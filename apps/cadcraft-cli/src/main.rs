@@ -616,7 +616,7 @@ fn perf_file(path: &str) -> Result<(), String> {
         return Err("perf: the drawing is empty".into());
     }
     outln!("open {open_ms:.0} ms, {} entities, extents {:.1} x {:.1}", d.entity_count(), ext.width(), ext.height());
-    outln!("{:>8} {:>10} {:>10}", "zoom", "build ms", "prims");
+    outln!("{:>8} {:>10} {:>10} {:>12} {:>10}", "zoom", "build ms", "prims", "near-view ms", "prims");
     let mut finest = Options::default();
     for k in 0..5 {
         let zoom = 4f64.powi(k);
@@ -627,7 +627,12 @@ fn perf_file(path: &str) -> Result<(), String> {
         let screen = Options { tolerance: pixel * 0.5, min_dash: pixel * 2.0, view: Some(visible.expand(h * 0.8)), ..Default::default() };
         let t = Instant::now();
         let n = build(d, space, &screen).prims.len();
-        outln!("{:>7}x {:>10.1} {n:>10}", zoom, ms(t));
+        let full_ms = ms(t);
+        // As the canvas builds it: only the objects near the view (spatial index lookup included).
+        let t = Instant::now();
+        let near = Options { only: cadcraft_engine::spatial::near_view(d, space, screen.view), ..screen.clone() };
+        let m = build(d, space, &near).prims.len();
+        outln!("{:>7}x {:>10.1} {n:>10} {:>12.1} {m:>10}", zoom, full_ms, ms(t));
         finest = screen;
     }
     // Plots: every pattern line, everywhere (last, so its large list doesn't weigh on the above).

@@ -226,6 +226,11 @@ pub struct Options {
     /// rebuild the view no longer needs). A cancelled build returns a partial list, which the
     /// caller must discard; see [`Options::cancelled`].
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Model space only: the top-level entities to build, as ascending draw indices (positions
+    /// in the space's store). The canvas passes the objects near the view (from the engine's
+    /// spatial index), so a zoomed-in view builds what it shows instead of the whole drawing.
+    /// `None` = every entity. Ignored for layouts.
+    pub only: Option<std::sync::Arc<Vec<u32>>>,
 }
 
 impl Options {
@@ -249,6 +254,7 @@ impl Default for Options {
             skip_viewport: None,
             transparency: false,
             cancel: None,
+            only: None,
         }
     }
 }
@@ -528,7 +534,8 @@ fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> Di
             return b.list;
         }
         let mut viewports = 0usize;
-        for e in store.iter() {
+        let only = if paper { None } else { b.opts.only.as_deref().map(Vec::as_slice) };
+        for e in top_level(store, only) {
             if paper && let EntityKind::Viewport(vp) = &e.kind {
                 if viewports < MAX_VIEWPORTS {
                     viewports += 1;
@@ -561,7 +568,7 @@ const PARALLEL_CHUNK: usize = 256;
 #[cfg(not(target_arch = "wasm32"))]
 fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStore) {
     use rayon::prelude::*;
-    let ents: Vec<&std::sync::Arc<Entity>> = store.iter().collect();
+    let ents = top_level(store, b.opts.only.as_deref().map(Vec::as_slice));
     let budget = std::sync::atomic::AtomicUsize::new(0);
     let (opts, plotting) = (b.opts, b.plotting);
     let parts: Vec<DisplayList> = ents
@@ -581,6 +588,26 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
     b.list.tris.reserve(parts.iter().map(|p| p.tris.len()).sum());
     for part in parts {
         append(&mut b.list, part);
+    }
+}
+
+/// The top-level entities of `store` to build: all of them, or those at the draw indices `only`
+/// (ascending; indices past the end are skipped).
+fn top_level<'a>(store: &'a cadcraft_doc::EntityStore, only: Option<&[u32]>) -> Vec<&'a std::sync::Arc<Entity>> {
+    match only {
+        None => store.iter().collect(),
+        Some(ix) => {
+            let mut want = ix.iter().copied().peekable();
+            let mut out = Vec::with_capacity(ix.len());
+            for (i, e) in store.iter().enumerate() {
+                let Some(&next) = want.peek() else { break };
+                if u32::try_from(i).is_ok_and(|i| i == next) {
+                    out.push(e);
+                    want.next();
+                }
+            }
+            out
+        }
     }
 }
 

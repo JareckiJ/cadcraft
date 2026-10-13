@@ -999,3 +999,31 @@ fn wide_polyline_centre_line_is_drawn_on_screen_only() {
         assert_eq!(lines(&see_through), 0, "{lt}: a transparent band gets no hairline");
     }
 }
+
+/// `Options::only` builds just the listed top-level entities, in draw order, on the one-thread
+/// path and on the parallel one (large spaces), and the same primitives as a full build.
+#[test]
+fn only_builds_the_listed_entities() {
+    let d = sample();
+    let full = build(&d, &Space::Model, &Options { tolerance: 0.01, ..Default::default() });
+    let circle_only = build(&d, &Space::Model, &Options { tolerance: 0.01, only: Some(std::sync::Arc::new(vec![1])), ..Default::default() });
+    assert_eq!(circle_only.prims.len(), 1);
+    assert_eq!(circle_only.prims[0].color, full.prims[1].color);
+    assert_eq!(circle_only.prims[0].len, full.prims[1].len);
+    // Past-the-end indices are skipped; an empty list builds nothing.
+    assert_eq!(build(&d, &Space::Model, &Options { only: Some(std::sync::Arc::new(vec![0, 7])), ..Default::default() }).prims.len(), 1);
+    assert!(build(&d, &Space::Model, &Options { only: Some(std::sync::Arc::new(vec![])), ..Default::default() }).prims.is_empty());
+
+    // A space large enough for the parallel build: every 3rd line.
+    let mut big = Drawing::new_imperial();
+    for i in 0..2000 {
+        let y = f64::from(i);
+        big.add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, y, 0.0), b: Vec3::new(1.0, y, 0.0) }))
+            .unwrap();
+    }
+    let pick: Vec<u32> = (0..2000).step_by(3).collect();
+    let l = build(&big, &Space::Model, &Options { only: Some(std::sync::Arc::new(pick.clone())), ..Default::default() });
+    assert_eq!(l.prims.len(), pick.len());
+    let ys: Vec<f64> = l.prims.iter().map(|p| l.verts[p.start as usize].y).collect();
+    assert_eq!(ys, pick.iter().map(|i| f64::from(*i)).collect::<Vec<_>>());
+}
