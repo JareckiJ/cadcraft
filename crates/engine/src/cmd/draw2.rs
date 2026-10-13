@@ -10,7 +10,7 @@ use super::curves::{self, Chain, MAX_GEN, TanObj};
 use super::helpers::*;
 use super::machines::number;
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, PointInput, Prompt, Result, Session, Step};
 
 pub(crate) mod breakline;
 pub(crate) mod mline;
@@ -353,7 +353,8 @@ impl Interactive for SeqM {
             // modifiers so it remains UI-agnostic.
             let dir = if s.ctrl_down { -dir } else { dir };
             return match i {
-                Input::Point(e) => {
+                Input::Point(pi) => {
+                    let e = pi.point();
                     let a = curves::arc_sed(st, e, dir).ok_or_else(|| other("Invalid end point."))?;
                     s.add_entity(arc(&a))?;
                     Ok(Step::Done)
@@ -378,7 +379,7 @@ impl Interactive for SeqM {
         }
         let Some((_, ask)) = self.ask() else { return Ok(Step::Done) };
         let val = match (&i, ask) {
-            (Input::Point(q), _) => self.value_from_point(ask, *q),
+            (Input::Point(PointInput::Picked(q)), _) => self.value_from_point(ask, *q),
             (Input::Text(t), Ask::Angle(_) | Ask::Sweep(..)) => {
                 // The tangent direction is a direction; included angles are sizes.
                 let au = s.angle_settings();
@@ -506,7 +507,8 @@ impl Interactive for ArcContinueM {
         // Ctrl flips the direction, exactly as in `SeqM::input`.
         let dir = if s.ctrl_down { -dir } else { dir };
         match i {
-            Input::Point(e) => {
+            Input::Point(pi) => {
+                let e = pi.point();
                 let a = curves::arc_sed(st, e, dir).ok_or_else(|| other("Invalid end point."))?;
                 s.add_entity(arc(&a))?;
                 Ok(Step::Done)
@@ -614,7 +616,8 @@ impl Interactive for TanCircleM {
         let need = if self.radius_mode { 2 } else { 3 };
         if self.picks.len() < need {
             return match i {
-                Input::Point(p) => {
+                Input::Point(pi) => {
+                    let p = pi.point();
                     let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                     let o = tan_obj(s, h, p)?;
                     self.picks.push((o, p));
@@ -636,7 +639,10 @@ impl Interactive for TanCircleM {
             };
         }
         let r = match i {
-            Input::Point(p) => self.picks.last().map(|x| x.1.dist(p)).unwrap_or(0.0),
+            Input::Point(pi) => {
+                let p = pi.point();
+                self.picks.last().map(|x| x.1.dist(p)).unwrap_or(0.0)
+            }
             Input::Text(t) => number(&t).ok_or_else(|| other("Requires numeric distance or second point."))?,
             Input::Enter => s.doc()?.header.f64("CIRCLERAD", 0.0),
             _ => return Ok(Step::Continue),
@@ -845,7 +851,8 @@ impl Interactive for DivideM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match (self.phase, i) {
-            (DivPhase::Object, Input::Point(p)) => {
+            (DivPhase::Object, Input::Point(pi)) => {
+                let p = pi.point();
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 chain_of(s, h)?;
                 self.obj = Some((h, p));
@@ -876,7 +883,10 @@ impl Interactive for DivideM {
                 let Some((h, pick)) = self.obj else { return Ok(Step::Cancel) };
                 let v = match inp {
                     Input::Text(t) => number(&t).ok_or_else(|| other("Requires a number."))?,
-                    Input::Point(q) => pick.dist(q),
+                    Input::Point(pi) => {
+                        let q = pi.point();
+                        pick.dist(q)
+                    }
                     _ => return Ok(Step::Continue),
                 };
                 let mut params = json!({ "handle": h.hex(), "align": self.align, "from": [pick.x, pick.y] });
@@ -1109,7 +1119,7 @@ impl Interactive for RevcloudM {
             return Ok(Step::Continue);
         }
         if self.object {
-            let Input::Point(p) = i else { return if i == Input::Enter { Ok(Step::Cancel) } else { Ok(Step::Continue) } };
+            let Input::Point(PointInput::Picked(p)) = i else { return if i == Input::Enter { Ok(Step::Cancel) } else { Ok(Step::Continue) } };
             let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
             let pts = object_outline(s, h)?;
             let vs = cloud_vertices(&pts, self.arc_len, false, false).ok_or_else(|| other("The object has no area."))?;
@@ -1137,7 +1147,8 @@ impl Interactive for RevcloudM {
                 }
                 Ok(Step::Continue)
             }
-            Input::Point(p) => {
+            Input::Point(pi) => {
+                let p = pi.point();
                 self.pts.push(p);
                 if self.kind == CloudKind::Rect && self.pts.len() == 2 {
                     return self.finish(s);
@@ -1240,7 +1251,8 @@ impl Interactive for WipeoutM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match (self.phase, i) {
-            (1, Input::Point(p)) => {
+            (1, Input::Point(pi)) => {
+                let p = pi.point();
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 let e = curves::entity(s, h)?;
                 if !matches!(&e.kind, EntityKind::LwPolyline(pl) if pl.closed) {
@@ -1276,7 +1288,8 @@ impl Interactive for WipeoutM {
                 }
                 Ok(Step::Continue)
             }
-            (0, Input::Point(p)) => {
+            (0, Input::Point(pi)) => {
+                let p = pi.point();
                 if self.pts.len() < MAX_GEN {
                     self.pts.push(p);
                 }
@@ -1462,7 +1475,8 @@ impl Interactive for XlineM2 {
                 };
                 Ok(Step::Continue)
             }
-            (XMode::Two, Input::Point(p)) => {
+            (XMode::Two, Input::Point(pi)) => {
+                let p = pi.point();
                 match self.base {
                     None => self.base = Some(p),
                     Some(b) => {
@@ -1473,7 +1487,8 @@ impl Interactive for XlineM2 {
                 }
                 Ok(Step::Continue)
             }
-            (XMode::Fixed(a), Input::Point(p)) => {
+            (XMode::Fixed(a), Input::Point(pi)) => {
+                let p = pi.point();
                 add_xline(s, p, Vec2::from_angle(a))?;
                 Ok(Step::Continue)
             }
@@ -1486,7 +1501,8 @@ impl Interactive for XlineM2 {
                 self.mode = XMode::Fixed(a);
                 Ok(Step::Continue)
             }
-            (XMode::RefSelect, Input::Point(p)) => {
+            (XMode::RefSelect, Input::Point(pi)) => {
+                let p = pi.point();
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 let (_, d) = linear_of(s, h, Some(p))?;
                 self.mode = XMode::RefAngle(d.angle());
@@ -1497,7 +1513,8 @@ impl Interactive for XlineM2 {
                 self.mode = XMode::Fixed(base + a);
                 Ok(Step::Continue)
             }
-            (XMode::Bisect, Input::Point(p)) => {
+            (XMode::Bisect, Input::Point(pi)) => {
+                let p = pi.point();
                 if self.bis.len() < 2 {
                     self.bis.push(p);
                 } else if let (Some(v), Some(a)) = (self.bis.first().copied(), self.bis.get(1).copied()) {
@@ -1519,13 +1536,15 @@ impl Interactive for XlineM2 {
                 self.mode = XMode::OffSelect;
                 Ok(Step::Continue)
             }
-            (XMode::OffSelect, Input::Point(p)) => {
+            (XMode::OffSelect, Input::Point(pi)) => {
+                let p = pi.point();
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 self.line = Some(linear_of(s, h, Some(p))?);
                 self.mode = XMode::OffSide;
                 Ok(Step::Continue)
             }
-            (XMode::OffSide, Input::Point(p)) => {
+            (XMode::OffSide, Input::Point(pi)) => {
+                let p = pi.point();
                 let (b, d) = self.line.ok_or_else(|| other("No line selected."))?;
                 let (nb, nd) = match self.offset {
                     Some(dist) => offset_xline(b, d, dist, p),
@@ -1775,17 +1794,22 @@ impl Interactive for RectM2 {
                 }
                 RAsk::Rotation => match i {
                     Input::Keyword(_) => self.asking = Some(RAsk::RotPick1),
-                    Input::Point(p) => self.rotation = self.first.map(|f| f.angle_to(p)).unwrap_or(0.0),
+                    Input::Point(pi) => {
+                        let p = pi.point();
+                        self.rotation = self.first.map(|f| f.angle_to(p)).unwrap_or(0.0)
+                    }
                     Input::Text(t) => self.rotation = s.angle_settings().direction(&t).ok_or_else(|| other("Requires a valid angle."))?,
                     _ => {}
                 },
                 RAsk::RotPick1 => {
-                    if let Input::Point(p) = i {
+                    if let Input::Point(pi) = i {
+                        let p = pi.point();
                         self.asking = Some(RAsk::RotPick2(p));
                     }
                 }
                 RAsk::RotPick2(b) => {
-                    if let Input::Point(p) = i {
+                    if let Input::Point(pi) = i {
+                        let p = pi.point();
                         self.rotation = b.angle_to(p);
                     }
                 }
@@ -1806,16 +1830,19 @@ impl Interactive for RectM2 {
                 });
                 Ok(Step::Continue)
             }
-            Input::Point(p) => match self.first {
-                None => {
-                    self.first = Some(p);
-                    Ok(Step::Continue)
+            Input::Point(pi) => {
+                let p = pi.point();
+                match self.first {
+                    None => {
+                        self.first = Some(p);
+                        Ok(Step::Continue)
+                    }
+                    Some(_) => {
+                        let (w, h) = self.other_corner(p).ok_or_else(|| other("No first corner."))?;
+                        self.make(s, w, h)
+                    }
                 }
-                Some(_) => {
-                    let (w, h) = self.other_corner(p).ok_or_else(|| other("No first corner."))?;
-                    self.make(s, w, h)
-                }
-            },
+            }
             Input::Enter => Ok(Step::Cancel),
             _ => Ok(Step::Continue),
         }
@@ -1889,7 +1916,8 @@ impl Interactive for Poly3dM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
-            Input::Point(p) => {
+            Input::Point(pi) => {
+                let p = pi.point();
                 if self.pts.last().is_none_or(|l| !l.near(p, 1e-12)) && self.pts.len() < MAX_GEN {
                     self.pts.push(p);
                     self.sync(s, false)?;
@@ -2030,14 +2058,18 @@ impl Interactive for HelixM {
         }
         let num = |i: &Input, base: Option<Vec2>| -> Option<f64> {
             match i {
-                Input::Point(p) => base.map(|b| b.dist(*p)),
+                Input::Point(pi) => {
+                    let p = pi.point();
+                    base.map(|b| b.dist(p))
+                }
                 Input::Text(t) => number(t),
                 _ => None,
             }
         };
         match (self.center, self.rb, self.rt, &i) {
-            (None, _, _, Input::Point(p)) => {
-                self.center = Some(*p);
+            (None, _, _, Input::Point(pi)) => {
+                let p = pi.point();
+                self.center = Some(p);
                 Ok(Step::Continue)
             }
             (Some(_), None | Some(_), _, Input::Keyword(k)) if k == "Diameter" => {
@@ -2050,8 +2082,9 @@ impl Interactive for HelixM {
                     _ => num(&i, Some(c)),
                 };
                 let v = v.filter(|v| *v > 0.0).ok_or_else(|| other("Requires a positive distance."))?;
-                if let Input::Point(p) = &i {
-                    self.start = Some(c.angle_to(*p));
+                if let Input::Point(pi) = &i {
+                    let p = pi.point();
+                    self.start = Some(c.angle_to(p));
                 }
                 self.rb = Some(if self.diameter { v / 2.0 } else { v });
                 self.diameter = false;
@@ -2152,7 +2185,8 @@ impl Interactive for SplineCvM {
         }
         let deg = self.degree.unwrap_or(3);
         match i {
-            Input::Point(p) => {
+            Input::Point(pi) => {
+                let p = pi.point();
                 if self.pts.len() < MAX_GEN {
                     self.pts.push(p);
                 }
@@ -2292,7 +2326,8 @@ impl Interactive for CenterM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
-            Input::Point(p) => {
+            Input::Point(pi) => {
+                let p = pi.point();
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 if self.mark {
                     center_mark(s, h)?;

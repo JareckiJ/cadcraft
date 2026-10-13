@@ -628,7 +628,8 @@ impl Interactive for DistM {
                 return Ok(Step::Continue);
             }
             match i {
-                Input::Point(p) => {
+                Input::Point(pi) => {
+                    let p = pi.point();
                     pts.push(p);
                     self.sources.push(s.picked_viewport);
                     let model = model_points(&self.sources);
@@ -649,12 +650,14 @@ impl Interactive for DistM {
             return Ok(Step::Continue);
         }
         match (self.first, i) {
-            (None, Input::Point(p)) => {
+            (None, Input::Point(pi)) => {
+                let p = pi.point();
                 self.first = Some(p);
                 self.first_source = s.picked_viewport;
                 Ok(Step::Continue)
             }
-            (Some(a), Input::Point(b)) => {
+            (Some(a), Input::Point(pi)) => {
+                let b = pi.point();
                 let (a, b) = match (self.first_source, s.picked_viewport) {
                     (Some(first), Some(second)) if first.viewport == second.viewport => (first.point, second.point),
                     _ => (a, b),
@@ -706,7 +709,8 @@ impl Interactive for IdM {
         Prompt::new("Specify point", Accept::POINT)
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        if let Input::Point(p) = i {
+        if let Input::Point(pi) = i {
+            let p = pi.point();
             let m = id_text(s, Vec3::new(p.x, p.y, z_at(s, p)));
             s.echo(m);
         }
@@ -865,7 +869,10 @@ impl Interactive for AreaM {
             return Ok(Step::Continue);
         }
         match i {
-            Input::Point(p) => self.pts.push(p),
+            Input::Point(pi) => {
+                let p = pi.point();
+                self.pts.push(p)
+            }
             Input::Keyword(k) => match k.as_str() {
                 "Object" => self.object = true,
                 "Add area" => self.mode = AreaMode::Add,
