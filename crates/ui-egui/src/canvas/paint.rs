@@ -9,7 +9,8 @@ use super::*;
 /// space) and the background colour the overlays are drawn against.
 pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Option<cadcraft_render::Sheet>, Rgb) {
     let Frame { t, rect, scale, xf, xf_paper, hover_pos, .. } = *frame;
-    let (painter, tiles, active_vp, active_clip) = (&frame.painter, &frame.tiles, &frame.active_vp, &frame.active_clip);
+    let painter = frame.painter.clone();
+    let (tiles, active_vp, active_clip) = (&frame.tiles, &frame.active_vp, &frame.active_clip);
     // ---------- paint ----------
     painter.rect_filled(rect, 0.0, t.canvas);
     let t0 = crate::now_ms();
@@ -38,8 +39,8 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
             Rgb(t.paper.r(), t.paper.g(), t.paper.b())
         }
         None => {
-            blockedit::wash(app, painter, rect);
-            draw_grid(app, painter, &xf);
+            blockedit::wash(app, &painter, rect);
+            draw_grid(app, &painter, &xf);
             Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b())
         }
     };
@@ -57,9 +58,9 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
         masked = gpu && f.outline.is_some();
     }
     if app.canvas.gpu.is_some() {
-        draw_list_gpu(&mut app.canvas, painter, &xf_paper, bg, app.session.settings.lwdisplay);
+        draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
     } else if let Some(list) = &app.canvas.list {
-        draw_list(painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
+        draw_list(&painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
     }
     if let Some(vp) = &active_vp {
         // The active viewport: a heavy border, highlights in model units clipped to it.
@@ -116,14 +117,14 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
         if let Some(h) = *hover
             && !sel.contains(&h)
         {
-            draw_highlight(painter, &xf, list, &prim_index.prims(*list_gen, list, &[h]), t.hover, preview_look);
+            draw_highlight(&painter, &xf, list, &prim_index.prims(*list_gen, list, &[h]), t.hover, preview_look);
         }
         if let Some(look) = selection_look {
             if gpu.is_some() && !sel.is_empty() {
                 let list_id = *list_gen;
                 let hl = (hl_key, &*hl_slot, hl_origin, &mut *hl_infinite);
                 draw_highlight_gpu(
-                    painter,
+                    &painter,
                     &xf,
                     list,
                     list_id,
@@ -134,15 +135,15 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
                     hl,
                     crate::gpu::Stencil::Off,
                 );
-                draw_highlight(painter, &xf, list, hl_infinite, t.selection, look);
+                draw_highlight(&painter, &xf, list, hl_infinite, t.selection, look);
             } else {
-                draw_highlight(painter, &xf, list, &prim_index.prims(*list_gen, list, &sel), t.selection, look);
+                draw_highlight(&painter, &xf, list, &prim_index.prims(*list_gen, list, &sel), t.selection, look);
             }
         }
     }
     app.canvas.draw_ms = crate::now_ms() - t0;
-    compare::paint(app, ui.ctx(), painter, &xf_paper, rect);
-    blockedit::paint(app, ui.ctx(), painter, &xf_paper, rect);
+    compare::paint(app, ui.ctx(), &painter, &xf_paper, rect);
+    blockedit::paint(app, ui.ctx(), &painter, &xf_paper, rect);
     // Constraint bars and dynamic dimensional constraints (model space, or inside a viewport).
     if sheet.is_none() || active_vp.is_some() {
         let clip = match &active_vp {
@@ -194,7 +195,7 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
                 }
             }
         }
-        crate::dyngrips::draw(app, painter, &xf, rect, hover_pos);
+        crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
     }
     (sheet, bg)
 }
@@ -203,7 +204,8 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
 /// marker, the other tiles, the UCS icon, ViewCube and viewport label, and the command line.
 pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet: Option<cadcraft_render::Sheet>, bg: Rgb) {
     let Frame { t, full, rect, view, scale, xf, raw_world, .. } = *frame;
-    let (painter, tiles) = (&frame.painter, &frame.tiles);
+    let painter = frame.painter.clone();
+    let tiles = &frame.tiles;
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
     let drag = match (app.canvas.cursor, app.canvas.gpu.is_some()) {
@@ -214,9 +216,9 @@ pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet
         if let Ok(st) = app.session.state() {
             let serial = app.session.clipboard_source.as_ref().map_or(0, |c| c.serial);
             let transparency = app.session.settings.transparency_display;
-            draw_drag_gpu(&mut app.canvas, painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
+            draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
             let list = rebuilt_preview(&st.doc, extra.iter(), scale);
-            draw_list(painter, &xf, &list, bg, false);
+            draw_list(&painter, &xf, &list, bg, false);
         }
     } else if let (Some(c), true) = (app.canvas.cursor, app.session.prompting()) {
         let ents = app.session.preview(c);
@@ -224,7 +226,7 @@ pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet
             && let Ok(st) = app.session.state()
         {
             let list = rebuilt_preview(&st.doc, ents.iter(), scale);
-            draw_list(painter, &xf, &list, bg, false);
+            draw_list(&painter, &xf, &list, bg, false);
         }
     }
     // Pending selection window.
@@ -246,21 +248,21 @@ pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {
-        draw_tracking(painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
+        draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(painter, xf.to_screen(hit.point), &hit);
+        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
     }
     draw_tiles(app, ui, tiles);
     // UCS icon, ViewCube and viewport label.
     if app.ui.show_ucs_icon {
-        draw_ucs_icon(painter, rect);
+        draw_ucs_icon(&painter, rect);
         crate::viewcube::ucs_icon(app, ui, rect);
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(painter, rect);
+    viewport_label(&painter, rect);
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
@@ -272,15 +274,15 @@ pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet
 /// The crosshair (or the system cursor) and the Dynamic Input tooltip.
 pub(super) fn cursor(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) {
     let Frame { rect, hover_pos, inside, selecting, .. } = *frame;
-    let painter = &frame.painter;
+    let painter = frame.painter.clone();
     // Crosshair cursor.
     if inside {
         // Hide the OS cursor under the drawn crosshair, unless assistive tech needs it (#39).
         ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
         if let Some(hp) = hover_pos {
-            draw_crosshair(app, painter, rect, hp, selecting);
+            draw_crosshair(app, &painter, rect, hp, selecting);
             if app.canvas.cycle_badge && app.canvas.cycle.is_none() {
-                cycle_badge(painter, hp);
+                cycle_badge(&painter, hp);
             }
         }
         if app.session.settings.dynmode
@@ -288,12 +290,12 @@ pub(super) fn cursor(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) {
         {
             // A stretched grip shows its dimensions instead of the pointer boxes; a prompt asking
             // for a distance shows its one field and keeps the prompt and its options.
-            let fields = crate::grip_dyn::draw(app, painter);
+            let fields = crate::grip_dyn::draw(app, &painter);
             if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
-                dynamic_input(app, painter, hp, fields);
+                dynamic_input(app, &painter, hp, fields);
             }
         }
     }
     // Over the crosshair, so the row under the pointer reads clearly.
-    cycle_list(app, painter);
+    cycle_list(app, &painter);
 }
