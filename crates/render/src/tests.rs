@@ -1067,3 +1067,20 @@ fn hatch_dots_are_one_primitive_and_all_drawn() {
     let lit = pm.pixels().iter().filter(|p| p.red() > 0 || p.green() > 0 || p.blue() > 0).count();
     assert!(lit > expected, "every dot is rasterised ({lit} pixels for {expected} dots)");
 }
+
+/// Layers are found whatever the case of the name an object uses, as `Drawing::layer` finds them
+/// (the build's layer index must not change which layer an object takes its colour from).
+#[test]
+fn layer_lookup_ignores_case() {
+    let mut d = Drawing::new_imperial();
+    d.ensure_layer("Walls");
+    d.layer_mut("Walls").unwrap().color = Color::Index(1);
+    d.add(
+        &Space::Model,
+        Common { layer: "WALLS".into(), ..Default::default() },
+        EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(1.0, 0.0, 0.0) }),
+    )
+    .unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert_eq!(l.prims[0].color, Rgb(255, 0, 0));
+}
