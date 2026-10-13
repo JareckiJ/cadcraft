@@ -60,6 +60,25 @@ object, a missing required argument or one of the wrong type is a JSON-RPC error
 params), so `command_line {}` never presses Enter by accident. A tool that runs and fails (a bad
 point, an unknown command) returns a result with `isError: true` and the message.
 
+### Error codes
+
+From protocol version `2025-06-18` on, a tool error that comes from the engine also carries
+`structuredContent` `{code, command, param?, message}`: `message` is the same text as the content
+block, `command` the command the error concerns, and `param` the parameter it names, when the
+message names one (`` `radius` is required`` gives `radius`). `param` is best effort: the first key
+the message names. Errors outside the engine (no UI for
+`screenshot`, a lost connection, a timeout) are text only. The codes are stable; new ones may be
+added.
+
+| Code | Meaning |
+|---|---|
+| `unknown_command` | No command has this name or alias. |
+| `not_available` | The command exists but can't run now (its `enabled` check refused it; `list_commands` shows `enabled`). |
+| `bad_params` | The parameters were refused: missing, of the wrong type, out of range, or naming something that doesn't exist (a block, a file). |
+| `no_document` | No drawing is open. |
+| `failed` | The command ran and failed for another reason (nothing to act on, an unknown or malformed object handle, an operation it can't do). |
+| `internal` | A bug in the command: it panicked and the drawing was kept as it was. Please report it. |
+
 ## Coordinates, units and angles
 
 - **Coordinates** are drawing units in the world coordinate system (WCS), x right, y up. Each

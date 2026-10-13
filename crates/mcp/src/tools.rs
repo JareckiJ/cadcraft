@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use crate::backend::Backend;
+use crate::backend::{Backend, CallError};
 
 pub fn tool_definitions(has_ui: bool) -> Value {
     let mut tools = vec![
@@ -55,8 +55,17 @@ fn text(v: Value, structured: bool) -> Value {
     r
 }
 
-fn err_text(e: &str) -> Value {
-    json!({"content": [{"type": "text", "text": e}], "isError": true})
+/// A failed tool call: `isError` with the error text and, when `structured` and the engine
+/// reported the error, its data `{code, command, param?, message}` as `structuredContent`.
+fn err_text(e: CallError, structured: bool) -> Value {
+    let mut r = json!({"content": [{"type": "text", "text": e.message}], "isError": true});
+    if structured
+        && let Some(data) = e.data
+        && let Some(o) = r.as_object_mut()
+    {
+        o.insert("structuredContent".into(), data);
+    }
+    r
 }
 
 /// Whether `v` fits the subset of JSON Schema the tool definitions use: `type`, `items`,
@@ -120,13 +129,13 @@ fn command_matches(c: &Value, f: &str) -> bool {
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value, structured: bool) -> Result<Value, String> {
     let a = check_args(name, args)?;
     let r = match name {
-        "command_line" => b.call("cmdline.input", a),
-        "script" => b.call("cmdline.script", a),
-        "execute" => b.call(
+        "command_line" => b.call_detailed("cmdline.input", a),
+        "script" => b.call_detailed("cmdline.script", a),
+        "execute" => b.call_detailed(
             "engine.execute",
             json!({"command": a.get("command").cloned().unwrap_or(Value::Null), "params": a.get("params").cloned().unwrap_or(json!({}))}),
         ),
-        "list_commands" => b.call("engine.commands", json!({})).map(|v| {
+        "list_commands" => b.call_detailed("engine.commands", json!({})).map(|v| {
             let f = a.get("filter").and_then(Value::as_str).map(str::to_ascii_lowercase);
             match (v, f) {
                 (Value::Array(items), Some(f)) => Value::Array(items.into_iter().filter(|c| command_matches(c, &f)).collect()),
@@ -141,30 +150,30 @@ pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value, structured: bool
             {
                 o.insert("entities".into(), json!(false));
             }
-            b.call("drawing.inspect", a)
+            b.call_detailed("drawing.inspect", a)
         }
-        "query_entities" => b.call("engine.execute", json!({"command": "entities", "params": a})),
-        "find_text" => b.call("engine.execute", json!({"command": "texts", "params": a})),
-        "new_drawing" => b.call("engine.execute", json!({"command": "new", "params": a})),
-        "open" => b.call("app.open", a),
-        "save" => b.call("app.save", a),
-        "cancel" => b.call("cmdline.key", json!({"key": "escape"})),
-        "screenshot" => b.call("ui.screenshot", a),
-        "ui_inspect" => b.call("ui.inspect", json!({})),
-        "ui_click" => b.call("ui.pointer", a),
+        "query_entities" => b.call_detailed("engine.execute", json!({"command": "entities", "params": a})),
+        "find_text" => b.call_detailed("engine.execute", json!({"command": "texts", "params": a})),
+        "new_drawing" => b.call_detailed("engine.execute", json!({"command": "new", "params": a})),
+        "open" => b.call_detailed("app.open", a),
+        "save" => b.call_detailed("app.save", a),
+        "cancel" => b.call_detailed("cmdline.key", json!({"key": "escape"})),
+        "screenshot" => b.call_detailed("ui.screenshot", a),
+        "ui_inspect" => b.call_detailed("ui.inspect", json!({})),
+        "ui_click" => b.call_detailed("ui.pointer", a),
         "render" => {
-            return Ok(match b.call("ui.render", a) {
+            return Ok(match b.call_detailed("ui.render", a) {
                 Ok(v) => match v.get("pngBase64").and_then(Value::as_str) {
                     Some(data) => json!({"content": [{"type": "image", "data": data, "mimeType": "image/png"}]}),
                     None => text(v, structured),
                 },
-                Err(e) => err_text(&e),
+                Err(e) => err_text(e, structured),
             });
         }
         other => return Err(format!("unknown tool `{other}`")),
     };
     Ok(match r {
         Ok(v) => text(v, structured),
-        Err(e) => err_text(&e),
+        Err(e) => err_text(e, structured),
     })
 }

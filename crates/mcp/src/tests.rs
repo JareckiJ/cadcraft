@@ -271,3 +271,39 @@ fn results_are_compact_and_structured_from_2025_06_18() {
     let r = call(&mut future, 2, "tools/call", json!({"name": "inspect_drawing", "arguments": {}}));
     assert!(r["result"]["structuredContent"].is_object(), "{r}");
 }
+
+/// A failing tool is `isError` with the text as before; from 2025-06-18 on, an error the engine
+/// reported also comes as `structuredContent` `{code, command, param?, message}`.
+#[test]
+fn tool_errors_carry_a_code_from_2025_06_18() {
+    let mut s = Server::new(Box::new(Headless::default()));
+    call(&mut s, 1, "initialize", json!({"protocolVersion": "2025-06-18"}));
+    let err = |s: &mut Server, args: Value| {
+        let r = call(s, 2, "tools/call", json!({"name": "execute", "arguments": args}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap().to_string();
+        let data = r["result"]["structuredContent"].clone();
+        assert_eq!(data["message"], json!(text), "{r}");
+        data
+    };
+    let d = err(&mut s, json!({"command": "frobnicate"}));
+    assert_eq!((d["code"].as_str(), d["command"].as_str()), (Some("unknown_command"), Some("frobnicate")), "{d}");
+    assert!(d.get("param").is_none(), "{d}");
+    let d = err(&mut s, json!({"command": "circle", "params": {"center": [0, 0]}}));
+    assert_eq!((d["code"].as_str(), d["command"].as_str(), d["param"].as_str()), (Some("bad_params"), Some("circle"), Some("radius")), "{d}");
+    let d = err(&mut s, json!({"command": "open", "params": {"path": "/nonexistent/nowhere.dxf"}}));
+    // The engine reports a file it can't find as a refused parameter.
+    assert_eq!((d["code"].as_str(), d["command"].as_str()), (Some("bad_params"), Some("open")), "{d}");
+    // Errors that aren't the engine's (here: no UI) stay text only.
+    let r = call(&mut s, 3, "tools/call", json!({"name": "screenshot", "arguments": {}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"].get("structuredContent").is_none(), "{r}");
+
+    // An older client gets the same text and no `structuredContent`.
+    let mut old = Server::new(Box::new(Headless::default()));
+    call(&mut old, 1, "initialize", json!({"protocolVersion": "2025-03-26"}));
+    let r = call(&mut old, 2, "tools/call", json!({"name": "execute", "arguments": {"command": "frobnicate"}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert_eq!(r["result"]["content"][0]["text"], "unknown command `frobnicate`", "{r}");
+    assert!(r["result"].get("structuredContent").is_none(), "{r}");
+}
