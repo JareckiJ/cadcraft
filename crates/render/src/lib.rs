@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod blockcull;
 pub mod clip;
 mod dim;
 mod fill;
@@ -609,6 +610,48 @@ fn top_level<'a>(store: &'a cadcraft_doc::EntityStore, only: Option<&[u32]>) -> 
             out
         }
     }
+}
+
+/// One entity of a block reference: in full, or as a dot at `dot` (block coordinates) when it is
+/// smaller than a pixel on screen, in the colour it would be drawn with.
+fn block_entity(b: &mut Builder, sub: &Ctx, be: &Entity, dot: Option<Vec2>) {
+    match dot {
+        None => entity(b, sub, be),
+        Some(p) => {
+            let (ink, _, _, _, visible, _) = resolve_common(sub, &be.common, b.plotting);
+            if visible {
+                b.point(sub, ink, p);
+            }
+        }
+    }
+}
+
+/// Build a large block's entities `ents` (in `sub`, the reference's context) on all cores and
+/// append them to `b` in drawing order. False once the shared expansion budget ran out.
+#[cfg(not(target_arch = "wasm32"))]
+fn insert_parallel(b: &mut Builder, sub: &Ctx, ents: &[(&std::sync::Arc<Entity>, Option<Vec2>)], budget: &std::sync::atomic::AtomicUsize) -> bool {
+    use rayon::prelude::*;
+    let (opts, named, transparency) = (b.opts, b.named, b.transparency);
+    let exhausted = std::sync::atomic::AtomicBool::new(false);
+    let parts: Vec<DisplayList> = ents
+        .par_chunks(PARALLEL_CHUNK)
+        .map(|chunk| {
+            let mut part =
+                Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named, shared_budget: Some(budget), transparency };
+            for (be, dot) in chunk {
+                if !part.expand() {
+                    exhausted.store(true, std::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+                block_entity(&mut part, sub, be, *dot);
+            }
+            part.list
+        })
+        .collect();
+    for part in parts {
+        append(&mut b.list, part);
+    }
+    !exhausted.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Append `src` to `dst`: its primitives index into `dst`'s vertex and triangle arrays.
@@ -1714,15 +1757,57 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
                 let m = Mat3::translate(off).then_before(ins.transform(blk.base.xy()));
                 let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, m) };
-                for be in blk.entities.iter() {
+                // A screen build (a view and a pixel size; never plots or exports) skips the
+                // block's entities outside the view, brought into block coordinates, and draws
+                // those smaller than a pixel as a dot. An entity with no measurable bounds is
+                // always drawn in full.
+                let cull = match b.opts.view {
+                    Some(v) if b.opts.min_dash > 0.0 => sub.xf.inverse().map(|inv| {
+                        let px = b.opts.min_dash / 2.0 / max_scale(&sub.xf).max(1e-300);
+                        (Bounds2::from_points(v.corners().map(|p| inv.apply(p))), blockcull::entity_bounds_of(ctx.d, blk), px)
+                    }),
+                    _ => None,
+                };
+                let shown = blk.entities.iter().enumerate().filter_map(|(k, be)| {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {
-                        continue;
+                        return None;
                     }
+                    let Some((view, bounds, px)) = &cull else { return Some((be, None)) };
+                    match bounds.get(k) {
+                        Some(eb) if !eb.is_empty() && !eb.intersects(view) => None,
+                        Some(eb) if !eb.is_empty() && eb.width().max(eb.height()) < *px => Some((be, Some(eb.center()))),
+                        _ => Some((be, None)),
+                    }
+                });
+                #[cfg(not(target_arch = "wasm32"))]
+                if ctx.depth == 0
+                    && !b.plotting
+                    && b.styles.is_none()
+                    && let Some(budget) = b.shared_budget
+                {
+                    let ents: Vec<(&std::sync::Arc<Entity>, Option<Vec2>)> = shown.collect();
+                    if ents.len() >= 2 * PARALLEL_CHUNK {
+                        // A large block (a whole plan inserted as one block): its entities are
+                        // built on all cores, joined in drawing order like `build_parallel`.
+                        if !insert_parallel(b, &sub, &ents, budget) {
+                            break 'copies;
+                        }
+                    } else {
+                        for (be, dot) in ents {
+                            if !b.expand() {
+                                break 'copies;
+                            }
+                            block_entity(b, &sub, be, dot);
+                        }
+                    }
+                    continue;
+                }
+                for (be, dot) in shown {
                     if !b.expand() {
                         break 'copies;
                     }
-                    entity(b, &sub, be);
+                    block_entity(b, &sub, be, dot);
                 }
             }
         }

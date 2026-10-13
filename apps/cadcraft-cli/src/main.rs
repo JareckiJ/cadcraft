@@ -616,6 +616,15 @@ fn perf_file(path: &str) -> Result<(), String> {
         return Err("perf: the drawing is empty".into());
     }
     outln!("open {open_ms:.0} ms, {} entities, extents {:.1} x {:.1}", d.entity_count(), ext.width(), ext.height());
+    // CADCRAFT_PERF_AT=x,y zooms in on that point instead of the extents' centre.
+    let at = std::env::var("CADCRAFT_PERF_AT")
+        .ok()
+        .and_then(|s| {
+            let (x, y) = s.split_once(',')?;
+            Some(Vec2::new(x.trim().parse().ok()?, y.trim().parse().ok()?))
+        })
+        .filter(|p| p.x.is_finite() && p.y.is_finite())
+        .unwrap_or(ext.center());
     outln!("{:>8} {:>10} {:>10} {:>12} {:>10}", "zoom", "build ms", "prims", "near-view ms", "prims");
     let mut finest = Options::default();
     for k in 0..5 {
@@ -623,7 +632,8 @@ fn perf_file(path: &str) -> Result<(), String> {
         let h = size / zoom;
         let pixel = 2f64.powi((h / 1000.0).max(1e-300).log2().floor() as i32);
         let half = Vec2::new(h * 0.8, h * 0.5);
-        let visible = Bounds2::new(ext.center() - half, ext.center() + half);
+        let centre = if k == 0 { ext.center() } else { at };
+        let visible = Bounds2::new(centre - half, centre + half);
         let screen = Options { tolerance: pixel * 0.5, min_dash: pixel * 2.0, view: Some(visible.expand(h * 0.8)), ..Default::default() };
         let t = Instant::now();
         let n = build(d, space, &screen).prims.len();
