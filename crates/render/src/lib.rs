@@ -55,7 +55,7 @@ pub enum Kind {
     /// (paper white when plotting, the canvas colour on screen) so they hide what was drawn
     /// before them.
     Mask,
-    /// A single point marker at `verts[start]`.
+    /// Point markers at `verts[start..start+len]` (one for a POINT, all the dots of a hatch).
     Point,
     /// An infinite line or ray: `verts[start]` = base, `verts[start+1]` = unit direction.
     Infinite { ray: bool },
@@ -463,6 +463,29 @@ impl Builder<'_> {
             kind: Kind::Point,
             start,
             len: 1,
+        });
+    }
+    /// Many point markers as one primitive (the dots of a hatch pattern).
+    fn points(&mut self, ctx: &Ctx, color: Ink, ps: &[Vec2]) {
+        if ps.is_empty() {
+            return;
+        }
+        let (color, _) = self.styled(color, 0.0);
+        let start = self.list.verts.len() as u32;
+        for p in ps {
+            let q = ctx.xf.apply(*p);
+            self.list.bounds.add(q);
+            self.list.verts.push(q);
+        }
+        self.list.prims.push(DPrim {
+            handle: ctx.top,
+            color: color.rgb,
+            aci7: color.aci7,
+            lw: 0.0,
+            transparency: self.transparency,
+            kind: Kind::Point,
+            start,
+            len: u32::try_from(ps.len()).unwrap_or(u32::MAX),
         });
     }
     fn infinite(&mut self, ctx: &Ctx, color: Ink, base: Vec2, dir: Vec2, ray: bool) {
@@ -920,10 +943,9 @@ fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
                     Clip::Rect(rect) => rect.contains(q),
                     Clip::Poly(c) => c.contains(q),
                 };
-                if let Some(q) = pts.first()
-                    && inside(*q)
-                {
-                    push_raw(dst, p, Kind::Point, &[*q]);
+                let kept: Vec<Vec2> = pts.iter().copied().filter(|q| inside(*q)).collect();
+                if !kept.is_empty() {
+                    push_raw(dst, p, Kind::Point, &kept);
                 }
             }
             (Kind::Infinite { ray }, Clip::Rect(rect)) => {

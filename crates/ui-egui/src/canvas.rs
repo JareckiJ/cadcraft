@@ -835,9 +835,7 @@ pub(crate) fn draw_list(p: &egui::Painter, xf: &Xf, list: &DisplayList, bg: Rgb,
                 }
             }
             Kind::Point => {
-                if let Some(q) = pts.first()
-                    && vis.contains(*q)
-                {
+                for q in pts.iter().filter(|q| vis.contains(**q)) {
                     shapes.push(Shape::rect_filled(Rect::from_center_size(xf.to_screen(*q), vec2(1.5, 1.5)), 0.0, col));
                 }
             }
@@ -1070,7 +1068,7 @@ pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, pri
                 }
             }
             Kind::Point => {
-                if let Some(q) = pts.first() {
+                for q in pts {
                     shapes.push(Shape::circle_stroke(xf.to_screen(*q), 3.0, Stroke::new(1.0, color)));
                 }
             }

@@ -1048,3 +1048,22 @@ fn block_contents_off_view_are_skipped_and_specks_become_dots_on_screen_only() {
     let plot = build(&d, &Space::Model, &Options::default());
     assert_eq!(plot.prims.iter().filter(|p| p.kind == Kind::Polyline).count(), 3, "a plot draws every line");
 }
+
+/// A dot pattern's dots are one primitive (a dense AR-SAND made hundreds of thousands), and none
+/// is lost: as many as the pattern lines give, and all of them rasterised.
+#[test]
+fn hatch_dots_are_one_primitive_and_all_drawn() {
+    let mut h = pattern_hatch("DOTS", 1.0, (0.0, 0.0, 10.0, 10.0));
+    h.pattern_lines = vec![cadcraft_doc::library::PatternLine { angle: 0.0, origin: (0.0, 0.0), delta: (0.0, 1.0), dashes: vec![0.0, -1.0] }];
+    let d = drawing_with(h.clone());
+    let l = build(&d, &Space::Model, &Options::default());
+    let points: Vec<_> = l.prims.iter().filter(|p| p.kind == Kind::Point).collect();
+    assert_eq!(points.len(), 1, "one primitive for all the dots");
+    let expected = crate::hatch::pattern_lines(&d, &h, &loops_of(&h), 0.0, None).iter().filter(|r| r.len() == 1).count();
+    assert!(expected > 50, "{expected}");
+    assert_eq!(points[0].len as usize, expected);
+    let view = View::fit(&l.bounds, 200, 200, 0.0);
+    let pm = render(&l, &view, &RasterOptions { background: Rgb(0, 0, 0), antialias: false, ..Default::default() }).unwrap();
+    let lit = pm.pixels().iter().filter(|p| p.red() > 0 || p.green() > 0 || p.blue() > 0).count();
+    assert!(lit > expected, "every dot is rasterised ({lit} pixels for {expected} dots)");
+}

@@ -941,12 +941,17 @@ fn fill_tris(s: &mut Surface<'_>, p: &SheetPage, raw: &[Vec2], rgb: Rgb, t: u8) 
 
 /// Paint a point marker: a small square at the point.
 fn point(s: &mut Surface<'_>, batch: &mut Option<(StrokeStyle, PathBuilder)>, map: &Map, raw: &[Vec2], m: Mark) {
-    let Some(q) = raw.first() else { return };
+    if raw.is_empty() {
+        return;
+    }
     flush(s, batch);
     let half = (m.w.max(0.5)) / 2.0;
-    let c = map.pt(*q);
-    if let Some(path) = rect_path(c - Vec2::new(half, half), c + Vec2::new(half, half)) {
-        fill_path(s, &path, m.rgb, m.t);
+    // A hatch's dots are one point primitive with every dot.
+    for q in raw {
+        let c = map.pt(*q);
+        if let Some(path) = rect_path(c - Vec2::new(half, half), c + Vec2::new(half, half)) {
+            fill_path(s, &path, m.rgb, m.t);
+        }
     }
 }
 
