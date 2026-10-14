@@ -302,7 +302,8 @@ pub fn mono() -> FontId {
 }
 
 /// Load a system UI font at run time when one is installed (not bundled), else keep egui's.
-pub fn install_fonts(ctx: &egui::Context, cjk: bool) {
+/// `language` picks the CJK font: Chinese and Korean each want a font with their own glyphs.
+pub fn install_fonts(ctx: &egui::Context, language: &str) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let candidates: &[&str] = if cfg!(target_os = "macos") {
@@ -327,8 +328,8 @@ pub fn install_fonts(ctx: &egui::Context, cjk: bool) {
                 break;
             }
         }
-        // Chinese: an installed CJK font after the Latin ones, so Latin text keeps its look.
-        if let Some(bytes) = cjk.then(cjk_font).flatten().and_then(|p| read_capped(p, MAX_UI_FONT_BYTES)) {
+        // Chinese and Korean: an installed CJK font after the Latin ones, so Latin keeps its look.
+        if let Some(bytes) = cjk_font(language).and_then(|p| read_capped(p, MAX_UI_FONT_BYTES)) {
             fonts.font_data.insert("system-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
             for family in [FontFamily::Proportional, FontFamily::Monospace] {
                 if let Some(f) = fonts.families.get_mut(&family) {
@@ -339,7 +340,7 @@ pub fn install_fonts(ctx: &egui::Context, cjk: bool) {
         ctx.set_fonts(fonts);
     }
     #[cfg(target_arch = "wasm32")]
-    let _ = (ctx, cjk);
+    let _ = (ctx, language);
 }
 
 /// Largest interface font file read (CJK collections are 15–60 MB).
@@ -355,18 +356,51 @@ fn read_capped(path: &std::path::Path, max: u64) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-/// An installed font with Chinese characters, for the Chinese interface; fonts are never bundled
-/// (only looked for where the OS or common packages put them). Checked once.
-pub fn cjk_font() -> Option<&'static std::path::Path> {
+/// An installed font with the characters `language` (Chinese or Korean) needs; fonts are never
+/// bundled (only looked for where the OS or common packages put them). Checked once per script,
+/// so a Chinese preference never hands a Korean interface a Chinese-only font, or the reverse.
+pub fn cjk_font(language: &str) -> Option<&'static std::path::Path> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-        FOUND
+        static CHINESE: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        static KOREAN: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        let korean = language.starts_with("ko");
+        let found = if korean { &KOREAN } else { &CHINESE };
+        found
             .get_or_init(|| {
                 let candidates: &[&str] = if cfg!(target_os = "macos") {
-                    &["/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Light.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"]
+                    if korean {
+                        &["/System/Library/Fonts/AppleSDGothicNeo.ttc", "/System/Library/Fonts/AppleGothic.ttf", "/Library/Fonts/AppleGothic.ttf"]
+                    } else {
+                        &[
+                            "/System/Library/Fonts/PingFang.ttc",
+                            "/System/Library/Fonts/STHeiti Light.ttc",
+                            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                        ]
+                    }
                 } else if cfg!(windows) {
-                    &["C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyh.ttf", "C:\\Windows\\Fonts\\simsun.ttc"]
+                    if korean {
+                        &[
+                            "C:\\Windows\\Fonts\\gulim.ttc",
+                            "C:\\Windows\\Fonts\\gulim.ttf",
+                            "C:\\Windows\\Fonts\\malgun.ttf",
+                            "C:\\Windows\\Fonts\\batang.ttc",
+                            "C:\\Windows\\Fonts\\batang.ttf",
+                            "C:\\Windows\\Fonts\\malgunbd.ttf",
+                            "C:\\Windows\\Fonts\\malgunsl.ttf",
+                        ]
+                    } else {
+                        &["C:\\Windows\\Fonts\\msyh.ttc", "C:\\Windows\\Fonts\\msyh.ttf", "C:\\Windows\\Fonts\\simsun.ttc"]
+                    }
+                } else if korean {
+                    &[
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+                        "/usr/share/fonts/nanum/NanumGothic.ttf",
+                        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                    ]
                 } else {
                     &[
                         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -385,12 +419,20 @@ pub fn cjk_font() -> Option<&'static std::path::Path> {
             .as_deref()
     }
     #[cfg(target_arch = "wasm32")]
-    None
+    {
+        let _ = language;
+        None
+    }
 }
 
-/// Whether the interface can show `language`: Chinese needs an installed CJK font.
+/// Whether showing `language` needs an installed CJK font (Chinese or Korean).
+pub fn is_cjk(language: &str) -> bool {
+    language.starts_with("zh") || language.starts_with("ko")
+}
+
+/// Whether the interface can show `language`: Chinese and Korean need an installed CJK font.
 pub fn can_show(language: &str) -> bool {
-    !language.starts_with("zh") || cjk_font().is_some()
+    !is_cjk(language) || cjk_font(language).is_some()
 }
 
 /// egui's visuals for `theme`, from its tokens.

@@ -115,10 +115,12 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             };
             app.ui.interface_language = preference;
             let shown = app.language();
-            if shown != preference.resolve(&app.system_languages) {
-                app.set_status(
-                    "No Chinese font is installed, so the interface stays in English. Install one (Noto Sans CJK, for example) to use Chinese.",
-                );
+            let wanted = preference.resolve(&app.system_languages);
+            if shown != wanted {
+                let name = if wanted.starts_with("ko") { "Korean" } else { "Chinese" };
+                app.set_status(format!(
+                    "No {name} font is installed, so the interface stays in English. Install one (Noto Sans CJK, for example) to use {name}."
+                ));
             }
             Ok(json!({"interfaceLanguage": preference.code(), "shown": shown}))
         }

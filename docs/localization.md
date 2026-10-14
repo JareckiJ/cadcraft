@@ -1,7 +1,9 @@
 # Interface languages
 
 Choose **Edit → Interface Language** and select **Auto (system language)**, **English**,
-**Українська**, **Português (Brasil)**, **Deutsch**, **Español**, or **Čeština** (Czech).
+**Українська** (Ukrainian), **Português (Brasil)**, **Deutsch** (German), **Español** (Spanish),
+**Čeština** (Czech), **Русский** (Russian), **Français** (French), **简体中文** (Simplified
+Chinese), or **한국어** (Korean).
 The interface updates without restarting, including the native macOS menus.
 The choice is saved with the other interface preferences (`cadcraft.prefs`, beside the theme):
 eframe storage on the desktop, browser local storage on the web. Installations without a saved
@@ -21,8 +23,8 @@ Automation can select the language through the existing control channel:
 ```
 
 The `ui.set` method also accepts `{"interfaceLanguage":"cs"}`. Supported values are `auto`,
-`en`, `uk`, `pt-BR`, `de`, `es`, and `cs`; invalid values are rejected without changing the current
-selection. Resetting palettes keeps the language choice.
+`en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, and `ko`; invalid values are rejected
+without changing the current selection. Resetting palettes keeps the language choice.
 
 ## Translation coverage
 
@@ -46,8 +48,10 @@ English. Uncatalogued text also falls back to English. Number formatting and the
 system's own file-picker controls follow the existing behavior.
 
 The bundled egui fonts cover Ukrainian (`Ґґ Єє Іі Її`), German (`ÄÖÜ äöü ß`), and Czech
-(`ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ áčďéěíňóřšťúůýž`, including typographic quotes `„…“`).
-The translations add no font assets and work on the web without system fonts.
+(`ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ áčďéěíňóřšťúůýž`, including typographic quotes `„…“`). Simplified Chinese and
+Korean bundle no glyphs: each shows only where an installed CJK font has its characters (Noto Sans
+CJK, Microsoft YaHei, Gulim, …) and otherwise stays English — on the web, which has no installed
+fonts, that means English. The translations add no font assets.
 
 ## Adding translations
 

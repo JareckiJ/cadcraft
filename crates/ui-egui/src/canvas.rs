@@ -99,6 +99,9 @@ pub struct CanvasState {
     pub param: crate::parametric::Cache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
+    /// A Shift+left-drag Zoom Window in progress: its two world corners (start, current). The
+    /// gesture is transparent and never disturbs a running command.
+    zoom_window: Option<(Vec2, Vec2)>,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -780,6 +783,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         )
     });
     let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
+
     // Which device is scrolling? On macOS, trackpads (and Magic Mouse) report precise point
     // deltas; notched mouse wheels report lines. The answer is sticky because egui spreads a wheel
     // notch over several frames. Elsewhere (browsers, Wayland smooth-scroll mice) ordinary wheels
@@ -843,12 +847,35 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     } else {
         app.canvas.pan_last = None;
     }
-    if dbl_middle && inside {
+    if dbl_middle && inside && !mods.shift {
         let _ = app.session.zoom_extents();
     }
+    // While a command runs, Shift+left is a zoom modifier: drag = Zoom Window, double-click = Zoom
+    // Previous, and a plain click does nothing — so it can never cancel the running command.
+    let shift_left = inside && mods.shift && !mods.ctrl && !mods.alt && app.session.running.is_some();
     // ZOOM Realtime: dragging up zooms in, down zooms out.
-    if resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
+    if !shift_left && resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
+    }
+    if shift_left && dbl_primary {
+        let _ = app.run("zoom.previous", serde_json::json!({}));
+    }
+    if shift_left
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && rect.contains(origin)
+    {
+        app.canvas.zoom_window = Some((xf.to_world(origin), xf.to_world(origin)));
+    }
+    if let (Some((start, _)), Some(hp)) = (app.canvas.zoom_window, hover_pos) {
+        app.canvas.zoom_window = Some((start, xf.to_world(hp)));
+    }
+    if resp.drag_stopped_by(egui::PointerButton::Primary)
+        && let Some((start, end)) = app.canvas.zoom_window.take()
+        && (start.x - end.x).abs() > 1e-9
+        && (start.y - end.y).abs() > 1e-9
+    {
+        let _ = app.run("zoom.window", serde_json::json!({"p1": [start.x, start.y], "p2": [end.x, end.y]}));
     }
     // A click in another tile makes it current (or answers -VPORTS Join's prompts).
     if pressed_primary
@@ -954,6 +981,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if inside
         && pressed_primary
         && !middle_down
+        && !resp.dragged_by(egui::PointerButton::Primary)
+        && !shift_left
         && let Some(p) = app.canvas.cursor
     {
         if app.session.running.is_some() {
@@ -983,9 +1012,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Press-and-drag selection window (AutoCAD's PICKDRAG = 2; click-click still works): a drag
     // that starts while objects are being selected opens a window where the button went down,
-    // and letting go closes it. Drags on grips and drags while drawing are left alone.
+    // and letting go closes it. Drags on grips, drags while drawing are left alone.
     if resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
+        && !shift_left
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
@@ -1230,6 +1260,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         } else {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
         }
+    }
+    // The Shift+left-drag Zoom Window rubber band.
+    if let Some((a, b)) = app.canvas.zoom_window {
+        let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b));
+        painter.rect_filled(r, 0.0, t.window_fill);
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, t.window_stroke), egui::StrokeKind::Middle);
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {

@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Czech catalog added: reference/literal coverage, Czech plurals and menu headings) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (Korean catalog: `ko` preference and a repaired 429-row catalog, Korean CJK-font test, gap reporting) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How far CADCraft's interface and drawing text are from AutoCAD's languages. Summarised in
 [ROADMAP.md](../ROADMAP.md#languages); work items in [gaps.md](gaps.md#localization).
@@ -62,14 +62,15 @@ plus native review by a human; extending the catalog to the remaining English-on
 | Indonesian | id | 0 (0%) | 0% | Latin: yes | no | none | 3–5 h |
 | Japanese | ja | 0 (0%) | 0% | CJK glyphs render; IME pending; no vertical text | no | none | 4–6 h |
 | German | de | 989 catalog rows (≈ 100% of the catalog; ≈ 80% of all UI strings, estimated: engine diagnostics and uncatalogued text stay English) | dialogs and tooltips yes; command reference searchable in German | Latin: yes (bundled egui fonts cover ä ö ü Ä Ö Ü ß; long strings will need layout checks) | no native review | partial | 1–2 h |
-| Korean | ko | 0 (0%) | 0% | Hangul renders; macOS Korean IME fixes pending (#118, #119) | no | none | 4–6 h |
+| Korean | ko | 429 catalog rows (gaps reported, English fallback) | partial | Hangul renders via an installed CJK font; macOS Korean IME fixes pending (#118, #119) | no native review yet | partial | 2–4 h |
 | Vietnamese | vi | 0 (0%) | 0% | Latin with stacked diacritics: renders per code point, untested | no | none | 3–5 h |
 | Ukrainian | uk | 989 catalog rows (≈ 100% of the catalog; ≈ 80% of all UI strings, estimated: engine diagnostics and uncatalogued text stay English) | dialogs and tooltips yes; command reference searchable in Ukrainian | Cyrillic: yes (bundled egui fonts) | translated by a contributor; no second review | partial | 2–4 h |
 | Czech | cs | 1,202 catalog rows; reference catalog and marked UI literals covered | dialogs and tooltips yes; contextual menu headings; command reference searchable in Czech | Latin: yes (bundled egui proportional and monospace fonts; Czech letters and quotes tested) | AI-assisted by @Losminek; independent review pass; not yet proofread by a native speaker | complete current catalog; English-only interface gaps remain | native review + shared English-only UI work |
 
-Other languages shipped: Ukrainian, Brazilian Portuguese, German, Czech, Russian and French. Czech covers the
-reference catalog and marked UI literals; engine diagnostics and uncatalogued text remain English. AutoCAD for Mac ships 7
-non-English languages (zh-Hans, es, fr, ja, de, ko, it); of those, CADCraft now ships German,
+Other languages shipped: Ukrainian, Brazilian Portuguese, German, Czech, Russian, French, Simplified Chinese and
+Korean. Czech covers the reference catalog and marked UI literals; Korean ships 429 catalog rows with gaps
+reported by the tests and English fallback; engine diagnostics and uncatalogued text remain English. AutoCAD for Mac ships 7
+non-English languages (zh-Hans, es, fr, ja, de, ko, it); of those, CADCraft now ships German, Simplified Chinese and Korean,
 and additionally Ukrainian, which AutoCAD for Mac doesn't ship.
 
 **Total to put all twelve at `full`:** about 55–95 Opus 5.5 hours (catalog extension 4–6 h,
@@ -80,6 +81,7 @@ each language, which needs humans. Translations parallelise fully once the catal
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Korean catalog: `ko` preference and a repaired 429-row catalog, Korean CJK-font test, gap reporting in REPORTED |
 | 2026-10-11 | minor | Czech added: 1,202 rows, one/few/other plurals, locale/preferences/menu/font/render tests; independent review pass; native proofreading pending |
 | 2026-10-11 | minor | German catalog landed: `de` preference and catalog, per-language plural rules; non-English languages 1 → 2; total hours 60–100 → 55–95 |
 | 2026-10-10 | minor | Right-to-left drawing text: bidi and Arabic-script shaping in TEXT and MTEXT (#287) |

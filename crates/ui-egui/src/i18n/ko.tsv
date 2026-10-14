@@ -1,0 +1,435 @@
+# CADCraft Korean interface catalog — original translations.
+# License: MIT OR Apache-2.0 (the repository LICENSE-MIT and LICENSE-APACHE).
+# Written from CADCraft's English strings; no proprietary translations were copied.
+# UTF-8: context<TAB>English source<TAB>Korean translation.
+# Empty context = ordinary label; @plural = one|other forms with {n}.
+# Command IDs, typed keywords, technology/product names and user data stay unchanged.
+	 Cancel	취소
+	 OK	확인
+	 or [	 또는 [
+	% of all commits	% 의 모든 커밋
+	* Wildcard Match	* 와일드카드 매칭
+	*VARIES*	*다중값*
+	+  |  Top  |  2D Wireframe	+  |  평면  |  2D 와이어프레임
+	+Bin	+Bin
+	+LOC	+LOC
+	1 Viewport	1 뷰포트
+	2 Points	2 점
+	2 Viewports	2 뷰포트
+	3 Points	3 점
+	3 Viewports	3 뷰포트
+	3D Face	3D 면
+	3D Operations	3D 작업
+	3D Polyline	3D 폴리라인
+	4 Viewports	4 뷰포트
+	< Less than	< 미만
+	<> Not Equal	<> 같지 않음
+	= Equals	= 같음
+	> Greater than	> 초과
+	About	정보
+	About CADCraft	CADCraft 정보
+	Absolute	절대
+	Add Leader	참조선 추가
+	Align	정렬
+	Align Text	문자 정렬
+	Aligned	정렬됨
+	All	전체
+	All Used Layers	사용 중인 모든 레이어
+	All files	모든 파일
+	Angle	각도
+	Angular	각도
+	Annotation Visibility	치수/주석 가시성
+	Annotation scale	주석 축척
+	Apparent Intersection	가상 교점
+	Append to current selection set	현재 선택 세트에 추가
+	Apply to:	적용 대상:
+	Apply true color	트루 컬러 적용
+	Arc	호
+	Arc Length	호 길이
+	Area	면적
+	Array	배열
+	Attach	첨부
+	Auto	자동
+	Auto (system language)	자동 (시스템 언어)
+	AutoComplete	자동완성
+	Auto-save	자동 저장
+	Background	배경
+	Base point	기준점
+	Block	블록
+	Block Editor	블록 편집기
+	Block name	블록 이름
+	Blocks	블록
+	Bold	굵게
+	Border	테두리
+	Bottom	아래
+	Break	분해
+	Bring to Front	맨 앞으로
+	By Layer	레이어별
+	ByBlock	블록별
+	Cancel	취소
+	Center	중심
+	Center mark	중심 표시
+	Centerline	중심선
+	Chamfer	모깎기
+	Circle	원
+	Clean	정리
+	Clear	지우기
+	Close	닫기
+	Color	색상
+	Command	명령
+	Command line	명령줄
+	Commands	명령어
+	Configure	설정
+	Constrain	구속
+	Construction	작업선
+	Content	내용
+	Continue	계속
+	Control	제어
+	Convert	변환
+	Copy	복사
+	Count	개수
+	Create	생성
+	Crosshair	십자선
+	Current	현재
+	Cursor	커서
+	Cut	잘라내기
+	Dashed	대시
+	Data	데이터
+	Default	기본값
+	Delete	삭제
+	Dimension	치수
+	Dimension Style	치수 스타일
+	Dimensions	치수
+	Direction	방향
+	Distance	거리
+	Divide	나누기
+	Donut	도넛
+	Drafting	제도
+	Drag	드래그
+	Draw	그리기
+	Drawing	도면
+	DWG	DWG
+	DXF	DXF
+	Edit	편집
+	Ellipse	타원
+	End	끝점
+	End point	끝점
+	Enter	입력
+	Erase	지우기
+	Error	오류
+	Escape	취소
+	Exit	종료
+	Export	내보내기
+	Extend	연장
+	External References	외부 참조
+	Fade	페이드
+	Field	필드
+	File	파일
+	Fill	채우기
+	Filter	필터
+	Find	찾기
+	Fit	맞춤
+	Font	글꼴
+	Format	서식
+	Freeze	동결
+	From	시작점
+	Full	전체
+	General	일반
+	Geometry	기하
+	Grid	그리드
+	Group	그룹
+	Grip	그립
+	Grips	그립
+	Hatch	해치
+	Height	높이
+	Help	도움말
+	Hide	숨기기
+	Horizontal	수평
+	Import	가져오기
+	Insert	삽입
+	Inspect	검사
+	Intersection	교점
+	Invert	반전
+	Isometric	아이소메트릭
+	Join	결합
+	Justify	정렬
+	Layer	레이어
+	Layer Properties	레이어 특성
+	Layers	레이어
+	Layout	레이아웃
+	Leader	참조선
+	Length	길이
+	Lengthen	길이 연장
+	Level	레벨
+	Libraries	라이브러리
+	Light	조명
+	Limits	한계
+	Line	선
+	Line Type	선 종류
+	Line Weight	선 두께
+	Linear	선형
+	List	목록
+	Load	불러오기
+	Lock	잠금
+	Log	로그
+	Loop	반복
+	Manage	관리
+	Match	일치
+	Measure	측정
+	Menu	메뉴
+	Merge	병합
+	Midpoint	중간점
+	Mirror	대칭
+	Modify	수정
+	Move	이동
+	Multiline	다중선
+	Multiple	다중
+	Name	이름
+	Nearest	최근접
+	New	새로 만들기
+	Next	다음
+	No	아니오
+	Non	없음
+	None	없음
+	Normal	일반
+	Not Equal	같지 않음
+	Object	객체
+	Object Snap	객체 스냅
+	Off	끔
+	On	켬
+	Open	열기
+	Options	옵션
+	Origin	원점
+	Ortho	직교
+	Other	기타
+	Output	출력
+	Overkill	중복 정리
+	Override	재정의
+	Page	페이지
+	Pan	팬
+	Parallel	평행
+	Paste	붙여넣기
+	Path	경로
+	Pattern	패턴
+	Perpendicular	수직
+	Pick	선택
+	Pickbox	선택 상자
+	Place	배치
+	Plan	계획
+	Plot	플롯
+	Point	점
+	Polar	극좌표
+	Polygon	다각형
+	Preview	미리보기
+	Previous	이전
+	Print	인쇄
+	Properties	특성
+	Properties Palette	특성 팔레트
+	Quick	빠르게
+	Quit	종료
+	Radius	반지름
+	Real-time	실시간
+	Recent	최근
+	Rectangle	사각형
+	Redo	다시 실행
+	Redraw	다시 그리기
+	Reference	참조
+	Region	영역
+	Regen	재생성
+	Remove	제거
+	Rename	이름 바꾸기
+	Render	렌더
+	Repeat	반복
+	Replace	바꾸기
+	Reset	초기화
+	Resize	크기 조절
+	Rotate	회전
+	Round	모깎기
+	Row	행
+	Run	실행
+	Save	저장
+	Scale	축척
+	Script	스크립트
+	Select	선택
+	Selection	선택
+	Set	설정
+	Settings	설정
+	Shade	음영
+	Shape	형상
+	Shift	Shift
+	Shortcut	단축키
+	Show	표시
+	Show System Cursor	시스템 커서 표시
+	Side	측면
+	Size	크기
+	Sketch	스케치
+	Snap	스냅
+	Snap to grid	그리드 스냅
+	Solid	솔리드
+	Source	소스
+	Space	공간
+	Specify	지정
+	Spline	스플라인
+	Split	분할
+	Start	시작
+	Status Bar	상태 표시줄
+	Stretch	신축
+	Style	스타일
+	Subtract	빼기
+	Surface	표면
+	Swap	교체
+	Switch	전환
+	Symbol	기호
+	System	시스템
+	Tab	탭
+	Table	표
+	Tag	태그
+	Target	대상
+	Template	템플릿
+	Text	문자
+	Text Style	문자 스타일
+	Thaw	해동
+	Thickness	두께
+	Time	시간
+	Title	제목
+	Toggle	토글
+	Toolbar	도구 모음
+	Top	위
+	Tracking	추적
+	Trim	자르기
+	True Color	트루 컬러
+	Turn	회전
+	Type	유형
+	Undo	실행 취소
+	Units	단위
+	Update	업데이트
+	Use	사용
+	User	사용자
+	Value	값
+	Vertical	수직
+	View	보기
+	Viewport	뷰포트
+	Viewport Scale	뷰포트 축척
+	Visible	보임
+	Visual Style	시각 스타일
+	Width	너비
+	Window	윈도우
+	Write	쓰기
+	X Axis	X축
+	Y Axis	Y축
+	Z Axis	Z축
+	Zoom	줌
+	Zoom All	전체 줌
+	Zoom Center	중심 줌
+	Zoom Dynamic	동적 줌
+	Zoom Extents	범위 줌
+	Zoom In	확대
+	Zoom Out	축소
+	Zoom Previous	이전 줌
+	Zoom Realtime	실시간 줌
+	Zoom Window	윈도우 줌
+@plural	{n} commit	{n} 커밋|{n} 커밋
+@plural	{n} contributor	{n} 기여자|{n} 기여자
+menu	About	정보
+menu	All	전체
+menu	Auto	자동
+menu	Block	블록
+menu	Block Editor	블록 편집기
+menu	Blocks	블록
+menu	Center	중심
+menu	Chamfer	모깎기
+menu	Circle	원
+menu	Clean	정리
+menu	Color	색상
+menu	Commands	명령어
+menu	Copy	복사
+menu	Cut	잘라내기
+menu	Delete	삭제
+menu	Dimension	치수
+menu	Dimension Style	치수 스타일
+menu	Dimensions	치수
+menu	Distance	거리
+menu	Divide	나누기
+menu	Donut	도넛
+menu	Drafting Settings	제도 설정
+menu	Draw	그리기
+menu	Draw Order	그리기 순서
+menu	Edit	편집
+menu	Ellipse	타원
+menu	Erase	지우기
+menu	Export	내보내기
+menu	Extend	연장
+menu	External References	외부 참조
+menu	File	파일
+menu	Find	찾기
+menu	Format	서식
+menu	Group	그룹
+menu	Hatch	해치
+menu	Help	도움말
+menu	Hide	숨기기
+menu	Import	가져오기
+menu	Insert	삽입
+menu	Join	결합
+menu	Layer	레이어
+menu	Layer Properties	레이어 특성
+menu	Layers	레이어
+menu	Layout	레이아웃
+menu	Leader	참조선
+menu	Lengthen	길이 연장
+menu	Line	선
+menu	Line Type	선 종류
+menu	Line Weight	선 두께
+menu	List	목록
+menu	Match Properties	특성 일치
+menu	Measure	측정
+menu	Mirror	대칭
+menu	Modify	수정
+menu	Move	이동
+menu	Multiline	다중선
+menu	New	새로 만들기
+menu	Open	열기
+menu	Options	옵션
+menu	Paste	붙여넣기
+menu	Plot	플롯
+menu	Polygon	다각형
+menu	Properties	특성
+menu	Quick Select	빠른 선택
+menu	Quit	종료
+menu	Radius	반지름
+menu	Rectangle	사각형
+menu	Redo	다시 실행
+menu	Redraw	다시 그리기
+menu	Regen	재생성
+menu	Remove	제거
+menu	Rename	이름 바꾸기
+menu	Rotate	회전
+menu	Save	저장
+menu	Scale	축척
+menu	Select	선택
+menu	Select All	전체 선택
+menu	Settings	설정
+menu	Spline	스플라인
+menu	Status Bar	상태 표시줄
+menu	Stretch	신축
+menu	Text	문자
+menu	Text Style	문자 스타일
+menu	Thaw	해동
+menu	Tools	도구
+menu	Trim	자르기
+menu	Undo	실행 취소
+menu	Units	단위
+menu	View	보기
+menu	Viewport	뷰포트
+menu	Window	윈도우
+menu	Zoom	줌
+	Drag up to zoom in or down to zoom out; press Esc or Enter to exit	위로 드래그하면 확대, 아래로 드래그하면 축소; Esc 또는 Enter로 종료
+	Specify center of view box	뷰 박스 중심 지정
+	Specify size of view box	뷰 박스 크기 지정
+	Specify first corner	첫 번째 모서리 지정
+	Specify opposite corner	반대쪽 모서리 지정
+	Specify corner of window, enter a scale factor (nX or nXP)	윈도우 모서리 지정, 축척 인자 입력 (nX 또는 nXP)
+	Specify center point	중심점 지정
+	Enter magnification or height	배율 또는 높이 입력
+	Enter a scale factor (nX or nXP)	축척 인자 입력 (nX 또는 nXP)
+	Specify base point or displacement (drag with the middle mouse button for realtime pan)	기준점 또는 변위 지정 (가운데 마우스 버튼 드래그로 실시간 팬)
+	Specify second point	두 번째 점 지정

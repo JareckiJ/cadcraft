@@ -195,8 +195,9 @@ pub struct CadApp {
     /// Caps the frame rate when presenting without vsync (see [`gpu::FrameCap`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub frame_cap: Option<gpu::FrameCap>,
-    /// Interface fonts installed, and whether with a CJK font (`None` until the first frame).
-    fonts_cjk: Option<bool>,
+    /// Interface fonts installed, and for which CJK script (`"zh"`, `"ko"`, or `""` for a Latin
+    /// language); `None` until the first frame. Chinese and Korean want different fonts.
+    fonts_cjk: Option<&'static str>,
     /// The theme last installed into egui (`None` until the first frame).
     shown_theme: Option<egui::Theme>,
     /// Whether the last applied theme was handed to egui as the System preference.
@@ -414,10 +415,17 @@ impl CadApp {
         if ctx.input(|i| i.viewport().close_requested()) && self.request_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
-        let cjk = self.language().starts_with("zh");
-        if self.fonts_cjk != Some(cjk) {
-            theme::install_fonts(ctx, cjk);
-            self.fonts_cjk = Some(cjk);
+        let language = self.language();
+        let script = if language.starts_with("ko") {
+            "ko"
+        } else if language.starts_with("zh") {
+            "zh"
+        } else {
+            ""
+        };
+        if self.fonts_cjk != Some(script) {
+            theme::install_fonts(ctx, language);
+            self.fonts_cjk = Some(script);
         }
         // Resolved every frame, so a System choice follows the OS appearance live (winit and the
         // browser report changes as input); the saved choice itself never changes here.
