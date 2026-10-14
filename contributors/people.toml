@@ -73,3 +73,8 @@ sync_github_name = false
 
 [people.gurparvez]
 real_name = "Gurparvez"
+
+[people.belchiordameao]
+real_name = "Belchior Dameao de Araujo Neto"
+display_name = "Belchior Dameao de Araujo Neto"
+sync_github_name = false
