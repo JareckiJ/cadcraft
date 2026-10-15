@@ -7,10 +7,10 @@
 	 Cancel	취소
 	 OK	확인
 	 or [	 또는 [
-	% of all commits	% 의 모든 커밋
+	% of all commits	%의 모든 커밋
 	* Wildcard Match	* 와일드카드 매칭
 	*VARIES*	*다중값*
-	+  |  Top  |  2D Wireframe	+  |  평면  |  2D 와이어프레임
+	+  |  Top  |  2D Wireframe	+  |  위  |  2D 와이어프레임
 	+Bin	+Bin
 	+LOC	+LOC
 	1 Viewport	1 뷰포트
@@ -81,7 +81,7 @@
 	Commands	명령어
 	Configure	설정
 	Constrain	구속
-	Construction	작업선
+	Construction	작도선
 	Content	내용
 	Continue	계속
 	Control	제어
@@ -132,7 +132,7 @@
 	Font	글꼴
 	Format	서식
 	Freeze	동결
-	From	시작점
+	From	기준점
 	Full	전체
 	General	일반
 	Geometry	기하
@@ -215,7 +215,7 @@
 	Pick	선택
 	Pickbox	선택 상자
 	Place	배치
-	Plan	계획
+	Plan	평면
 	Plot	플롯
 	Point	점
 	Polar	극좌표
@@ -244,11 +244,11 @@
 	Reset	초기화
 	Resize	크기 조절
 	Rotate	회전
-	Round	모깎기
+	Round	라운드
 	Row	행
 	Run	실행
 	Save	저장
-	Scale	축척
+	Scale	배율
 	Script	스크립트
 	Select	선택
 	Selection	선택
@@ -404,7 +404,7 @@ menu	Remove	제거
 menu	Rename	이름 바꾸기
 menu	Rotate	회전
 menu	Save	저장
-menu	Scale	축척
+menu	Scale	배율
 menu	Select	선택
 menu	Select All	전체 선택
 menu	Settings	설정
