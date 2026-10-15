@@ -1853,7 +1853,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // The Shift+left-drag Zoom Window rubber band.
     if let Some((a, b)) = app.canvas.zoom_window {
         let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b));
-        painter.rect_filled(r, 0.0, t.window_fill);
+        if let Some(fill) = selection_area_fill(&app.session.settings, false) {
+            painter.rect_filled(r, 0.0, fill);
+        }
         painter.rect_stroke(r, 0.0, Stroke::new(1.0, t.window_stroke), egui::StrokeKind::Middle);
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
