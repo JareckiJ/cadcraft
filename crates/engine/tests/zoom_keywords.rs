@@ -58,3 +58,25 @@ fn zoom_center_scale_dynamic_and_paper_space_all() {
     let v = view(&s);
     assert!(v.center.near(sheet.center(), 1e-9) && v.height < 297.0 && v.height >= sheet.height(), "{v:?} vs {sheet:?}");
 }
+
+/// The `zoom.window` command frames its two corners even when the caller passes only `p1`/`p2`
+/// (the UI's Shift+drag and the toolbar): the command id must imply Window mode, not default to
+/// Extents. Regression: it once shared ZOOM's runner and reset the view to the extents instead.
+#[test]
+fn zoom_window_command_frames_the_region() {
+    let mut s = Session::new();
+    s.viewport_px = (1600.0, 900.0);
+    s.execute("limits", &json!({ "min": [0, 0], "max": [420, 297] })).unwrap();
+    s.execute("line", &json!({ "points": [[0, 0], [1000, 0]] })).unwrap();
+    s.execute("view.set", &json!({ "center": [0, 0], "height": 100.0 })).unwrap();
+
+    s.execute("zoom.window", &json!({ "p1": [10, 10], "p2": [30, 30] })).unwrap();
+    let v = view(&s);
+    assert!(v.center.near(Vec2::new(20.0, 20.0), 1e-9), "frames the region centre: {v:?}");
+    assert!(near(v.height, 20.0), "frames the region, not the extents: {v:?}");
+
+    // A wider-than-tall region is limited by its width over the viewport aspect.
+    s.execute("zoom.window", &json!({ "p1": [0, 0], "p2": [40, 10] })).unwrap();
+    let v = view(&s);
+    assert!(near(v.height, 40.0 / (1600.0 / 900.0)), "the width limits a wide region: {v:?}");
+}

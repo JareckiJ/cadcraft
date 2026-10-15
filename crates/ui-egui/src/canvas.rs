@@ -850,17 +850,20 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if dbl_middle && inside && !mods.shift {
         let _ = app.session.zoom_extents();
     }
-    // While a command runs, Shift+left is a zoom modifier: drag = Zoom Window, double-click = Zoom
-    // Previous, and a plain click does nothing — so it can never cancel the running command.
-    let shift_left = inside && mods.shift && !mods.ctrl && !mods.alt && app.session.running.is_some();
+    // Shift+left over the drawing area is a zoom modifier, with or without a command running: a
+    // drag sets a region (Zoom Window) and a double-click goes back (Zoom Previous). A plain
+    // Shift+click does nothing while a command runs — so the gesture can never cancel it — and
+    // otherwise keeps its usual idle meaning (deselect).
+    let shift_zoom = inside && mods.shift && !mods.ctrl && !mods.alt;
+    let shift_click = shift_zoom && app.session.running.is_some();
     // ZOOM Realtime: dragging up zooms in, down zooms out.
-    if !shift_left && resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
+    if !shift_zoom && resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
     }
-    if shift_left && dbl_primary {
+    if shift_zoom && dbl_primary {
         let _ = app.run("zoom.previous", serde_json::json!({}));
     }
-    if shift_left
+    if shift_zoom
         && resp.drag_started_by(egui::PointerButton::Primary)
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
@@ -982,7 +985,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && pressed_primary
         && !middle_down
         && !resp.dragged_by(egui::PointerButton::Primary)
-        && !shift_left
+        && !shift_click
         && let Some(p) = app.canvas.cursor
     {
         if app.session.running.is_some() {
@@ -1015,7 +1018,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // and letting go closes it. Drags on grips, drags while drawing are left alone.
     if resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
-        && !shift_left
+        && !shift_zoom
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
