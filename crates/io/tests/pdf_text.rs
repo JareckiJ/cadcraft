@@ -7,7 +7,8 @@
 
 use cadcraft_doc::{Common, Drawing, EntityKind, Space, Text, TextStyle, Viewport};
 use cadcraft_geom::{Vec2, Vec3};
-use cadcraft_io::plot;
+use cadcraft_io::pdf::pdf_sheets;
+use cadcraft_io::{PdfOptions, plot};
 use serde_json::json;
 
 // ---------- a minimal TrueType font: .notdef, "A" (triangle), "B" (square) ----------
@@ -369,4 +370,23 @@ fn hostile_text_never_panics() {
     }
     pdf(&d, &Space::Model, json!({}));
     pdf(&d, &Space::Model, json!({"compress": true}));
+}
+
+#[test]
+fn sheets_written_one_by_one_share_the_fonts_of_the_file() {
+    // Pages are written as their sheets are plotted: a face that cannot be embedded on the
+    // first sheet takes no font index, and a face used on two sheets is embedded once.
+    let mut d = drawing();
+    let paper = Space::Paper("Layout1".into());
+    text(&mut d, &paper, "Locked", (20.0, 20.0), "AB", 0.0, 1.0, 0.0);
+    text(&mut d, &paper, "Real", (20.0, 40.0), "A", 0.0, 1.0, 0.0);
+    text(&mut d, &Space::Model, "Real", (0.0, 0.0), "BA", 0.0, 1.0, 0.0);
+    let o = PdfOptions { compress: false, ..PdfOptions::default() };
+    let bytes = pdf_sheets(&d, &[paper, Space::Model], &o).unwrap();
+    check_xref(&bytes);
+    let p: String = bytes.iter().map(|b| if b.is_ascii() { char::from(*b) } else { '?' }).collect();
+    assert_eq!(p.matches("/FontFile2").count(), 1, "one embedded font");
+    assert!(p.contains("/F0 1 Tf") && !p.contains("/F1 "), "the restricted face takes no index");
+    assert_eq!(p.lines().filter(|l| l.ends_with(" Tj")).count(), 3, "A on the layout, B and A in model space");
+    assert!(p.contains("/Count 2"));
 }

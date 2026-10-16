@@ -48,24 +48,15 @@ pub(super) struct Fonts {
 impl Fonts {
     /// Collect the glyphs of every plotted text glyph and subset their fonts.
     pub(super) fn collect<'a>(lists: impl IntoIterator<Item = &'a DisplayList>) -> Fonts {
-        let mut used: Vec<(Face, BTreeMap<u16, char>)> = Vec::new();
-        let mut index: HashMap<FaceKey, usize> = HashMap::new();
+        let mut g = Gather::default();
         for list in lists {
-            for t in usable(list) {
-                let k = key(&t.glyph.face);
-                let i = match index.get(&k) {
-                    Some(i) => *i,
-                    None => {
-                        index.insert(k, used.len());
-                        used.push((t.glyph.face.clone(), BTreeMap::new()));
-                        used.len() - 1
-                    }
-                };
-                if let Some((_, chars)) = used.get_mut(i) {
-                    chars.entry(t.glyph.gid).or_insert(t.glyph.ch);
-                }
-            }
+            g.glyphs(list);
         }
+        Fonts::build(g.used)
+    }
+
+    /// Subset the fonts of the glyphs used, by face in order of first use.
+    fn build(used: Vec<(Face, BTreeMap<u16, char>)>) -> Fonts {
         let mut out = Fonts::default();
         let mut total = 0usize;
         for (face, chars) in used {
@@ -106,6 +97,62 @@ impl Fonts {
     /// Write the font objects; returns each font's `Type0` object, by font index.
     pub(super) fn write(&self, objs: &mut Objects, compress: bool) -> Vec<usize> {
         self.fonts.iter().map(|f| write_font(objs, f, compress)).collect()
+    }
+}
+
+/// The fonts of a PDF gathered sheet by sheet, so each sheet's page is written as soon as it is
+/// plotted and its display list dropped. A face gets its font index when first seen, as
+/// [`Fonts::collect`] would give it, unless it cannot be embedded at all; whether the plan
+/// holds (the caps on fonts and font data are only known at the end) is checked by
+/// [`Gather::finish`].
+#[derive(Default)]
+pub(super) struct Gather {
+    used: Vec<(Face, BTreeMap<u16, char>)>,
+    index: HashMap<FaceKey, usize>,
+    plan: Fonts,
+    planned: usize,
+}
+
+impl Gather {
+    /// Add the glyphs of a sheet; returns the fonts to write its page with.
+    pub(super) fn add(&mut self, list: &DisplayList) -> &Fonts {
+        for face in self.glyphs(list) {
+            let embeds = self.planned < MAX_FONTS && subset::info(&face).is_some() && subset::subset(&face, &BTreeSet::new()).is_ok();
+            let font = embeds.then(|| {
+                self.planned += 1;
+                self.planned - 1
+            });
+            self.plan.by_face.insert(key(&face), font);
+        }
+        &self.plan
+    }
+
+    /// Record the glyphs of `list`; returns the faces seen for the first time.
+    fn glyphs(&mut self, list: &DisplayList) -> Vec<Face> {
+        let mut new = Vec::new();
+        for t in usable(list) {
+            let k = key(&t.glyph.face);
+            let i = match self.index.get(&k) {
+                Some(i) => *i,
+                None => {
+                    self.index.insert(k, self.used.len());
+                    self.used.push((t.glyph.face.clone(), BTreeMap::new()));
+                    new.push(t.glyph.face.clone());
+                    self.used.len() - 1
+                }
+            };
+            if let Some((_, chars)) = self.used.get_mut(i) {
+                chars.entry(t.glyph.gid).or_insert(t.glyph.ch);
+            }
+        }
+        new
+    }
+
+    /// The fonts to write, or `None` when they differ from the plan the pages were written
+    /// with (a cap was reached, or a subset failed with more glyphs).
+    pub(super) fn finish(self) -> Option<Fonts> {
+        let fonts = Fonts::build(self.used);
+        (fonts.by_face == self.plan.by_face).then_some(fonts)
     }
 }
 
