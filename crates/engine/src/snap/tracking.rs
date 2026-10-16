@@ -813,7 +813,12 @@ impl crate::Session {
             let (origin, angle) = super::grid_frame(&doc);
             p = super::grid_snap(p, doc.header.snap_unit(), origin, angle);
         }
-        if let Some(mut t) = self.tracking.track(&doc, &space, p, q.aperture, q.tol, &cfg, q.base) {
+        // A TK run past its first segment draws its own half-axis guide on the UI side; the
+        // base's polar rays would sit on the same axis and run out past the cursor, so the
+        // guide would read as a line that never stops. Send no base to `track` while it runs.
+        let tk_guided = matches!(self.point_mods.last(), Some(crate::pointmod::Frame::Track { last: Some(_), axis: Some(_) }));
+        let track_base = if tk_guided { None } else { q.base };
+        if let Some(mut t) = self.tracking.track(&doc, &space, p, q.aperture, q.tol, &cfg, track_base) {
             // PolarSnap (SNAPTYPE 1): steps of POLARDIST, or of the snap X spacing when it is 0.
             let step = if s.polardist > 0.0 { s.polardist } else { s.snapunit.x };
             if s.snapmode
