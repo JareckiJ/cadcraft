@@ -136,7 +136,10 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "CURSORSIZE" => json!(st.cursorsize),
         "MAXARRAY" => json!(st.maxarray),
         "ZOOMFACTOR" => json!(st.zoomfactor),
-        "LASTPOINT" => json!([s.last_point.x, s.last_point.y, 0.0]),
+        "LASTPOINT" => {
+            let p = s.last_point3();
+            json!([p.x, p.y, p.z])
+        }
         // Held in radians (`$ANGBASE` in DXF is in degrees); reported in degrees, like POLARANG.
         "ANGBASE" => json!(s.doc().ok()?.header.f64("ANGBASE", 0.0).to_degrees()),
         "CONSTRAINTINFER" => json!(i32::from(s.doc().ok()?.parametric.settings.infer)),

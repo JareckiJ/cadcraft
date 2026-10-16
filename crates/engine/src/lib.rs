@@ -34,7 +34,7 @@ pub mod units;
 use std::sync::Arc;
 
 use cadcraft_doc::{Common, Drawing, Entity, EntityKind, Handle, Space};
-use cadcraft_geom::{Bounds2, Vec2};
+use cadcraft_geom::{Bounds2, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -644,6 +644,12 @@ pub struct Session {
     pub last_command: Option<String>,
     /// LASTPOINT.
     pub last_point: Vec2,
+    /// LASTPOINT's Z, as `(last_point, z)`: it holds only while `last_point` is still that point
+    /// (whatever sets `last_point` without a Z puts it back on z = 0). See [`Session::last_point3`].
+    last_point_z: (Vec2, f64),
+    /// The Z of the point being entered: the third number of a typed point
+    /// ([`prompt::parse_point3_with`]), 0 for a picked one. See [`Session::point_z`].
+    point_z: f64,
     /// The last segment given at a point prompt (its base point and the point): polar angles
     /// relative to the last segment (POLARMODE bit 1) are measured from it.
     pub last_segment: Option<(Vec2, Vec2)>,
@@ -720,6 +726,8 @@ impl Session {
             log: Vec::new(),
             last_command: None,
             last_point: Vec2::ZERO,
+            last_point_z: (Vec2::ZERO, 0.0),
+            point_z: 0.0,
             last_segment: None,
             last_polar: None,
             point_mods: Vec::new(),
@@ -1049,6 +1057,19 @@ impl Session {
         result
     }
 
+    /// LASTPOINT with its Z (z = 0 unless the last point was typed with one, or relative to one).
+    pub fn last_point3(&self) -> Vec3 {
+        let (p, z) = self.last_point_z;
+        self.last_point.to3(if p == self.last_point { z } else { 0.0 })
+    }
+
+    /// The Z of the point a command is being given ([`Input::Point`] carries only X and Y): the
+    /// third number of a typed `x,y,z` or `@dx,dy,dz` (relative forms add to LASTPOINT's Z), 0
+    /// for a picked point. Commands that build 3D geometry (3DPOLY) read it with the point.
+    pub fn point_z(&self) -> f64 {
+        self.point_z
+    }
+
     /// Give an input to the running command. With no command running, `Enter` repeats the last
     /// command (as in AutoCAD) and points do nothing. A LISP routine waiting in a `get…`
     /// function takes the input instead; one paused in `command` carries on after it.
@@ -1222,6 +1243,7 @@ impl Session {
             Some(i) => {
                 if let Input::Point(p) = &i {
                     self.last_point = *p;
+                    self.last_point_z = (*p, self.point_z);
                     if let Some(b) = base.filter(|b| b.is_finite() && p.is_finite() && b.dist(*p) > 1e-12) {
                         self.last_segment = Some((b, *p));
                     }
@@ -1573,9 +1595,12 @@ impl Session {
             return self.input(Input::Keyword(k));
         }
         if prompt.accept.point {
-            if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
+            if let Some(p) = prompt::parse_point3_with(tt, self.last_point3(), &self.angle_settings()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
-                return self.input(Input::Point(p));
+                self.point_z = p.z;
+                let r = self.input(Input::Point(p.xy()));
+                self.point_z = 0.0;
+                return r;
             }
             // Direct distance entry along the tracking path the cursor is on, from the point it
             // comes from (an acquired or temporary tracking point needs no base point).
