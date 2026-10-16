@@ -42,7 +42,7 @@ ignored; there are no context menus. Remaining: **≈ 110–170 Opus 5.5 hours**
 
 | Input | AutoCAD | CADCraft | Evidence |
 |---|---|---|---|
-| `x,y[,z]`, `@dx,dy`, `@d<a`, `d<a`, `#x,y`, bare `@` | yes | yes; `#` equals absolute because there is no UCS; Z parsed then discarded | `prompt.rs:147-180` |
+| `x,y[,z]`, `@dx,dy[,dz]`, `@d<a`, `d<a`, `#x,y[,z]`, bare `@` | yes | yes; `#` equals absolute because there is no UCS; a typed Z reaches the command (`Session::point_z`; relative forms add to LASTPOINT's Z), but only 3DPOLY reads it so far | `prompt.rs` (`parse_point3_with`) |
 | `*x,y` (WCS override) | yes | yes (`*x,y`, `*@dx,dy`, `@*dx,dy`); the same as the plain forms because there is no UCS | `prompt.rs` |
 | Direct distance entry | yes, honours ortho, polar and tracking paths | yes, ortho; polar only through the UI's snapped cursor | `lib.rs:782-793` |
 | Angle forms: `45d30'`, radians, grads, surveyor `N45dE` | yes | yes | `units.rs:141-197` |
@@ -210,6 +210,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | 2026-10-16 | minor | ALIASEDIT opens the Command Aliases dialog (#1381) |
 | 2026-10-18 | minor | In-window menu bar: once a menu is open, pointing at another title closes it and opens that one (#1567) |
 | 2026-10-13 | minor | Options ▸ Selection adds Select using two clicks only; PICKDRAG 0 disables drag-window creation/completion, 2 preserves clicks or drag, and the preference survives restart; UI pointer and profile regressions |
+| 2026-10-16 | trivial | A typed point keeps its Z (`x,y,z`, `@dx,dy,dz`; LASTPOINT carries it), and the interactive 3DPOLY draws with it (#1409, #1410) |
 | 2026-10-12 | minor | Selected and hovered objects redrawn in the selection colour (text and arrowheads included); Options ▸ Selection laid out as AutoCAD's: Object grouping, Show grips, grip object limit, selection preview, Visual Effect Settings (selection area, preview filter) |
 | 2026-10-12 | minor | Animation effects (dialog and menu fades, smoothed wheel scrolling and ⌘/Ctrl+wheel zoom) follow the operating system's setting; View ▸ Accessibility ▸ Animation Effects chooses System, On or Off |
 | 2026-10-12 | minor | Hatch and Gradient / Hatch Edit dialogs (HATCH, GRADIENT, HATCHEDIT, double-click a hatch; HPDLGMODE) |
