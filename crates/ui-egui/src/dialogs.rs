@@ -23,6 +23,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "units" => units(app, ctx, &mut open),
         "hatch" => crate::hatchdlg::dialog(app, ctx, &mut open),
         "tolerance" => crate::tolerancedlg::dialog(app, ctx, &mut open),
+        "matchprop" => crate::matchpropdlg::dialog(app, ctx, &mut open),
         "about" => about(ctx, &mut open),
         "preview" => crate::exchange::dialog(app, ctx, &mut open),
         "commands" => commands(app, ctx, &mut open),

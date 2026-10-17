@@ -421,6 +421,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        "matchprop.settings" | "ui.dialog.matchprop" if params.is_null() => {
+            crate::matchpropdlg::open(app);
+            Ok(Value::Null)
+        }
         "properties" | "pr" | "props" | "ch" if params.is_null() => {
             crate::docking::command(app, false, &json!({"operation":"open", "panel":"properties"}))
         }

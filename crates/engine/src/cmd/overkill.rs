@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use cadcraft_doc::{Circle, Common, Entity, EntityKind, Handle};
-use cadcraft_geom::{TAU, Vec2, Vec3, ccw_sweep, norm_angle};
+use cadcraft_geom::{TAU, Vec2, Vec3, bulge_to_arc, ccw_sweep, norm_angle};
 use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase, number};
@@ -206,6 +206,7 @@ fn overkill(s: &mut Session, hs: Option<Vec<Handle>>, o: &Opts) -> Result<Report
     lines(&cands, o, &mut gone, &mut changed, &mut rep);
     arcs(&cands, o, &mut gone, &mut changed, &mut rep);
     if o.plines {
+        compare_plines_with_objects(&cands, o, &mut gone, &mut rep);
         for (i, c) in cands.iter().enumerate() {
             if gone.get(i).copied().unwrap_or(true) || c.protected {
                 continue;
@@ -591,6 +592,234 @@ fn optimize_pline(pl: &mut cadcraft_doc::LwPolyline, q: f64) -> usize {
         }
     }
     before - pl.vertices.len()
+}
+
+#[derive(Clone, Copy)]
+enum PlineSeg {
+    Straight { a: Vec2, b: Vec2, u: Vec2, n: Vec2, len: f64 },
+    Arc { center: Vec2, radius: f64, start: f64, sweep: f64 },
+}
+
+struct PlineRec {
+    cand_idx: usize,
+    prop: u32,
+    elevation: f64,
+    is_1seg: bool,
+    segs: Vec<PlineSeg>,
+}
+
+fn eliminate(victim: usize, cands: &[Cand], gone: &mut [bool], rep: &mut Report, is_dup: bool) -> bool {
+    if cands.get(victim).is_some_and(|c| c.protected) {
+        return false;
+    }
+    if let Some(g) = gone.get_mut(victim)
+        && !*g
+    {
+        *g = true;
+        if is_dup {
+            rep.duplicates += 1;
+        } else {
+            rep.overlapping += 1;
+        }
+        return true;
+    }
+    false
+}
+
+/// Compare polyline straight and arc segments with standalone lines and arcs
+/// (and 1-segment polylines), eliminating duplicate and overlapping segments.
+fn compare_plines_with_objects(cands: &[Cand], o: &Opts, gone: &mut [bool], rep: &mut Report) {
+    let q = o.q();
+    let mut plines: Vec<PlineRec> = Vec::new();
+    for (i, c) in cands.iter().enumerate() {
+        if gone.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        let EntityKind::LwPolyline(pl) = &c.e.kind else { continue };
+        if pl.const_width > q {
+            continue;
+        }
+        let n = pl.vertices.len();
+        if n < 2 {
+            continue;
+        }
+        let count = if pl.closed { n } else { n - 1 };
+        let mut segs = Vec::new();
+        for k in 0..count {
+            let (Some(v0), Some(v1)) = (pl.vertices.get(k), pl.vertices.get((k + 1) % n)) else {
+                break;
+            };
+            if v0.start_width > q || v0.end_width > q || v0.p.dist(v1.p) <= q {
+                continue;
+            }
+            if v0.bulge.abs() < 1e-12 || !v0.bulge.is_finite() {
+                let len = v0.p.dist(v1.p);
+                if len.is_finite() && len > q {
+                    let u = (v1.p - v0.p) * (1.0 / len);
+                    let n = u.perp();
+                    segs.push(PlineSeg::Straight { a: v0.p, b: v1.p, u, n, len });
+                }
+            } else if let Some((arc, _ccw)) = bulge_to_arc(v0.p, v1.p, v0.bulge)
+                && arc.radius > q
+                && arc.radius.is_finite()
+            {
+                let s = norm_angle(arc.start);
+                let sweep = ccw_sweep(arc.start, arc.end);
+                segs.push(PlineSeg::Arc { center: arc.center, radius: arc.radius, start: s, sweep });
+            }
+        }
+        if !segs.is_empty() {
+            plines.push(PlineRec { cand_idx: i, prop: c.prop, elevation: pl.elevation, is_1seg: !pl.closed && n == 2, segs });
+        }
+    }
+
+    // Part A: Compare polyline straight segments with standalone lines
+    for p in &plines {
+        if gone.get(p.cand_idx).copied().unwrap_or(true) {
+            continue;
+        }
+        for seg in &p.segs {
+            let PlineSeg::Straight { a, u, n, len, .. } = *seg else { continue };
+            for (j, c) in cands.iter().enumerate() {
+                if gone.get(j).copied().unwrap_or(true) || c.prop != p.prop {
+                    continue;
+                }
+                let EntityKind::Line(l) = &c.e.kind else { continue };
+                if !l.a.is_finite() || !l.b.is_finite() {
+                    continue;
+                }
+                if (l.a.z - l.b.z).abs() > q || (l.a.z - p.elevation).abs() > q {
+                    continue;
+                }
+                let (p0, p1) = (l.a.xy(), l.b.xy());
+                if n.dot(p0 - a).abs() > q || n.dot(p1 - a).abs() > q {
+                    continue;
+                }
+                let t0 = u.dot(p0 - a);
+                let t1 = u.dot(p1 - a);
+                let t_min = t0.min(t1);
+                let t_max = t0.max(t1);
+                if t_min >= -q && t_max <= len + q {
+                    let is_dup = t_min.abs() <= q && (t_max - len).abs() <= q;
+                    if !eliminate(j, cands, gone, rep, is_dup) && p.is_1seg {
+                        eliminate(p.cand_idx, cands, gone, rep, is_dup);
+                    }
+                } else if p.is_1seg && t_min <= q && t_max >= len - q {
+                    eliminate(p.cand_idx, cands, gone, rep, false);
+                }
+            }
+        }
+    }
+
+    // Part B: Compare polyline arc segments with standalone arcs
+    for p in &plines {
+        if gone.get(p.cand_idx).copied().unwrap_or(true) {
+            continue;
+        }
+        for seg in &p.segs {
+            let PlineSeg::Arc { center, radius, start: seg_start, sweep: seg_sweep } = *seg else { continue };
+            for (j, c) in cands.iter().enumerate() {
+                if gone.get(j).copied().unwrap_or(true) || c.prop != p.prop {
+                    continue;
+                }
+                let EntityKind::Arc(a) = &c.e.kind else { continue };
+                if !a.center.is_finite() || !a.radius.is_finite() {
+                    continue;
+                }
+                if (a.center.z - p.elevation).abs() > q {
+                    continue;
+                }
+                if a.center.xy().dist(center) > q || (a.radius - radius).abs() > q {
+                    continue;
+                }
+                let atol = (q / radius).min(1.0);
+                let arc_start = norm_angle(a.start);
+                let arc_sweep = ccw_sweep(a.start, a.end);
+                let mut phi_s = ccw_sweep(seg_start, arc_start);
+                if phi_s > TAU - atol {
+                    phi_s -= TAU;
+                }
+                if phi_s >= -atol && phi_s + arc_sweep <= seg_sweep + atol {
+                    let is_dup = phi_s.abs() <= atol && (arc_sweep - seg_sweep).abs() <= atol;
+                    if !eliminate(j, cands, gone, rep, is_dup) && p.is_1seg {
+                        eliminate(p.cand_idx, cands, gone, rep, is_dup);
+                    }
+                } else if p.is_1seg {
+                    let mut phi_seg = ccw_sweep(arc_start, seg_start);
+                    if phi_seg > TAU - atol {
+                        phi_seg -= TAU;
+                    }
+                    if phi_seg >= -atol && phi_seg + seg_sweep <= arc_sweep + atol {
+                        eliminate(p.cand_idx, cands, gone, rep, false);
+                    }
+                }
+            }
+        }
+    }
+
+    // Part C: Compare 1-segment polylines with other polylines
+    for p1 in &plines {
+        if !p1.is_1seg || gone.get(p1.cand_idx).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(seg1) = p1.segs.first().copied() else { continue };
+        for p2 in &plines {
+            if p1.cand_idx == p2.cand_idx
+                || gone.get(p2.cand_idx).copied().unwrap_or(true)
+                || p1.prop != p2.prop
+                || (p1.elevation - p2.elevation).abs() > q
+            {
+                continue;
+            }
+            let mut eliminated = false;
+            for seg2 in &p2.segs {
+                match (seg1, *seg2) {
+                    (PlineSeg::Straight { a: a1, b: b1, .. }, PlineSeg::Straight { a: a2, u: u2, n: n2, len: len2, .. }) => {
+                        if n2.dot(a1 - a2).abs() <= q && n2.dot(b1 - a2).abs() <= q {
+                            let t0 = u2.dot(a1 - a2);
+                            let t1 = u2.dot(b1 - a2);
+                            let t_min = t0.min(t1);
+                            let t_max = t0.max(t1);
+                            if t_min >= -q && t_max <= len2 + q {
+                                let is_dup = t_min.abs() <= q && (t_max - len2).abs() <= q;
+                                if is_dup && p2.is_1seg && p1.cand_idx < p2.cand_idx {
+                                    eliminate(p2.cand_idx, cands, gone, rep, true);
+                                } else {
+                                    eliminate(p1.cand_idx, cands, gone, rep, is_dup);
+                                    eliminated = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    (
+                        PlineSeg::Arc { center: c1, radius: r1, start: s1, sweep: sw1 },
+                        PlineSeg::Arc { center: c2, radius: r2, start: s2, sweep: sw2 },
+                    ) if c1.dist(c2) <= q && (r1 - r2).abs() <= q => {
+                        let atol = (q / r2).min(1.0);
+                        let mut phi = ccw_sweep(s2, s1);
+                        if phi > TAU - atol {
+                            phi -= TAU;
+                        }
+                        if phi >= -atol && phi + sw1 <= sw2 + atol {
+                            let is_dup = phi.abs() <= atol && (sw1 - sw2).abs() <= atol;
+                            if is_dup && p2.is_1seg && p1.cand_idx < p2.cand_idx {
+                                eliminate(p2.cand_idx, cands, gone, rep, true);
+                            } else {
+                                eliminate(p1.cand_idx, cands, gone, rep, is_dup);
+                                eliminated = true;
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if eliminated {
+                break;
+            }
+        }
+    }
 }
 
 fn report_message(r: &Report) -> String {

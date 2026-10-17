@@ -20,6 +20,8 @@ pub struct MatchProps {
     pub transparency: bool,
     pub thickness: bool,
     pub plot_style: bool,
+    pub material: bool,
+    pub shadow: bool,
     /// Dimension style and overrides of dimensions; the style of leaders.
     pub dimension: bool,
     /// Text style, height, width factor and oblique angle of text and multiline text.
@@ -34,6 +36,8 @@ pub struct MatchProps {
     pub table: bool,
     /// Style, arrowhead size, landing and leader type of multileaders.
     pub multileader: bool,
+    /// Center object properties of center marks and centerlines.
+    pub center: bool,
 }
 
 impl Default for MatchProps {
@@ -53,6 +57,8 @@ const FIELDS: &[(&str, &str, Field)] = &[
     ("TRansparency", "transparency", |m| &mut m.transparency),
     ("THickness", "thickness", |m| &mut m.thickness),
     ("PLotstyle", "plotStyle", |m| &mut m.plot_style),
+    ("MAt", "material", |m| &mut m.material),
+    ("SHadow", "shadow", |m| &mut m.shadow),
     ("DImension", "dimension", |m| &mut m.dimension),
     ("TExt", "text", |m| &mut m.text),
     ("Hatch", "hatch", |m| &mut m.hatch),
@@ -60,6 +66,7 @@ const FIELDS: &[(&str, &str, Field)] = &[
     ("Viewport", "viewport", |m| &mut m.viewport),
     ("TAble", "table", |m| &mut m.table),
     ("Multileader", "multileader", |m| &mut m.multileader),
+    ("CEnter", "center", |m| &mut m.center),
 ];
 
 impl MatchProps {
@@ -73,6 +80,8 @@ impl MatchProps {
             transparency: on,
             thickness: on,
             plot_style: on,
+            material: on,
+            shadow: on,
             dimension: on,
             text: on,
             hatch: on,
@@ -80,6 +89,7 @@ impl MatchProps {
             viewport: on,
             table: on,
             multileader: on,
+            center: on,
         }
     }
     /// The settings that are on, by name.
@@ -222,6 +232,21 @@ fn copy_props(src: &Entity, dst: &mut Entity, m: &MatchProps) {
         }
         _ => {}
     }
+    if m.center {
+        let center_xdata: Vec<_> = src
+            .common
+            .xdata
+            .iter()
+            .filter(|t| t.code == 1001 && (t.value.eq_ignore_ascii_case("ACAD_CENTERLINE") || t.value.eq_ignore_ascii_case("ACAD_CENTERMARK")))
+            .cloned()
+            .collect();
+        if !center_xdata.is_empty() {
+            dst.common.xdata.retain(|t| {
+                !(t.code == 1001 && (t.value.eq_ignore_ascii_case("ACAD_CENTERLINE") || t.value.eq_ignore_ascii_case("ACAD_CENTERMARK")))
+            });
+            dst.common.xdata.extend(center_xdata);
+        }
+    }
 }
 
 /// Copy the chosen properties from `src` to `targets`, skipping the source itself and objects on
@@ -233,6 +258,7 @@ fn match_onto(s: &mut Session, src: Handle, targets: &[Handle], m: &MatchProps) 
         d.ensure_layer(&source.common.layer);
     }
     let mut n = 0;
+    let mut modified = Vec::new();
     for h in targets {
         if *h == src {
             continue;
@@ -242,7 +268,30 @@ fn match_onto(s: &mut Session, src: Handle, targets: &[Handle], m: &MatchProps) 
             continue;
         }
         d.modify_entity(*h, |e| copy_props(&source, e, m))?;
+        modified.push(*h);
         n += 1;
+    }
+    if (m.material || m.shadow) && !modified.is_empty() {
+        let src_props = d.foreign.entities.get(&src).map(|f| f.props.clone()).unwrap_or_default();
+        let mat_tag = if m.material { src_props.iter().find(|t| t.code == 347).cloned() } else { None };
+        let shadow_tag = if m.shadow { src_props.iter().find(|t| t.code == 284).cloned() } else { None };
+        let foreign = std::sync::Arc::make_mut(&mut d.foreign);
+        for h in modified {
+            if m.material {
+                let extra = foreign.entities.entry(h).or_default();
+                extra.props.retain(|t| t.code != 347);
+                if let Some(ref t) = mat_tag {
+                    extra.props.push(t.clone());
+                }
+            }
+            if m.shadow {
+                let extra = foreign.entities.entry(h).or_default();
+                extra.props.retain(|t| t.code != 284);
+                if let Some(ref t) = shadow_tag {
+                    extra.props.push(t.clone());
+                }
+            }
+        }
     }
     Ok(n)
 }
@@ -257,11 +306,41 @@ pub(super) fn run_matchprop(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => targets(s, &json!({ "handles": v }))?,
     };
     let m = match p.get("properties") {
-        None | Some(Value::Null) => MatchProps::default(),
+        None | Some(Value::Null) => s.last_used.matchprop,
         Some(v) => MatchProps::from_json(v)?,
     };
     let n = match_onto(s, src, &tg, &m)?;
     Ok(json!({ "changed": n }))
+}
+
+pub(super) fn run_matchprop_settings(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(v) = p.get("properties")
+        && !v.is_null()
+    {
+        s.last_used.matchprop = MatchProps::from_json(v)?;
+    }
+    let m = s.last_used.matchprop;
+    Ok(json!({
+        "color": m.color,
+        "layer": m.layer,
+        "linetype": m.linetype,
+        "ltscale": m.ltscale,
+        "lineweight": m.lineweight,
+        "transparency": m.transparency,
+        "thickness": m.thickness,
+        "plotStyle": m.plot_style,
+        "material": m.material,
+        "shadow": m.shadow,
+        "dimension": m.dimension,
+        "text": m.text,
+        "hatch": m.hatch,
+        "polyline": m.polyline,
+        "viewport": m.viewport,
+        "table": m.table,
+        "multileader": m.multileader,
+        "center": m.center,
+        "active": m.names(),
+    }))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -305,13 +384,17 @@ fn label(name: &str) -> &'static str {
         "transparency" => "Transparency",
         "thickness" => "Thickness",
         "plotStyle" => "PlotStyle",
+        "material" => "Material",
+        "shadow" => "Shadow",
         "dimension" => "Dim",
         "text" => "Text",
         "hatch" => "Hatch",
         "polyline" => "Polyline",
         "viewport" => "Viewport",
         "table" => "Table",
-        _ => "Multileader",
+        "multileader" => "Multileader",
+        "center" => "Center",
+        _ => "Special",
     }
 }
 

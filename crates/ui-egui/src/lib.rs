@@ -22,6 +22,7 @@ pub mod credits;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
+pub mod matchpropdlg;
 mod mtext_editor;
 pub mod spacemouse;
 pub mod tolerancedlg;
@@ -244,6 +245,8 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Geometric Tolerance dialog while open ([`tolerancedlg`]).
     pub tolerance_dlg: Option<tolerancedlg::ToleranceDlgState>,
+    /// The Property Settings dialog for MATCHPROP while open ([`matchpropdlg`]).
+    pub matchprop_dlg: Option<matchpropdlg::MatchPropDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
 }
@@ -284,6 +287,7 @@ impl CadApp {
             gpu_notice: None,
             hatch_dlg: None,
             tolerance_dlg: None,
+            matchprop_dlg: None,
             bedit: bedit::State::default(),
         }
     }

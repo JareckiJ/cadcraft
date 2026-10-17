@@ -145,3 +145,33 @@ fn texttofront_and_hatchtoback() {
     s.cmdline("").unwrap();
     assert!(s.log.iter().any(|l| l.contains("2 object(s) brought to front")), "{:?}", s.log);
 }
+
+#[test]
+fn texttofront_and_hatchtoback_across_all_spaces() {
+    let mut s = Session::new();
+    // In model space: text then line
+    s.execute("text", &json!({ "at": [0, 0], "height": 2, "text": "ModelText" })).unwrap();
+    s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+
+    // Switch to Layout1 paper space
+    s.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
+    s.execute("text", &json!({ "at": [5, 5], "height": 3, "text": "PaperText" })).unwrap();
+    s.execute("line", &json!({ "points": [[0, 0], [20, 20]] })).unwrap();
+
+    // In both spaces, line is currently at the front.
+    // texttofront brings text to front in BOTH model space and layout space!
+    let r = s.execute("texttofront", &json!({})).unwrap();
+    assert_eq!(r["moved"], 2);
+
+    // Verify model space has text at the front
+    let doc = s.doc().unwrap();
+    assert_eq!(doc.model.iter().last().map(|e| e.kind.type_name()), Some("Text"));
+    // Verify Layout1 has text at the front
+    let layout = doc.layouts.iter().find(|l| l.name == "Layout1").unwrap();
+    assert_eq!(layout.entities.iter().last().map(|e| e.kind.type_name()), Some("Text"));
+
+    // Now test space: "current" which only operates on Layout1
+    s.execute("line", &json!({ "points": [[1, 1], [2, 2]] })).unwrap();
+    let r_curr = s.execute("texttofront", &json!({ "space": "current" })).unwrap();
+    assert_eq!(r_curr["moved"], 1);
+}
