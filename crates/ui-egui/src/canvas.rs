@@ -1389,18 +1389,24 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         return;
     }
 
-    // Double-click a hatch (no command running) to edit it in the Hatch Edit dialog. The click is
-    // used up: it must not also start a grip edit on the hatch's centre grip below.
+    // Double-click a hatch or tolerance (no command running) to edit it. The click is
+    // used up: it must not also start a grip edit on the centre grip below.
     let mut hatch_dialog = false;
     if inside
         && dbl_primary
         && app.session.running.is_none()
         && let Some(hp) = hover_pos
-        && let Some(h) = hatch_at(app, xf.to_world(hp), scale)
     {
-        app.session.set_selection(vec![h]);
-        crate::hatchdlg::open_edit(app);
-        hatch_dialog = true;
+        let wp = xf.to_world(hp);
+        if let Some(h) = hatch_at(app, wp, scale) {
+            app.session.set_selection(vec![h]);
+            crate::hatchdlg::open_edit(app);
+            hatch_dialog = true;
+        } else if let Some(h) = tolerance_at(app, wp, scale) {
+            app.session.set_selection(vec![h]);
+            crate::tolerancedlg::open_edit(app, h);
+            hatch_dialog = true;
+        }
     }
 
     // While a command asks for a point, every click places one, however fast the drafting (#815).
@@ -1930,6 +1936,13 @@ fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
     let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
+}
+
+fn tolerance_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
+    let st = app.session.state().ok()?;
+    let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
+    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Tolerance(_)).then_some(h)
 }
 
 /// Half the side of the pick box: the pick aperture (PICKBOX × 1.5 pixels, as `select::pick` is

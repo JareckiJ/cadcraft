@@ -150,3 +150,98 @@ fn hostile_params_are_refused_without_panicking() {
         }
     }
 }
+
+#[test]
+fn in_place_editing_via_handle_and_textedit() {
+    let mut s = Session::new();
+    let r = s.execute("tolerance", &json!({ "at": [10, 10], "symbol": "flatness", "tol1": "0.05" })).unwrap();
+    let h = r["handle"].as_str().unwrap();
+
+    // 1. Edit via tolerance JSON with handle
+    let r2 = s.execute("tolerance", &json!({ "handle": h, "symbol": "straightness", "tol1": "0.02" })).unwrap();
+    assert_eq!(r2["handle"], h);
+    assert_eq!(r2["text"], "{\\Fgdt;u}%%v0.02");
+    assert_eq!(tolerance(&s).1.text, "{\\Fgdt;u}%%v0.02");
+
+    // 2. Edit via tolerance.edit command
+    s.execute("tolerance.edit", &json!({ "handle": h, "symbol": "circularity", "tol1": "0.01" })).unwrap();
+    assert_eq!(tolerance(&s).1.text, "{\\Fgdt;e}%%v0.01");
+
+    // 3. Edit via textedit / ddedit
+    s.execute("textedit", &json!({ "handle": h, "text": "{\\Fgdt;j}%%v0.1%%vA" })).unwrap();
+    assert_eq!(tolerance(&s).1.text, "{\\Fgdt;j}%%v0.1%%vA");
+}
+
+#[test]
+fn leader_and_qleader_tolerance_annotation() {
+    let mut s = Session::new();
+    // LEADER with raw frame string tolerance annotation
+    let r1 = s
+        .execute(
+            "leader",
+            &json!({
+                "points": [[0, 0], [10, 10], [20, 10]],
+                "tolerance": "{\\Fgdt;j}%%v0.05%%vA"
+            }),
+        )
+        .unwrap();
+    let hs1 = r1["handles"].as_array().unwrap();
+    assert_eq!(hs1.len(), 2, "{r1:?}");
+    {
+        let d = s.doc().unwrap();
+        let l_ent = d.entity(cadcraft_engine::doc::Handle::parse_hex(hs1[0].as_str().unwrap()).unwrap()).unwrap();
+        let tol_ent = d.entity(cadcraft_engine::doc::Handle::parse_hex(hs1[1].as_str().unwrap()).unwrap()).unwrap();
+        assert!(matches!(l_ent.kind, EntityKind::Leader(_)));
+        if let EntityKind::Tolerance(t) = &tol_ent.kind {
+            assert_eq!(t.text, "{\\Fgdt;j}%%v0.05%%vA");
+            assert!(near(t.insert, Vec3::new(20.0, 10.0, 0.0)));
+        } else {
+            panic!("expected tolerance entity");
+        }
+    }
+
+    // QLEADER with structured parameter object tolerance annotation
+    let r2 = s
+        .execute(
+            "qleader",
+            &json!({
+                "points": [[50, 50], [40, 40], [30, 40]],
+                "tolerance": { "symbol": "flatness", "tol1": "0.02" }
+            }),
+        )
+        .unwrap();
+    let hs2 = r2["handles"].as_array().unwrap();
+    assert_eq!(hs2.len(), 2, "{r2:?}");
+    let d = s.doc().unwrap();
+    let tol_ent2 = d.entity(cadcraft_engine::doc::Handle::parse_hex(hs2[1].as_str().unwrap()).unwrap()).unwrap();
+    if let EntityKind::Tolerance(t) = &tol_ent2.kind {
+        assert_eq!(t.text, "{\\Fgdt;c}%%v0.02");
+    } else {
+        panic!("expected tolerance entity");
+    }
+}
+
+#[test]
+fn interactive_leader_with_tolerance() {
+    let mut s = Session::new();
+    // Leader interactive prompt sequence:
+    // Start point: 0,0
+    // Next point: 10,10
+    // Next point: Enter (proceed to annotation)
+    // Annotation: Tolerance
+    // Characteristic: position
+    // Tol 1: 0.1
+    // Tol 2: none
+    // Datum 1: A
+    // Datum 2: none (ends datums)
+    s.script("LEADER\n0,0\n10,10\n\nTolerance\nposition\n0.1\nnone\nA\nnone\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let d = s.doc().unwrap();
+    assert!(d.model.iter().any(|e| matches!(e.kind, EntityKind::Leader(_))));
+    let tol = d.model.iter().find(|e| matches!(e.kind, EntityKind::Tolerance(_))).expect("tolerance entity created");
+    if let EntityKind::Tolerance(t) = &tol.kind {
+        assert!(t.text.contains("{\\Fgdt;j}"));
+        assert!(t.text.contains("0.1"));
+        assert!(t.text.contains("A"));
+    }
+}

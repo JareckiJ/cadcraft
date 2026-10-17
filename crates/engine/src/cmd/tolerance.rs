@@ -12,11 +12,14 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("tolerance", "Tolerance...", run_tolerance)
             .menu(&["Dimension", "Tolerance..."])
-            .alias(&["tol"])
+            .alias(&["tol", "-tolerance"])
             .params(
-                "{at: [x,y], symbol?: position|concentricity|symmetry|parallelism|perpendicularity|angularity|cylindricity|flatness|circularity|straightness|surfaceprofile|lineprofile|circularrunout|totalrunout, tol1?: \"%%c0.1(M)\" | {value, diameter?, material?: M|L|S}, tol2?, datums?: [\"A(M)\", \"B\", {letter, material?}] (up to 3), line2?: {symbol?, tol1?, tol2?, datums?}, height? (projected zone), projected?, datumId?, rotation? (degrees), style? (dimension style; default DIMSTYLE), text? (the frame string as in DXF, instead of the fields)}",
+                "{at?: [x,y], handle?: hex, handles?: [hex], symbol?: position|concentricity|symmetry|parallelism|perpendicularity|angularity|cylindricity|flatness|circularity|straightness|surfaceprofile|lineprofile|circularrunout|totalrunout, tol1?: \"%%c0.1(M)\" | {value, diameter?, material?: M|L|S}, tol2?, datums?: [\"A(M)\", \"B\", {letter, material?}] (up to 3), line2?: {symbol?, tol1?, tol2?, datums?}, height? (projected zone), projected?, datumId?, rotation? (degrees), style? (dimension style; default DIMSTYLE), text? (the frame string as in DXF, instead of the fields)}",
             )
             .interactive(|s| Ok(Box::new(ToleranceM::new(s)))),
+        CommandSpec::new("tolerance.edit", "Edit Tolerance", run_tolerance)
+            .alias(&["toledit"])
+            .params("{handle: hex, text?, symbol?, tol1?, tol2?, datums?, line2?, height?, projected?, datumId?, at?, rotation?, style?}"),
     ]
 }
 
@@ -103,7 +106,7 @@ fn line_value(cmd: &str, p: &Value) -> Result<GdtLine> {
 }
 
 /// The frame string the parameters describe.
-fn frame_text(p: &Value) -> Result<String> {
+pub fn frame_text(p: &Value) -> Result<String> {
     if let Some(t) = str_param(p, "text") {
         return Ok(t.chars().take(MAX_FRAME_CHARS).collect());
     }
@@ -129,6 +132,44 @@ fn make(style: String, at: Vec2, rotation: f64, text: String) -> Tolerance {
 }
 
 fn run_tolerance(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(h) = str_param(p, "handle")
+        .and_then(Handle::parse_hex)
+        .or_else(|| p.get("handles").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).and_then(Handle::parse_hex))
+    {
+        let text = frame_text(p)?;
+        if cadcraft_doc::parse_frame(&text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
+            return Err(bad("tolerance", "the feature control frame is empty"));
+        }
+        let at = point_param(p, "at");
+        let rot = p.get("rotation").and_then(Value::as_f64).map(f64::to_radians);
+        let style = str_param(p, "style").map(str::to_string);
+        if let Some(ref st) = style
+            && s.doc()?.dim_style(st).is_none()
+        {
+            return Err(bad("tolerance", format!("no dimension style `{st}`")));
+        }
+        let d = s.doc_mut()?;
+        let mut found = false;
+        d.modify_entity(h, |e| {
+            if let EntityKind::Tolerance(t) = &mut e.kind {
+                t.text = text.clone();
+                if let Some(at) = at {
+                    t.insert = v3(at);
+                }
+                if let Some(r) = rot {
+                    t.dir = Vec2::from_angle(r).to3(0.0);
+                }
+                if let Some(ref st) = style {
+                    t.style = st.clone();
+                }
+                found = true;
+            }
+        })?;
+        if !found {
+            return Err(bad("tolerance", "specified entity is not a tolerance"));
+        }
+        return Ok(json!({ "handle": h.hex(), "text": text }));
+    }
     let at = point_req("tolerance", p, "at")?;
     let text = frame_text(p)?;
     if cadcraft_doc::parse_frame(&text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
@@ -149,6 +190,7 @@ struct ToleranceM {
     step: usize,
     line: GdtLine,
     style: String,
+    edit_handle: Option<Handle>,
 }
 
 const SYMBOL_KW: &[&str] = &[
@@ -174,8 +216,25 @@ const VALUE: Accept = Accept { point: false, number: false, text: false, select:
 
 impl ToleranceM {
     fn new(s: &Session) -> Self {
-        ToleranceM { step: 0, line: GdtLine { symbol: Some(GdtSymbol::Position), ..Default::default() }, style: current_dimstyle(s) }
+        let mut edit_handle = None;
+        let mut line = GdtLine { symbol: Some(GdtSymbol::Position), ..Default::default() };
+        let mut style = current_dimstyle(s);
+
+        if s.selection().len() == 1 {
+            let entity_tol = s.selection().first().and_then(|h| s.doc().ok()?.entity(*h).map(|e| (*h, &e.kind)));
+            if let Some((h, EntityKind::Tolerance(t))) = entity_tol {
+                edit_handle = Some(h);
+                style = t.style.clone();
+                let f = cadcraft_doc::deconstruct_frame(&t.text);
+                if let Some(l) = f.lines.first() {
+                    line = l.clone();
+                }
+            }
+        }
+
+        ToleranceM { step: 0, line, style, edit_handle }
     }
+
     fn text(&self) -> String {
         cadcraft_doc::compose_frame(&GdtFrame { lines: vec![self.line.clone()], ..Default::default() })
     }
@@ -195,11 +254,30 @@ impl Interactive for ToleranceM {
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.step {
-            0 => Prompt::new("Enter geometric characteristic", VALUE).kw(SYMBOL_KW).default("Position"),
-            1 => Prompt::new("Enter first tolerance value", VALUE).default("none"),
-            2 => Prompt::new("Enter second tolerance value", VALUE).default("none"),
-            n @ 3..=5 => Prompt::new(format!("Enter datum reference {}", n - 2), VALUE).default("none"),
-            _ => Prompt::new("Enter tolerance location", Accept::POINT),
+            0 => {
+                let def = self.line.symbol.map(|s| s.name()).unwrap_or("Position");
+                Prompt::new("Enter geometric characteristic", VALUE).kw(SYMBOL_KW).default(def)
+            }
+            1 => {
+                let def = self.line.tol1.as_ref().map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
+                Prompt::new("Enter first tolerance value", VALUE).default(def)
+            }
+            2 => {
+                let def = self.line.tol2.as_ref().map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
+                Prompt::new("Enter second tolerance value", VALUE).default(def)
+            }
+            n @ 3..=5 => {
+                let idx = n - 3;
+                let def = self.line.datums.get(idx).map(|d| d.letter.as_str()).filter(|l| !l.is_empty()).unwrap_or("none");
+                Prompt::new(format!("Enter datum reference {}", idx + 1), VALUE).default(def)
+            }
+            _ => {
+                if self.edit_handle.is_some() {
+                    Prompt::new("Enter tolerance location or <keep current>", Accept::POINT)
+                } else {
+                    Prompt::new("Enter tolerance location", Accept::POINT)
+                }
+            }
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -228,37 +306,80 @@ impl Interactive for ToleranceM {
                 self.step = 1;
             }
             1 | 2 => {
-                if !matches!(i, Input::Enter | Input::Text(_) | Input::Keyword(_)) {
-                    return Ok(Step::Continue);
-                }
-                let v = (!none(&text)).then(|| parse_tol(text.as_deref().unwrap_or("")));
-                if self.step == 1 {
-                    self.line.tol1 = v;
-                } else {
-                    self.line.tol2 = v;
+                match &i {
+                    Input::Enter => {}
+                    Input::Text(_) | Input::Keyword(_) => {
+                        let v = (!none(&text)).then(|| parse_tol(text.as_deref().unwrap_or("")));
+                        if self.step == 1 {
+                            self.line.tol1 = v;
+                        } else {
+                            self.line.tol2 = v;
+                        }
+                    }
+                    _ => return Ok(Step::Continue),
                 }
                 self.step += 1;
             }
             3..=5 => {
-                if !matches!(i, Input::Enter | Input::Text(_) | Input::Keyword(_)) {
-                    return Ok(Step::Continue);
-                }
-                if none(&text) {
-                    return Ok(self.at_location(s));
-                }
-                self.line.datums.push(parse_datum(text.as_deref().unwrap_or("")));
-                if self.step == 5 {
-                    return Ok(self.at_location(s));
+                let idx = self.step - 3;
+                match &i {
+                    Input::Enter => {
+                        if self.line.datums.get(idx).is_none() {
+                            return Ok(self.at_location(s));
+                        }
+                    }
+                    Input::Text(_) | Input::Keyword(_) => {
+                        if none(&text) {
+                            return Ok(self.at_location(s));
+                        }
+                        let d = parse_datum(text.as_deref().unwrap_or(""));
+                        if idx < self.line.datums.len() {
+                            self.line.datums[idx] = d;
+                        } else {
+                            self.line.datums.push(d);
+                        }
+                        if self.step == 5 {
+                            return Ok(self.at_location(s));
+                        }
+                    }
+                    _ => return Ok(Step::Continue),
                 }
                 self.step += 1;
             }
             _ => match i {
                 Input::Point(p) => {
-                    let t = make(self.style.clone(), p, 0.0, self.text());
-                    s.add_entity(EntityKind::Tolerance(t))?;
+                    if let Some(h) = self.edit_handle {
+                        let text = self.text();
+                        let style = self.style.clone();
+                        let d = s.doc_mut()?;
+                        d.modify_entity(h, |e| {
+                            if let EntityKind::Tolerance(t) = &mut e.kind {
+                                t.text = text;
+                                t.insert = v3(p);
+                                t.style = style;
+                            }
+                        })?;
+                    } else {
+                        let t = make(self.style.clone(), p, 0.0, self.text());
+                        s.add_entity(EntityKind::Tolerance(t))?;
+                    }
                     return Ok(Step::Done);
                 }
-                Input::Enter => return Ok(Step::Cancel),
+                Input::Enter => {
+                    if let Some(h) = self.edit_handle {
+                        let text = self.text();
+                        let style = self.style.clone();
+                        let d = s.doc_mut()?;
+                        d.modify_entity(h, |e| {
+                            if let EntityKind::Tolerance(t) = &mut e.kind {
+                                t.text = text;
+                                t.style = style;
+                            }
+                        })?;
+                        return Ok(Step::Done);
+                    }
+                    return Ok(Step::Cancel);
+                }
                 _ => {}
             },
         }
