@@ -1257,3 +1257,31 @@
 	World UCS	SCU
 	Z	Z
 	Z Axis Vector	Vector eje Z
+# Cuadro de diálogo de sombreado y gradiente (Hatch & Gradient).
+	Add boundaries	Añadir contornos
+	Remove boundaries	Eliminar contornos
+	Boundaries to add: {n}	Contornos para añadir: {n}
+	Boundaries to remove: {n}	Contornos para eliminar: {n}
+	Inherit Properties	Heredar propiedades
+	No boundary points or objects selected	No se han seleccionado puntos ni objetos de contorno
+# Vistas 3D predefinidas y estilos visuales.
+	2D Wireframe	Estructura alámbrica 2D
+	Back	Posterior
+	Bottom	Inferior
+	Conceptual	Conceptual
+	Front	Frontal
+	Hidden	Líneas ocultas
+	NE Isometric	Isométrica NE
+	NW Isometric	Isométrica NO
+	Realistic	Realista
+	SE Isometric	Isométrica SE
+	SW Isometric	Isométrica SO
+	Shaded	Sombreado
+	Shaded with Edges	Sombreado con aristas
+	Shades of Gray	Tonos de gris
+	Sketchy	Esbozo
+	Top	Superior
+	Viewpoint	Punto de vista
+	Visual Styles	Estilos visuales
+	Wireframe	Estructura alámbrica
+	X-Ray	Rayos X

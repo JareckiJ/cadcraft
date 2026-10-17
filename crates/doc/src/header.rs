@@ -116,6 +116,32 @@ impl Header {
         self.set("UCSYDIR", HVal::Point(ucs.y_axis));
     }
 
+    pub fn view_dir(&self) -> Vec3 {
+        self.point("VIEWDIR").filter(|v| v.len() > 1e-6).unwrap_or(Vec3::new(0.0, 0.0, 1.0)).normalized()
+    }
+
+    pub fn set_view_dir(&mut self, dir: Vec3) {
+        if dir.len() > 1e-6 {
+            self.set("VIEWDIR", HVal::Point(dir.normalized()));
+        }
+    }
+
+    pub fn target(&self) -> Vec3 {
+        self.point("TARGET").unwrap_or(Vec3::ZERO)
+    }
+
+    pub fn set_target(&mut self, target: Vec3) {
+        self.set("TARGET", HVal::Point(target));
+    }
+
+    pub fn visual_style(&self) -> String {
+        self.str("VSCURRENT", "2dWireframe")
+    }
+
+    pub fn set_visual_style(&mut self, style: &str) {
+        self.set_str("VSCURRENT", style);
+    }
+
     fn common() -> Header {
         let mut h = Header::default();
         h.set_str("ACADVER", "AC1032");
@@ -158,6 +184,10 @@ impl Header {
         h.set("UCSORG", HVal::Point(Vec3::ZERO));
         h.set("UCSXDIR", HVal::Point(Vec3::new(1.0, 0.0, 0.0)));
         h.set("UCSYDIR", HVal::Point(Vec3::new(0.0, 1.0, 0.0)));
+        // 3D View direction, target, and visual style
+        h.set("VIEWDIR", HVal::Point(Vec3::new(0.0, 0.0, 1.0)));
+        h.set("TARGET", HVal::Point(Vec3::ZERO));
+        h.set_str("VSCURRENT", "2dWireframe");
         h
     }
 

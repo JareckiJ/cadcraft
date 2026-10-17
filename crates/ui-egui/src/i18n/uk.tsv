@@ -1301,7 +1301,13 @@
 	Boundaries	Контури
 	Add: Pick points	Додати: вказати точки
 	Add: Select objects	Додати: вибрати об'єкти
+	Add boundaries	Додати контури
+	Remove boundaries	Видалити контури
 	Boundaries picked: {n}	Вибрано контурів: {n}
+	Boundaries to add: {n}	Контурів для додавання: {n}
+	Boundaries to remove: {n}	Контурів для видалення: {n}
+	Inherit Properties	Успадкувати властивості
+	No boundary points or objects selected	Не вибрано точок або об'єктів контуру
 	Associative	Асоціативне
 	Create separate hatches	Створити окремі штрихування
 	Island detection	Виявлення островів
@@ -1350,3 +1356,24 @@
 	Y	Y
 	Z	Z
 	Z Axis Vector	Вектор осі Z
+# 3D Preset Views and Visual Styles (#F24, #M11).
+	2D Wireframe	2D-каркас
+	Back	Ззаду
+	Bottom	Знизу
+	Conceptual	Концептуальний
+	Front	Спереду
+	Hidden	Приховані лінії
+	NE Isometric	Пн-Сх ізометрія
+	NW Isometric	Пн-Зх ізометрія
+	Realistic	Реалістичний
+	SE Isometric	Пд-Сх ізометрія
+	SW Isometric	Пд-Зх ізометрія
+	Shaded	Тонований
+	Shaded with Edges	Тонований із ребрами
+	Shades of Gray	Відтінки сірого
+	Sketchy	Ескізний
+	Top	Зверху
+	Viewpoint	Точка огляду
+	Visual Styles	Візуальні стилі
+	Wireframe	Каркас
+	X-Ray	Рентген

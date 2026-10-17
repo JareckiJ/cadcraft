@@ -42,6 +42,7 @@ mod trimextend;
 pub(crate) mod ucs;
 mod utility;
 mod view;
+pub(crate) mod views3d;
 
 pub mod curves;
 pub mod helpers;
@@ -204,6 +205,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(constraints::specs());
         v.extend(lisp::specs());
         v.extend(ucs::specs());
+        v.extend(views3d::specs());
         v
     })
 }

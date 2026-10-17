@@ -165,3 +165,98 @@ fn interactive_ucs_at_the_command_line() {
     s.cmdline("World").unwrap();
     assert_eq!(s.execute("getvar", &json!({ "name": "UCSORG" })).unwrap()["value"], json!([0.0, 0.0, 0.0]));
 }
+
+#[test]
+fn vpoint_direction_rotate_and_sysvars() {
+    let mut s = Session::new();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, 0.0, 1.0]));
+    assert_eq!(s.execute("getvar", &json!({ "name": "TARGET" })).unwrap()["value"], json!([0.0, 0.0, 0.0]));
+
+    // Explicit direction vector: [1, 1, 1] normalized is [1/√3, 1/√3, 1/√3]
+    let res = s.execute("vpoint", &json!({ "direction": [1, 1, 1] })).unwrap();
+    let expected = 1.0 / (3.0_f64).sqrt();
+    let d = res["direction"].as_array().unwrap();
+    assert!((d[0].as_f64().unwrap() - expected).abs() < 1e-4);
+    assert!((d[1].as_f64().unwrap() - expected).abs() < 1e-4);
+    assert!((d[2].as_f64().unwrap() - expected).abs() < 1e-4);
+
+    let viewdir = s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"].as_array().unwrap().clone();
+    assert!((viewdir[0].as_f64().unwrap() - expected).abs() < 1e-4);
+
+    // Set TARGET
+    s.execute("setvar", &json!({ "name": "TARGET", "value": [10.0, 20.0, 30.0] })).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "TARGET" })).unwrap()["value"], json!([10.0, 20.0, 30.0]));
+
+    // Interactive VPOINT at command line
+    s.cmdline("VPOINT").unwrap();
+    s.cmdline("0,0,1").unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, 0.0, 1.0]));
+
+    // Interactive Rotate
+    s.cmdline("VPOINT").unwrap();
+    s.cmdline("Rotate").unwrap();
+    s.cmdline("0").unwrap(); // angle in XY plane
+    s.cmdline("0").unwrap(); // angle from XY plane -> direction [1, 0, 0]
+    let vd = s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"].as_array().unwrap().clone();
+    assert!((vd[0].as_f64().unwrap() - 1.0).abs() < 1e-4);
+    assert!((vd[1].as_f64().unwrap() - 0.0).abs() < 1e-4);
+    assert!((vd[2].as_f64().unwrap() - 0.0).abs() < 1e-4);
+}
+
+#[test]
+fn preset_3d_views() {
+    let mut s = Session::new();
+
+    s.execute("view.top", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, 0.0, 1.0]));
+
+    s.execute("view.bottom", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, 0.0, -1.0]));
+
+    s.execute("view.left", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([-1.0, 0.0, 0.0]));
+
+    s.execute("view.right", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([1.0, 0.0, 0.0]));
+
+    s.execute("view.front", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, -1.0, 0.0]));
+
+    s.execute("view.back", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"], json!([0.0, 1.0, 0.0]));
+
+    // Isometric views
+    s.execute("view.neiso", &json!({})).unwrap();
+    let expected = 1.0 / (3.0_f64).sqrt();
+    let d = s.execute("getvar", &json!({ "name": "VIEWDIR" })).unwrap()["value"].as_array().unwrap().clone();
+    assert!((d[0].as_f64().unwrap() - expected).abs() < 1e-4);
+    assert!((d[1].as_f64().unwrap() - expected).abs() < 1e-4);
+    assert!((d[2].as_f64().unwrap() - expected).abs() < 1e-4);
+}
+
+#[test]
+fn visual_styles_and_vscurrent() {
+    let mut s = Session::new();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("2dWireframe"));
+
+    // Subcommands for visual styles
+    s.execute("vscurrent.realistic", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Realistic"));
+
+    s.execute("vscurrent.conceptual", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Conceptual"));
+
+    s.execute("vscurrent.shadededges", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Shaded with Edges"));
+
+    s.execute("vscurrent.xray", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("X-Ray"));
+
+    // SETVAR with canonicalization
+    s.execute("setvar", &json!({ "name": "VSCURRENT", "value": "hidden" })).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Hidden"));
+
+    // SHADEMODE alias at command line
+    s.cmdline("shademode wireframe").unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Wireframe"));
+}

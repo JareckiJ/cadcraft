@@ -4,13 +4,13 @@
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 296 / 491 items (60%)** · 446 registered commands.
+**Menu breadth: 315 / 491 items (64%)** · 468 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
 | File | 22 | 13 | 59% |
 | Edit | 13 | 11 | 85% |
-| View | 75 | 35 | 47% |
+| View | 75 | 54 | 72% |
 | Insert | 11 | 5 | 45% |
 | Format | 27 | 25 | 93% |
 | Tools | 85 | 68 | 80% |
@@ -39,26 +39,7 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - View > Camera > Adjust Distance
 - View > Camera > Swivel
 - View > Viewports > Named Viewports...
-- View > 3D Views > Viewpoint
-- View > 3D Views > Top
-- View > 3D Views > Bottom
-- View > 3D Views > Front
-- View > 3D Views > Back
-- View > 3D Views > SW Isometric
-- View > 3D Views > SE Isometric
-- View > 3D Views > NE Isometric
-- View > 3D Views > NW Isometric
 - View > Hide
-- View > Visual Styles > 2D Wireframe
-- View > Visual Styles > Wireframe
-- View > Visual Styles > Hidden
-- View > Visual Styles > Realistic
-- View > Visual Styles > Conceptual
-- View > Visual Styles > Shaded
-- View > Visual Styles > Shaded with Edges
-- View > Visual Styles > Shades of Gray
-- View > Visual Styles > Sketchy
-- View > Visual Styles > X-Ray
 - View > Render > Light > New Point Light
 - View > Render > Light > New Spotlight
 - View > Render > Light > New Distant Light

@@ -171,6 +171,15 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             let p = s.doc().ok()?.header.point("UCSYDIR").unwrap_or(cadcraft_geom::Vec3::new(0.0, 1.0, 0.0));
             json!([p.x, p.y, p.z])
         }
+        "VIEWDIR" => {
+            let p = s.doc().ok()?.header.view_dir();
+            json!([p.x, p.y, p.z])
+        }
+        "TARGET" => {
+            let p = s.doc().ok()?.header.target();
+            json!([p.x, p.y, p.z])
+        }
+        "VSCURRENT" => json!(s.doc().ok()?.header.visual_style()),
         "ELEVATION" => json!(s.doc().ok()?.header.f64("ELEVATION", 0.0)),
         "THICKNESS" => json!(s.doc().ok()?.header.f64("THICKNESS", 0.0)),
         _ => {
@@ -341,6 +350,19 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             s.doc_mut()?.header.set_f64("ANGBASE", cadcraft_geom::norm_angle(a));
         }
         "CONSTRAINTINFER" => s.doc_mut()?.parametric.settings.infer = as_bool(v).ok_or_else(bad)?,
+        "VIEWDIR" => {
+            let pt = as_vec3(v).filter(|p| p.len() > 1e-6).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_view_dir(pt);
+        }
+        "TARGET" => {
+            let pt = as_vec3(v).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_target(pt);
+        }
+        "VSCURRENT" => {
+            let style = v.as_str().ok_or_else(bad)?;
+            let canonical = canonical_visual_style(style).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_visual_style(canonical);
+        }
         _ => {
             if let Some(r) = table::set(s, &n, v) {
                 return r;
@@ -416,4 +438,40 @@ pub fn list(s: &Session) -> Value {
     }
     table::list(s, &mut m);
     Value::Object(m)
+}
+
+pub fn canonical_visual_style(s: &str) -> Option<&'static str> {
+    let lower = s.trim().to_ascii_lowercase().replace([' ', '-', '_'], "");
+    match lower.as_str() {
+        "2dwireframe" | "2d" => Some("2dWireframe"),
+        "wireframe" | "w" => Some("Wireframe"),
+        "hidden" | "h" => Some("Hidden"),
+        "realistic" | "r" => Some("Realistic"),
+        "conceptual" | "c" => Some("Conceptual"),
+        "shaded" | "s" => Some("Shaded"),
+        "shadedwithedges" | "shadededges" | "edges" | "e" => Some("Shaded with Edges"),
+        "shadesofgray" | "shades" | "gray" | "g" => Some("Shades of Gray"),
+        "sketchy" | "k" => Some("Sketchy"),
+        "xray" | "x" => Some("X-Ray"),
+        _ => None,
+    }
+}
+
+fn as_vec3(v: &Value) -> Option<cadcraft_geom::Vec3> {
+    match v {
+        Value::Array(a) => {
+            let x = a.first()?.as_f64()?;
+            let y = a.get(1)?.as_f64()?;
+            let z = a.get(2).and_then(Value::as_f64).unwrap_or(0.0);
+            if x.is_finite() && y.is_finite() && z.is_finite() { Some(cadcraft_geom::Vec3::new(x, y, z)) } else { None }
+        }
+        Value::String(s) => {
+            let parts: Vec<&str> = s.split(',').map(str::trim).collect();
+            let x = parts.first()?.parse().ok()?;
+            let y = parts.get(1)?.parse().ok()?;
+            let z = parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0.0);
+            Some(cadcraft_geom::Vec3::new(x, y, z))
+        }
+        _ => None,
+    }
 }
