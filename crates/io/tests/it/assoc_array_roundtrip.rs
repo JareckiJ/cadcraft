@@ -129,3 +129,38 @@ fn renamed_blocks_are_followed() {
     assert!(back.block("*U2").unwrap().array.is_none());
     assert_eq!(back.block("*U2").unwrap().entities.len(), 19);
 }
+
+#[test]
+fn path_array_parameters_survive_a_dxf_round_trip() {
+    let mut d = drawing();
+    let path = PathArray {
+        points: vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 7.5)],
+        closed: false,
+        count: 4,
+        divide: false,
+        spacing: 3.25,
+        align: true,
+    };
+    let p = ArrayParams { kind: ArrayKind::Path(path), levels: 1, level_spacing: 0.0, replaced: Vec::new(), ..params("*U1") };
+    let items = p.item_entities(&mut d).unwrap();
+    assert_eq!(items.len(), 4);
+    let mut arr = Block::new("*U3");
+    for e in items {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p.clone());
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert_eq!(back.block("*U3").unwrap().array.as_ref(), Some(&p));
+    // A path array whose stored path has no length is read as a plain block.
+    let mut bad = p.clone();
+    if let ArrayKind::Path(k) = &mut bad.kind {
+        k.points = vec![Vec2::ZERO, Vec2::ZERO];
+    }
+    let mut blk = (**d.block("*U3").unwrap()).clone();
+    blk.array = Some(bad);
+    d.blocks.insert("*U3".into(), Arc::new(blk));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 4);
+}

@@ -421,6 +421,22 @@ fn apply_params(a: &mut ArrayParams, p: &Value, to_local: &Mat3) -> Result<()> {
                 k.center = to_local.apply(c);
             }
         }
+        ArrayKind::Path(k) => {
+            if let Some(n) = count_param(p, "items")? {
+                k.count = n;
+            }
+            if let Some(x) = num_param(p, "spacing")? {
+                // A spacing measures the items along the path; "divide" goes back to dividing it.
+                k.spacing = x;
+                k.divide = false;
+            }
+            if p.get("divide").and_then(Value::as_bool) == Some(true) {
+                k.divide = true;
+            }
+            if let Some(a) = p.get("align").and_then(Value::as_bool) {
+                k.align = a;
+            }
+        }
     }
     Ok(())
 }
@@ -634,17 +650,21 @@ impl Interactive for EditM {
         let p = self.params(s);
         let rect = p.as_ref().and_then(|p| match &p.kind {
             ArrayKind::Rect(r) => Some(r.clone()),
-            ArrayKind::Polar(_) => None,
+            ArrayKind::Polar(_) | ArrayKind::Path(_) => None,
         });
         let polar = p.as_ref().and_then(|p| match &p.kind {
             ArrayKind::Polar(k) => Some(k.clone()),
-            ArrayKind::Rect(_) => None,
+            ArrayKind::Rect(_) | ArrayKind::Path(_) => None,
+        });
+        let path_count = p.as_ref().and_then(|p| match &p.kind {
+            ArrayKind::Path(k) => Some(k.count),
+            _ => None,
         });
         let (levels, ls) = p.as_ref().map(|p| (p.levels, p.level_spacing)).unwrap_or((1, 0.0));
         let (cols, rows, cs, rs, elev) = match (&rect, &polar) {
             (Some(r), _) => (r.cols, r.rows, r.col_spacing, r.row_spacing, r.row_elevation),
             (_, Some(k)) => (k.items, k.rows, 0.0, k.row_spacing, k.row_elevation),
-            _ => (1, 1, 0.0, 0.0, 0.0),
+            _ => (path_count.unwrap_or(1), 1, 0.0, 0.0, 0.0),
         };
         let dist = |m: &str, d: f64| Prompt::new(m, Accept::POINT_OR_NUMBER).default(fmt(d));
         let total = |n: u32, d: f64| d * f64::from(n.saturating_sub(1));
@@ -653,6 +673,9 @@ impl Interactive for EditM {
             Main if polar.is_some() => Prompt::new("Enter an option", KEYWORDS)
                 .kw(&["Source", "REPlace", "Base point", "Items", "Angle between", "Fill angle", "Rows", "Levels", "ROTate items", "RESet", "eXit"])
                 .default("eXit"),
+            Main if path_count.is_some() => {
+                Prompt::new("Enter an option", KEYWORDS).kw(&["Source", "REPlace", "Base point", "Items", "Levels", "RESet", "eXit"]).default("eXit")
+            }
             Main => Prompt::new("Enter an option", KEYWORDS)
                 .kw(&["Source", "REPlace", "Base point", "Rows", "Columns", "Levels", "RESet", "eXit"])
                 .default("eXit"),
@@ -755,6 +778,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.cols = n,
                             ArrayKind::Polar(k) => k.items = n,
+                            ArrayKind::Path(k) => k.count = n,
                         }
                         Ok(())
                     })?;
@@ -769,6 +793,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.rows = n,
                             ArrayKind::Polar(k) => k.rows = n,
+                            ArrayKind::Path(_) => {}
                         }
                         Ok(())
                     })?;
@@ -826,6 +851,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.row_elevation = z,
                             ArrayKind::Polar(k) => k.row_elevation = z,
+                            ArrayKind::Path(_) => {}
                         }
                         Ok(())
                     })?;

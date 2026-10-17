@@ -76,7 +76,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(SelOp::new(SelKind::Flatten)))),
         CommandSpec::new("arraypath", "Path Array", run_arraypath)
             .menu(&["Modify", "Array", "Path Array"])
-            .params("{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true)}")
+            .params("{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true), associative?: bool (default per ARRAYASSOCIATIVITY)}")
             .interactive(|_| Ok(Box::new(PathArrayM::default()))),
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
@@ -2044,8 +2044,67 @@ pub(crate) fn extend_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Resul
 }
 
 // =====================================================================================
-// ARRAYPATH (non-associative copies along a curve)
+// ARRAYPATH (items along a curve: one associative array, or separate copies)
 // =====================================================================================
+
+/// The path as the polyline an associative path array keeps: relative to its start, arcs in
+/// chords of at most 2 degrees. The path's start is returned too.
+fn flatten_path(c: &Chain) -> Result<(Vec<Vec2>, Vec2)> {
+    use cadcraft_geom::Segment;
+    let start = c.start().ok_or_else(|| other("The path has no length."))?;
+    let mut pts = vec![start];
+    for seg in &c.segs {
+        let steps = match seg {
+            Segment::Line(_) => 1,
+            Segment::Arc { arc, .. } => (arc.sweep().to_degrees() / 2.0).ceil().clamp(1.0, 180.0) as usize,
+        };
+        for k in 1..=steps {
+            pts.push(seg.at(k as f64 / steps as f64));
+        }
+        if pts.len() > cadcraft_doc::MAX_PATH_POINTS {
+            return Err(other("The path has too many segments to array along."));
+        }
+    }
+    if c.closed && pts.len() > 2 && pts.last().is_some_and(|p| p.dist(start) <= 1e-9 * c.len().max(1.0)) {
+        // The closing segment joins the last vertex to the first.
+        pts.pop();
+    }
+    Ok((pts.into_iter().map(|p| p - start).collect(), start))
+}
+
+/// ARRAYPATH as one associative array: the objects move into the array, whose items follow
+/// the path as it was when the array was made.
+fn arraypath_assoc(s: &mut Session, hs: &[Handle], path: Handle, count: Option<usize>, spacing: Option<f64>, align: bool) -> Result<Value> {
+    let pk = curves::entity(s, path)?.kind;
+    let c = Chain::of(&pk).ok_or_else(|| other("Select a line, arc, circle, polyline, ellipse or spline as the path."))?;
+    let l = c.len();
+    if l <= 1e-12 {
+        return Err(other("The path has no length."));
+    }
+    let objs: Vec<Handle> = hs.iter().copied().filter(|h| *h != path).collect();
+    if objs.is_empty() {
+        return Err(other("Select objects to array."));
+    }
+    let (n, divide, step) = match (count, spacing) {
+        (_, Some(sp)) if sp.is_finite() && sp > 0.0 => (((l / sp).floor() as usize).saturating_add(1), false, sp),
+        (Some(n), _) => (n.max(1), true, 0.0),
+        _ => (6, true, 0.0),
+    };
+    super::array::check_size(s, n as u64, objs.len())?;
+    let (points, start) = flatten_path(&c)?;
+    let kind = cadcraft_doc::ArrayKind::Path(cadcraft_doc::PathArray {
+        points,
+        closed: c.closed,
+        count: u32::try_from(n).unwrap_or(u32::MAX),
+        divide,
+        spacing: step,
+        align,
+    });
+    let params = cadcraft_doc::ArrayParams { source: "*".into(), kind, levels: 1, level_spacing: 0.0, replaced: Vec::new(), editing: None };
+    let copies = (n as u64).saturating_sub(1).saturating_mul(objs.len() as u64);
+    let h = super::array::make_assoc(s, &objs, start, params)?;
+    Ok(json!({ "handle": h.hex(), "created": copies, "associative": true }))
+}
 
 pub(crate) fn arraypath(
     s: &mut Session,
@@ -2092,7 +2151,11 @@ fn run_arraypath(s: &mut Session, p: &Value) -> Result<Value> {
     let path = curves::handle_param(p, "path").ok_or_else(|| bad("arraypath", "`path` (handle) is required"))?;
     let count = p.get("count").and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     let spacing = p.get("spacing").and_then(Value::as_f64);
-    let r = arraypath(s, &hs, path, count, spacing, bool_or(p, "align", true))?;
+    let align = bool_or(p, "align", true);
+    if bool_or(p, "associative", super::array::assoc_default(s)) {
+        return arraypath_assoc(s, &hs, path, count, spacing, align);
+    }
+    let r = arraypath(s, &hs, path, count, spacing, align)?;
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
@@ -2153,9 +2216,14 @@ impl Interactive for PathArrayM {
                     Input::Text(t) => number(t).filter(|n| *n >= 1.0).ok_or_else(|| other("Requires a count of 1 or more."))? as usize,
                     _ => 6,
                 };
-                arraypath(s, &self.objs, path, Some(n), None, true)?;
+                let assoc = super::array::assoc_default(s);
+                if assoc {
+                    arraypath_assoc(s, &self.objs, path, Some(n), None, true)?;
+                } else {
+                    arraypath(s, &self.objs, path, Some(n), None, true)?;
+                }
                 s.set_selection(Vec::new());
-                s.echo(format!("Type = Path  Associative = No ({n} items)"));
+                s.echo(format!("Type = Path  Associative = {} ({n} items)", if assoc { "Yes" } else { "No" }));
                 Ok(Step::Done)
             }
             (None, Input::Enter) => Ok(Step::Cancel),

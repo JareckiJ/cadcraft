@@ -617,6 +617,8 @@ fn new_modify_commands_survive_garbage_input() {
 #[test]
 fn arraypath_json_and_command_line() {
     let mut s = Session::new();
+    // Separate copies (the associative path array is tested in tests/assoc_array_path.rs).
+    s.execute("setvar", &json!({"name": "ARRAYASSOCIATIVITY", "value": 0})).unwrap();
     let dot = h(&s.execute("circle", &json!({"center": [0, 1], "radius": 0.25})).unwrap());
     let path = h(&s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap());
     let r = s.execute("arraypath", &json!({"handles": [dot], "path": path, "count": 6})).unwrap();
@@ -632,6 +634,7 @@ fn arraypath_json_and_command_line() {
     assert!(s.execute("arraypath", &json!({"handles": [dot], "path": dot})).is_err());
 
     let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "ARRAYASSOCIATIVITY", "value": 0})).unwrap();
     s.execute("circle", &json!({"center": [0, 1], "radius": 0.25})).unwrap();
     s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
     s.cmdline("arraypath 0.25,1").unwrap();

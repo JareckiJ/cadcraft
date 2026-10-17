@@ -99,7 +99,7 @@ fn nesting(d: &Drawing, ents: &[&Entity], memo: &mut HashMap<String, usize>, dep
 }
 
 /// ARRAYASSOCIATIVITY: whether new arrays start associative (on unless set to 0).
-fn assoc_default(s: &Session) -> bool {
+pub(super) fn assoc_default(s: &Session) -> bool {
     s.doc().map(|d| d.header.i64("ARRAYASSOCIATIVITY", 1) != 0).unwrap_or(true)
 }
 
