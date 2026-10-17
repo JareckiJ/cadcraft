@@ -851,6 +851,32 @@ pub struct Ucs {
     pub y_axis: Vec3,
 }
 
+impl Ucs {
+    pub fn world() -> Self {
+        Self { name: String::new(), origin: Vec3::ZERO, x_axis: Vec3::new(1.0, 0.0, 0.0), y_axis: Vec3::new(0.0, 1.0, 0.0) }
+    }
+
+    pub fn is_world(&self) -> bool {
+        self.origin.len() < 1e-9 && (self.x_axis - Vec3::new(1.0, 0.0, 0.0)).len() < 1e-9 && (self.y_axis - Vec3::new(0.0, 1.0, 0.0)).len() < 1e-9
+    }
+
+    pub fn z_axis(&self) -> Vec3 {
+        let z = self.x_axis.cross(self.y_axis);
+        if z.len() > 1e-9 { z.normalized() } else { Vec3::new(0.0, 0.0, 1.0) }
+    }
+
+    /// Transform a point in UCS coordinates to WCS coordinates.
+    pub fn to_wcs(&self, p: Vec3) -> Vec3 {
+        self.origin + self.x_axis * p.x + self.y_axis * p.y + self.z_axis() * p.z
+    }
+
+    /// Transform a point in WCS coordinates to UCS coordinates.
+    pub fn to_ucs(&self, p: Vec3) -> Vec3 {
+        let d = p - self.origin;
+        Vec3::new(d.dot(self.x_axis), d.dot(self.y_axis), d.dot(self.z_axis()))
+    }
+}
+
 /// A saved layer state (LAYERSTATE).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayerState {

@@ -100,6 +100,22 @@ impl Header {
         self.set(name, HVal::Str(v.into()));
     }
 
+    pub fn ucs(&self) -> crate::tables::Ucs {
+        crate::tables::Ucs {
+            name: self.str("UCSNAME", ""),
+            origin: self.point("UCSORG").unwrap_or(Vec3::ZERO),
+            x_axis: self.point("UCSXDIR").filter(|v| v.len() > 1e-6).unwrap_or(Vec3::new(1.0, 0.0, 0.0)).normalized(),
+            y_axis: self.point("UCSYDIR").filter(|v| v.len() > 1e-6).unwrap_or(Vec3::new(0.0, 1.0, 0.0)).normalized(),
+        }
+    }
+
+    pub fn set_ucs(&mut self, ucs: &crate::tables::Ucs) {
+        self.set_str("UCSNAME", &ucs.name);
+        self.set("UCSORG", HVal::Point(ucs.origin));
+        self.set("UCSXDIR", HVal::Point(ucs.x_axis));
+        self.set("UCSYDIR", HVal::Point(ucs.y_axis));
+    }
+
     fn common() -> Header {
         let mut h = Header::default();
         h.set_str("ACADVER", "AC1032");
@@ -137,6 +153,11 @@ impl Header {
         // Annotation scale of model space; annotative objects of other scales show (1) or not.
         h.set_str("CANNOSCALE", "1:1");
         h.set_i64("ANNOALLVISIBLE", 1);
+        // Current User Coordinate System (UCS)
+        h.set_str("UCSNAME", "");
+        h.set("UCSORG", HVal::Point(Vec3::ZERO));
+        h.set("UCSXDIR", HVal::Point(Vec3::new(1.0, 0.0, 0.0)));
+        h.set("UCSYDIR", HVal::Point(Vec3::new(0.0, 1.0, 0.0)));
         h
     }
 

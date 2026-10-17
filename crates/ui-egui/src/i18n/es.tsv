@@ -1243,3 +1243,17 @@
 	Search for pattern	Buscar patrón
 	Not a number or distance: {text}	No es un número ni una distancia: {text}
 	Query Texts	Consultar textos
+# Sistema de coordenadas personales (SCP) y vistas 3D.
+	3 Point	3 puntos
+	3D Views	Vistas 3D
+	Current UCS	SCP actual
+	Named UCS	SCP guardado
+	Named UCS...	SCP guardado...
+	New UCS	Nuevo SCP
+	Origin	Origen
+	Plan View	Vista en planta
+	UCS	SCP
+	World	Universal
+	World UCS	SCU
+	Z	Z
+	Z Axis Vector	Vector eje Z

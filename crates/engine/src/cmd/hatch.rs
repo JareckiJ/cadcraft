@@ -289,7 +289,22 @@ impl HatchSettings {
             1.0,
             0.0,
         ));
-        let pattern = str_param(p, "pattern").map(str::to_ascii_uppercase).unwrap_or(hdr.0);
+        let inh = p.get("inherit").and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))).and_then(|h| {
+            let d = s.doc().ok()?;
+            let e = d.entity(h)?;
+            if let EntityKind::Hatch(hh) = &e.kind { Some(hh.clone()) } else { None }
+        });
+        let (def_pat, def_scale, def_ang, def_assoc, def_style) = match &inh {
+            Some(hh) => (hh.pattern.clone(), hh.scale, hh.angle, hh.associative, hh.style),
+            None => (
+                hdr.0,
+                hdr.1,
+                hdr.2,
+                s.doc().map_or(true, |d| d.header.i64("HPASSOC", 1) != 0),
+                s.doc().map_or(0, |d| d.header.i64("HPISLANDDETECTION", 0).clamp(0, 2) as u8),
+            ),
+        };
+        let pattern = str_param(p, "pattern").map(str::to_ascii_uppercase).unwrap_or(def_pat);
         let g = gradient.then(|| Gradient {
             name: str_param(p, "name").and_then(gradient_name).unwrap_or("LINEAR").to_string(),
             color1: str_param(p, "color1").and_then(Color::parse).unwrap_or(Color::Index(5)),
@@ -299,10 +314,10 @@ impl HatchSettings {
         });
         HatchSettings {
             pattern,
-            scale: f64_or(p, "scale", hdr.1).max(1e-9),
-            angle: p.get("angle").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(hdr.2),
+            scale: f64_or(p, "scale", def_scale).max(1e-9),
+            angle: p.get("angle").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(def_ang),
             gradient: g,
-            associative: bool_or(p, "associative", s.doc().map_or(true, |d| d.header.i64("HPASSOC", 1) != 0)),
+            associative: bool_or(p, "associative", def_assoc),
             separate: bool_or(p, "separate", s.doc().is_ok_and(|d| d.header.i64("HPSEPARATE", 0) != 0)),
             origin: point_param(p, "origin").filter(|o| o.is_finite()).unwrap_or_else(|| {
                 s.doc().ok().and_then(|d| d.header.point("HPORIGIN")).map(|o| o.xy()).filter(|o| o.is_finite()).unwrap_or(Vec2::ZERO)
@@ -314,9 +329,7 @@ impl HatchSettings {
                     .and_then(OriginMode::parse)
                     .unwrap_or_else(|| OriginMode::from_index(s.doc().map_or(0, |d| d.header.i64("HPORIGINMODE", 0))))
             },
-            style: str_param(p, "style")
-                .and_then(island_style)
-                .unwrap_or_else(|| s.doc().map_or(0, |d| d.header.i64("HPISLANDDETECTION", 0).clamp(0, 2) as u8)),
+            style: str_param(p, "style").and_then(island_style).unwrap_or(def_style),
         }
     }
     fn hatch(&self, mut loops: Vec<HatchLoop>) -> EntityKind {
@@ -531,6 +544,7 @@ enum HatchAsk {
     Scale,
     Angle,
     Origin,
+    Inherit,
 }
 
 struct HatchM {
@@ -610,7 +624,36 @@ impl HatchM {
                 };
                 self.set_origin(s, None, mode)?;
             }
+            HatchAsk::Inherit => {}
         }
+        Ok(())
+    }
+    fn inherit(&mut self, s: &mut Session, h: Handle) -> Result<()> {
+        let (pattern, scale, angle, style, associative, is_grad) = {
+            let d = s.doc()?;
+            let Some(e) = d.entity(h) else {
+                s.echo("No such object.");
+                return Ok(());
+            };
+            let EntityKind::Hatch(hh) = &e.kind else {
+                s.echo("Selected object is not a hatch.");
+                return Ok(());
+            };
+            (hh.pattern.clone(), hh.scale, hh.angle, hh.style, hh.associative, hh.gradient.is_some())
+        };
+        self.settings.pattern = pattern.clone();
+        self.settings.scale = scale;
+        self.settings.angle = angle;
+        self.settings.style = style;
+        self.settings.associative = associative;
+        self.gradient = is_grad;
+        let doc = s.doc_mut()?;
+        doc.header.set_str("HPNAME", &pattern);
+        doc.header.set_f64("HPSCALE", scale);
+        doc.header.set_f64("HPANG", angle);
+        doc.header.set_i64("HPASSOC", if associative { 1 } else { 0 });
+        doc.header.set_i64("HPISLANDDETECTION", i64::from(style));
+        s.echo(format!("Inherited pattern: {}  Scale: {:.4}  Angle: {:.0}", pattern, scale, angle.to_degrees()));
         Ok(())
     }
 }
@@ -647,6 +690,7 @@ impl Interactive for HatchM {
                 return Prompt::new("Specify an angle for the hatch pattern", Accept::NUMBER).default(d);
             }
             Some(HatchAsk::Origin) => return Prompt::new("Specify the pattern origin", Accept::POINT).kw(&ORIGIN_KW).default("Use current"),
+            Some(HatchAsk::Inherit) => return Prompt::new("Select hatch object", Accept::SELECT),
             None => {}
         }
         // The pattern picker stays offered while boundaries are picked: a choice sets the pattern.
@@ -660,6 +704,7 @@ impl Interactive for HatchM {
                 "Angle",
                 "Origin",
                 "sEparate",
+                "inHerit properties",
             ]));
         }
         picker(Prompt::new("Pick internal point", Accept::POINT).kw(&[
@@ -671,12 +716,23 @@ impl Interactive for HatchM {
             "Angle",
             "Origin",
             "sEparate",
+            "inHerit properties",
         ]))
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Some(a) = self.asking.take() {
             match &i {
                 Input::Point(p) if a == HatchAsk::Origin => self.set_origin(s, Some(*p), OriginMode::Current)?,
+                Input::Pick(hs) if a == HatchAsk::Inherit => {
+                    if let Some(&h) = hs.first() {
+                        self.inherit(s, h)?;
+                    }
+                }
+                Input::Text(t) if a == HatchAsk::Inherit => {
+                    if let Some(h) = Handle::parse_hex(t.trim()) {
+                        self.inherit(s, h)?;
+                    }
+                }
                 Input::Text(t) | Input::Keyword(t) => self.answer(s, a, t)?,
                 _ => {}
             }
@@ -716,6 +772,7 @@ impl Interactive for HatchM {
                     "sCale" => self.asking = Some(HatchAsk::Scale),
                     "Angle" => self.asking = Some(HatchAsk::Angle),
                     "Origin" => self.asking = Some(HatchAsk::Origin),
+                    "inHerit properties" | "Inherit properties" => self.asking = Some(HatchAsk::Inherit),
                     "sEparate" => {
                         self.settings.separate = !self.settings.separate;
                         s.doc_mut()?.header.set_i64("HPSEPARATE", i64::from(self.settings.separate));

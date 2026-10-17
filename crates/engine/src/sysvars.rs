@@ -158,6 +158,21 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             let p = if n == "EXTMIN" { e.min } else { e.max };
             json!([p.x, p.y, 0.0])
         }
+        "UCSNAME" => json!(s.doc().ok()?.header.str("UCSNAME", "")),
+        "UCSORG" => {
+            let p = s.doc().ok()?.header.point("UCSORG").unwrap_or(cadcraft_geom::Vec3::ZERO);
+            json!([p.x, p.y, p.z])
+        }
+        "UCSXDIR" => {
+            let p = s.doc().ok()?.header.point("UCSXDIR").unwrap_or(cadcraft_geom::Vec3::new(1.0, 0.0, 0.0));
+            json!([p.x, p.y, p.z])
+        }
+        "UCSYDIR" => {
+            let p = s.doc().ok()?.header.point("UCSYDIR").unwrap_or(cadcraft_geom::Vec3::new(0.0, 1.0, 0.0));
+            json!([p.x, p.y, p.z])
+        }
+        "ELEVATION" => json!(s.doc().ok()?.header.f64("ELEVATION", 0.0)),
+        "THICKNESS" => json!(s.doc().ok()?.header.f64("THICKNESS", 0.0)),
         _ => {
             if let Some(v) = table::get(s, &n) {
                 return Some(v);
@@ -196,8 +211,24 @@ fn as_pt(v: &Value) -> Option<cadcraft_geom::Vec2> {
 }
 
 /// Variables `get` reports from session or drawing state that `set` can't change.
-const READ_ONLY: &[&str] =
-    &["CMDNAMES", "DWGNAME", "DBMOD", "BLOCKEDITOR", "CTAB", "LASTPOINT", "VIEWCTR", "VIEWSIZE", "EXTMIN", "EXTMAX", "UNDOCTL", "UNDOMARKS"];
+const READ_ONLY: &[&str] = &[
+    "CMDNAMES",
+    "DWGNAME",
+    "DBMOD",
+    "BLOCKEDITOR",
+    "CTAB",
+    "LASTPOINT",
+    "VIEWCTR",
+    "VIEWSIZE",
+    "EXTMIN",
+    "EXTMAX",
+    "UNDOCTL",
+    "UNDOMARKS",
+    "UCSNAME",
+    "UCSORG",
+    "UCSXDIR",
+    "UCSYDIR",
+];
 
 pub fn is_read_only(name: &str) -> bool {
     READ_ONLY.iter().any(|r| r.eq_ignore_ascii_case(name.trim())) || table::is_read_only(&name.trim().to_ascii_uppercase())

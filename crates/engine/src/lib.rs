@@ -137,6 +137,7 @@ pub struct DocState {
     pub mspace: Option<Handle>,
     pub views: Vec<(Space, View)>,
     pub view_history: Vec<View>,
+    pub ucs_history: Vec<cadcraft_doc::Ucs>,
     pub uid: u64,
     /// The drawing is saved as binary DXF (it was opened from one, or last saved as one).
     pub binary_dxf: bool,
@@ -166,6 +167,7 @@ impl DocState {
             mspace: None,
             views: Vec::new(),
             view_history: Vec::new(),
+            ucs_history: Vec::new(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
@@ -806,6 +808,25 @@ impl Session {
             let mut seen = std::collections::HashSet::new();
             st.selection = sel.into_iter().filter(|h| seen.insert(*h)).collect();
         }
+    }
+
+    /// The active User Coordinate System (UCS) of the drawing.
+    pub fn current_ucs(&self) -> cadcraft_doc::Ucs {
+        self.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world())
+    }
+
+    /// Set the active User Coordinate System (UCS), keeping the previous one in history.
+    pub fn set_current_ucs(&mut self, ucs: cadcraft_doc::Ucs) -> Result<()> {
+        let old = self.current_ucs();
+        if let Ok(st) = self.state_mut() {
+            if st.ucs_history.len() >= 10 {
+                st.ucs_history.remove(0);
+            }
+            st.ucs_history.push(old);
+        }
+        self.doc_mut()?.header.set_ucs(&ucs);
+        self.touch();
+        Ok(())
     }
 
     /// Message on the command line history.
@@ -1538,7 +1559,8 @@ impl Session {
             return self.input(Input::Keyword(k));
         }
         if prompt.accept.point {
-            if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
+            let ucs = self.doc().ok().map(|d| d.header.ucs());
+            if let Some(p) = prompt::parse_point_ucs(tt, self.last_point, &self.angle_settings(), ucs.as_ref()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
                 return self.input(Input::Point(p));
             }

@@ -1334,3 +1334,19 @@
 	Justify	За шириною
 	Text color	Колір тексту
 	Click the ruler to add a tab stop, right-click to remove one	Натисніть на лінійку, щоб додати табуляцію; права кнопка видаляє її
+# User Coordinate System (UCS) and 3D Views (#F24, #M11).
+	3 Point	3 точки
+	3D Views	3D-види
+	Current UCS	Поточна СКК
+	Named UCS	Іменована СКК
+	Named UCS...	Іменовані СКК...
+	New UCS	Нова СКК
+	Origin	Початок координат
+	Plan View	Вид у плані
+	UCS	СКК
+	World	Світова
+	World UCS	Світова СКК
+	X	X
+	Y	Y
+	Z	Z
+	Z Axis Vector	Вектор осі Z

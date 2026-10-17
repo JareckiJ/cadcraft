@@ -39,6 +39,7 @@ mod spline_opts;
 mod table;
 mod tolerance;
 mod trimextend;
+pub(crate) mod ucs;
 mod utility;
 mod view;
 
@@ -202,6 +203,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(tolerance::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
+        v.extend(ucs::specs());
         v
     })
 }

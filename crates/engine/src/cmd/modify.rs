@@ -155,6 +155,13 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
                 v.clip = Some(new_b);
                 new_boundaries_to_sync.push((nh, new_b));
             }
+            if let EntityKind::Hatch(h) = &mut ne.kind
+                && h.associative
+            {
+                for l in &mut h.loops {
+                    l.sources = l.sources.iter().map(|s| handle_map.get(s).copied().unwrap_or(*s)).collect();
+                }
+            }
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 if hs.contains(&h) {

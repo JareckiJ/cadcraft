@@ -194,3 +194,105 @@ fn interactive_stretch_at_the_command_line_refills() {
     assert!(hh.associative);
     assert!(close(area(&hh), 150.0), "area {}", area(&hh));
 }
+
+#[test]
+fn copying_hatch_with_boundary_keeps_the_link_and_follows_copied_boundary() {
+    let mut s = Session::new();
+    let r = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap());
+    let h = handle(&s.execute("hatch", &json!({ "handles": [r.clone()] })).unwrap());
+    assert!(hatch(&s, &h).associative);
+
+    // Copy both rectang and hatch by delta (20, 0)
+    let res = s.execute("copy", &json!({ "handles": [r.clone(), h.clone()], "delta": [20, 0] })).unwrap();
+    let handles: Vec<String> = res["handles"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    assert_eq!(handles.len(), 2);
+    let (copied_r, copied_h) = if matches!(s.doc().unwrap().entity(Handle::parse_hex(&handles[0]).unwrap()).unwrap().kind, EntityKind::Hatch(_)) {
+        (handles[1].clone(), handles[0].clone())
+    } else {
+        (handles[0].clone(), handles[1].clone())
+    };
+
+    let ch = hatch(&s, &copied_h);
+    assert!(ch.associative, "copied hatch with boundary is associative");
+    assert_eq!(ch.loops[0].sources, vec![Handle::parse_hex(&copied_r).unwrap()], "loop sources point to copied boundary");
+
+    // Moving the copied boundary updates the copied hatch!
+    s.execute("move", &json!({ "handles": [copied_r], "delta": [5, 5] })).unwrap();
+    let ch2 = hatch(&s, &copied_h);
+    assert!(ch2.associative);
+    assert!(bounds(&ch2).min.dist(Vec2::new(25.0, 5.0)) < 1e-4, "copied hatch followed copied boundary");
+}
+
+#[test]
+fn pickstyle_bit_2_associative_hatch_selection_expands_reciprocally() {
+    let mut s = Session::new();
+    let r = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap());
+    let h = handle(&s.execute("hatch", &json!({ "handles": [r.clone()] })).unwrap());
+    let rh = Handle::parse_hex(&r).unwrap();
+    let hh = Handle::parse_hex(&h).unwrap();
+
+    // Default PICKSTYLE is 1 (groups only, hatch bit 2 off)
+    s.settings.pickstyle = 1;
+    s.idle_click(Vec2::new(0.0, 5.0), false).unwrap();
+    assert_eq!(s.selection(), vec![rh], "with bit 2 off, selecting boundary does not include hatch");
+
+    // Turn on bit 2 (PICKSTYLE 2 or 3)
+    s.settings.pickstyle = 3;
+    s.set_selection(Vec::new());
+    s.idle_click(Vec2::new(0.0, 5.0), false).unwrap();
+    let sel = s.selection();
+    assert_eq!(sel.len(), 2);
+    assert!(sel.contains(&rh));
+    assert!(sel.contains(&hh));
+}
+
+#[test]
+fn hatch_inherit_properties_copies_pattern_and_scale() {
+    let mut s = Session::new();
+    let r1 = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap());
+    let h1 = handle(&s.execute("hatch", &json!({ "handles": [r1], "pattern": "CROSS30", "scale": 2.5, "angle": 30.0 })).unwrap());
+
+    // Create second hatch inheriting from h1 via JSON
+    let r2 = handle(&s.execute("rectang", &json!({ "p1": [20, 0], "p2": [30, 10] })).unwrap());
+    let h2 = handle(&s.execute("hatch", &json!({ "handles": [r2.clone()], "inherit": h1 })).unwrap());
+    let hh2 = hatch(&s, &h2);
+    assert_eq!(hh2.pattern, "CROSS30");
+    assert!((hh2.scale - 2.5).abs() < 1e-6);
+    assert!((hh2.angle - 30.0_f64.to_radians()).abs() < 1e-6);
+
+    // Also test command-line "Inherit properties"
+    s.execute("rectang", &json!({ "p1": [40, 0], "p2": [50, 10] })).unwrap();
+    s.cmdline("HATCH").unwrap();
+    s.cmdline("Inherit").unwrap();
+    s.cmdline(&h1).unwrap();
+    assert_eq!(s.doc().unwrap().header.str("HPNAME", ""), "CROSS30");
+    s.cmdline("45,5").unwrap();
+    s.cmdline("").unwrap();
+    let hh3 = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter_map(|e| if let EntityKind::Hatch(hh) = &e.kind { Some(hh) } else { None })
+        .find(|hh| hh.loops.iter().any(|l| l.vertices.iter().any(|v| v.p.x >= 35.0)))
+        .expect("expected hatch in [40, 50]");
+    assert_eq!(hh3.pattern, "CROSS30");
+    assert!((hh3.scale - 2.5).abs() < 1e-6);
+}
+
+#[test]
+fn hatchedit_add_and_remove_boundaries() {
+    let mut s = Session::new();
+    let r1 = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [20, 20] })).unwrap());
+    let h = handle(&s.execute("hatch", &json!({ "handles": [r1.clone()] })).unwrap());
+    assert_eq!(hatch(&s, &h).loops.len(), 1);
+
+    // Add an inner circle boundary as island
+    let c = handle(&s.execute("circle", &json!({ "center": [10, 10], "radius": 4 })).unwrap());
+    s.execute("hatchedit", &json!({ "handle": h.clone(), "addBoundaries": [c.clone()] })).unwrap();
+    assert_eq!(hatch(&s, &h).loops.len(), 2, "added boundary loop");
+
+    // Remove the inner circle boundary
+    s.execute("hatchedit", &json!({ "handle": h.clone(), "removeBoundaries": [c] })).unwrap();
+    assert_eq!(hatch(&s, &h).loops.len(), 1, "removed boundary loop");
+}

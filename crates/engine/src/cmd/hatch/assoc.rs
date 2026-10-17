@@ -154,6 +154,13 @@ fn follow(before: &Drawing, after: &Drawing, handle: Handle, h: &Hatch, checked:
         match prev {
             // Moved or reshaped on its own: no longer tied to the boundary.
             Some(p) if reshaped(p, h) => {
+                let fits = h.loops.iter().any(|l| !l.sources.is_empty())
+                    && h.loops
+                        .iter()
+                        .all(|l| l.sources.is_empty() || matches!(refill(after, after, l), Refill::Loop(vs) if same_shape(&vs, &l.vertices)));
+                if fits {
+                    return None;
+                }
                 detach(&mut nh);
                 return Some((nh, None));
             }
