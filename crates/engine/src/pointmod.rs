@@ -242,10 +242,10 @@ impl Session {
             && let Some(d) = crate::units::parse_distance(t)
         {
             let (dx, dy) = (self.cursor.x - l.x, self.cursor.y - l.y);
-            let horizontal = match axis {
-                None => dx.abs() >= dy.abs(),
-                Some(prev_h) => !prev_h,
-            };
+            let screen_dist = self.cursor.dist(l) / self.pixel_size();
+            // Near the anchor (or the first pick): follow the cursor direction.
+            // Far from the anchor: force the other axis (alternation).
+            let horizontal = axis.unwrap_or_else(|| dx.abs() >= dy.abs());
             let dir =
                 if horizontal { Vec2::new(if dx >= 0.0 { 1.0 } else { -1.0 }, 0.0) } else { Vec2::new(0.0, if dy >= 0.0 { 1.0 } else { -1.0 }) };
             return Some(self.modifier_point(l + dir * d));
@@ -340,23 +340,18 @@ impl Session {
                         None => p,
                         Some(l) => {
                             let (dx, dy) = (p.x - l.x, p.y - l.y);
-                            let horizontal = match axis {
-                                None => dx.abs() >= dy.abs(),
-                                Some(prev_h) => !prev_h,
-                            };
+                            let screen_dist = p.dist(l) / self.pixel_size();
+                            let horizontal = axis.unwrap_or_else(|| dx.abs() >= dy.abs());
                             if horizontal { Vec2::new(p.x, l.y) } else { Vec2::new(l.x, p.y) }
                         }
                     };
                     let new_axis = last.map(|l| {
                         let (dx, dy) = (q.x - l.x, q.y - l.y);
-                        dx.abs() >= dy.abs()
+                        let current_h = dx.abs() >= dy.abs();
+                        !current_h
                     });
-                    // The first pick shows a green +; the first point after it clears the marker
-                    // and every later point keeps it clear.
+                    // TK never carries a `+` marker (unlike TT).
                     self.tracking.clear();
-                    if last.is_none() {
-                        self.tracking.acquire_temporary(q);
-                    }
                     self.point_mods.push(Frame::Track { last: Some(q), axis: new_axis });
                     self.last_point = q;
                     return Ok(());

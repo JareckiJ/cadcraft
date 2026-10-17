@@ -780,6 +780,36 @@ impl crate::Session {
     /// acquires it for tracking), then grid snap, then tracking paths (polar, object snap
     /// tracking, Extension, Parallel, Apparent Intersection), then ortho.
     pub fn snap_cursor(&mut self, raw: Vec2, q: &CursorQuery) -> CursorSnap {
+        // TK axis switching requires the cursor to be near the anchor.
+        // Once dragged away, the axis is locked.
+        let pixel_size = self.pixel_size();
+        if let Some(crate::pointmod::Frame::Track { last: Some(l), axis }) = self.point_mods.last_mut() {
+            let dist = raw.dist(*l) / pixel_size;
+            let dx = (raw.x - l.x).abs() / pixel_size;
+            let dy = (raw.y - l.y).abs() / pixel_size;
+
+            // 80px radius limit for switching axes
+            if dist < 80.0 {
+                let is_h = axis.unwrap_or(dx >= dy);
+                // 20% ratio deadband to prevent 45-degree jitter
+                if is_h {
+                    if dy > dx * 1.2 {
+                        *axis = Some(false);
+                    } else {
+                        *axis = Some(true);
+                    }
+                } else {
+                    if dx > dy * 1.2 {
+                        *axis = Some(true);
+                    } else {
+                        *axis = Some(false);
+                    }
+                }
+            } else if axis.is_none() {
+                // If dragged out of the radius without a prior axis, lock it now.
+                *axis = Some(dx >= dy);
+            }
+        }
         // Snap and grid spacing are the drawing's (SNAPUNIT/GRIDUNIT live in its header).
         let mut s = self.drafting_settings();
         // Holding Shift overrides ortho while it is held: on when ORTHOMODE is off, off when it

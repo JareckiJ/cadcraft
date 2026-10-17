@@ -1268,8 +1268,13 @@ fn draw_tracking(
     // A TK run past its first segment: the next leg runs on the other axis, on the cursor's
     // side, and stops at the cursor's projection. No `+` here; TK carries none after the first
     // pick.
-    if let (Some((anchor, Some(prev_h))), Some(m)) = (tk, mouse) {
-        let end = if prev_h { Vec2::new(anchor.x, m.y) } else { Vec2::new(m.x, anchor.y) };
+    if let (Some((anchor, axis_opt)), Some(m)) = (tk, mouse) {
+        // First leg: follow the cursor. Later legs: alternate.
+        let prev_h = match axis_opt {
+            Some(h) => h,
+            None => (m.x - anchor.x).abs() >= (m.y - anchor.y).abs(),
+        };
+        let end = if prev_h { Vec2::new(m.x, anchor.y) } else { Vec2::new(anchor.x, m.y) };
         let (a, b) = (xf.to_screen(anchor), xf.to_screen(end));
         if a != b {
             p.extend(Shape::dotted_line(&[a, b], t.snap, 6.0, 1.0));
