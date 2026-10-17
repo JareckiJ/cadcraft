@@ -71,3 +71,12 @@ fn layer_commands_reject_unloaded_linetypes_and_duplicate_renames() {
     s.execute("layer.set", &json!({ "name": "A", "newName": "a", "linetype": "continuous" })).unwrap();
     assert_eq!(s.doc().unwrap().layer("a").unwrap().linetype, "Continuous");
 }
+
+#[test]
+fn layer_color_book_applies_true_color() {
+    let mut s = Session::new();
+    s.script("-LAYER N Parts C CO RAL 1000 Parts\n\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let parts = s.doc().unwrap().layer("Parts").expect("Parts created");
+    assert_eq!(parts.color, cadcraft_color::Color::True(cadcraft_color::Rgb(206, 198, 140)));
+}

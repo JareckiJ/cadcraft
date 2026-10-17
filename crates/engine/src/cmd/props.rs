@@ -67,7 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("rename", "Rename...", run_rename)
             .menu(&["Format", "Rename..."])
             .alias(&["ren", "-rename"])
-            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs, from, to}")
+            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs|vport|plotstyle|material, from, to}")
             .interactive(|_| Ok(Box::new(rename::RenameM::default()))),
     ]
 }
@@ -1014,6 +1014,9 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        "vport" | "vports" | "viewport" => rename::vport(s, &from, &to)?,
+        "plotstyle" => rename::plotstyle(s, &from, &to)?,
+        "material" => rename::material(s, &from, &to)?,
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()
