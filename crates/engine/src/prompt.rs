@@ -235,6 +235,13 @@ impl PointInput {
     }
 }
 
+impl From<Vec2> for PointInput {
+    /// Wrap a bare coordinate as a pick: the form the UI gives when it hands over a click.
+    fn from(p: Vec2) -> Self {
+        PointInput::Picked(p)
+    }
+}
+
 /// An input to the active command.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
@@ -329,7 +336,9 @@ pub fn parse_point_input(text: &str, last: Vec2, angles: &crate::units::AngleSet
         (false, t)
     };
     if rel && body.is_empty() {
-        return Some(PointInput::Absolute(last));
+        // `@` alone means "zero offset from the last point". Keep it relative so commands that
+        // look at the form still see a relative input.
+        return Some(PointInput::RelativeCartesian { at: last, delta: Vec2::ZERO });
     }
     let pi = if let Some((d, a)) = body.split_once('<') {
         let dist = crate::units::parse_distance(d)?;

@@ -518,7 +518,10 @@ impl Interactive for StretchM {
             }
             (StretchPhase::Displacement, Input::Point(pi)) => self.apply(s, pi.point()),
             (StretchPhase::Displacement, Input::Enter) => Ok(Step::Done),
-            (StretchPhase::Second, Input::Point(pi)) => self.apply(s, pi.point() - self.base.unwrap_or(pi.point())),
+            (StretchPhase::Second, Input::Point(pi)) => {
+                let p = pi.point();
+                self.apply(s, p - self.base.unwrap_or(p))
+            }
             (StretchPhase::Second, Input::Enter) => self.apply(s, self.base.unwrap_or(Vec2::ZERO)),
             _ => Ok(Step::Continue),
         }
