@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cadcraft_doc::{EntityKind, Handle};
+use cadcraft_doc::{EntityKind, EntityStore, Handle, Space};
 use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase, SelectRun};
@@ -34,23 +34,23 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{handles?, reference: [hex]}")
             .interactive(|_| Ok(Box::new(DrawOrderM::new(Some(Order::Under))))),
         CommandSpec::new("texttofront", "Bring Annotations to Front", run_texttofront)
-            .params("{objects?: \"text\"|\"dimensions\"|\"leaders\"|\"all\" (default all)} → {moved}")
+            .params("{objects?: \"text\"|\"dimensions\"|\"leaders\"|\"all\" (default all), space?: \"all\"|\"current\" (default all)} → {moved}")
             .interactive(|_| Ok(Box::new(TextToFrontM))),
-        CommandSpec::new("texttofront.text", "Text Objects Only", |s, _| annotations_to_front(s, Annot::Text))
+        CommandSpec::new("texttofront.text", "Text Objects Only", |s, p| annotations_to_front(s, Annot::Text, p))
             .menu(&["Tools", "Draw Order", "Bring Annotations to Front", "Text Objects Only"])
-            .params("{} → {moved}"),
-        CommandSpec::new("texttofront.dimensions", "Dimension Objects Only", |s, _| annotations_to_front(s, Annot::Dimensions))
+            .params("{space?: \"all\"|\"current\"} → {moved}"),
+        CommandSpec::new("texttofront.dimensions", "Dimension Objects Only", |s, p| annotations_to_front(s, Annot::Dimensions, p))
             .menu(&["Tools", "Draw Order", "Bring Annotations to Front", "Dimension Objects Only"])
-            .params("{} → {moved}"),
-        CommandSpec::new("texttofront.leaders", "Leaders Only", |s, _| annotations_to_front(s, Annot::Leaders))
+            .params("{space?: \"all\"|\"current\"} → {moved}"),
+        CommandSpec::new("texttofront.leaders", "Leaders Only", |s, p| annotations_to_front(s, Annot::Leaders, p))
             .menu(&["Tools", "Draw Order", "Bring Annotations to Front", "Leaders Only"])
-            .params("{} → {moved}"),
-        CommandSpec::new("texttofront.all", "All Annotation Objects", |s, _| annotations_to_front(s, Annot::All))
+            .params("{space?: \"all\"|\"current\"} → {moved}"),
+        CommandSpec::new("texttofront.all", "All Annotation Objects", |s, p| annotations_to_front(s, Annot::All, p))
             .menu(&["Tools", "Draw Order", "Bring Annotations to Front", "All Annotation Objects"])
-            .params("{} → {moved}"),
+            .params("{space?: \"all\"|\"current\"} → {moved}"),
         CommandSpec::new("hatchtoback", "Send Hatches to Back", run_hatchtoback)
             .menu(&["Tools", "Draw Order", "Send Hatches to Back"])
-            .params("{} → {moved}"),
+            .params("{space?: \"all\"|\"current\" (default all)} → {moved}"),
     ]
 }
 
@@ -62,13 +62,10 @@ enum Order {
     Under,
 }
 
-/// Move `hs` in the current space's draw order, keeping their order among themselves. Above and
+/// Move `hs` in a space's draw order, keeping their order among themselves. Above and
 /// Under place them right over the topmost reference object or right under the lowest one.
 /// Returns how many objects moved.
-fn reorder(s: &mut Session, hs: &[Handle], order: Order, refs: &[Handle]) -> Result<usize> {
-    let space = s.space();
-    let d = s.doc_mut()?;
-    let Some(st) = d.space_mut(&space) else { return Ok(0) };
+fn reorder_in_space(st: &mut EntityStore, hs: &[Handle], order: Order, refs: &[Handle]) -> Result<usize> {
     let index: HashMap<Handle, usize> = st.handles().into_iter().enumerate().map(|(i, h)| (h, i)).collect();
     let mut moving: Vec<(usize, Handle)> = hs.iter().filter_map(|h| index.get(h).map(|i| (*i, *h))).collect();
     moving.sort_unstable();
@@ -101,6 +98,16 @@ fn reorder(s: &mut Session, hs: &[Handle], order: Order, refs: &[Handle]) -> Res
         }
     }
     Ok(moving.len())
+}
+
+/// Move `hs` in the current space's draw order, keeping their order among themselves. Above and
+/// Under place them right over the topmost reference object or right under the lowest one.
+/// Returns how many objects moved.
+fn reorder(s: &mut Session, hs: &[Handle], order: Order, refs: &[Handle]) -> Result<usize> {
+    let space = s.space();
+    let d = s.doc_mut()?;
+    let Some(st) = d.space_mut(&space) else { return Ok(0) };
+    reorder_in_space(st, hs, order, refs)
 }
 
 fn parse_order(p: &Value) -> Result<Order> {
@@ -169,7 +176,7 @@ enum Annot {
 impl Annot {
     fn matches(self, k: &EntityKind) -> bool {
         let text = matches!(k, EntityKind::Text(_) | EntityKind::MText(_));
-        let dim = matches!(k, EntityKind::Dimension(_));
+        let dim = matches!(k, EntityKind::Dimension(_) | EntityKind::Tolerance(_));
         let leader = matches!(k, EntityKind::Leader(_) | EntityKind::MLeader(_));
         match self {
             Annot::Text => text,
@@ -180,16 +187,31 @@ impl Annot {
     }
 }
 
-/// Every object of the current space that `keep` accepts, in draw order.
-fn of_kind(s: &Session, keep: impl Fn(&EntityKind) -> bool) -> Result<Vec<Handle>> {
-    let d = s.doc()?;
-    Ok(d.space(&s.space()).map(|st| st.iter().filter(|e| keep(&e.kind)).map(|e| e.handle).collect()).unwrap_or_default())
+/// Spaces to process: all spaces (Model + Layouts) unless `space: "current"` is requested.
+fn target_spaces(s: &Session, p: &Value) -> Result<Vec<Space>> {
+    let current_only = p.get("space").and_then(Value::as_str).is_some_and(|sp| sp.eq_ignore_ascii_case("current"));
+    if current_only {
+        Ok(vec![s.space()])
+    } else {
+        let d = s.doc()?;
+        let mut spaces = vec![Space::Model];
+        for l in &d.layouts {
+            spaces.push(Space::Paper(l.name.clone()));
+        }
+        Ok(spaces)
+    }
 }
 
-fn annotations_to_front(s: &mut Session, which: Annot) -> Result<Value> {
-    let hs = of_kind(s, |k| which.matches(k))?;
-    let n = reorder(s, &hs, Order::Front, &[])?;
-    Ok(json!({ "moved": n, "message": format!("{n} object(s) brought to front.") }))
+fn annotations_to_front(s: &mut Session, which: Annot, p: &Value) -> Result<Value> {
+    let spaces = target_spaces(s, p)?;
+    let d = s.doc_mut()?;
+    let mut total = 0;
+    for sp in spaces {
+        let Some(st) = d.space_mut(&sp) else { continue };
+        let hs: Vec<Handle> = st.iter().filter(|e| which.matches(&e.kind)).map(|e| e.handle).collect();
+        total += reorder_in_space(st, &hs, Order::Front, &[])?;
+    }
+    Ok(json!({ "moved": total, "message": format!("{total} object(s) brought to front.") }))
 }
 
 fn run_texttofront(s: &mut Session, p: &Value) -> Result<Value> {
@@ -203,13 +225,19 @@ fn run_texttofront(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad("texttofront", format!("`objects` must be \"text\", \"dimensions\", \"leaders\" or \"all\", got {v}"))),
         },
     };
-    annotations_to_front(s, which)
+    annotations_to_front(s, which, p)
 }
 
-fn run_hatchtoback(s: &mut Session, _p: &Value) -> Result<Value> {
-    let hs = of_kind(s, |k| matches!(k, EntityKind::Hatch(_)))?;
-    let n = reorder(s, &hs, Order::Back, &[])?;
-    Ok(json!({ "moved": n, "message": format!("{n} hatch object(s) sent to back.") }))
+fn run_hatchtoback(s: &mut Session, p: &Value) -> Result<Value> {
+    let spaces = target_spaces(s, p)?;
+    let d = s.doc_mut()?;
+    let mut total = 0;
+    for sp in spaces {
+        let Some(st) = d.space_mut(&sp) else { continue };
+        let hs: Vec<Handle> = st.iter().filter(|e| matches!(e.kind, EntityKind::Hatch(_))).map(|e| e.handle).collect();
+        total += reorder_in_space(st, &hs, Order::Back, &[])?;
+    }
+    Ok(json!({ "moved": total, "message": format!("{total} hatch object(s) sent to back.") }))
 }
 
 /// TEXTTOFRONT typed: "Bring to front [Text/Dimensions/Leaders/All] <All>:".
@@ -237,7 +265,7 @@ impl Interactive for TextToFrontM {
             },
             _ => return Ok(Step::Continue),
         };
-        let r = annotations_to_front(s, which)?;
+        let r = annotations_to_front(s, which, &json!({}))?;
         if let Some(m) = r.get("message").and_then(Value::as_str) {
             s.echo(m.to_string());
         }

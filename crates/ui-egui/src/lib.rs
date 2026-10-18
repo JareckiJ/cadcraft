@@ -22,8 +22,10 @@ pub mod credits;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
+pub mod matchpropdlg;
 mod mtext_editor;
 pub mod spacemouse;
+pub mod tolerancedlg;
 // The External References palette.
 pub mod xrefs;
 
@@ -241,6 +243,10 @@ pub struct CadApp {
     pub gpu_notice: Option<autosave::GpuNotice>,
     /// The Hatch and Gradient dialog while open or picking ([`hatchdlg`]).
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
+    /// The Geometric Tolerance dialog while open ([`tolerancedlg`]).
+    pub tolerance_dlg: Option<tolerancedlg::ToleranceDlgState>,
+    /// The Property Settings dialog for MATCHPROP while open ([`matchpropdlg`]).
+    pub matchprop_dlg: Option<matchpropdlg::MatchPropDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
 }
@@ -280,6 +286,8 @@ impl CadApp {
             gpu_faults: std::sync::Arc::default(),
             gpu_notice: None,
             hatch_dlg: None,
+            tolerance_dlg: None,
+            matchprop_dlg: None,
             bedit: bedit::State::default(),
         }
     }

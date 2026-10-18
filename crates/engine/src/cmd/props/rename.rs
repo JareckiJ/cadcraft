@@ -121,22 +121,125 @@ pub(super) fn simple(s: &mut Session, table: &str, from: &str, to: &str) -> Resu
     repoint(d, &uses, &fix)
 }
 
+/// Rename a viewport configuration (VPORTS).
+pub(super) fn vport(s: &mut Session, from: &str, to: &str) -> Result<()> {
+    let to = to.trim().to_string();
+    if !valid_name(&to) {
+        return Err(bad("rename", "invalid viewport configuration name"));
+    }
+    if from.eq_ignore_ascii_case(cadcraft_doc::VportConfig::ACTIVE) {
+        return Err(bad("rename", "the active viewport configuration cannot be renamed"));
+    }
+    let d = s.doc_mut()?;
+    if !to.eq_ignore_ascii_case(from) && d.vports.iter().any(|c| c.name.eq_ignore_ascii_case(&to)) {
+        return Err(bad("rename", format!("a viewport configuration `{to}` already exists")));
+    }
+    let vp = d
+        .vports
+        .iter_mut()
+        .find(|c| !c.is_active() && c.name.eq_ignore_ascii_case(from))
+        .ok_or_else(|| bad("rename", format!("no viewport configuration `{from}`")))?;
+    vp.name = to;
+    Ok(())
+}
+
+/// Rename a plot style in named plot style tables and drawing references.
+pub(super) fn plotstyle(s: &mut Session, from: &str, to: &str) -> Result<()> {
+    let to = to.trim().to_string();
+    if !valid_name(&to) {
+        return Err(bad("rename", "invalid plot style name"));
+    }
+    if ["Normal", "ByLayer", "ByBlock"].iter().any(|n| from.eq_ignore_ascii_case(n)) {
+        return Err(bad("rename", format!("the {from} plot style cannot be renamed")));
+    }
+    let d = s.doc_mut()?;
+    let mut changed = false;
+    for table in &mut d.plot_style_tables {
+        if table.kind == cadcraft_doc::PlotStyleKind::Named && table.styles.iter().any(|st| st.name.eq_ignore_ascii_case(from)) {
+            if !to.eq_ignore_ascii_case(from) && table.styles.iter().any(|st| st.name.eq_ignore_ascii_case(&to)) {
+                return Err(bad("rename", format!("a plot style `{to}` already exists")));
+            }
+            for st in &mut table.styles {
+                if st.name.eq_ignore_ascii_case(from) {
+                    st.name = to.clone();
+                    changed = true;
+                }
+            }
+        }
+    }
+    for l in &mut d.layers {
+        if l.plot_style.eq_ignore_ascii_case(from) {
+            l.plot_style = to.clone();
+            changed = true;
+        }
+    }
+    let users = |st: &cadcraft_doc::EntityStore| -> Vec<Handle> {
+        st.iter().filter(|e| e.common.plot_style.eq_ignore_ascii_case(from)).map(|e| e.handle).collect()
+    };
+    let mut hs = users(&d.model);
+    hs.extend(d.layouts.iter().flat_map(|l| users(&l.entities)));
+    for h in hs {
+        d.modify_entity(h, |e| {
+            if e.common.plot_style.eq_ignore_ascii_case(from) {
+                e.common.plot_style = to.clone();
+            }
+        })?;
+        changed = true;
+    }
+    for b in d.blocks.values_mut() {
+        let hs = users(&b.entities);
+        if !hs.is_empty() {
+            let blk = Arc::make_mut(b);
+            for h in hs {
+                blk.entities.modify(h, |e| {
+                    if e.common.plot_style.eq_ignore_ascii_case(from) {
+                        e.common.plot_style = to.clone();
+                    }
+                });
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Err(bad("rename", format!("no plot style `{from}`")));
+    }
+    Ok(())
+}
+
+/// Rename a material.
+pub(super) fn material(s: &mut Session, from: &str, to: &str) -> Result<()> {
+    let to = to.trim().to_string();
+    if !valid_name(&to) {
+        return Err(bad("rename", "invalid material name"));
+    }
+    if ["Global", "ByLayer", "ByBlock"].iter().any(|n| from.eq_ignore_ascii_case(n)) {
+        return Err(bad("rename", format!("the {from} material cannot be renamed")));
+    }
+    let d = s.doc_mut()?;
+    if !to.eq_ignore_ascii_case(from) && d.materials.iter().any(|m| m.name.eq_ignore_ascii_case(&to)) {
+        return Err(bad("rename", format!("a material `{to}` already exists")));
+    }
+    let m = d.materials.iter_mut().find(|m| m.name.eq_ignore_ascii_case(from)).ok_or_else(|| bad("rename", format!("no material `{from}`")))?;
+    m.name = to;
+    Ok(())
+}
+
 // ---------------- -RENAME prompts ----------------
 
-/// Prompt keyword, `rename` table (None: not available yet), noun.
+/// Prompt keyword, `rename` table, noun.
 const TYPES: &[(&str, Option<&str>, &str)] = &[
     ("Block", Some("block"), "block"),
     ("Dimstyle", Some("dimstyle"), "dimension style"),
     ("LAyer", Some("layer"), "layer"),
     ("LType", Some("linetype"), "linetype"),
-    ("Material", None, "material"),
+    ("Material", Some("material"), "material"),
     ("multileadeRstyle", Some("mleaderstyle"), "multileader style"),
-    ("Plotstyle", None, "plot style"),
+    ("Plotstyle", Some("plotstyle"), "plot style"),
     ("textStyle", Some("style"), "text style"),
     ("Tablestyle", Some("tablestyle"), "table style"),
     ("Ucs", Some("ucs"), "UCS"),
     ("VIew", Some("view"), "view"),
-    ("VPort", None, "viewport configuration"),
+    ("VPort", Some("vport"), "viewport configuration"),
 ];
 
 /// Keyword-only: spaces separate inputs.
@@ -159,6 +262,13 @@ fn exists(d: &Drawing, table: &str, name: &str) -> bool {
         "tablestyle" => any_named(d.table_styles.iter().map(|t| &t.name), name),
         "view" => any_named(d.views.iter().map(|t| &t.name), name),
         "ucs" => any_named(d.ucss.iter().map(|t| &t.name), name),
+        "material" => any_named(d.materials.iter().map(|m| &m.name), name),
+        "plotstyle" => {
+            d.plot_style_tables.iter().flat_map(|t| &t.styles).any(|s| s.name.eq_ignore_ascii_case(name))
+                || d.layers.iter().any(|l| l.plot_style.eq_ignore_ascii_case(name))
+                || d.model.iter().any(|e| e.common.plot_style.eq_ignore_ascii_case(name))
+        }
+        "vport" => d.vports.iter().any(|c| !c.is_active() && c.name.eq_ignore_ascii_case(name)),
         _ => true,
     }
 }

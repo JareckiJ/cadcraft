@@ -20,8 +20,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
-            .params("{source, targets?: [hex] (default: selection), properties?: [name] | {name: bool} (default: all; names: color, layer, linetype, ltscale, lineweight, transparency, thickness, plotStyle, dimension, text, hatch, polyline, viewport, table, multileader)} → {changed}")
+            .params("{source, targets?: [hex] (default: selection), properties?: [name] | {name: bool} (default: active settings; names: color, layer, linetype, ltscale, lineweight, transparency, thickness, plotStyle, material, shadow, dimension, text, hatch, polyline, viewport, table, multileader, center)} → {changed}")
             .interactive(|_| Ok(Box::new(matchprop::MatchPropM::new()))),
+        CommandSpec::new("matchprop.settings", "Match Properties Settings", matchprop::run_matchprop_settings)
+            .params("{properties?: [name] | {name: bool}} → current settings")
+            .noundo(),
         CommandSpec::new("color", "Color...", run_color).menu(&["Format", "Color..."]).alias(&["col", "colour"]).params("{color: \"ByLayer\" | \"red\" | 1..255 | \"r,g,b\"}"),
         CommandSpec::new("linetype", "Linetype...", run_linetype).menu(&["Format", "Linetype..."]).alias(&["lt", "ltype"]).params("{current?: name, load?: name | \"*\" (with a file: comma-separated names, wildcards), file?: path to a .lin file | text?: its contents, reload?: bool}"),
         CommandSpec::new("hatch.patterns", "Hatch Patterns", super::hatch::run_patterns)
@@ -67,7 +70,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("rename", "Rename...", run_rename)
             .menu(&["Format", "Rename..."])
             .alias(&["ren", "-rename"])
-            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs, from, to}")
+            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs|vport|plotstyle|material, from, to}")
             .interactive(|_| Ok(Box::new(rename::RenameM::default()))),
     ]
 }
@@ -1014,6 +1017,9 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        "vport" | "vports" | "viewport" => rename::vport(s, &from, &to)?,
+        "plotstyle" => rename::plotstyle(s, &from, &to)?,
+        "material" => rename::material(s, &from, &to)?,
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()

@@ -76,8 +76,9 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
             .alias(&["ed", "ddedit"])
-            .params("{handle, text} (text, mtext, attribute definitions, dimension text override)")
+            .params("{handle, text} (text, mtext, attribute definitions, dimension text override, tolerance frame)")
             .interactive(|_| Ok(Box::new(TextEditM::default()))),
+
     ]
 }
 
@@ -2162,6 +2163,7 @@ fn text_of(k: &EntityKind) -> Option<String> {
         EntityKind::AttDef(a) => Some(a.text.value.clone()),
         EntityKind::MText(t) => Some(t.contents.replace("\\P", "\n")),
         EntityKind::Dimension(d) => Some(if d.text.is_empty() { "<>".into() } else { d.text.clone() }),
+        EntityKind::Tolerance(t) => Some(t.text.clone()),
         _ => None,
     }
 }
@@ -2179,7 +2181,13 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
             d.text = if text == "<>" { String::new() } else { text.to_string() };
             d.block = None;
         }
-        _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
+        EntityKind::Tolerance(t) => {
+            if cadcraft_doc::parse_frame(text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
+                return Err(other("The feature control frame is empty."));
+            }
+            t.text = text.chars().take(cadcraft_doc::MAX_FRAME_CHARS).collect();
+        }
+        _ => return Err(other("Select a text, mtext, attribute definition, dimension or tolerance.")),
     }
     set_kind(s, h, k)
 }
@@ -2233,7 +2241,8 @@ impl Interactive for TextEditM {
         match (&self.h, i) {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                let old = text_of(&curves::entity(s, h)?.kind).ok_or_else(|| other("Select a text, mtext, attribute definition or dimension."))?;
+                let old = text_of(&curves::entity(s, h)?.kind)
+                    .ok_or_else(|| other("Select a text, mtext, attribute definition, dimension or tolerance."))?;
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }

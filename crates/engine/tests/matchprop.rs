@@ -136,3 +136,52 @@ fn matchprop_skips_locked_layers() {
     assert_eq!(r["changed"], 0);
     assert_eq!(props(&s, a).0, "L");
 }
+
+#[test]
+fn matchprop_settings_command_and_special_properties() {
+    let mut s = Session::new();
+    let r = s.execute("matchprop.settings", &json!({})).unwrap();
+    assert_eq!(r["color"], true);
+    assert_eq!(r["material"], true);
+    assert_eq!(r["shadow"], true);
+    assert_eq!(r["center"], true);
+
+    // Turn off some properties via matchprop.settings
+    let r = s.execute("matchprop.settings", &json!({ "properties": { "material": false, "color": false } })).unwrap();
+    assert_eq!(r["material"], false);
+    assert_eq!(r["color"], false);
+    assert_eq!(r["shadow"], true);
+
+    // Test transferring foreign material and shadow properties
+    s.execute("line", &json!({ "points": [[0, 0], [1, 1]] })).unwrap();
+    let h1 = last(&s);
+    s.execute("line", &json!({ "points": [[2, 2], [3, 3]] })).unwrap();
+    let h2 = last(&s);
+    let l1 = h1.hex();
+    let l2 = h2.hex();
+
+    // Attach foreign material tag (group 347) and shadow tag (group 284) to l1
+    {
+        let d = s.doc_mut().unwrap();
+        let foreign = std::sync::Arc::make_mut(&mut d.foreign);
+        let extra = foreign.entities.entry(h1).or_default();
+        extra.props.push(cadcraft_doc::RawTag { code: 347, value: "Wood_Oak".into() });
+        extra.props.push(cadcraft_doc::RawTag { code: 284, value: "1".into() });
+    }
+
+    // Match properties with material and shadow enabled
+    s.execute(
+        "matchprop",
+        &json!({
+            "source": l1,
+            "targets": [l2],
+            "properties": ["material", "shadow"]
+        }),
+    )
+    .unwrap();
+
+    let d = s.doc().unwrap();
+    let extra2 = d.foreign.entities.get(&h2).unwrap();
+    assert!(extra2.props.iter().any(|t| t.code == 347 && t.value == "Wood_Oak"));
+    assert!(extra2.props.iter().any(|t| t.code == 284 && t.value == "1"));
+}

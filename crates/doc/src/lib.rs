@@ -107,6 +107,8 @@ pub struct Drawing {
     /// Plot style tables kept with the drawing (STYLESMANAGER); they shadow built-in tables of
     /// the same name.
     pub plot_style_tables: Vec<PlotStyleTable>,
+    /// Material definitions (MATERIAL).
+    pub materials: Vec<Material>,
     /// Parametric constraints (GEOMCONSTRAINT / DIMCONSTRAINT).
     pub constraints: Vec<Constraint>,
     /// User parameters and parametric settings.
@@ -175,6 +177,7 @@ impl Drawing {
             layer_states: Vec::new(),
             groups: Vec::new(),
             plot_style_tables: Vec::new(),
+            materials: vec![Material::global()],
             constraints: Vec::new(),
             parametric: Parametric::default(),
             scales: imperial_scales(),

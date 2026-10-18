@@ -867,5 +867,21 @@ pub struct Group {
     pub members: Vec<crate::Handle>,
 }
 
+/// A material definition (MATERIAL).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Material {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Material {
+    pub const GLOBAL: &'static str = "Global";
+    pub fn global() -> Material {
+        Material { name: Self::GLOBAL.into(), description: String::new() }
+    }
+}
+
 /// Shared ownership helper: blocks are cloned on write.
 pub type BlockRef = Arc<Block>;
