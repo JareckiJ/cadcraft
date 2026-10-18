@@ -70,7 +70,7 @@ impl SnapHit {
     pub fn input(&self) -> crate::Input {
         match self.deferred {
             Some(d) => crate::Input::Deferred(d),
-            None => crate::Input::Point(PointInput::Picked(self.point)),
+            None => crate::Input::Point(PointInput::Snapped { at: self.point, mode: self.mode }),
         }
     }
 }
@@ -1027,6 +1027,19 @@ mod tests {
         d.add(&Space::Model, Common::default(), l((5.0, -5.0), (5.0, 5.0))).unwrap();
         d.add(&Space::Model, Common::default(), EntityKind::Circle(cadcraft_doc::Circle { center: Vec3::new(20.0, 0.0, 0.0), radius: 2.0 })).unwrap();
         d
+    }
+
+    #[test]
+    fn snap_hit_input_preserves_mode() {
+        let d = drawing();
+        let h = osnap(&d, &Space::Model, Vec2::new(9.8, 0.1), 0.5, mode::END, None, false).unwrap();
+        assert!(matches!(
+            h.input(),
+            crate::Input::Point(PointInput::Snapped { at, mode }) if at == h.point && mode == h.mode
+        ));
+        // A deferred TAN is still a Deferred, not a Snapped point.
+        let t = osnap(&d, &Space::Model, Vec2::new(20.0, 1.95), 0.5, mode::TAN, None, true).unwrap();
+        assert!(matches!(t.input(), crate::Input::Deferred(_)));
     }
 
     #[test]

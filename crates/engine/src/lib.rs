@@ -1581,7 +1581,7 @@ impl Session {
             if let Some(dist) = units::parse_distance(tt).filter(|_| !prompt.accept.number)
                 && let Some((from, dir)) = self.tracking.last.as_ref().filter(|t| t.point.near(self.cursor, 1e-9)).and_then(|t| t.along())
             {
-                return self.input(Input::Point(PointInput::Picked(from + dir * dist)));
+                return self.input(Input::Point(PointInput::DirectDistance { base: from, dist, dir }));
             }
             // Direct distance entry along the rubber band.
             if let (Some(base), Some(dist)) = (prompt.base, units::parse_distance(tt))
@@ -1593,7 +1593,7 @@ impl Session {
                 }
                 let dir = (c - base).normalized();
                 let dir = if dir == Vec2::ZERO { Vec2::X } else { dir };
-                return self.input(Input::Point(PointInput::Picked(base + dir * dist)));
+                return self.input(Input::Point(PointInput::DirectDistance { base, dist, dir }));
             }
         }
         self.input(Input::Text(tt.to_string()))

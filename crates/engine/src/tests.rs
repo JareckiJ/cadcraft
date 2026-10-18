@@ -114,6 +114,30 @@ fn undo_during_a_command_without_undo_keyword_ends_it_and_undoes() {
 }
 
 #[test]
+fn line_accepts_direct_distance_point_input() {
+    // A DirectDistance carries the base, distance and direction the user typed. The command
+    // must draw exactly there, whether the form came from the rubber band or the tracking path.
+    let mut s = Session::new();
+    s.cmdline("line 1,1").unwrap();
+    s.input(Input::Point(PointInput::DirectDistance { base: Vec2::new(1.0, 1.0), dist: 4.0, dir: Vec2::new(1.0, 0.0) })).unwrap();
+    s.cmdline("").unwrap();
+    let ends: Vec<_> = s.doc().unwrap().model.iter().map(|e| e.kind.grips()).collect();
+    assert!(ends[0][2].near(Vec2::new(5.0, 1.0), 1e-9));
+}
+
+#[test]
+fn line_accepts_snapped_point_input() {
+    // A Snapped point is a plain coordinate with the snap mode attached. The command uses the
+    // coordinate; the mode is there for the callers that care.
+    let mut s = Session::new();
+    s.cmdline("line 0,0").unwrap();
+    s.input(Input::Point(PointInput::Snapped { at: Vec2::new(3.0, 4.0), mode: snap::mode::END })).unwrap();
+    s.cmdline("").unwrap();
+    let ends: Vec<_> = s.doc().unwrap().model.iter().map(|e| e.kind.grips()).collect();
+    assert!(ends[0][2].near(Vec2::new(3.0, 4.0), 1e-9));
+}
+
+#[test]
 fn polar_and_direct_distance() {
     let mut s = Session::new();
     s.cmdline("line 1,1").unwrap();
