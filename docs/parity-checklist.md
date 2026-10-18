@@ -4,19 +4,19 @@
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 327 / 491 items (67%)** · 479 registered commands.
+**Menu breadth: 371 / 491 items (76%)** · 521 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
 | File | 22 | 13 | 59% |
 | Edit | 13 | 11 | 85% |
-| View | 75 | 60 | 80% |
+| View | 75 | 68 | 91% |
 | Insert | 11 | 5 | 45% |
-| Format | 27 | 25 | 93% |
-| Tools | 85 | 68 | 80% |
-| Draw | 87 | 57 | 66% |
+| Format | 27 | 27 | 100% |
+| Tools | 85 | 69 | 81% |
+| Draw | 87 | 82 | 94% |
 | Dimension | 28 | 28 | 100% |
-| Modify | 113 | 57 | 50% |
+| Modify | 113 | 65 | 58% |
 | Window | 22 | 3 | 14% |
 | Help | 8 | 0 | 0% |
 
@@ -33,20 +33,12 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - File > Share...
 - Edit > Undo Group of commands
 - Edit > Cut with Base Point
-- View > Pan > Point
-- View > Orbit > Constrained Orbit
-- View > Orbit > Free Orbit
-- View > Camera > Adjust Distance
-- View > Camera > Swivel
 - View > Viewports > Named Viewports...
 - View > Render > Light > New Point Light
 - View > Render > Light > New Spotlight
 - View > Render > Light > New Distant Light
 - View > Render > Light > Light Glyphs
 - View > Render > Materials Browser
-- View > UCS Icon > Properties...
-- View > ViewCube > Settings
-- View > Lights
 - View > Enter Full Screen
 - Insert > PDF Underlay...
 - Insert > Raster Image Reference...
@@ -54,13 +46,10 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Insert > Layout > Layout from Template...
 - Insert > ACIS File...
 - Insert > Drawing Exchange Binary...
-- Format > Transparency
-- Format > Thickness
 - Tools > Spelling
 - Tools > Inquiry > Volume
 - Tools > Update Fields
 - Tools > Edit Xref in Place
-- Tools > New UCS > Face
 - Tools > Customize > Interface (CUI)...
 - Tools > Customize > Edit Command Aliases (PGP)...
 - Tools > Import Settings
@@ -73,51 +62,18 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Tools > Express Tools > Super Hatch > Image...
 - Tools > Express Tools > Super Hatch > Xref...
 - Tools > Express Tools > Super Hatch > Select Existing Object
-- Draw > 3D Modeling > Polysolid
-- Draw > 3D Modeling > Box
-- Draw > 3D Modeling > Wedge
-- Draw > 3D Modeling > Cone
-- Draw > 3D Modeling > Sphere
-- Draw > 3D Modeling > Cylinder
-- Draw > 3D Modeling > Torus
-- Draw > 3D Modeling > Pyramid
-- Draw > 3D Modeling > Extrude
-- Draw > 3D Modeling > Revolve
-- Draw > 3D Modeling > Sweep
-- Draw > 3D Modeling > Loft
-- Draw > 3D Modeling > Section Plane
 - Draw > 3D Modeling > Surfaces > Planar
 - Draw > 3D Modeling > Surfaces > Network
 - Draw > 3D Modeling > Surfaces > Patch
-- Draw > 3D Modeling > Meshes > Primitives > Box
-- Draw > 3D Modeling > Meshes > Primitives > Wedge
-- Draw > 3D Modeling > Meshes > Primitives > Cone
-- Draw > 3D Modeling > Meshes > Primitives > Sphere
-- Draw > 3D Modeling > Meshes > Primitives > Cylinder
-- Draw > 3D Modeling > Meshes > Primitives > Torus
-- Draw > 3D Modeling > Meshes > Primitives > Pyramid
-- Draw > 3D Modeling > Meshes > Smooth Mesh
-- Draw > 3D Modeling > Meshes > Meshes, Revolved Surface
-- Draw > 3D Modeling > Meshes > Meshes, Tabulated Surface
-- Draw > 3D Modeling > Meshes > Meshes, Ruled Surface
-- Draw > 3D Modeling > Meshes > Meshes, Edge Surface
 - Draw > 3D Modeling > Setup > Drawing
 - Draw > 3D Modeling > Setup > Profile
 - Modify > Object > External Reference > Frame
 - Modify > Object > Image > Adjust...
 - Modify > Object > Image > Quality
-- Modify > Object > Image > Transparency
 - Modify > Object > Image > Frame
 - Modify > Object > Block Description...
 - Modify > Clip > Image
 - Modify > Clip > Xref
-- Modify > 3D Operations > Interference Checking
-- Modify > 3D Operations > Slice
-- Modify > 3D Operations > Thicken
-- Modify > 3D Operations > Convert to Solid
-- Modify > 3D Operations > Convert to Surface
-- Modify > 3D Operations > Extract Edges
-- Modify > 3D Operations > Extract Isolines
 - Modify > Solid Editing > Imprint Edges
 - Modify > Solid Editing > Fillet edges
 - Modify > Solid Editing > Chamfer edges

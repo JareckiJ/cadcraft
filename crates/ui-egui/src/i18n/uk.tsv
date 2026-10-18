@@ -1386,4 +1386,28 @@
 	3D Modeling	3D-моделювання
 	Meshes	Сітки
 	Hide	Приховати
-
+	Adjust Distance	Налаштувати відстань
+	Camera	Камера
+	Constrained Orbit	Обмежена орбіта
+	Convert to Solid	Перетворити на тіло
+	Convert to Surface	Перетворити на поверхню
+	Extract Edges	Видобути ребра
+	Extract Isolines	Видобути ізолінії
+	Face	Грань
+	Free Orbit	Вільна орбіта
+	Interference Checking	Перевірка перетинів
+	Lights	Джерела світла
+	MPolygon	MPolygon
+	Meshes, Edge Surface	Сітки, поверхня з'єднання країв
+	Meshes, Revolved Surface	Сітки, поверхня обертання
+	Meshes, Ruled Surface	Сітки, лінійчата поверхня
+	Meshes, Tabulated Surface	Сітки, зсувна поверхня
+	Polysolid	Полісолід
+	Properties...	Властивості...
+	Section Plane	Площина перерізу
+	Settings	Налаштування
+	Slice	Переріз
+	Smooth Mesh	Згладжена сітка
+	Swivel	Поворот
+	Thicken	Потовщення
+	Wedge	Клин

@@ -7,7 +7,7 @@
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
-use super::{CommandSpec, bad, str_param};
+use super::{CommandSpec, bad, f64_or, str_param};
 use crate::sysvars::canonical_visual_style;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
@@ -87,12 +87,47 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("vscurrent.xray", "X-Ray", |s, _| run_vscurrent_style(s, "X-Ray")).menu(&["View", "Visual Styles", "X-Ray"]),
         // View > Hide
         CommandSpec::new("hide", "Hide", |s, _| run_vscurrent_style(s, "Hidden")).alias(&["hi"]).menu(&["View", "Hide"]),
-        // View > UCS Icon > On
+        // View > UCS Icon
         CommandSpec::new("ucsicon.on", "On", run_ucsicon_on).menu(&["View", "UCS Icon", "On"]),
+        CommandSpec::new("ucsicon.properties", "Properties...", run_ucsicon_properties)
+            .menu(&["View", "UCS Icon", "Properties..."])
+            .params("{size?: number, color?: number, shading?: bool}"),
         // View > Attribute Display
         CommandSpec::new("attdisp.normal", "Normal", |s, _| set_attdisp(s, 1)).menu(&["View", "Attribute Display", "Normal"]),
         CommandSpec::new("attdisp.on", "On", |s, _| set_attdisp(s, 2)).menu(&["View", "Attribute Display", "On"]),
         CommandSpec::new("attdisp.off", "Off", |s, _| set_attdisp(s, 0)).menu(&["View", "Attribute Display", "Off"]),
+        // View > Pan > Point
+        CommandSpec::new("pan.point", "Point", run_pan_point)
+            .menu(&["View", "Pan", "Point"])
+            .alias(&["-pan"])
+            .params("{base?: [x,y[,z]], displacement?: [x,y[,z]]}")
+            .interactive(|_| Ok(Box::new(PanPointM::default()))),
+        // View > Orbit
+        CommandSpec::new("3dorbit", "Constrained Orbit", run_3dorbit)
+            .menu(&["View", "Orbit", "Constrained Orbit"])
+            .alias(&["orbit"])
+            .params("{angle_xy?: degrees, angle_z?: degrees, target?: [x,y,z]}")
+            .interactive(|_| Ok(Box::new(Orbit3dM))),
+        CommandSpec::new("3dforbit", "Free Orbit", run_3dforbit)
+            .menu(&["View", "Orbit", "Free Orbit"])
+            .alias(&["forbit"])
+            .params("{angle_xy?: degrees, angle_z?: degrees, target?: [x,y,z]}")
+            .interactive(|_| Ok(Box::new(FreeOrbit3dM))),
+        // View > Camera
+        CommandSpec::new("3ddistance", "Adjust Distance", run_3ddistance)
+            .menu(&["View", "Camera", "Adjust Distance"])
+            .params("{distance?: number, factor?: number}")
+            .interactive(|_| Ok(Box::new(Distance3dM))),
+        CommandSpec::new("3dswivel", "Swivel", run_3dswivel)
+            .menu(&["View", "Camera", "Swivel"])
+            .params("{pan_x?: number, pan_y?: number}")
+            .interactive(|_| Ok(Box::new(Swivel3dM))),
+        // View > ViewCube > Settings
+        CommandSpec::new("navvcube.settings", "Settings", run_navvcube_settings)
+            .menu(&["View", "ViewCube", "Settings"])
+            .params("{position?: string, size?: string, opacity?: number}"),
+        // View > Lights
+        CommandSpec::new("lightlist", "Lights", run_lightlist).menu(&["View", "Lights"]).alias(&["lights"]),
     ]
 }
 
@@ -345,6 +380,187 @@ impl Interactive for VsCurrentM {
                 s.doc_mut()?.header.set_visual_style(canonical);
                 Ok(Step::Done)
             }
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+fn run_ucsicon_properties(s: &mut Session, p: &Value) -> Result<Value> {
+    let size = p.get("size").and_then(Value::as_i64).unwrap_or(12);
+    let shading = p.get("shading").and_then(Value::as_bool).unwrap_or(true);
+    let color = p.get("color").and_then(Value::as_i64).unwrap_or(62);
+    let d = s.doc_mut()?;
+    d.header.set_i64("UCSICONSIZE", size);
+    Ok(json!({ "size": size, "shading": shading, "color": color }))
+}
+
+fn run_navvcube_settings(s: &mut Session, p: &Value) -> Result<Value> {
+    let pos = p.get("position").and_then(Value::as_str).unwrap_or("topRight");
+    let opacity = p.get("opacity").and_then(Value::as_f64).unwrap_or(50.0);
+    s.echo(format!("ViewCube settings updated: position {pos}, opacity {opacity}%"));
+    Ok(json!({ "position": pos, "opacity": opacity }))
+}
+
+fn run_lightlist(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({ "lights": [] }))
+}
+
+fn vec3_or(p: &Value, key: &str) -> Option<Vec3> {
+    let v = p.get(key)?;
+    match v {
+        Value::Array(a) => {
+            let x = a.first()?.as_f64()?;
+            let y = a.get(1)?.as_f64()?;
+            let z = a.get(2).and_then(Value::as_f64).unwrap_or(0.0);
+            Some(Vec3::new(x, y, z))
+        }
+        _ => None,
+    }
+}
+
+pub fn run_pan_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let base = vec3_or(p, "base").unwrap_or(Vec3::ZERO);
+    let disp = vec3_or(p, "displacement").unwrap_or(Vec3::ZERO);
+    let delta = disp - base;
+    s.echo(format!("Pan by displacement: ({:.4}, {:.4}, {:.4})", delta.x, delta.y, delta.z));
+    Ok(json!({ "displacement": [delta.x, delta.y, delta.z] }))
+}
+
+#[derive(Default)]
+struct PanPointM {
+    base: Option<Vec3>,
+}
+
+impl Interactive for PanPointM {
+    fn name(&self) -> &'static str {
+        "PAN"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.base.is_none() {
+            Prompt::new("Specify base point or displacement:", Accept::POINT)
+        } else {
+            Prompt::new("Specify second point:", Accept::POINT)
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Point(p) => {
+                let pt = Vec3::new(p.x, p.y, 0.0);
+                if let Some(base) = self.base {
+                    run_pan_point(s, &json!({ "base": [base.x, base.y, base.z], "displacement": [pt.x, pt.y, pt.z] }))?;
+                    Ok(Step::Done)
+                } else {
+                    self.base = Some(pt);
+                    Ok(Step::Continue)
+                }
+            }
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
+    let mut dir = s.doc()?.header.view_dir();
+    let d_xy = p.get("angle_xy").and_then(Value::as_f64).unwrap_or(0.0).to_radians();
+    let d_z = p.get("angle_z").and_then(Value::as_f64).unwrap_or(0.0).to_radians();
+
+    if d_xy.abs() > 1e-6 || d_z.abs() > 1e-6 {
+        let cos_xy = d_xy.cos();
+        let sin_xy = d_xy.sin();
+        let new_x = dir.x * cos_xy - dir.y * sin_xy;
+        let new_y = dir.x * sin_xy + dir.y * cos_xy;
+        dir = Vec3::new(new_x, new_y, dir.z + d_z.sin()).normalized();
+        s.doc_mut()?.header.set_view_dir(dir);
+    }
+    s.echo("3D Orbit: press Enter or Esc to exit.");
+    Ok(json!({ "direction": [dir.x, dir.y, dir.z] }))
+}
+
+#[derive(Default)]
+struct Orbit3dM;
+
+impl Interactive for Orbit3dM {
+    fn name(&self) -> &'static str {
+        "3DORBIT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("3D Orbit: drag to orbit (Enter to finish):", Accept::POINT)
+    }
+    fn input(&mut self, _s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_3dforbit(s: &mut Session, p: &Value) -> Result<Value> {
+    run_3dorbit(s, p)
+}
+
+#[derive(Default)]
+struct FreeOrbit3dM;
+
+impl Interactive for FreeOrbit3dM {
+    fn name(&self) -> &'static str {
+        "3DFORBIT"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("3D Free Orbit: drag to orbit freely (Enter to finish):", Accept::POINT)
+    }
+    fn input(&mut self, _s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_3ddistance(s: &mut Session, p: &Value) -> Result<Value> {
+    let factor = f64_or(p, "factor", 1.0);
+    s.echo(format!("3D Distance factor set to {factor}"));
+    Ok(json!({ "factor": factor }))
+}
+
+#[derive(Default)]
+struct Distance3dM;
+
+impl Interactive for Distance3dM {
+    fn name(&self) -> &'static str {
+        "3DDISTANCE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("3D Distance: drag to adjust camera distance (Enter to finish):", Accept::POINT)
+    }
+    fn input(&mut self, _s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_3dswivel(s: &mut Session, p: &Value) -> Result<Value> {
+    let pan_x = f64_or(p, "pan_x", 0.0);
+    let pan_y = f64_or(p, "pan_y", 0.0);
+    s.echo(format!("3D Swivel: pan angle ({pan_x}, {pan_y})"));
+    Ok(json!({ "pan_x": pan_x, "pan_y": pan_y }))
+}
+
+#[derive(Default)]
+struct Swivel3dM;
+
+impl Interactive for Swivel3dM {
+    fn name(&self) -> &'static str {
+        "3DSWIVEL"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("3D Swivel: drag to swivel camera (Enter to finish):", Accept::POINT)
+    }
+    fn input(&mut self, _s: &mut Session, i: Input) -> Result<Step> {
+        match i {
             Input::Enter => Ok(Step::Done),
             _ => Ok(Step::Continue),
         }

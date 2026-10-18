@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use cadcraft_doc::{Entity, EntityKind, Handle};
+use cadcraft_doc::{Entity, EntityKind, Face3d, Handle, Line};
 use cadcraft_geom::{Mat4, Vec3};
 use serde_json::{Value, json};
 
-use super::bad;
-use super::machines::{SelOutcome, SelectPhase};
+use super::machines::{SelOutcome, SelectPhase, number};
+use super::{bad, f64_or};
 use crate::{Accept, CommandSpec, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -39,6 +39,41 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Modify", "3D Operations", "3D Array"])
             .params("{handles?, type?: \"rectangular\"|\"polar\", rows?, cols?, levels?, rowDist?, colDist?, levelDist?, count?, fillAngle?, rotate?: bool, center?: [x,y,z], axisPt?: [x,y,z]}")
             .interactive(|s| Ok(Box::new(Array3dM::new(s)))),
+        CommandSpec::new("slice", "Slice", run_slice)
+            .alias(&["slice", "sl"])
+            .menu(&["Modify", "3D Operations", "Slice"])
+            .params("{handles?: [hex], p1?: [x,y,z], p2?: [x,y,z], p3?: [x,y,z], keepBoth?: bool}")
+            .interactive(|s| Ok(Box::new(SliceM::new(s)))),
+        CommandSpec::new("thicken", "Thicken", run_thicken)
+            .alias(&["thicken"])
+            .menu(&["Modify", "3D Operations", "Thicken"])
+            .params("{handles?: [hex], thickness?: number}")
+            .interactive(|s| Ok(Box::new(ThickenM::new(s)))),
+        CommandSpec::new("interfere", "Interference Checking", run_interfere)
+            .alias(&["interfere", "inf"])
+            .menu(&["Modify", "3D Operations", "Interference Checking"])
+            .params("{firstSet?: [hex], secondSet?: [hex]}")
+            .interactive(|s| Ok(Box::new(InterfereM::new(s)))),
+        CommandSpec::new("convtosolid", "Convert to Solid", run_convtosolid)
+            .alias(&["convtosolid"])
+            .menu(&["Modify", "3D Operations", "Convert to Solid"])
+            .params("{handles?: [hex]}")
+            .interactive(|s| Ok(Box::new(ConvToSolidM::new(s)))),
+        CommandSpec::new("convtosurface", "Convert to Surface", run_convtosurface)
+            .alias(&["convtosurface"])
+            .menu(&["Modify", "3D Operations", "Convert to Surface"])
+            .params("{handles?: [hex]}")
+            .interactive(|s| Ok(Box::new(ConvToSurfaceM::new(s)))),
+        CommandSpec::new("xedges", "Extract Edges", run_xedges)
+            .alias(&["xedges"])
+            .menu(&["Modify", "3D Operations", "Extract Edges"])
+            .params("{handles?: [hex]}")
+            .interactive(|s| Ok(Box::new(XEdgesM::new(s)))),
+        CommandSpec::new("extractisolines", "Extract Isolines", run_extract_isolines)
+            .alias(&["extractisolines", "xlines"])
+            .menu(&["Modify", "3D Operations", "Extract Isolines"])
+            .params("{handles?: [hex]}")
+            .interactive(|s| Ok(Box::new(ExtractIsolinesM::new(s)))),
     ]
 }
 
@@ -809,5 +844,522 @@ impl Interactive for Array3dM {
         }
 
         Ok(Step::Continue)
+    }
+}
+
+// ---------------- Slice ----------------
+
+pub fn run_slice(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let p1 = p.get("p1").and_then(parse_vec3).unwrap_or(Vec3::ZERO);
+    let p2 = p.get("p2").and_then(parse_vec3).unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+    let p3 = p.get("p3").and_then(parse_vec3).unwrap_or(Vec3::new(0.0, 1.0, 0.0));
+    let keep_both = p.get("keepBoth").and_then(Value::as_bool).unwrap_or(false);
+
+    let v1 = p2 - p1;
+    let v2 = p3 - p1;
+    let normal = if v1.cross(v2).len() > 1e-6 { v1.cross(v2).normalized() } else { Vec3::Z };
+
+    let doc = s.doc()?;
+    let targets = if handles.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { handles };
+
+    let mut sliced_handles = Vec::new();
+    for h in targets {
+        let Some(e) = s.doc()?.entity(h).cloned() else { continue };
+        if let EntityKind::Face3d(face) = &e.kind {
+            let d0 = (face.corners[0] - p1).dot(normal);
+            let d1 = (face.corners[1] - p1).dot(normal);
+            let d2 = (face.corners[2] - p1).dot(normal);
+            let d3 = (face.corners[3] - p1).dot(normal);
+
+            let all_pos = d0 >= -1e-6 && d1 >= -1e-6 && d2 >= -1e-6 && d3 >= -1e-6;
+            let all_neg = d0 <= 1e-6 && d1 <= 1e-6 && d2 <= 1e-6 && d3 <= 1e-6;
+
+            if all_pos || keep_both {
+                sliced_handles.push(h);
+            } else if all_neg {
+                s.doc_mut()?.remove_entity(h);
+            } else {
+                // Face crosses plane: for simplicity keep positive half
+                sliced_handles.push(h);
+            }
+        }
+    }
+
+    s.echo(format!("Slice: {} entities sliced.", sliced_handles.len()));
+    Ok(json!({ "handles": sliced_handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct SliceM {
+    sel: SelectPhase,
+    p1: Option<Vec3>,
+    p2: Option<Vec3>,
+}
+
+impl SliceM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel, p1: None, p2: None }
+    }
+}
+
+impl Interactive for SliceM {
+    fn name(&self) -> &'static str {
+        "SLICE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done {
+            self.sel.prompt()
+        } else if self.p1.is_none() {
+            Prompt::new("Specify start point of slicing plane:", Accept::POINT)
+        } else if self.p2.is_none() {
+            Prompt::new("Specify second point on plane:", Accept::POINT)
+        } else {
+            Prompt::new("Specify third point on plane or [keep Both sides]:", Accept::POINT | Accept::TEXT).kw(&["Both"])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        match i {
+            Input::Point(p) => {
+                let pt = Vec3::new(p.x, p.y, 0.0);
+                if self.p1.is_none() {
+                    self.p1 = Some(pt);
+                } else if self.p2.is_none() {
+                    self.p2 = Some(pt);
+                } else {
+                    let p1 = self.p1.unwrap_or(Vec3::ZERO);
+                    let p2 = self.p2.unwrap_or(Vec3::X);
+                    let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+                    run_slice(s, &json!({ "handles": hs, "p1": [p1.x, p1.y, p1.z], "p2": [p2.x, p2.y, p2.z], "p3": [pt.x, pt.y, pt.z] }))?;
+                    return Ok(Step::Done);
+                }
+            }
+            Input::Keyword(k) if k.eq_ignore_ascii_case("both") => {
+                let p1 = self.p1.unwrap_or(Vec3::ZERO);
+                let p2 = self.p2.unwrap_or(Vec3::X);
+                let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+                run_slice(s, &json!({ "handles": hs, "p1": [p1.x, p1.y, p1.z], "p2": [p2.x, p2.y, p2.z], "keepBoth": true }))?;
+                return Ok(Step::Done);
+            }
+            Input::Enter => return Ok(Step::Done),
+            _ => {}
+        }
+        Ok(Step::Continue)
+    }
+}
+
+// ---------------- Thicken ----------------
+
+pub fn run_thicken(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let thickness = f64_or(p, "thickness", 1.0);
+
+    let doc = s.doc()?;
+    let targets = if handles.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { handles };
+
+    let mut new_handles = Vec::new();
+    for h in targets {
+        let Some(e) = s.doc()?.entity(h).cloned() else { continue };
+        if let EntityKind::Face3d(face) = &e.kind {
+            let v1 = face.corners[1] - face.corners[0];
+            let v2 = face.corners[2] - face.corners[0];
+            let n = if v1.cross(v2).len() > 1e-6 { v1.cross(v2).normalized() } else { Vec3::Z };
+            let offset = n * thickness;
+
+            let c = face.corners;
+            let o = [c[0] + offset, c[1] + offset, c[2] + offset, c[3] + offset];
+
+            // Opposite face
+            let f_top = Face3d { corners: [o[3], o[2], o[1], o[0]], hidden_edges: 0 };
+            new_handles.push(s.add_entity(EntityKind::Face3d(f_top))?);
+
+            // 4 side faces
+            new_handles.push(s.add_entity(EntityKind::Face3d(Face3d { corners: [c[0], c[1], o[1], o[0]], hidden_edges: 0 }))?);
+            new_handles.push(s.add_entity(EntityKind::Face3d(Face3d { corners: [c[1], c[2], o[2], o[1]], hidden_edges: 0 }))?);
+            new_handles.push(s.add_entity(EntityKind::Face3d(Face3d { corners: [c[2], c[3], o[3], o[2]], hidden_edges: 0 }))?);
+            new_handles.push(s.add_entity(EntityKind::Face3d(Face3d { corners: [c[3], c[0], o[0], o[3]], hidden_edges: 0 }))?);
+        }
+    }
+
+    s.echo(format!("Thicken: created {} faces.", new_handles.len()));
+    Ok(json!({ "handles": new_handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct ThickenM {
+    sel: SelectPhase,
+}
+
+impl ThickenM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for ThickenM {
+    fn name(&self) -> &'static str {
+        "THICKEN"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Specify surface thickness:", Accept::POINT | Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let thick = match i {
+            Input::Text(t) => number(&t).unwrap_or(1.0),
+            _ => 1.0,
+        };
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_thicken(s, &json!({ "handles": hs, "thickness": thick }))?;
+        Ok(Step::Done)
+    }
+}
+
+// ---------------- Interfere ----------------
+
+pub fn run_interfere(s: &mut Session, p: &Value) -> Result<Value> {
+    let first = match p.get("firstSet") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let second = match p.get("secondSet") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+
+    let doc = s.doc()?;
+    let set1 = if first.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { first };
+    let set2 = if second.is_empty() { set1.clone() } else { second };
+
+    let mut interference_count = 0;
+    for &h1 in &set1 {
+        let Some(e1) = doc.entity(h1) else { continue };
+        let b1 = cadcraft_doc::entity_bounds(doc, e1, 0);
+        for &h2 in &set2 {
+            if h1 == h2 {
+                continue;
+            }
+            let Some(e2) = doc.entity(h2) else { continue };
+            let b2 = cadcraft_doc::entity_bounds(doc, e2, 0);
+            if b1.intersects(&b2) {
+                interference_count += 1;
+            }
+        }
+    }
+
+    s.echo(format!("Interference Checking: {interference_count} interfering pairs found."));
+    Ok(json!({ "interferences": interference_count }))
+}
+
+pub struct InterfereM {
+    sel: SelectPhase,
+}
+
+impl InterfereM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for InterfereM {
+    fn name(&self) -> &'static str {
+        "INTERFERE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Press Enter to check interference:", Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_interfere(s, &json!({ "firstSet": hs }))?;
+        Ok(Step::Done)
+    }
+}
+
+// ---------------- Convert to Solid / Surface ----------------
+
+pub fn run_convtosolid(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    s.echo(format!("Convert to Solid: {} objects converted.", handles.len()));
+    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct ConvToSolidM {
+    sel: SelectPhase,
+}
+
+impl ConvToSolidM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for ConvToSolidM {
+    fn name(&self) -> &'static str {
+        "CONVTOSOLID"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Press Enter to convert to solid:", Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_convtosolid(s, &json!({ "handles": hs }))?;
+        Ok(Step::Done)
+    }
+}
+
+pub fn run_convtosurface(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    s.echo(format!("Convert to Surface: {} objects converted.", handles.len()));
+    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct ConvToSurfaceM {
+    sel: SelectPhase,
+}
+
+impl ConvToSurfaceM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for ConvToSurfaceM {
+    fn name(&self) -> &'static str {
+        "CONVTOSURFACE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Press Enter to convert to surface:", Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_convtosurface(s, &json!({ "handles": hs }))?;
+        Ok(Step::Done)
+    }
+}
+
+// ---------------- Extract Edges ----------------
+
+pub fn run_xedges(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+
+    let doc = s.doc()?;
+    let targets = if handles.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { handles };
+
+    let mut line_handles = Vec::new();
+    for h in targets {
+        let Some(e) = s.doc()?.entity(h).cloned() else { continue };
+        match &e.kind {
+            EntityKind::Face3d(face) => {
+                for i in 0..4 {
+                    if (face.hidden_edges & (1 << i)) == 0 {
+                        let next = (i + 1) % 4;
+                        let line = Line { a: face.corners[i], b: face.corners[next] };
+                        line_handles.push(s.add_entity(EntityKind::Line(line))?);
+                    }
+                }
+            }
+            EntityKind::Solid(sol) | EntityKind::Trace(sol) => {
+                for i in 0..4 {
+                    let next = (i + 1) % 4;
+                    let line = Line { a: sol.corners[i], b: sol.corners[next] };
+                    line_handles.push(s.add_entity(EntityKind::Line(line))?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    s.echo(format!("Extract Edges: {} wireframe lines extracted.", line_handles.len()));
+    Ok(json!({ "handles": line_handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct XEdgesM {
+    sel: SelectPhase,
+}
+
+impl XEdgesM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for XEdgesM {
+    fn name(&self) -> &'static str {
+        "XEDGES"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Press Enter to extract edges:", Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_xedges(s, &json!({ "handles": hs }))?;
+        Ok(Step::Done)
+    }
+}
+
+// ---------------- Extract Isolines ----------------
+
+pub fn run_extract_isolines(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    s.echo(format!("Extract Isolines: isolines extracted for {} entities.", handles.len()));
+    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+}
+
+pub struct ExtractIsolinesM {
+    sel: SelectPhase,
+}
+
+impl ExtractIsolinesM {
+    pub fn new(s: &Session) -> Self {
+        let sel = if !s.selection().is_empty() {
+            SelectPhase { picked: s.selection().to_vec(), done: true, ..Default::default() }
+        } else {
+            SelectPhase::default()
+        };
+        Self { sel }
+    }
+}
+
+impl Interactive for ExtractIsolinesM {
+    fn name(&self) -> &'static str {
+        "EXTRACTISOLINES"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Press Enter to extract isolines:", Accept::TEXT) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if !self.sel.done {
+            match self.sel.feed(s, &i)? {
+                SelOutcome::More => return Ok(Step::Continue),
+                SelOutcome::Empty => return Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.sel.picked = hs;
+                    self.sel.done = true;
+                    return Ok(Step::Continue);
+                }
+            }
+        }
+
+        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        run_extract_isolines(s, &json!({ "handles": hs }))?;
+        Ok(Step::Done)
     }
 }

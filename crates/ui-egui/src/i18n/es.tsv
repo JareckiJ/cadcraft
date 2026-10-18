@@ -1294,4 +1294,28 @@
 	3D Modeling	Modelado 3D
 	Meshes	Mallas
 	Hide	Ocultar
-
+	Adjust Distance	Ajustar distancia
+	Camera	Cámara
+	Constrained Orbit	Órbita restringida
+	Convert to Solid	Convertir en sólido
+	Convert to Surface	Convertir en superficie
+	Extract Edges	Extraer aristas
+	Extract Isolines	Extraer isolíneas
+	Face	Cara
+	Free Orbit	Órbita libre
+	Interference Checking	Comprobación de interferencias
+	Lights	Luces
+	MPolygon	MPolygon
+	Meshes, Edge Surface	Mallas, superficie reglada por aristas
+	Meshes, Revolved Surface	Mallas, superficie de revolución
+	Meshes, Ruled Surface	Mallas, superficie reglada
+	Meshes, Tabulated Surface	Mallas, superficie tabulada
+	Polysolid	Polisólido
+	Properties...	Propiedades...
+	Section Plane	Plano de sección
+	Settings	Configuración
+	Slice	Corte
+	Smooth Mesh	Malla suave
+	Swivel	Giro
+	Thicken	Engrosar
+	Wedge	Cuña

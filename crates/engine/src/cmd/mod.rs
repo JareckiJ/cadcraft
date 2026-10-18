@@ -33,6 +33,7 @@ pub mod plotters;
 mod props;
 pub use props::MatchProps;
 pub(crate) mod face3d;
+pub(crate) mod modeling3d;
 pub(crate) mod ops3d;
 mod qselect;
 mod selecttools;
@@ -210,6 +211,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(views3d::specs());
         v.extend(ops3d::specs());
         v.extend(face3d::specs());
+        v.extend(modeling3d::specs());
         v
     })
 }

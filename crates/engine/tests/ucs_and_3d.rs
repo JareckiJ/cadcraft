@@ -407,3 +407,165 @@ fn test_view_commands_hide_ucsicon_attdisp() {
     s.execute("attdisp.normal", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().header.i64("ATTMODE", -1), 1);
 }
+
+#[test]
+fn test_3d_primitives_modeling() {
+    let mut s = Session::new();
+
+    // Box
+    let r = s.execute("box", &json!({ "corner1": [0, 0, 0], "corner2": [10, 20, 30] })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 6);
+
+    // Wedge
+    let r = s.execute("wedge", &json!({ "corner1": [0, 0, 0], "corner2": [10, 10, 0], "height": 5 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 5);
+
+    // Cylinder
+    let r = s.execute("cylinder", &json!({ "center": [0, 0, 0], "radius": 5, "height": 10, "segments": 8 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 24); // 8 side + 8 bottom + 8 top
+
+    // Cone
+    let r = s.execute("cone", &json!({ "center": [0, 0, 0], "radius": 5, "height": 10, "segments": 8 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 16); // 8 side + 8 bottom
+
+    // Sphere
+    let r = s.execute("sphere", &json!({ "center": [0, 0, 0], "radius": 5, "segments": 6 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert!(!handles.is_empty());
+
+    // Torus
+    let r = s.execute("torus", &json!({ "center": [0, 0, 0], "radius": 10, "tubeRadius": 2, "segments": 8 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert!(!handles.is_empty());
+
+    // Pyramid
+    let r = s.execute("pyramid", &json!({ "center": [0, 0, 0], "radius": 5, "height": 10, "sides": 4 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 8);
+
+    // Polysolid
+    let r = s.execute("polysolid", &json!({ "points": [[0, 0, 0], [10, 0, 0], [10, 10, 0]], "width": 1, "height": 3 })).unwrap();
+    let handles = r["handles"].as_array().unwrap();
+    assert_eq!(handles.len(), 8); // 4 faces per segment * 2 segments
+}
+
+#[test]
+fn test_3d_extrude_and_revolve() {
+    let mut s = Session::new();
+
+    // Create a 2D line
+    let r = s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let h = r["handles"][0].as_str().unwrap();
+
+    // Extrude line into 3D face
+    let r_ext = s.execute("extrude", &json!({ "handles": [h], "height": 5 })).unwrap();
+    let ext_handles = r_ext["handles"].as_array().unwrap();
+    assert_eq!(ext_handles.len(), 1);
+
+    // Revolve line around Y axis
+    let r_rev = s.execute("revolve", &json!({ "handles": [h], "axisP1": [0, 0, 0], "axisP2": [0, 1, 0], "angle": 360 })).unwrap();
+    let rev_handles = r_rev["handles"].as_array().unwrap();
+    assert_eq!(rev_handles.len(), 16);
+}
+
+#[test]
+fn test_3d_operations_slice_thicken_xedges() {
+    let mut s = Session::new();
+
+    // Create a box
+    let r_box = s.execute("box", &json!({ "corner1": [0, 0, 0], "corner2": [10, 10, 10] })).unwrap();
+    let box_handles = r_box["handles"].as_array().unwrap();
+    let h0 = box_handles[0].as_str().unwrap();
+
+    // Thicken face
+    let r_thk = s.execute("thicken", &json!({ "handles": [h0], "thickness": 2.0 })).unwrap();
+    assert!(!r_thk["handles"].as_array().unwrap().is_empty());
+
+    // Extract edges
+    let r_edges = s.execute("xedges", &json!({ "handles": [h0] })).unwrap();
+    assert_eq!(r_edges["handles"].as_array().unwrap().len(), 4);
+
+    // Slice
+    let r_slice = s.execute("slice", &json!({ "handles": [h0], "p1": [5, 0, 0], "p2": [5, 10, 0], "p3": [5, 0, 10], "keepBoth": true })).unwrap();
+    assert!(!r_slice["handles"].as_array().unwrap().is_empty());
+
+    // Interference
+    let r_inf = s.execute("interfere", &json!({})).unwrap();
+    assert!(r_inf.get("interferences").is_some());
+}
+
+#[test]
+fn test_3d_views_navigation_and_settings() {
+    let mut s = Session::new();
+
+    // 3D Orbit
+    let r_orbit = s.execute("3dorbit", &json!({ "angle_xy": 45, "angle_z": 30 })).unwrap();
+    assert!(r_orbit.get("direction").is_some());
+
+    // Pan point
+    let r_pan = s.execute("pan.point", &json!({ "base": [0, 0, 0], "displacement": [10, 20, 0] })).unwrap();
+    assert_eq!(r_pan["displacement"], json!([10.0, 20.0, 0.0]));
+
+    // Distance & Swivel
+    let r_dist = s.execute("3ddistance", &json!({ "factor": 1.5 })).unwrap();
+    assert_eq!(r_dist["factor"], 1.5);
+
+    let r_swivel = s.execute("3dswivel", &json!({ "pan_x": 5, "pan_y": -5 })).unwrap();
+    assert_eq!(r_swivel["pan_x"], 5.0);
+
+    // UCS icon properties & navvcube settings & lights
+    let r_props = s.execute("ucsicon.properties", &json!({ "size": 15 })).unwrap();
+    assert_eq!(r_props["size"], 15);
+
+    let r_vc = s.execute("navvcube.settings", &json!({ "opacity": 75 })).unwrap();
+    assert_eq!(r_vc["opacity"], 75.0);
+
+    let r_lights = s.execute("lightlist", &json!({})).unwrap();
+    assert_eq!(r_lights["lights"], json!([]));
+}
+
+#[test]
+fn test_ucs_face_and_format_transparency() {
+    let mut s = Session::new();
+
+    // Create 3D face
+    let r_face = s.execute("3dface", &json!({ "points": [[0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0]] })).unwrap();
+    let face_h = r_face["handle"].as_str().unwrap();
+
+    // Align UCS to face
+    let r_ucs = s.execute("ucs.face", &json!({ "handle": face_h })).unwrap();
+    assert_eq!(r_ucs["origin"], json!([0.0, 0.0, 0.0]));
+    assert_eq!(r_ucs["xAxis"], json!([1.0, 0.0, 0.0]));
+    assert_eq!(r_ucs["yAxis"], json!([0.0, 1.0, 0.0]));
+
+    // Transparency
+    s.execute("transparency", &json!({ "value": 50 })).unwrap();
+    let r_tr = s.execute("transparency", &json!({})).unwrap();
+    assert_eq!(r_tr["value"], "50");
+
+    s.execute("transparency", &json!({ "value": "ByLayer" })).unwrap();
+    let r_tr2 = s.execute("transparency", &json!({})).unwrap();
+    assert_eq!(r_tr2["value"], "ByLayer");
+
+    // Thickness
+    s.execute("thickness", &json!({ "thickness": 7.5 })).unwrap();
+    assert_eq!(s.doc().unwrap().header.f64("THICKNESS", 0.0), 7.5);
+}
+
+#[test]
+fn test_mpolygon_command() {
+    let mut s = Session::new();
+
+    // Create MPolygon from points
+    let r = s.execute("mpolygon", &json!({ "points": [[0, 0], [10, 0], [10, 10], [0, 10]], "pattern": "SOLID" })).unwrap();
+    assert!(r.get("boundary").is_some());
+    assert!(r.get("hatch").is_some());
+
+    let doc = s.doc().unwrap();
+    let boundary_h = r["boundary"].as_str().unwrap();
+    assert!(doc.model.iter().any(|e| e.handle.hex() == boundary_h && matches!(e.kind, EntityKind::LwPolyline(_))));
+}

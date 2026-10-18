@@ -31,6 +31,10 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(has_doc)
             .noundo()
             .interactive(|_| Ok(Box::new(pick::HatchPickM::default()))),
+        CommandSpec::new("mpolygon", "MPolygon", run_mpolygon)
+            .alias(&["mpolygon"])
+            .params("{points?: [[x,y]], handles?: [hex], pattern?: string}")
+            .interactive(|_| Ok(Box::new(MPolygonM::default()))),
     ]
 }
 
@@ -821,6 +825,90 @@ impl Interactive for BoundaryM {
                 Ok(Step::Continue)
             }
             Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_mpolygon(s: &mut Session, p: &Value) -> Result<Value> {
+    let handles = match p.get("handles") {
+        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let pattern = p.get("pattern").and_then(Value::as_str).unwrap_or("SOLID");
+
+    if !handles.is_empty() {
+        let hex_handles = handles.iter().map(|h| h.hex()).collect::<Vec<_>>();
+        let hatch_res = run_hatch(s, &json!({ "handles": hex_handles, "pattern": pattern, "associative": true }))?;
+        s.echo("MPOLYGON: converted boundary to MPolygon with associative fill.");
+        return Ok(json!({ "boundaries": hex_handles, "hatch": hatch_res.get("handles") }));
+    }
+
+    let pts = match p.get("points") {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| match v {
+                Value::Array(coords) => {
+                    let x = coords.first()?.as_f64()?;
+                    let y = coords.get(1)?.as_f64()?;
+                    Some(Vec2::new(x, y))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+
+    if pts.len() < 3 {
+        return Err(bad("mpolygon", "at least 3 points required to create an MPolygon"));
+    }
+
+    let verts = pts.iter().map(|&p| PolyVertex::new(p)).collect();
+    let poly = cadcraft_doc::LwPolyline { vertices: verts, closed: true, const_width: 0.0, elevation: s.doc()?.header.elevation(), plinegen: false };
+    let poly_h = s.add_entity(EntityKind::LwPolyline(poly))?;
+    let hatch_res = run_hatch(s, &json!({ "handles": [poly_h.hex()], "pattern": pattern, "associative": true }))?;
+    s.echo("MPolygon created.");
+    Ok(json!({ "boundary": poly_h.hex(), "hatch": hatch_res.get("handles") }))
+}
+
+#[derive(Default)]
+pub struct MPolygonM {
+    pts: Vec<Vec2>,
+}
+
+impl Interactive for MPolygonM {
+    fn name(&self) -> &'static str {
+        "MPOLYGON"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.pts.is_empty() {
+            Prompt::new("Specify first point of MPolygon:", Accept::POINT)
+        } else if self.pts.len() < 3 {
+            Prompt::new("Specify next point:", Accept::POINT)
+        } else {
+            Prompt::new("Specify next point or [Close]:", Accept::POINT | Accept::TEXT).kw(&["Close"])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Point(p) => {
+                self.pts.push(Vec2::new(p.x, p.y));
+                Ok(Step::Continue)
+            }
+            Input::Keyword(k) if k.eq_ignore_ascii_case("close") => {
+                if self.pts.len() >= 3 {
+                    let pts_json = self.pts.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>();
+                    run_mpolygon(s, &json!({ "points": pts_json }))?;
+                }
+                Ok(Step::Done)
+            }
+            Input::Enter => {
+                if self.pts.len() >= 3 {
+                    let pts_json = self.pts.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>();
+                    run_mpolygon(s, &json!({ "points": pts_json }))?;
+                }
+                Ok(Step::Done)
+            }
             _ => Ok(Step::Continue),
         }
     }

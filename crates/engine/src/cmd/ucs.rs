@@ -1,4 +1,4 @@
-use cadcraft_doc::Ucs;
+use cadcraft_doc::{Handle, Ucs};
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
@@ -55,12 +55,23 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("plan.named", "Named UCS...", run_plan_named)
             .menu(&["View", "3D Views", "Plan View", "Named UCS"])
             .params("{name: string}"),
+        CommandSpec::new("ucs.face", "Face", run_ucs_face)
+            .menu(&["Tools", "New UCS", "Face"])
+            .alias(&["ucsface"])
+            .params("{handle?: hex, point?: [x,y,z]}")
+            .interactive(|_| Ok(Box::new(UcsFaceM))),
         CommandSpec::new("elevation", "Elevation", run_elevation)
             .params("{elevation?: number, thickness?: number}")
             .interactive(|s| Ok(Box::new(ElevationM::new(s)))),
         CommandSpec::new("thickness", "Thickness", run_thickness)
+            .menu(&["Format", "Thickness"])
             .params("{thickness: number}")
             .interactive(|s| Ok(Box::new(ThicknessM::new(s)))),
+        CommandSpec::new("transparency", "Transparency", run_transparency)
+            .menu(&["Format", "Transparency"])
+            .alias(&["cetransparency"])
+            .params("{value?: number | \"ByLayer\" | \"ByBlock\"}")
+            .interactive(|s| Ok(Box::new(TransparencyM::new(s)))),
     ]
 }
 
@@ -902,5 +913,185 @@ impl Interactive for ThicknessM {
         };
         run_thickness(s, &json!({ "thickness": thick }))?;
         Ok(Step::Done)
+    }
+}
+
+pub fn run_ucs_face(s: &mut Session, p: &Value) -> Result<Value> {
+    let handle = p.get("handle").and_then(Value::as_str);
+    let pt = vec3_param(p, "point");
+
+    let doc = s.doc()?;
+    let target = if let Some(h_str) = handle {
+        let h = Handle::parse_hex(h_str).ok_or_else(|| bad("ucs", "invalid handle"))?;
+        doc.entity(h).cloned().ok_or_else(|| bad("ucs", "entity not found"))?
+    } else if let Some(p) = pt {
+        doc.model
+            .iter()
+            .find(|e| match &e.kind {
+                cadcraft_doc::EntityKind::Face3d(f) => f.corners.iter().any(|c| (*c - p).len() < 5.0),
+                cadcraft_doc::EntityKind::Solid(sol) | cadcraft_doc::EntityKind::Trace(sol) => sol.corners.iter().any(|c| (*c - p).len() < 5.0),
+                _ => false,
+            })
+            .cloned()
+            .ok_or_else(|| bad("ucs", "no 3D face found near point"))?
+    } else {
+        doc.model
+            .iter()
+            .find(|e| matches!(e.kind, cadcraft_doc::EntityKind::Face3d(_)))
+            .cloned()
+            .ok_or_else(|| bad("ucs", "specify `handle` or `point` of face"))?
+    };
+
+    let (origin, x_axis, y_axis) = match &target.kind {
+        cadcraft_doc::EntityKind::Face3d(f) => {
+            let p0 = f.corners[0];
+            let p1 = f.corners[1];
+            let p2 = f.corners[2];
+            let vx = p1 - p0;
+            let vy_cand = p2 - p0;
+            let normal = vx.cross(vy_cand);
+            if vx.len() < 1e-9 || normal.len() < 1e-9 {
+                return Err(bad("ucs", "face is degenerate"));
+            }
+            let x_axis = vx.normalized();
+            let z_axis = normal.normalized();
+            let y_axis = z_axis.cross(x_axis).normalized();
+            (p0, x_axis, y_axis)
+        }
+        cadcraft_doc::EntityKind::Solid(sol) | cadcraft_doc::EntityKind::Trace(sol) => {
+            let p0 = sol.corners[0];
+            let p1 = sol.corners[1];
+            let p2 = sol.corners[2];
+            let vx = p1 - p0;
+            let vy_cand = p2 - p0;
+            let normal = vx.cross(vy_cand);
+            if vx.len() < 1e-9 || normal.len() < 1e-9 {
+                return Err(bad("ucs", "solid face is degenerate"));
+            }
+            let x_axis = vx.normalized();
+            let z_axis = normal.normalized();
+            let y_axis = z_axis.cross(x_axis).normalized();
+            (p0, x_axis, y_axis)
+        }
+        _ => return Err(bad("ucs", "selected entity is not a 3D face")),
+    };
+
+    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis };
+    s.set_current_ucs(ucs)?;
+    s.echo("UCS aligned to selected face.");
+    Ok(json!({
+        "origin": [origin.x, origin.y, origin.z],
+        "xAxis": [x_axis.x, x_axis.y, x_axis.z],
+        "yAxis": [y_axis.x, y_axis.y, y_axis.z],
+    }))
+}
+
+struct UcsFaceM;
+
+impl Interactive for UcsFaceM {
+    fn name(&self) -> &'static str {
+        "UCS"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Select face of 3D object", Accept::POINT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Point(p) => {
+                run_ucs_face(s, &json!({ "point": [p.x, p.y, 0.0] }))?;
+                Ok(Step::Done)
+            }
+            Input::Text(t) => {
+                let trimmed = t.trim();
+                if let Some(h) = Handle::parse_hex(trimmed) {
+                    run_ucs_face(s, &json!({ "handle": h.hex() }))?;
+                    Ok(Step::Done)
+                } else {
+                    Ok(Step::Done)
+                }
+            }
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+pub fn run_transparency(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(v) = p.get("value") {
+        let val_str = match v {
+            Value::String(str_val) => {
+                let lower = str_val.trim().to_ascii_lowercase();
+                if lower == "bylayer" {
+                    "ByLayer".to_string()
+                } else if lower == "byblock" {
+                    "ByBlock".to_string()
+                } else if let Ok(num) = str_val.trim().trim_end_matches('%').parse::<u8>() {
+                    if num > 90 {
+                        return Err(bad("transparency", "transparency must be between 0 and 90"));
+                    }
+                    format!("{num}")
+                } else {
+                    return Err(bad("transparency", "invalid transparency value (use ByLayer, ByBlock, or 0-90)"));
+                }
+            }
+            Value::Number(num) => {
+                if let Some(n) = num.as_u64() {
+                    if n > 90 {
+                        return Err(bad("transparency", "transparency must be between 0 and 90"));
+                    }
+                    format!("{n}")
+                } else {
+                    return Err(bad("transparency", "transparency must be an integer 0-90"));
+                }
+            }
+            _ => return Err(bad("transparency", "invalid transparency parameter")),
+        };
+        s.doc_mut()?.header.set_str("CETRANSPARENCY", &val_str);
+        s.echo(format!("CETRANSPARENCY set to {val_str}"));
+        return Ok(json!({ "value": val_str }));
+    }
+
+    let cur = s.doc()?.header.str("CETRANSPARENCY", "ByLayer");
+    Ok(json!({ "value": cur }))
+}
+
+struct TransparencyM {
+    cur_val: String,
+}
+
+impl TransparencyM {
+    fn new(s: &Session) -> Self {
+        let cur_val = s.doc().map(|d| d.header.str("CETRANSPARENCY", "ByLayer").to_string()).unwrap_or_else(|_| "ByLayer".into());
+        Self { cur_val }
+    }
+}
+
+impl Interactive for TransparencyM {
+    fn name(&self) -> &'static str {
+        "CETRANSPARENCY"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new(format!("Enter new value for CETRANSPARENCY [ByLayer/ByBlock/0-90%] <{}>", self.cur_val), Accept::TEXT)
+            .kw(&["ByLayer", "ByBlock"])
+            .default(&self.cur_val)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Keyword(k) => {
+                run_transparency(s, &json!({ "value": k }))?;
+                Ok(Step::Done)
+            }
+            Input::Text(t) => {
+                let trimmed = t.trim();
+                let val = if trimmed.is_empty() { self.cur_val.as_str() } else { trimmed };
+                run_transparency(s, &json!({ "value": val }))?;
+                Ok(Step::Done)
+            }
+            Input::Enter => {
+                run_transparency(s, &json!({ "value": self.cur_val }))?;
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
     }
 }
