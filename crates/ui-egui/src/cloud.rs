@@ -26,9 +26,9 @@ use cadcraft_doc::Drawing;
 pub use craft_cloud::{Capability, Entry, EntryKind};
 pub use craft_ui::cloud::{
     Account, Busy, CloudApp, CloudBackend, CloudFiles, Conflict, CopyFormat, Destination, DocumentKind, Event, Fault, Folder, Job, Link, Origin,
-    Post, Source, UNAVAILABLE, available, browse, can_converse, conflict_modal, destination_name, has_target, link, load_shared, open_entry,
-    open_page, origin, parent_of, prefers_cloud, progress, pump, reload_active, save, save_as, save_page, share_button, shares, sign_in, sign_out,
-    start, who, work_together,
+    Post, SaveIntent, Source, UNAVAILABLE, available, browse, can_converse, conflict_modal, destination_name, has_target, link, load_shared,
+    open_entry, open_page, origin, parent_of, prefers_cloud, progress, reload_active, save, save_as, save_page, share_button, shares, sign_in,
+    sign_out, start, who, work_together,
 };
 use egui::{Color32, Painter, Rect, Ui};
 use serde_json::{Value as Json, json};
@@ -67,6 +67,19 @@ const COPIES: [(&str, &str); 4] = [
 /// that reached the server. An edit made while the bytes were on the wire stays
 /// unsaved.
 pub type Sent = HashMap<u64, Arc<Drawing>>;
+
+/// Drain CollabCraft answers on the UI thread.
+pub fn pump(app: &mut CadApp, ctx: &egui::Context) {
+    craft_ui::cloud::pump(app, ctx);
+    if !matches!(app.cloud.busy, Some(Busy::Encoding { .. })) {
+        app.cloud_encode = false;
+    }
+}
+
+/// Output file name for a cloud save, from the destination and preferred format.
+fn output_name(name: &str, ext: &str, save_format: &str) -> String {
+    if ext.is_empty() { format!("{}.{}", name.trim_end_matches('.'), save_format) } else { name.to_owned() }
+}
 
 /// Which cloud page the toolbar is showing as a modal over the canvas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,11 +179,44 @@ impl CloudApp for CadApp {
         // DWT, SVG and PDF; anything else is refused with a clear message.
         // A name with no extension goes out as the user's preferred format
         // (DXF or DWG), the same default Save As applies.
-        let name =
-            if ext.is_empty() { format!("{}.{}", into.name.trim_end_matches('.'), self.ui.save_format.as_str()) } else { into.name.to_owned() };
+        let name = output_name(into.name, &ext, self.ui.save_format.as_str());
         let bytes = cadcraft_io::write(&snapshot, &name).map_err(|e| e.to_string())?;
         self.cloud_sent.insert(uid, snapshot);
         Ok(bytes)
+    }
+
+    /// Snapshot on the UI thread; encode off it (desktop) or on the calling task (wasm).
+    fn begin_encode(&mut self, intent: SaveIntent) -> Result<(), String> {
+        if self.cloud_encode {
+            return Err("a cloud save is already preparing".into());
+        }
+        let doc = self.session.docs.iter().find(|d| d.uid == intent.uid).ok_or("no drawing open")?;
+        let snapshot = Arc::clone(&doc.doc);
+        let dest = Destination { name: &intent.name, mime: intent.mime.as_deref() };
+        let name = output_name(&intent.name, &dest.extension(), self.ui.save_format.as_str());
+        self.cloud_sent.insert(intent.uid, snapshot.clone());
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = cadcraft_io::write(&snapshot, &name).map_err(|e| Fault::Refused(e.to_string()));
+            self.cloud.post(Event::Encoded { intent, bytes });
+            return Ok(());
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.cloud_encode = true;
+            let tx = self.cloud.event_sender();
+            std::thread::Builder::new().name("cloud-encode".into()).spawn(move || {
+                let bytes = cadcraft_io::write(&snapshot, &name).map_err(|e| Fault::Refused(e.to_string()));
+                let _ = tx.send(Event::Encoded { intent, bytes });
+            }).map_err(|e| {
+                self.cloud_encode = false;
+                self.cloud_sent.remove(&intent.uid);
+                format!("could not start cloud encode: {e}")
+            })?;
+            Ok(())
+        }
     }
 
     fn close(&mut self, uid: u64) {

@@ -222,6 +222,8 @@ pub struct CadApp {
     pub save_to_cloud: Option<bool>,
     /// The drawing snapshot each in-flight cloud save encoded, keyed by drawing uid.
     pub cloud_sent: cloud::Sent,
+    /// True while a background cloud encode thread is running (desktop only).
+    pub(crate) cloud_encode: bool,
     /// The egui context, for opening URLs (stored after the first frame).
     pub egui_ctx: Option<egui::Context>,
     // ---- control channel -----------------------------------------------------
@@ -283,6 +285,7 @@ impl CadApp {
             cloud_page: None,
             save_to_cloud: None,
             cloud_sent: cloud::Sent::new(),
+            cloud_encode: false,
             egui_ctx: None,
             control_rx: None,
             pending_shots: Vec::new(),
