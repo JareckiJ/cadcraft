@@ -183,6 +183,29 @@ impl Prompt {
 /// Commands that only need the coordinate call [`PointInput::point`].
 /// Commands that can use the semantic (direction, distance, snap type)
 /// match on the variant.
+///
+/// To use a specific form, a command matches on the variant before
+/// falling back to the generic arm:
+///
+/// ```ignore
+/// match input {
+///     // match the variant and use its semantic fields:
+///     Input::Point(PointInput::RelativePolar { dist, angle, .. }) => {
+///         // use dist and angle
+///     }
+///     // bind the whole PointInput to use both fields and the coordinate:
+///     Input::Point(pi @ PointInput::RelativePolar { dist, angle, .. }) => {
+///         let coord = pi.point();
+///         // use dist / angle and coord
+///     }
+///     // generic fallback for commands that only need the coordinate:
+///     Input::Point(pi) => {
+///         let p = pi.point();
+///         // use p
+///     }
+///     _ => {}
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum PointInput {
     /// `x,y` or `x,y,z` typed at the command line.
