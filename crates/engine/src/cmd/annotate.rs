@@ -528,6 +528,7 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
             rows: 1,
             col_spacing: 0.0,
             row_spacing: 0.0,
+            clip: None,
         };
         out.push(s.add_entity(EntityKind::Insert(ins))?.hex());
     } else if let Some(t) = str_param(p, "text") {

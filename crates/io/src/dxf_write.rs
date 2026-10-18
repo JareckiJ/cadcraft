@@ -762,6 +762,18 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 w.f(44, i.col_spacing);
                 w.f(45, i.row_spacing);
             }
+            if let Some(clip) = &i.clip {
+                w.s(1001, dxf_ext::APP);
+                w.s(1000, "XCLIP");
+                w.i(1070, if clip.enabled { 1 } else { 0 });
+                w.i(1070, if clip.inverted { 1 } else { 0 });
+                w.i(1070, clip.points.len() as i64);
+                for pt in &clip.points {
+                    w.f(1010, pt.x);
+                    w.f(1020, pt.y);
+                    w.f(1030, 0.0);
+                }
+            }
             if !i.attribs.is_empty() {
                 for a in &i.attribs {
                     let ah = w.h();

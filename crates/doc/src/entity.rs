@@ -495,6 +495,43 @@ pub struct Insert {
     pub col_spacing: f64,
     #[serde(default)]
     pub row_spacing: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipBoundary>,
+}
+
+/// A 2D clipping boundary for block references and xrefs (XCLIP).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipBoundary {
+    /// 2D boundary vertices in the block reference's coordinate space.
+    pub points: Vec<Vec2>,
+    /// Whether the clipping boundary is active (default true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Invert clipping boundary: show outside, cut inside (default false).
+    #[serde(default)]
+    pub inverted: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Insert {
+    fn default() -> Self {
+        Insert {
+            block: String::new(),
+            insert: Vec3::ZERO,
+            scale: unit_scale(),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+            clip: None,
+        }
+    }
 }
 fn unit_scale() -> Vec3 {
     Vec3::new(1.0, 1.0, 1.0)

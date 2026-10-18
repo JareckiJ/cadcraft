@@ -136,7 +136,9 @@
 	Clear History	Очистити журнал
 	Clear	Очистити
 	Clip	Обрізати
+	Clip Image	Обрізати зображення
 	Clip Viewport	Обрізати видовий екран
+	Clip Xref	Обрізати зовнішнє посилання
 	Clipboard	Буфер обміну
 	Close	Закрити
 	Close All	Закрити всі
@@ -407,6 +409,7 @@
 	HorizontalDistance	Горизонтальна відстань
 	How to apply:	Спосіб застосування:
 	ID Point	Координати точки
+	Image	Зображення
 	Import	Імпортувати
 	Align Multileaders	Вирівняти мультивиноски
 	Collect	Зібрати
@@ -1191,6 +1194,7 @@
 	Workspace Switching	Перемикання робочого простору
 	Write Block	Записати блок у файл
 	Xline	Допоміжна пряма
+	Xref	Зовнішнє посилання
 	Yellow	Жовтий
 	Yes	Так
 	Zoom	Масштабування виду

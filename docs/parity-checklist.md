@@ -4,7 +4,7 @@
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 371 / 491 items (76%)** · 521 registered commands.
+**Menu breadth: 373 / 491 items (76%)** · 524 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 | Tools | 85 | 69 | 81% |
 | Draw | 87 | 82 | 94% |
 | Dimension | 28 | 28 | 100% |
-| Modify | 113 | 65 | 58% |
+| Modify | 113 | 67 | 59% |
 | Window | 22 | 3 | 14% |
 | Help | 8 | 0 | 0% |
 
@@ -72,8 +72,6 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Modify > Object > Image > Quality
 - Modify > Object > Image > Frame
 - Modify > Object > Block Description...
-- Modify > Clip > Image
-- Modify > Clip > Xref
 - Modify > Solid Editing > Imprint Edges
 - Modify > Solid Editing > Fillet edges
 - Modify > Solid Editing > Chamfer edges

@@ -6,6 +6,7 @@ mod annotate;
 mod array;
 mod audit;
 pub(crate) mod blocks;
+pub(crate) mod clip;
 pub mod clipboard;
 pub mod constraints;
 mod draw;
@@ -212,6 +213,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(ops3d::specs());
         v.extend(face3d::specs());
         v.extend(modeling3d::specs());
+        v.extend(clip::specs());
         v
     })
 }

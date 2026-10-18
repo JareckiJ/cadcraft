@@ -406,6 +406,27 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
                 rotation = -rotation;
                 col_spacing = -col_spacing;
             }
+            let clip = t.0.iter().position(|tag| tag.code == 1001 && tag.str().eq_ignore_ascii_case("CADCRAFT")).and_then(|pos| {
+                let sub = &t.0[pos + 1..];
+                if sub.first().is_some_and(|g| g.code == 1000 && g.str().eq_ignore_ascii_case("XCLIP")) {
+                    let enabled = sub.get(1).map(Tag::i64).map(|v| v != 0).unwrap_or(true);
+                    let inverted = sub.get(2).map(Tag::i64).map(|v| v != 0).unwrap_or(false);
+                    let count = sub.get(3).map(Tag::i64).unwrap_or(0).max(0) as usize;
+                    let mut points = Vec::new();
+                    let mut idx = 4;
+                    while idx < sub.len() && points.len() < count {
+                        if sub[idx].code == 1010 {
+                            let x = sub[idx].f64();
+                            let y = sub.get(idx + 1).filter(|g| g.code == 1020).map(Tag::f64).unwrap_or(0.0);
+                            points.push(Vec2::new(x, y));
+                        }
+                        idx += 1;
+                    }
+                    if !points.is_empty() { Some(cadcraft_doc::ClipBoundary { points, enabled, inverted }) } else { None }
+                } else {
+                    None
+                }
+            });
             EntityKind::Insert(Insert {
                 block: t.s(2).unwrap_or_default(),
                 insert: p,
@@ -416,6 +437,7 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
                 rows: t.i(71).unwrap_or(1).clamp(1, 10_000) as u32,
                 col_spacing,
                 row_spacing: t.fd(45, 0.0),
+                clip,
             })
         }
         "DIMENSION" => {

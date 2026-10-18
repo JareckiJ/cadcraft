@@ -132,7 +132,9 @@
 	Clear Command History	Borrar el historial de comandos
 	Clear History	Borrar historial
 	Clip	Delimitar
+	Clip Image	Delimitar imagen
 	Clip Viewport	Delimitar ventana gráfica
+	Clip Xref	Delimitar referencia externa
 	Clipboard	Portapapeles
 	Close	Cerrar
 	Close All	Cerrar todo
@@ -416,6 +418,7 @@
 	HorizontalDistance	Distancia horizontal
 	How to apply:	Cómo aplicar:
 	ID Point	Coordenadas de un punto
+	Image	Imagen
 	Import	Importar
 	Import...	Importar...
 	In	Acercar
@@ -1186,6 +1189,7 @@
 	Write Block	Escribir bloque
 	X	X
 	Xline	Línea auxiliar
+	Xref	Referencia externa
 	Y	Y
 	Yellow	Amarillo
 	Yes	Sí
