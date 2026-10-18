@@ -428,7 +428,7 @@ impl Interactive for LineM {
             && let Some(first) = self.first
         {
             match i {
-                Input::Point(pi @ PointInput::RelativePolar { dist, angle, .. }) => {
+                Input::Point(pi @ PointInput::RelativePolar { dist, angle, .. }) if first.mode == snap::mode::TAN => {
                     // A deferred TAN first point with a typed `@d<a` next point: resolve
                     // exactly from the direction and distance the user gave.
                     if let Some(t) = snap::tangent_point_in_direction(&first.curve, angle, first.at) {

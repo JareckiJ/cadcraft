@@ -267,6 +267,12 @@ impl Session {
             return self.input(input);
         }
         match input {
+            // `NON` alone: drop it and forward the input unchanged, so a typed
+            // `@d<a` keeps its `RelativePolar` form for the command below.
+            Input::Point(_) if matches!(self.point_mods.as_slice(), [Frame::Snap { mode: 0 }]) => {
+                self.point_mods.clear();
+                self.input(input)
+            }
             Input::Point(pi) => {
                 let p = pi.point();
                 self.modifier_point(p)
