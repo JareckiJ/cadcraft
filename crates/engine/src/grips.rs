@@ -39,6 +39,82 @@ fn translated(k: &EntityKind, d: Vec2) -> EntityKind {
     k
 }
 
+/// MTEXT frame in its local axes: top-left in world coordinates, column width and box height.
+fn mtext_frame(d: &cadcraft_doc::Drawing, t: &cadcraft_doc::MText) -> Option<(Vec2, f64, f64)> {
+    if !t.insert.xy().is_finite() || !t.rotation.is_finite() || !t.height.is_finite() || t.height <= EPS || !t.width.is_finite() {
+        return None;
+    }
+    let mut local = t.clone();
+    local.insert = Vec3::ZERO;
+    local.rotation = 0.0;
+    let bounds = cadcraft_render::layout_mtext_entity(d, &local).bounds;
+    if bounds.is_empty() {
+        return None;
+    }
+    let top = t.insert.xy() + Vec2::new(bounds.min.x, bounds.max.y).rotate(t.rotation);
+    let width = if t.width > EPS { t.width } else { bounds.width() };
+    let height = bounds.height().max(t.height);
+    (top.is_finite() && width.is_finite() && width > EPS && height.is_finite()).then_some((top, width, height))
+}
+
+/// Document-aware grips. MTEXT has its insertion grip, a column-width grip and a box-height grip.
+/// Measuring with the renderer keeps these aligned with wrapped and formatted text.
+pub fn entity_grips(d: &cadcraft_doc::Drawing, kind: &EntityKind) -> Vec<Vec2> {
+    let EntityKind::MText(t) = kind else { return kind.grips() };
+    let Some((top, width, height)) = mtext_frame(d, t) else { return kind.grips() };
+    let right = top + Vec2::new(width, 0.0).rotate(t.rotation);
+    let bottom = top + Vec2::new(width / 2.0, -height).rotate(t.rotation);
+    if !right.is_finite() || !bottom.is_finite() {
+        return kind.grips();
+    }
+    vec![t.insert.xy(), right, bottom]
+}
+
+/// Stretch a document-aware grip. Width changes wrap the text; height changes its column box,
+/// without changing character height. The frame's top-left stays fixed, including rotated text.
+pub fn stretch_entity_grip(d: &cadcraft_doc::Drawing, kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityKind> {
+    let EntityKind::MText(t) = kind else { return stretch_grip(kind, index, to) };
+    if index == 0 {
+        return stretch_grip(kind, index, to);
+    }
+    if !to.is_finite() {
+        return None;
+    }
+    let (top, width, _) = mtext_frame(d, t)?;
+    let local = (to - top).rotate(-t.rotation);
+    let mut t = t.clone();
+    match index {
+        1 if local.x.is_finite() && local.x > EPS => t.width = local.x,
+        2 if local.y.is_finite() && -local.y >= t.height => {
+            let height = -local.y;
+            // An uncolumned text becomes dynamic columns when its box is shortened.
+            let c = t.columns.get_or_insert_with(|| cadcraft_doc::MTextColumns {
+                kind: cadcraft_doc::MTextColumnType::Dynamic,
+                count: 1,
+                gutter: t.height * 0.5,
+                ..Default::default()
+            });
+            c.height = height;
+            c.heights.clear();
+            if c.kind == cadcraft_doc::MTextColumnType::Dynamic {
+                c.auto_height = false;
+                c.heights.push(height);
+            }
+            if t.width <= EPS {
+                t.width = width;
+            }
+        }
+        _ => return None,
+    }
+    let (new_top, _, _) = mtext_frame(d, &t)?;
+    let insert = t.insert.xy() + top - new_top;
+    if !insert.is_finite() {
+        return None;
+    }
+    set_xy(&mut t.insert, insert);
+    Some(EntityKind::MText(t))
+}
+
 /// What a polyline grip index refers to (matches the order of `EntityKind::grips`).
 enum PolyGrip {
     Vertex(usize),
@@ -528,7 +604,8 @@ impl Session {
 
     /// Grip points of an object (the indices `grip_edit` takes).
     pub fn grips_of(&self, handle: Handle) -> Result<Vec<Vec2>> {
-        self.doc()?.entity(handle).map(|e| e.kind.grips()).ok_or_else(|| EngineError::Other("no such object".into()))
+        let d = self.doc()?;
+        d.entity(handle).map(|e| entity_grips(d, &e.kind)).ok_or_else(|| EngineError::Other("no such object".into()))
     }
 }
 

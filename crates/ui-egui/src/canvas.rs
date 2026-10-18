@@ -1403,6 +1403,17 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         hatch_dialog = true;
     }
 
+    // MTEXT frame grips also support press-drag-release, as well as click-click editing.
+    if !app.session.prompting()
+        && !mods.shift
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && let Some(g) = grip_at(app, &xf, Some(origin))
+        && app.session.doc().ok().and_then(|d| d.entity(g.0)).is_some_and(|e| matches!(e.kind, cadcraft_engine::doc::EntityKind::MText(_)))
+    {
+        click_grip(app, g, false);
+    }
+
     // While a command asks for a point, every click places one, however fast the drafting (#815).
     // egui drops a click whose button comes up a few pixels from where it went down (a drag to it),
     // and eframe hands a slow frame's clicks over together, which egui reports as one.
@@ -1753,24 +1764,31 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
             if let Some(e) = st.doc.entity(*h) {
-                for (gi, g) in e.kind.grips().into_iter().enumerate() {
+                for (gi, g) in cadcraft_engine::grips::entity_grips(&st.doc, &e.kind).into_iter().enumerate() {
                     let sp = xf.to_screen(g);
                     if rect.contains(sp) {
                         let r = Rect::from_center_size(sp, vec2(gs * 2.0, gs * 2.0));
                         let hot = app.canvas.hot_grips.contains(&(*h, gi));
                         let warm = !hot && hover_pos.is_some_and(|hp| r.expand(2.0).contains(hp));
-                        painter.rect_filled(
-                            r,
-                            0.0,
-                            if hot {
-                                t.grip_hot
-                            } else if warm {
-                                Color32::from_rgb(0xff, 0x7f, 0x9f)
-                            } else {
-                                t.grip
-                            },
-                        );
-                        painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
+                        let color = if hot {
+                            t.grip_hot
+                        } else if warm {
+                            Color32::from_rgb(0xff, 0x7f, 0x9f)
+                        } else {
+                            t.grip
+                        };
+                        let stroke = Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80));
+                        if let cadcraft_engine::doc::EntityKind::MText(mt) = &e.kind
+                            && (gi == 1 || gi == 2)
+                        {
+                            let axis = if gi == 1 { Vec2::X } else { Vec2::Y }.rotate(mt.rotation);
+                            let v = vec2(axis.x as f32, -axis.y as f32) * gs;
+                            let side = vec2(-v.y, v.x) * 0.8;
+                            painter.add(Shape::convex_polygon(vec![sp + v, sp - v + side, sp - v - side], color, stroke));
+                        } else {
+                            painter.rect_filled(r, 0.0, color);
+                            painter.rect_stroke(r, 0.0, stroke, egui::StrokeKind::Middle);
+                        }
                     }
                 }
             }
@@ -2353,7 +2371,7 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        for (i, g) in e.kind.grips().into_iter().enumerate() {
+        for (i, g) in cadcraft_engine::grips::entity_grips(&st.doc, &e.kind).into_iter().enumerate() {
             let sp = xf.to_screen(g);
             if (sp.x - hp.x).abs() <= gs && (sp.y - hp.y).abs() <= gs {
                 return Some((*h, i));
