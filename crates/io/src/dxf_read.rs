@@ -178,7 +178,13 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     }
 }
 
-fn text_from(t: &T) -> Text {
+/// A TEXT, or (with `attribute`) an ATTRIB or ATTDEF. The vertical alignment is group 73 for
+/// TEXT and group 74 for attributes, whose group 73 is the field length: a writer that emits
+/// the field length (acadrust's DWG bridge always does, AutoCAD may) used to turn every
+/// attribute into baseline text, which put centred and right-aligned ones half a height too
+/// high and top-aligned ones a whole height (their alignment point is then taken for the
+/// baseline); left-aligned ones were saved by their precomputed insertion point.
+fn text_from(t: &T, attribute: bool) -> Text {
     let h = match t.i(72).unwrap_or(0) {
         1 => HAlign::Center,
         2 => HAlign::Right,
@@ -187,7 +193,7 @@ fn text_from(t: &T) -> Text {
         5 => HAlign::Fit,
         _ => HAlign::Left,
     };
-    let v = match t.i(73).or_else(|| t.i(74)).unwrap_or(0) {
+    let v = match t.i(if attribute { 74 } else { 73 }).unwrap_or(0) {
         1 => VAlign::Bottom,
         2 => VAlign::Middle,
         3 => VAlign::Top,
@@ -365,14 +371,14 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
         "HELIX" => EntityKind::Helix(helix(tags)),
         "RAY" => EntityKind::Ray(RayLine { base: t.p(10), dir: t.p(11) }),
         "XLINE" => EntityKind::XLine(RayLine { base: t.p(10), dir: t.p(11) }),
-        "TEXT" => EntityKind::Text(text_from(&t)),
+        "TEXT" => EntityKind::Text(text_from(&t, false)),
         "MTEXT" => EntityKind::MText(mtext_from(tags, &c)),
         "ATTDEF" => {
             // A multiline definition has its text as embedded MTEXT after its own groups.
             let (own, embedded) = split_embedded(tags);
             let multiline = multiline_attrib(embedded, &c);
             let own = T(own);
-            let mut text = text_from(&own);
+            let mut text = text_from(&own, true);
             if let Some(m) = &multiline {
                 text.value.clone_from(&m.read_as);
             }
@@ -1181,7 +1187,7 @@ fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, ski
                             let (own, embedded) = split_embedded(t2);
                             let multiline = multiline_attrib(embedded, &common(&tt));
                             let own = T(own);
-                            let mut text = text_from(&own);
+                            let mut text = text_from(&own, true);
                             if let Some(m) = &multiline {
                                 text.value.clone_from(&m.read_as);
                             }

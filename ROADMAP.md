@@ -119,6 +119,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Entry |
 |---|---|
+| 2026-10-18 | DXF/DWG read: an attribute's vertical alignment is read from group 74; group 73 (the field length, which the DWG bridge always writes) was taken for it, so centred and right-aligned attributes from DWGs sat half a text height too high, top-aligned ones a whole height. Found on office GA sheets, measured against BricsCAD's plot. Estimates unchanged. |
 | 2026-10-14 | HATCHEDIT adds boundaries from internal points or closed objects and removes selected loops in the dialog, command line and JSON command; associative links and undo are covered by tests. |
 | 2026-10-12 | TRIM: a pick after a closed polyline's last cut keeps only the complementary run instead of an extra circuit of the outline (#726) |
 | 2026-10-12 | HATCHEDIT refuses an explicit bad `scale` or `angle` before it edits anything, so a rejected request leaves the drawing, undo and redo as they were (#724) |
