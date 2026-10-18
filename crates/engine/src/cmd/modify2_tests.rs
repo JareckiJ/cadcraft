@@ -721,3 +721,25 @@ fn offset_polyline_arc_bulge_follows_joined_endpoints() {
     assert!(near(arc.center, 10.0, 5.0), "arc centre drifted to {:?}", arc.center);
     assert!((arc.radius - 4.0).abs() < 1e-6, "radius {}", arc.radius);
 }
+
+#[test]
+fn offset_closed_polyline_past_half_width_fails() {
+    let mut s = Session::new();
+    let sq = h(&s.execute("rectang", &json!({"p1": [0, 0], "p2": [10, 10]})).unwrap());
+    let err = s.execute("offset", &json!({"handle": sq, "distance": 6, "side": [5, 5]})).unwrap_err();
+    assert!(err.to_string().contains("cannot offset that object"), "{err}");
+}
+
+#[test]
+fn offset_closed_polyline_within_half_width_keeps_winding() {
+    let mut s = Session::new();
+    let sq = h(&s.execute("rectang", &json!({"p1": [0, 0], "p2": [10, 10]})).unwrap());
+    s.execute("offset", &json!({"handle": sq, "distance": 2, "side": [5, 5]})).unwrap();
+    let p = poly(&last(&s));
+    let pts: Vec<Vec2> = p.vertices.iter().map(|v| v.p).collect();
+    let orig = poly(&kind(&s, &sq));
+    let area = |v: &[Vec2]| (0..v.len()).map(|i| v[i].cross(v[(i + 1) % v.len()])).sum::<f64>() / 2.0;
+    let oarea = area(&orig.vertices.iter().map(|v| v.p).collect::<Vec<_>>());
+    assert!((area(&pts) - 36.0 * oarea.signum()).abs() < 1e-6, "{pts:?}");
+    assert!(pts.iter().all(|q| (q.x - 2.0).abs() < 1e-6 || (q.x - 8.0).abs() < 1e-6), "{pts:?}");
+}
