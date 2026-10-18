@@ -57,6 +57,22 @@ fn json_block_rename_repoints_every_insert() {
     let undo = s.state().unwrap().undo.len();
     s.execute("rename", &json!({ "table": "layer", "from": "Old", "to": "New" })).unwrap();
     assert_eq!(s.state().unwrap().undo.len(), undo + 1);
+    // Material, plotstyle, and vport renaming in JSON form.
+    s.doc_mut().unwrap().vports.push(cadcraft_doc::VportConfig { name: "Cfg1".into(), tiles: Vec::new() });
+    s.execute("rename", &json!({ "table": "vport", "from": "Cfg1", "to": "Cfg2" })).unwrap();
+    assert!(s.doc().unwrap().vports.iter().any(|c| c.name == "Cfg2"));
+    assert!(s.execute("rename", &json!({ "table": "vport", "from": "*Active", "to": "X" })).is_err());
+
+    s.doc_mut().unwrap().materials.push(cadcraft_doc::Material { name: "Steel".into(), description: String::new() });
+    s.execute("rename", &json!({ "table": "material", "from": "Steel", "to": "Iron" })).unwrap();
+    assert!(s.doc().unwrap().materials.iter().any(|m| m.name == "Iron"));
+    assert!(s.execute("rename", &json!({ "table": "material", "from": "Global", "to": "X" })).is_err());
+
+    let pst = cadcraft_doc::PlotStyleTable::named("custom.stb", "", vec![cadcraft_doc::PlotStyle::object("Pen1")]);
+    s.doc_mut().unwrap().plot_style_tables.push(pst);
+    s.execute("rename", &json!({ "table": "plotstyle", "from": "Pen1", "to": "Pen2" })).unwrap();
+    assert!(s.doc().unwrap().plot_style_tables[0].styles.iter().any(|st| st.name == "Pen2"));
+    assert!(s.execute("rename", &json!({ "table": "plotstyle", "from": "Normal", "to": "X" })).is_err());
 }
 
 #[test]
@@ -70,19 +86,16 @@ fn rename_prompts_type_old_and_new_name() {
     );
     s.cancel();
     s.execute("layer.new", &json!({ "name": "Old" })).unwrap();
-    s.script("-RENAME B Valve Pump\n-RENAME LA Old New\nLINE 0,0 1,0\n\n").unwrap();
+    s.doc_mut().unwrap().vports.push(cadcraft_doc::VportConfig { name: "ViewCfg".into(), tiles: Vec::new() });
+    s.script("-RENAME B Valve Pump\n-RENAME LA Old New\n-RENAME VP ViewCfg NewCfg\nLINE 0,0 1,0\n\n").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
     let d = s.doc().unwrap();
     assert!(d.block("Pump").is_some() && d.layer("New").is_some() && d.layer("Old").is_none(), "{:?}", s.log);
+    assert!(d.vports.iter().any(|c| c.name == "NewCfg"));
     assert_eq!(insert_targets(d), ["Assy", "Pump", "Pump", "Pump"]);
     assert_eq!(d.model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count(), 1);
-    // An unknown old name re-prompts; a type CADCraft lacks reads both names and reports.
+    // An unknown old name re-prompts.
     s.script("-RENAME LA Missing\nNew\nNewer\n").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
     assert!(s.doc().unwrap().layer("Newer").is_some());
-    let n = s.log.len();
-    s.script("-RENAME VP a b\nLINE 0,0 2,0\n\n").unwrap();
-    assert!(s.running.is_none(), "{}", s.prompt_text());
-    assert!(s.log[n..].iter().any(|l| l.contains("not available yet")), "{:?}", &s.log[n..]);
-    assert_eq!(s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count(), 2);
 }

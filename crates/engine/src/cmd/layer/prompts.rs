@@ -103,6 +103,8 @@ enum Stage {
     RenameTo(String),
     Color,
     TrueColor,
+    ColorBookName,
+    ColorBookColor(String),
     Ltype,
     Lweight,
     Transparency,
@@ -317,9 +319,10 @@ impl LayerM {
             }
             Stage::Color => match (&i, text) {
                 (Input::Keyword(k), _) if k == "Truecolor" => back(self, Stage::TrueColor),
+                (Input::Keyword(k), _) if k == "COlorbook" => back(self, Stage::ColorBookName),
                 (Input::Keyword(_), _) => {
-                    s.echo("Color books are not available yet.");
-                    Ok(Step::Continue)
+                    self.stage = Stage::Color;
+                    Err(retry("Invalid option keyword."))
                 }
                 (_, None) => Ok(Step::Continue),
                 (_, Some(t)) => match Color::parse(&t) {
@@ -330,6 +333,19 @@ impl LayerM {
                         Err(retry("Enter a color name or a number from 1 to 255."))
                     }
                 },
+            },
+            Stage::ColorBookName => match text {
+                None => Ok(Step::Continue),
+                Some(t) if t.trim().is_empty() => back(self, Stage::Option),
+                Some(t) => back(self, Stage::ColorBookColor(t.trim().to_string())),
+            },
+            Stage::ColorBookColor(book) => match text {
+                None => Ok(Step::Continue),
+                Some(t) if t.trim().is_empty() => back(self, Stage::Option),
+                Some(t) => {
+                    let rgb = cadcraft_color::lookup_color_book(&book, t.trim()).map_err(|e| retry(e.to_string()))?;
+                    back(self, Stage::Layers(Change::Color(format!("{},{},{}", rgb.0, rgb.1, rgb.2))))
+                }
             },
             Stage::TrueColor => match text.as_deref().map(Color::parse) {
                 None => Ok(Step::Continue),
@@ -423,6 +439,8 @@ impl Interactive for LayerM {
             Stage::RenameTo(_) => Prompt::new("Enter new layer name", NAME),
             Stage::Color => Prompt::new("Enter color name or number (1-255)", NAME).kw(&["Truecolor", "COlorbook"]),
             Stage::TrueColor => Prompt::new("Red, Green, Blue", NAME),
+            Stage::ColorBookName => Prompt::new("Enter Color Book name", NAME),
+            Stage::ColorBookColor(_) => Prompt::new("Enter color name", NAME),
             Stage::Ltype => Prompt::new("Enter a loaded linetype name", NAME).kw(&["?"]).default("Continuous"),
             Stage::Lweight => Prompt::new("Enter lineweight (0.0mm - 2.11mm)", NAME),
             Stage::Transparency => Prompt::new("Enter transparency value (0-90)", NAME).default("0"),

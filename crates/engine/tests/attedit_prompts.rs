@@ -83,14 +83,21 @@ fn dash_attedit_one_at_a_time_edits_the_selected_attributes() {
     let mut s = with_block();
     let h = handle(&insert(&mut s, 100.0, json!({"T": "abc"})));
     type_lines(&mut s, &["-attedit", "y", "", "T", "", "105,0", ""]);
-    assert!(s.prompt_text().contains("[Value/Layer/Color/Next] <N>"), "{}", s.prompt_text());
-    // Unsupported options say so and keep the prompt.
-    s.cmdline("p").unwrap();
-    assert!(s.log.iter().any(|l| l.contains("Position is not available yet")), "{:?}", s.log);
-    type_lines(&mut s, &["v", "c", "b", "B", "v", "r", "replaced value", "n"]);
+    assert!(s.prompt_text().contains("[Value/Position/Height/Angle/Style/Layer/Color/Next] <N>"), "{}", s.prompt_text());
+    // Edit Position, Height, Angle, Style, ColorBook and Value.
+    type_lines(&mut s, &["p", "200,50", "h", "5.0", "a", "45.0", "s", "Standard", "c", "co", "RAL", "1000", "v", "r", "replaced value", "n"]);
     assert!(s.running.is_none(), "{}", s.prompt_text());
     assert_eq!(value(&s, h, "T"), "replaced value");
     assert_eq!(value(&s, h, "U"), "u");
+    let d = s.doc().unwrap();
+    let EntityKind::Insert(ins) = &d.entity(h).unwrap().kind else { panic!() };
+    let a = &ins.attribs[0];
+    assert!((a.text.justify_point().x - 200.0).abs() < 1e-4);
+    assert!((a.text.justify_point().y - 50.0).abs() < 1e-4);
+    assert!((a.text.height - 5.0).abs() < 1e-4);
+    assert!((a.text.rotation.to_degrees() - 45.0).abs() < 1e-4);
+    assert_eq!(a.text.style, "Standard");
+    assert_eq!(a.props.color, Some(cadcraft_doc::color::Color::True(cadcraft_color::Rgb(206, 198, 140))));
 }
 
 #[test]

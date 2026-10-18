@@ -3,7 +3,7 @@
 //! DIMREASSOCIATE / DIMDISASSOCIATE, DIMTEDIT, DIMSPACE; DIMEDIT, DIMJOGGED, DIMJOGLINE,
 //! DIMBREAK and DIMINSPECT in `annotate_dimedit.rs`.
 
-use cadcraft_doc::{AssocSnap, DimAssoc, DimKind, Dimension, EntityKind, Handle, MLeader, MText, Prim};
+use cadcraft_doc::{AssocSnap, DimAssoc, DimKind, Dimension, EntityKind, GdtFrame, GdtLine, GdtSymbol, Handle, MLeader, MText, Prim, compose_frame};
 use cadcraft_geom::{Segment, Vec2, Vec3};
 use serde_json::{Value, json};
 
@@ -72,11 +72,20 @@ pub fn specs() -> Vec<CommandSpec> {
             .alias(&["mld"])
             .params("{points: [[arrow], ..., [landing]] ([location] with leaderType none), text?, leaderType?: straight|spline|none, block?: name, blockAttach?: center|insertion}")
             .interactive(|s| Ok(Box::new(MLeaderM::new(s)))),
-        CommandSpec::new("leader", "Leader", run_leader).alias(&["lead"]).params("{points: [[x,y]...], text?}"),
+        CommandSpec::new("leader", "Leader", run_leader)
+            .alias(&["lead"])
+            .menu(&["Dimension", "Leader"])
+            .params("{points: [[x,y]...], text?, tolerance?: string | {symbol?, tol1?, tol2?, datums?, text?}, block?: name, arrow?: bool, spline?: bool, style?}")
+            .interactive(|s| Ok(Box::new(LeaderM::new(s, false)))),
+        CommandSpec::new("qleader", "Quick Leader", run_leader)
+            .alias(&["qlead"])
+            .params("{points: [[x,y]...], text?, tolerance?: string | {symbol?, tol1?, tol2?, datums?, text?}, block?: name, arrow?: bool, spline?: bool, style?}")
+            .interactive(|s| Ok(Box::new(LeaderM::new(s, true)))),
         CommandSpec::new("dimstyle.update", "Update", run_update)
             .menu(&["Dimension", "Update"])
             .params("{handles?}")
             .interactive(|_| Ok(Box::new(SelectRun::new("dimstyle.update", "DIMSTYLE")))),
+
         CommandSpec::new("dimoverride", "Override", run_override)
             .menu(&["Dimension", "Override"])
             .alias(&["dov", "dimover"])
@@ -476,19 +485,56 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
     if pts.len() < 2 {
         return Err(bad("leader", "need 2+ points"));
     }
-    let st = style(s);
-    let h = s.add_entity(EntityKind::Leader(cadcraft_doc::Leader {
-        vertices: pts.iter().map(|q| v3(*q)).collect(),
-        arrow: true,
-        spline: false,
-        style: st,
-    }))?;
+    let st = str_param(p, "style").map(str::to_string).unwrap_or_else(|| style(s));
+    let arrow = bool_or(p, "arrow", true);
+    let spline = bool_or(p, "spline", false);
+    let h =
+        s.add_entity(EntityKind::Leader(cadcraft_doc::Leader { vertices: pts.iter().map(|q| v3(*q)).collect(), arrow, spline, style: st.clone() }))?;
     let mut out = vec![h.hex()];
-    if let (Some(t), Some(last)) = (str_param(p, "text"), pts.last()) {
-        let th = s.doc()?.dim_style(&style(s)).map(|d| d.text_height).unwrap_or(0.18);
+    let last = pts.last().copied().unwrap_or(Vec2::ZERO);
+
+    if let Some(tol_val) = p.get("tolerance") {
+        let text = match tol_val {
+            Value::String(t) => t.chars().take(cadcraft_doc::MAX_FRAME_CHARS).collect(),
+            Value::Object(_) => super::tolerance::frame_text(tol_val)?,
+            _ => return Err(bad("leader", "`tolerance` must be a frame string or parameter object")),
+        };
+        if cadcraft_doc::parse_frame(&text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
+            return Err(bad("leader", "the feature control frame is empty"));
+        }
+        let prev = pts.get(pts.len().saturating_sub(2)).copied().unwrap_or(last);
+        let dir_x = last.x - prev.x;
+        let insert_pt = if dir_x < 0.0 {
+            let temp_t = cadcraft_doc::Tolerance { insert: v3(last), dir: Vec3::new(1.0, 0.0, 0.0), style: st.clone(), text: text.clone() };
+            let l = temp_t.layout(s.doc()?, &|txt, h| txt.chars().count() as f64 * h * 0.7);
+            let w = l.bounds.max.x - l.bounds.min.x;
+            last - Vec2::new(w.max(0.1), 0.0)
+        } else {
+            last
+        };
+        let t = cadcraft_doc::Tolerance { insert: v3(insert_pt), dir: Vec3::new(1.0, 0.0, 0.0), style: st, text };
+        out.push(s.add_entity(EntityKind::Tolerance(t))?.hex());
+    } else if let Some(blk_name) = str_param(p, "block") {
+        if s.doc()?.block(blk_name).is_none() {
+            return Err(bad("leader", format!("no such block `{blk_name}`")));
+        }
+        let ins = cadcraft_doc::Insert {
+            block: blk_name.to_string(),
+            insert: v3(last),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        };
+        out.push(s.add_entity(EntityKind::Insert(ins))?.hex());
+    } else if let Some(t) = str_param(p, "text") {
+        let th = s.doc()?.dim_style(&st).map(|d| d.text_height).unwrap_or(0.18);
         out.push(
             s.add_entity(EntityKind::MText(MText {
-                insert: v3(*last + Vec2::new(th * 0.5, th * 0.5)),
+                insert: v3(last + Vec2::new(th * 0.5, th * 0.5)),
                 height: th,
                 width: 0.0,
                 attach: 4,
@@ -1821,6 +1867,285 @@ impl Interactive for MLeaderM {
             .and_then(|k| super::mleader_content::apply(s, k, &self.content_spec()).ok())
             .into_iter()
             .collect()
+    }
+}
+
+// =====================================================================================
+// LEADER & QLEADER
+// =====================================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LeaderStage {
+    StartPt,
+    NextPt,
+    Annotation,
+    ToleranceSymbol,
+    ToleranceTol1,
+    ToleranceTol2,
+    ToleranceDatum1,
+    ToleranceDatum2,
+    ToleranceDatum3,
+    BlockName,
+    Format,
+}
+
+struct LeaderM {
+    stage: LeaderStage,
+    pts: Vec<Vec2>,
+    arrow: bool,
+    spline: bool,
+    tol_line: GdtLine,
+    is_qleader: bool,
+}
+
+impl LeaderM {
+    fn new(_s: &Session, is_qleader: bool) -> Self {
+        LeaderM {
+            stage: LeaderStage::StartPt,
+            pts: Vec::new(),
+            arrow: true,
+            spline: false,
+            tol_line: GdtLine { symbol: Some(GdtSymbol::Position), ..Default::default() },
+            is_qleader,
+        }
+    }
+
+    fn finish(&self, s: &mut Session, annotation: Option<Value>) -> Result<Step> {
+        let mut p = json!({
+            "points": self.pts,
+            "arrow": self.arrow,
+            "spline": self.spline,
+        });
+        if let Some(Value::Object(ann_obj)) = annotation
+            && let Some(obj) = p.as_object_mut()
+        {
+            for (k, v) in ann_obj {
+                obj.insert(k, v);
+            }
+        }
+        run_leader(s, &p)?;
+        Ok(Step::Done)
+    }
+}
+
+const TOL_SYMBOL_KW: &[&str] = &[
+    "POsition",
+    "COncentricity",
+    "SYmmetry",
+    "PArallelism",
+    "PErpendicularity",
+    "ANgularity",
+    "CYlindricity",
+    "Flatness",
+    "CIrcularity",
+    "STraightness",
+    "SUrface",
+    "LIne",
+    "Runout",
+    "TOtal",
+    "None",
+];
+
+impl Interactive for LeaderM {
+    fn name(&self) -> &'static str {
+        if self.is_qleader { "QLEADER" } else { "LEADER" }
+    }
+
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.stage {
+            LeaderStage::StartPt => Prompt::new("Specify leader start point", Accept::POINT),
+            LeaderStage::NextPt => {
+                let base = self.pts.last().copied().unwrap_or(Vec2::ZERO);
+                Prompt::new("Specify next point", Accept::POINT).kw(&["Annotation", "Format", "Undo"]).default("Annotation").base(base)
+            }
+            LeaderStage::Annotation => Prompt::new("Enter first line of annotation text or [Block/Tolerance/None] <Mtext>", Accept::TEXT)
+                .kw(&["Block", "Tolerance", "None"])
+                .default("None"),
+            LeaderStage::ToleranceSymbol => Prompt::new("Enter geometric characteristic", Accept::TEXT).kw(TOL_SYMBOL_KW).default("Position"),
+            LeaderStage::ToleranceTol1 => Prompt::new("Enter first tolerance value", Accept::TEXT).default("none"),
+            LeaderStage::ToleranceTol2 => Prompt::new("Enter second tolerance value", Accept::TEXT).default("none"),
+            LeaderStage::ToleranceDatum1 => Prompt::new("Enter datum reference 1", Accept::TEXT).default("none"),
+            LeaderStage::ToleranceDatum2 => Prompt::new("Enter datum reference 2", Accept::TEXT).default("none"),
+            LeaderStage::ToleranceDatum3 => Prompt::new("Enter datum reference 3", Accept::TEXT).default("none"),
+            LeaderStage::BlockName => Prompt::new("Enter block name", Accept::TEXT),
+            LeaderStage::Format => {
+                Prompt::new("Enter leader format option", Accept::TEXT).kw(&["Spline", "STraight", "Arrow", "No arrow"]).default("STraight")
+            }
+        }
+    }
+
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if i == Input::Cancel {
+            return Ok(Step::Cancel);
+        }
+        let text = match &i {
+            Input::Text(t) | Input::Keyword(t) => Some(t.trim().to_string()),
+            _ => None,
+        };
+        let none = |t: &Option<String>| t.as_deref().is_none_or(|t| t.is_empty() || t.eq_ignore_ascii_case("none"));
+
+        match self.stage {
+            LeaderStage::StartPt => {
+                if let Input::Point(p) = i {
+                    self.pts.push(p);
+                    self.stage = LeaderStage::NextPt;
+                }
+            }
+            LeaderStage::NextPt => match i {
+                Input::Point(p) => {
+                    self.pts.push(p);
+                    if self.is_qleader && self.pts.len() >= 3 {
+                        self.stage = LeaderStage::Annotation;
+                    }
+                }
+                Input::Keyword(k) if k.eq_ignore_ascii_case("Annotation") => {
+                    if self.pts.len() >= 2 {
+                        self.stage = LeaderStage::Annotation;
+                    } else {
+                        s.echo("Need at least 2 points for a leader.");
+                    }
+                }
+                Input::Keyword(k) if k.eq_ignore_ascii_case("Format") => {
+                    self.stage = LeaderStage::Format;
+                }
+                Input::Keyword(k) if k.eq_ignore_ascii_case("Undo") => {
+                    self.pts.pop();
+                    if self.pts.is_empty() {
+                        self.stage = LeaderStage::StartPt;
+                    }
+                }
+                Input::Enter => {
+                    if self.pts.len() >= 2 {
+                        self.stage = LeaderStage::Annotation;
+                    } else {
+                        return Ok(Step::Cancel);
+                    }
+                }
+                _ => {}
+            },
+            LeaderStage::Annotation => match &i {
+                Input::Keyword(k) if k.eq_ignore_ascii_case("Tolerance") => {
+                    self.stage = LeaderStage::ToleranceSymbol;
+                }
+                Input::Keyword(k) if k.eq_ignore_ascii_case("Block") => {
+                    self.stage = LeaderStage::BlockName;
+                }
+                Input::Keyword(k) if k.eq_ignore_ascii_case("None") => {
+                    return self.finish(s, None);
+                }
+                Input::Enter => {
+                    return self.finish(s, None);
+                }
+                Input::Text(t) => {
+                    if t.trim().is_empty() {
+                        return self.finish(s, None);
+                    }
+                    return self.finish(s, Some(json!({ "text": t.trim() })));
+                }
+                _ => {}
+            },
+            LeaderStage::ToleranceSymbol => {
+                match (&i, &text) {
+                    (Input::Enter, _) => {}
+                    (_, Some(t)) if t.eq_ignore_ascii_case("none") => self.tol_line.symbol = None,
+                    (_, Some(t)) => match GdtSymbol::parse(t).filter(|g| g.is_characteristic()) {
+                        Some(g) => self.tol_line.symbol = Some(g),
+                        None => {
+                            s.echo("Requires a geometric characteristic or None.");
+                            return Ok(Step::Continue);
+                        }
+                    },
+                    _ => return Ok(Step::Continue),
+                }
+                self.stage = LeaderStage::ToleranceTol1;
+            }
+            LeaderStage::ToleranceTol1 | LeaderStage::ToleranceTol2 => {
+                let is_first = self.stage == LeaderStage::ToleranceTol1;
+                match &i {
+                    Input::Enter => {}
+                    Input::Text(_) | Input::Keyword(_) => {
+                        let v = (!none(&text)).then(|| super::tolerance::parse_tol(text.as_deref().unwrap_or("")));
+                        if is_first {
+                            self.tol_line.tol1 = v;
+                        } else {
+                            self.tol_line.tol2 = v;
+                        }
+                    }
+                    _ => return Ok(Step::Continue),
+                }
+                self.stage = if is_first { LeaderStage::ToleranceTol2 } else { LeaderStage::ToleranceDatum1 };
+            }
+            LeaderStage::ToleranceDatum1 | LeaderStage::ToleranceDatum2 | LeaderStage::ToleranceDatum3 => {
+                let idx = match self.stage {
+                    LeaderStage::ToleranceDatum1 => 0,
+                    LeaderStage::ToleranceDatum2 => 1,
+                    _ => 2,
+                };
+                match &i {
+                    Input::Enter => {
+                        let frame = compose_frame(&GdtFrame { lines: vec![self.tol_line.clone()], ..Default::default() });
+                        return self.finish(s, Some(json!({ "tolerance": frame })));
+                    }
+                    Input::Text(_) | Input::Keyword(_) => {
+                        if none(&text) {
+                            let frame = compose_frame(&GdtFrame { lines: vec![self.tol_line.clone()], ..Default::default() });
+                            return self.finish(s, Some(json!({ "tolerance": frame })));
+                        }
+                        let d = super::tolerance::parse_datum(text.as_deref().unwrap_or(""));
+                        if idx < self.tol_line.datums.len() {
+                            self.tol_line.datums[idx] = d;
+                        } else {
+                            self.tol_line.datums.push(d);
+                        }
+                        if idx == 2 {
+                            let frame = compose_frame(&GdtFrame { lines: vec![self.tol_line.clone()], ..Default::default() });
+                            return self.finish(s, Some(json!({ "tolerance": frame })));
+                        }
+                        self.stage = if idx == 0 { LeaderStage::ToleranceDatum2 } else { LeaderStage::ToleranceDatum3 };
+                    }
+                    _ => return Ok(Step::Continue),
+                }
+            }
+            LeaderStage::BlockName => {
+                if let Some(name) = text {
+                    if s.doc()?.block(&name).is_none() {
+                        s.echo(format!("No such block `{name}`."));
+                        return Ok(Step::Continue);
+                    }
+                    return self.finish(s, Some(json!({ "block": name })));
+                }
+            }
+            LeaderStage::Format => {
+                if let Some(opt) = text {
+                    if opt.eq_ignore_ascii_case("Spline") {
+                        self.spline = true;
+                    } else if opt.eq_ignore_ascii_case("STraight") {
+                        self.spline = false;
+                    } else if opt.eq_ignore_ascii_case("Arrow") {
+                        self.arrow = true;
+                    } else if opt.eq_ignore_ascii_case("No arrow") {
+                        self.arrow = false;
+                    }
+                }
+                self.stage = LeaderStage::NextPt;
+            }
+        }
+        Ok(Step::Continue)
+    }
+
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+        if self.pts.is_empty() {
+            return Vec::new();
+        }
+        let mut pts: Vec<cadcraft_geom::Vec3> = self.pts.iter().map(|p| v3(*p)).collect();
+        if self.stage == LeaderStage::NextPt {
+            pts.push(v3(c));
+        }
+        if pts.len() < 2 {
+            return Vec::new();
+        }
+        let st = style(s);
+        vec![EntityKind::Leader(cadcraft_doc::Leader { vertices: pts, arrow: self.arrow, spline: self.spline, style: st })]
     }
 }
 
