@@ -1,0 +1,1240 @@
+# CADCraft Lao interface catalog — original Lao translations.
+# License: MIT OR Apache-2.0 (the repository LICENSE-MIT and LICENSE-APACHE).
+# Written from CADCraft English strings; no proprietary translations copied.
+# UTF-8: context<TAB>English source<TAB>Lao translation.
+# @plural uses a single Lao form with {n}.
+	Apply	ນຳໃຊ້
+	Attach DWG...	ແນບ DWG...
+	Bind	ຜູກມັດ (Bind)
+	Detach	ແຍກອອກ (Detach)
+	Loaded	ໂຫຼດແລ້ວ
+	Make it a block of this drawing, keeping its layer names	ສ້າງເປັນບລັອກຂອງແບບແຕ້ມນີ້ ໂດຍຮັກສາຊື່ເລເຍີໄວ້
+	Make it a block of this drawing; its layers become NAME$0$LAYER	ສ້າງເປັນບລັອກຂອງແບບແຕ້ມນີ້; ເລເຍີຈະປ່ຽນເປັນ NAME$0$LAYER
+	No external references are attached.	ບໍ່ມີການອ້າງອີງພາຍນອກ (Xref) ຖືກແນບໄວ້.
+	Not Found	ບໍ່ພົບ
+	Not loaded	ຍັງບໍ່ໄດ້ໂຫຼດ
+	Open	ເປີດ
+	Overlay	ວາງຊ້ອນ (Overlay)
+	Reference Manager	ຕົວຈັດການການອ້າງອີງ (Reference Manager)
+	Reference Name	ຊື່ການອ້າງອີງ
+	References: {n}	ການອ້າງອີງ: {n}
+	Reload	ໂຫຼດໃໝ່
+	Reload All	ໂຫຼດໃໝ່ທັງໝົດ
+	Saved Path	ເສັ້ນທາງທີ່ບັນທຶກ
+	Unload	ຍົກເລີກການໂຫຼດ
+	Unloaded	ຍົກເລີກການໂຫຼດແລ້ວ
+	Unreferenced	ບໍ່ມີການອ້າງອີງ
+	Unresolved	ຫາໄຟລ໌ອ້າງອີງບໍ່ພົບ (Unresolved)
+	Cancel	ຍົກເລີກ
+	OK	ຕົກລົງ
+	 or [	 ຫຼື [
+	% of all commits	ເປີເຊັນຂອງຄອມມິດທັງໝົດ (%)
+	* Wildcard Match	* ກົງກັບຕົວແທນ (Wildcard)
+	*VARIES*	*ແຕກຕ່າງກັນ*
+	+  |  Top  |  2D Wireframe	+  |  ດ້ານເທິງ  |  ໂຄງລວດ 2D
+	+Bin	+Bin
+	+LOC	+LOC
+	1 Viewport	1 ວິວພອດ
+	2 Points	2 ຈຸດ
+	2 Viewports	2 ວິວພອດ
+	2D Solid	ເນື້ອຕັນ 2D
+	3 Points	3 ຈຸດ
+	3 Viewports	3 ວິວພອດ
+	3D Face	ໜ້າພຽງ 3D
+	3D Operations	ການເຮັດວຽກ 3D
+	3D Polyline	ເສັ້ນໂພລີໄລນ໌ 3D
+	4 Viewports	4 ວິວພອດ
+	< Less than	< ນ້ອຍກວ່າ
+	<> Not Equal	<> ບໍ່ເທົ່າກັບ
+	= Equals	= ເທົ່າກັບ
+	> Greater than	> ຫຼາຍກວ່າ
+	A variable name starts with a letter and has only letters, digits and _	ຊື່ຕົວປ່ຽນຕ້ອງເລີ່ມຕົ້ນດ້ວຍຕົວອັກສອນ ແລະ ປະກອບມີພຽງແຕ່ຕົວອັກສອນ, ຕົວເລກ ແລະ _ ເທົ່ານັ້ນ
+	About	ກ່ຽວກັບ
+	About CADCraft	ກ່ຽວກັບ CADCraft
+	Absolute	ຄ່າສຳບູນ
+	Add Leader	ເພີ່ມເສັ້ນຊີ້ບອກ
+	Additional angles	ມຸມເພີ່ມເຕີມ
+	Align	ຈັດລຽງ
+	Align Text	ຈັດລຽງຂໍ້ຄວາມ
+	Aligned	ຂະໜານຕາມແນວ
+	All	ທັງໝົດ
+	All Annotation Objects	ວັດຖຸຄຳອະທິບາຍທັງໝົດ
+	All Used Layers	ຊັ້ນງານທີ່ນຳໃຊ້ທັງໝົດ
+	All files	ໄຟລ໌ທັງໝົດ
+	Angle	ມຸມ
+	Angular	ມຸມ
+	Annotation Visibility	ການສະແດງຄຳອະທິບາຍ
+	Annotation scale	ມາດຕາສ່ວນຄຳອະທິບາຍ
+	Apparent Intersection	ຈຸດຕັດເຫັນໄດ້
+	Append to current selection set	ເພີ່ມເຂົ້າໃນກຸ່ມທີ່ເລືອກປະຈຸບັນ
+	Apply to:	ນຳໃຊ້ກັບ:
+	Apply true color	ນຳໃຊ້ສີແທ້ (True Color)
+	Arc	ເສັ້ນໂຄ້ງ
+	Arc Length	ຄວາມຍາວເສັ້ນໂຄ້ງ
+	Area	ເນື້ອທີ່
+	Arrange Panel	ຈັດວາງແຜງຄວບຄຸມ
+	Array	ຈັດອາເຣ
+	Attach	ແນບ
+	Attribute	ຄຸນລັກສະນະ
+	Attribute Definition	ກຳນົດຄຸນລັກສະນະ
+	Attribute Display	ການສະແດງຄຸນລັກສະນະ
+	Audit	ກວດສອບ
+	Auto (system language)	ອັດຕະໂນມັດ (ພາສາລະບົບ)
+	Auto Constrain	ຜູກມັດອັດຕະໂນມັດ
+	AutoConstrain	ຜູກມັດອັດຕະໂນມັດ
+	Axis, End	ແກນ, ຈຸດປາຍ
+	Base	ຈຸດອ້າງອີງ
+	Baseline	ເສັ້ນອ້າງອີງ
+	Batch Publish	ເຜີຍແຜ່ເປັນຊຸດ
+	Binary assets added	ຊັບສິນໄບນາຣີທີ່ເພີ່ມເຂົ້າ
+	Binary assets removed	ຊັບສິນໄບນາຣີທີ່ລຶບອອກ
+	Bind...	ຜູກມັດ...
+	Blend	ເຊື່ອມເສັ້ນໂຄ້ງ
+	Block	ບລັອກ
+	Block Attribute Manager...	ຕົວຈັດການຄຸນລັກສະນະບລັອກ...
+	Block Editor	ຕົວແກ້ໄຂບລັອກ
+	Block Reference	ການອ້າງອີງບລັອກ
+	Block...	ບລັອກ...
+	Blocks	ບລັອກ
+	Blue	ສີຟ້າ
+	Bold	ຕົວໜາ
+	Boolean	ບູນີນ
+	Boundary	ຂອບເຂດ
+	Boundary...	ຂອບເຂດ...
+	Box	ກ່ອງສີ່ຫຼ່ຽມ
+	Break	ຕັດຂາດ
+	Break At Point	ຕັດຂາດຢູ່ຈຸດ
+	Bring Above Objects	ຍ້າຍຂຶ້ນເໜືອວັດຖຸ
+	Bring Annotations to Front	ນຳຄຳອະທິບາຍມາໄວ້ໜ້າສຸດ
+	Bring to Front	ນຳມາໄວ້ໜ້າສຸດ
+	Bulleted list	ລາຍການຈຸດຫົວຂໍ້
+	ByBlock	ຕາມບລັອກ
+	ByColor	ຕາມສີ
+	ByLayer	ຕາມຊັ້ນງານ
+	CADCraft Help	ວິທີໃຊ້ CADCraft
+	Cancel	ຍົກເລີກ
+	Cartesian (x, y)	ພິກັດສາກ (x, y)
+	Center	ຈຸດໃຈກາງ
+	Center Line	ເສັ້ນໃຈກາງ
+	Center Mark	ເຄື່ອງໝາຍໃຈກາງ
+	Center X	ຈຸດໃຈກາງ X
+	Center Y	ຈຸດໃຈກາງ Y
+	Center Z	ຈຸດໃຈກາງ Z
+	Center, Diameter	ຈຸດໃຈກາງ, ເສັ້ນຜ່ານສູນກາງ
+	Center, Radius	ຈຸດໃຈກາງ, ລັດສະໝີ
+	Center, Start, Angle	ຈຸດໃຈກາງ, ຈຸດເລີ່ມຕົ້ນ, ມຸມ
+	Center, Start, End	ຈຸດໃຈກາງ, ຈຸດເລີ່ມຕົ້ນ, ຈຸດປາຍ
+	Center, Start, Length	ຈຸດໃຈກາງ, ຈຸດເລີ່ມຕົ້ນ, ຄວາມຍາວ
+	Chamfer	ປາດມຸມ
+	Change Space	ປ່ຽນພື້ນທີ່ເຮັດວຽກ
+	Change to Current Layer	ປ່ຽນໄປເປັນຊັ້ນງານປະຈຸບັນ
+	Changed: {n}	ປ່ຽນແປງແລ້ວ: {n}
+	Circle	ວົງມົນ
+	Circumference	ລວງຮອບວົງ
+	Clear History	ລຶບປະຫວັດ
+	Clear	ລຶບລ້າງ
+	Clip	ຕັດຂອບ
+	Clip Viewport	ຕັດຂອບວິວພອດ
+	Clipboard	ຄລິບບອດ
+	Close	ປິດ
+	Close All	ປິດທັງໝົດ
+	Close All Other Drawings	ປິດແບບແຕ້ມອື່ນໆທັງໝົດ
+	Closed	ປິດຢູ່
+	Close Comparison	ປິດການປຽບທຽບ
+	Coincident	ຮ່ວມຈຸດ
+	Collapse Palettes	ຫຍໍ້ພາເລັດ
+	Collapse Tool Sets	ຫຍໍ້ຊຸດເຄື່ອງມື
+	Collinear	ຮ່ວມເສັ້ນຊື່
+	Color	ສີ
+	Color 8	ສີ 8
+	Color 9	ສີ 9
+	Color Index	ດັດສະນີສີ
+	Color...	ສີ...
+	Command Aliases	ຊື່ຫຍໍ້ຄຳສັ່ງ
+	Command History	ປະຫວັດຄຳສັ່ງ
+	Clear Command History	ລຶບປະຫວັດຄຳສັ່ງ
+	Command Line	ແຖວຄຳສັ່ງ
+	Command Line History Lines	ຈຳນວນແຖວປະຫວັດແຖວຄຳສັ່ງ
+	Command Reference	ຄູ່ມືອ້າງອີງຄຳສັ່ງ
+	Commits	ຄອມມິດ
+	Company	ບໍລິສັດ
+	Compare Drawings...	ປຽບທຽບແບບແຕ້ມ...
+	Computer-aided design and drafting: an open-source, clean-room CAD application written in pure Rust.	ການອອກແບບ ແລະ ຂຽນແບບດ້ວຍຄອມພິວເຕີ: ແອັບພລິເຄຊັນ CAD ແບບໂອເພນຊອດ, ພັດທະນາແບບ clean-room ທີ່ຂຽນດ້ວຍ Rust ລ້ວນໆ.
+	Concentric	ຮ່ວມສູນກາງ
+	Cone	ຮູບຈວຍ
+	Constraint Bars	ແຖບຂໍ້ຜູກມັດ
+	Constraint Settings	ການຕັ້ງຄ່າຂໍ້ຜູກມັດ
+	Construction Line	ເສັ້ນສ້າງຮ່າງ
+	Contents	ເນື້ອໃນ
+	Continue	ຕໍ່ໄປ
+	Contributors	ຜູ້ປະກອບສ່ວນ
+	Control Vertices	ຈຸດຈອມຄວບຄຸມ
+	Convert	ປ່ຽນຮູບແບບ
+	Copy	ສຳເນົາ
+	Copy Full File Path	ສຳເນົາເສັ້ນທາງໄຟລ໌ເຕັມ
+	Copy History	ສຳເນົາປະຫວັດ
+	Copy Layout	ສຳເນົາໜ້າຈັດວາງ
+	Copy Nested Objects	ສຳເນົາວັດຖຸທີ່ຊ້ອນຢູ່
+	Copy Selection	ສຳເນົາສິ່ງທີ່ເລືອກ
+	Copy with Base Point	ສຳເນົາພ້ອມຈຸດອ້າງອີງ
+	Count	ຈຳນວນ
+	Count List	ລາຍການຈຳນວນ
+	Count Table	ຕາຕະລາງຈຳນວນ
+	Create Block	ສ້າງບລັອກ
+	Creates a user parameter	ສ້າງພາຣາມິເຕີຂອງຜູ້ໃຊ້
+	Ctrl+Enter to finish	Ctrl+Enter ເພື່ອສຳເລັດ
+	Current layer	ຊັ້ນງານປະຈຸບັນ
+	Current selection	ສິ່ງທີ່ເລືອກປະຈຸບັນ
+	Current: {color}	ປະຈຸບັນ: {color}
+	Cut	ຕັດ
+	Cyan	ສີຟ້າອົມຂຽວ
+	Cylinder	ຮູບທໍ່ກົມ
+	DWG	DWG
+	DWG Reference...	ການອ້າງອີງ DWG...
+	DXF	DXF
+	Dark	ມືດ
+	Data Extraction...	ການດຶງຂໍ້ມູນ...
+	Default	ຄ່າເລີ່ມຕົ້ນ
+	Data Link...	ລິ້ງຂໍ້ມູນ...
+	Default Save Format	ຮູບແບບບັນທຶກເລີ່ມຕົ້ນ
+	Default Save Version	ເວີຊັນບັນທຶກເລີ່ມຕົ້ນ
+	Define Attributes	ກຳນົດຄຸນລັກສະນະ
+	Define Attributes...	ກຳນົດຄຸນລັກສະນະ...
+	Defined width	ຄວາມກວ້າງທີ່ກຳນົດ
+	Degree	ອົງສາ
+	Degrees of Freedom	ລະດັບຄວາມເປັນອິດສະຫຼະ
+	Degrees of freedom: {n}	ລະດັບຄວາມເປັນອິດສະຫຼະ: {n}
+	Delete	ລຶບ
+	Delete Column	ລຶບຖັນ
+	Delete Constraints	ລຶບຂໍ້ຜູກມັດ
+	Delete Dimension Style	ລຶບຮູບແບບຂະໜາດ
+	Delete Duplicate Objects	ລຶບວັດຖຸທີ່ຊ້ຳກັນ
+	Delete Layer	ລຶບຊັ້ນງານ
+	Delete Layer State	ລຶບສະຖານະຊັ້ນງານ
+	Delete Layout	ລຶບໜ້າຈັດວາງ
+	Delete Row	ລຶບແຖວ
+	Delete Text Style	ລຶບຮູບແບບຂໍ້ຄວາມ
+	Delta X	ໄລຍະປ່ຽນແປງ X
+	Delta Y	ໄລຍະປ່ຽນແປງ Y
+	Description	ລາຍລະອຽດ
+	Deselect All	ຍົກເລີກການເລືອກທັງໝົດ
+	Diameter	ເສັ້ນຜ່ານສູນກາງ
+	Dim style	ຮູບແບບຂະໜາດ
+	Dimension Break	ຕັດເສັ້ນຂະໜາດ
+	Dimension Edit	ແກ້ໄຂຂະໜາດ
+	Dimension	ຂະໜາດ
+	Dimension Objects Only	ສະເພາະວັດຖຸຂະໜາດ
+	Dimension Space	ໄລຍະຫ່າງເສັ້ນຂະໜາດ
+	Dimension Style Override	ຂຽນທັບຮູບແບບຂະໜາດ
+	Dimension Style...	ຮູບແບບຂະໜາດ...
+	Dimension Text Edit	ແກ້ໄຂຂໍ້ຄວາມຂະໜາດ
+	Dimension style	ຮູບແບບຂະໜາດ
+	Dimensional Constraint	ຂໍ້ຜູກມັດດ້ານຂະໜາດ
+	Dimensional Constraint Parameters	ພາຣາມິເຕີຂໍ້ຜູກມັດດ້ານຂະໜາດ
+	Dimensional Constraints	ຂໍ້ຜູກມັດດ້ານຂະໜາດ
+	Disassociate Dimensions	ຍົກເລີກການເຊື່ອມໂຍງຂະໜາດ
+	Display name	ຊື່ທີ່ສະແດງ
+	Distance	ໄລຍະທາງ
+	Divide	ແບ່ງເທົ່າກັນ
+	Do not plot (click: plot)	ບໍ່ພິມ (ຄລິກ: ພິມ)
+	Donut	ຮູບໂດນັດ
+	Double-click to edit the description	ດັບເບິນຄລິກເພື່ອແກ້ໄຂລາຍລະອຽດ
+	Down	ລົງ
+	Drafting	ການຂຽນແບບ
+	Drafting Settings	ການຕັ້ງຄ່າການຂຽນແບບ
+	Drafting Settings...	ການຕັ້ງຄ່າການຂຽນແບບ...
+	Draw	ແຕ້ມ
+	Draw Order	ລຳດັບການແຕ້ມ
+	Drawing (DWG)	ແບບແຕ້ມ (DWG)
+	Drawing (DXF)	ແບບແຕ້ມ (DXF)
+	Drawing Limits	ຂອບເຂດແບບແຕ້ມ
+	Drawing Template (DWT)	ແມ່ແບບແຕ້ມ (DWT)
+	Drawing Utilities	ເຄື່ອງມືຊ່ວຍເຫຼືອແບບແຕ້ມ
+	Drawings (DWG, DXF)	ແບບແຕ້ມ (DWG, DXF)
+	SVG drawings (SVG, SVGZ)	ແບບແຕ້ມ SVG (SVG, SVGZ)
+	Dynamic	ໄດນາມິກ
+	Dynamic Dimensions	ຂະໜາດໄດນາມິກ
+	Dynamic Input	ການປ້ອນຂໍ້ມູນໄດນາມິກ
+	Dynamic Input (F12)	ການປ້ອນຂໍ້ມູນໄດນາມິກ (F12)
+	E	ຕາເວັນອອກ
+	Edit	ແກ້ໄຂ
+	Edit Attributes...	ແກ້ໄຂຄຸນລັກສະນະ...
+	Edit Text...	ແກ້ໄຂຂໍ້ຄວາມ...
+	Edit Table Cell	ແກ້ໄຂຫ້ອງຕາຕະລາງ
+	Elevation	ລະດັບຄວາມສູງ
+	Ellipse	ຮູບວົງຮີ
+	Elliptical Arc	ເສັ້ນໂຄ້ງວົງຮີ
+	Enable Dynamic Input (F12)	ເປີດໃຊ້ການປ້ອນຂໍ້ມູນໄດນາມິກ (F12)
+	End Object Isolation	ສິ້ນສຸດການແຍກດ່ຽວວັດຖຸ
+	End Width	ຄວາມກວ້າງຈຸດປາຍ
+	End X	ຈຸດປາຍ X
+	End Y	ຈຸດປາຍ Y
+	End angle	ມຸມປາຍ
+	Endpoint	ຈຸດປາຍ
+	Enter	Enter
+	Enter Top, Zero or Bottom.	ປ້ອນ Top, Zero ຫຼື Bottom.
+	Enter a fit data option	ປ້ອນຕົວເລືອກຂໍ້ມູນຄວາມພໍດີ (fit data)
+	Enter a pattern name	ປ້ອນຊື່ລວດລາຍ
+	Enter a vertex editing option	ປ້ອນຕົວເລືອກການແກ້ໄຂຈຸດຈອມ
+	Enter an option	ປ້ອນຕົວເລືອກ
+	Enter angle of xline	ປ້ອນມຸມຂອງເສັ້ນ xline
+	Enter angle of xline (0) or	ປ້ອນມຸມຂອງເສັ້ນ xline (0) ຫຼື
+	Enter area of rectangle in current units	ປ້ອນເນື້ອທີ່ຂອງຮູບສີ່ຫຼ່ຽມມຸມສາກຕາມຫົວໜ່ວຍປະຈຸບັນ
+	Enter attribute prompt	ປ້ອນຂໍ້ຄວາມເຕືອນຄຸນລັກສະນະ
+	Enter attribute tag name	ປ້ອນຊື່ແທັກຄຸນລັກສະນະ
+	Enter attribute value	ປ້ອນຄ່າຄຸນລັກສະນະ
+	Enter block name	ປ້ອນຊື່ບລັອກ
+	Enter constraint type	ປ້ອນປະເພດຂໍ້ຜູກມັດ
+	Enter continuity	ປ້ອນຄວາມຕໍ່ເນື່ອງ
+	Enter default attribute value	ປ້ອນຄ່າຄຸນລັກສະນະເລີ່ມຕົ້ນ
+	Enter degree of spline	ປ້ອນລະດັບຂັ້ນ (degree) ຂອງ spline
+	Enter delta angle	ປ້ອນມຸມປ່ຽນແປງ
+	Enter delta length or	ປ້ອນຄວາມຍາວປ່ຽນແປງ ຫຼື
+	Enter dimension text	ປ້ອນຂໍ້ຄວາມຂະໜາດ
+	Enter dimension text (<> = measurement)	ປ້ອນຂໍ້ຄວາມຂະໜາດ (<> = ຄ່າວັດແທກ)
+	Enter dimension value or [name=expression]	ປ້ອນຄ່າຂະໜາດ ຫຼື [name=expression]
+	Enter dimension variable name to override	ປ້ອນຊື່ຕົວປ່ຽນຂະໜາດທີ່ຈະຂຽນທັບ
+	Enter justification type	ປ້ອນປະເພດການຈັດແນວ
+	Enter leader text	ປ້ອນຂໍ້ຄວາມເສັ້ນຊີ້ບອກ
+	Enter mline scale	ປ້ອນມາດຕາສ່ວນ mline
+	Enter mode	ປ້ອນໂໝດ
+	Enter name of block to insert	ປ້ອນຊື່ບລັອກທີ່ຈະແຊກ
+	Enter new text	ປ້ອນຂໍ້ຄວາມໃໝ່
+	Enter next point	ປ້ອນຈຸດຖັດໄປ
+	Enter number of columns	ປ້ອນຈຳນວນຖັນ
+	Enter number of data rows	ປ້ອນຈຳນວນແຖວຂໍ້ມູນ
+	Enter number of items	ປ້ອນຈຳນວນລາຍການ
+	Enter number of items along path	ປ້ອນຈຳນວນລາຍການຕາມເສັ້ນທາງ
+	Enter number of sides	ປ້ອນຈຳນວນຂ້າງ
+	Enter number of turns	ປ້ອນຈຳນວນຮອບ
+	Enter percentage length	ປ້ອນເປີເຊັນຄວາມຍາວ
+	Enter rectangle length	ປ້ອນຄວາມຍາວຮູບສີ່ຫຼ່ຽມມຸມສາກ
+	Enter rectangle width	ປ້ອນຄວາມກວ້າງຮູບສີ່ຫຼ່ຽມມຸມສາກ
+	Enter scale factor	ປ້ອນຕົວຄູນມາດຕາສ່ວນ
+	Enter text	ປ້ອນຂໍ້ຄວາມ
+	Enter text (use \P for new paragraphs)	ປ້ອນຂໍ້ຄວາມ (ໃຊ້ \P ສຳລັບຍໍ້ໜ້າໃໝ່)
+	Enter the number of segments	ປ້ອນຈຳນວນສ່ວນແບ່ງ
+	Enter twist direction of helix	ປ້ອນທິດທາງການບິດຂອງກ້ຽວວຽນ (helix)
+	Entire drawing	ແບບແຕ້ມທັງໝົດ
+	Equal	ເທົ່າກັນ
+	Erase	ລຶບອອກ
+	Evaluate	ຄິດໄລ່ປະເມີນ
+	Exclude from new selection set	ຍົກເວັ້ນອອກຈາກກຸ່ມທີ່ເລືອກໃໝ່
+	Explode	ແຍກສ່ວນ
+	Export	ສົ່ງອອກ
+	Export Table	ສົ່ງອອກຕາຕະລາງ
+	Export to PDF...	ສົ່ງອອກເປັນ PDF...
+	Expression	ນິພົດ
+	Extend	ຕໍ່ຄວາມຍາວ
+	Extension	ເສັ້ນຕໍ່ຍາວ
+	Extents	ຂອບເຂດສິ້ນສຸດ
+	External Reference	ການອ້າງອີງພາຍນອກ
+	External References	ການອ້າງອີງພາຍນອກ
+	Extrude	ດຶງຍື່ນ
+	File	ໄຟລ໌
+	File Tab	ແທັບໄຟລ໌
+	Fillet	ມົນມຸມ
+	Filter	ຕົວກັ່ນຕອງ
+	Filters	ຕົວກັ່ນຕອງ
+	Find and Replace	ຊອກຫາ ແລະ ປ່ຽນແທນ
+	Find...	ຊອກຫາ...
+	First	ທຳອິດ
+	First commit	ຄອມມິດທຳອິດ
+	Fit Points	ຈຸດພໍດີ
+	Fix	ຄົງທີ່
+	Flatten Objects	ເຮັດວັດຖຸໃຫ້ເປັນແຜ່ນພຽງ
+	Format	ຮູບແບບ
+	Freehand	ແຕ້ມອິດສະຫຼະ
+	Freeze	ແຊ່ແຂງ
+	Freeze Layer	ແຊ່ແຂງຊັ້ນງານ
+	Freeze in new viewports	ແຊ່ແຂງໃນວິວພອດໃໝ່
+	Freeze/Thaw	ແຊ່ແຂງ/ລະລາຍ
+	Freeze/Thaw in all viewports	ແຊ່ແຂງ/ລະລາຍໃນທຸກວິວພອດ
+	Freeze/Thaw in the current viewport	ແຊ່ແຂງ/ລະລາຍໃນວິວພອດປະຈຸບັນ
+	From	ຈາກ
+	From Template...	ຈາກແມ່ແບບ...
+	General	ທົ່ວໄປ
+	Geometric Center	ຈຸດໃຈກາງເລຂາຄະນິດ
+	Geometric Constraint	ຂໍ້ຜູກມັດທາງເລຂາຄະນິດ
+	Geometric Constraints	ຂໍ້ຜູກມັດທາງເລຂາຄະນິດ
+	Geometry	ເລຂາຄະນິດ
+	Get from the Drawing	ດຶງເອົາຈາກແບບແຕ້ມ
+	Get Variable	ດຶງຄ່າຕົວປ່ຽນ
+	Get View	ດຶງມຸມມອງ
+	Global	ລວມທັງໝົດ
+	Global width	ຄວາມກວ້າງລວມທັງໝົດ
+	Grab bag	ລວມຫຼາກຫຼາຍ
+	Gradient	ສີໄລ່ລະດັບ
+	Gradient...	ສີໄລ່ລະດັບ...
+	Green	ສີຂຽວ
+	Grid (F7)	ຕາໜ່າງ (F7)
+	Grid Display	ການສະແດງຕາໜ່າງ
+	Grid On (F7)	ເປີດຕາໜ່າງ (F7)
+	Grid snap	ສະແນັບຕາໜ່າງ
+	Grid spacing	ໄລຍະຫ່າງຕາໜ່າງ
+	Grip Edit	ແກ້ໄຂຈຸດກຣິບ
+	Grip Mirror	ສະທ້ອນດ້ວຍຈຸດກຣິບ
+	Grip Option	ຕົວເລືອກຈຸດກຣິບ
+	Grip Rotate	ໝຸນດ້ວຍຈຸດກຣິບ
+	Grip Scale	ປັບມາດຕາສ່ວນດ້ວຍຈຸດກຣິບ
+	Grip Stretch	ຍືດດ້ວຍຈຸດກຣິບ
+	Group	ກຸ່ມ
+	Group Edit	ແກ້ໄຂກຸ່ມ
+	Group Options	ຕົວເລືອກກຸ່ມ
+	Group Selection	ເລືອກກຸ່ມ
+	Hatch	ແຮດຊ໌
+	Hatch Edit	ແກ້ໄຂແຮດຊ໌
+	Hatch Patterns	ລວດລາຍແຮດຊ໌
+	Hatch...	ແຮດຊ໌...
+	Height	ຄວາມສູງ
+	Height: {height}	ຄວາມສູງ: {height}
+	Helix	ກ້ຽວວຽນ
+	Help	ວິທີໃຊ້
+	Hide All	ເຊື່ອງທັງໝົດ
+	Hide All Constraint Bars	ເຊື່ອງແຖບຂໍ້ຜູກມັດທັງໝົດ
+	Hide All Dynamic Dimensions	ເຊື່ອງຂະໜາດໄດນາມິກທັງໝົດ
+	Hide Layer List	ເຊື່ອງລາຍການຊັ້ນງານ
+	Hide Objects	ເຊື່ອງວັດຖຸ
+	Hide Palettes	ເຊື່ອງພາເລັດ
+	History	ປະຫວັດ
+	Home	ໜ້າຫຼັກ
+	Horizontal	ລວງນອນ
+	HorizontalDistance	ໄລຍະຫ່າງລວງນອນ
+	How to apply:	ວິທີນຳໃຊ້:
+	ID Point	ກວດສອບພິກັດຈຸດ
+	Import	ນຳເຂົ້າ
+	In	ຂະຫຍາຍເຂົ້າ
+	In-window Menu Bar	ແຖບເມນູໃນໜ້າຕ່າງ
+	Include in new selection set	ຮວມເຂົ້າໃນກຸ່ມທີ່ເລືອກໃໝ່
+	Increment angle	ມຸມເພີ່ມຂຶ້ນ
+	Index Color	ດັດສະນີສີ
+	Index color: {index}	ດັດສະນີສີ: {index}
+	Infer Constraints	ຄາດຄະເນຂໍ້ຜູກມັດ
+	Inquiry	ສອບຖາມຂໍ້ມູນ
+	Insert	ແຊກ
+	Insert Block	ແຊກບລັອກ
+	Insert Column	ແຊກຖັນ
+	Insert Row	ແຊກແຖວ
+	Insert tab	ແທັບແຊກ
+	Insert this block	ແຊກບລັອກນີ້
+	Insert Table Formula	ແຊກສູດຄິດໄລ່ຕາຕະລາງ
+	Insertion	ຈຸດແຊກ
+	Insertion X	ຈຸດແຊກ X
+	Insertion Y	ຈຸດແຊກ Y
+	Insertion Z	ຈຸດແຊກ Z
+	Inspect Constraints	ກວດສອບຂໍ້ຜູກມັດ
+	Inspect Drawing	ກວດສອບແບບແຕ້ມ
+	Inspection	ການກວດສອບ
+	Interface Language	ພາສາສ່ວນຕິດຕໍ່ຜູ້ໃຊ້
+	Interface Theme	ຮູບແບບສ່ວນຕິດຕໍ່ຜູ້ໃຊ້
+	Intersect	ຕັດກັນ (Intersect)
+	Intersection	ຈຸດຕັດ
+	Isolate	ແຍກດ່ຽວ
+	Isolate Layer	ແຍກດ່ຽວຊັ້ນງານ
+	Isolate Objects	ແຍກດ່ຽວວັດຖຸ
+	Isometric Drafting	ການຂຽນແບບໄອໂຊເມຕຣິກ
+	Jogged	ລັດສະໝີຫັກງໍ
+	Jogged Linear	ເສັ້ນຊື່ຫັກງໍ
+	Join	ເຊື່ອມຕໍ່
+	Join the ArtCraft Discord…	ເຂົ້າຮ່ວມ Discord ຂອງ ArtCraft…
+	Join us on Discord	ເຂົ້າຮ່ວມກັບພວກເຮົາໃນ Discord
+	Isometric Plane	ໜ້າພຽງໄອໂຊເມຕຣິກ
+	Isometric snap	ສະແນັບໄອໂຊເມຕຣິກ
+	Language	ພາສາ
+	Last	ຫຼ້າສຸດ
+	Last commit	ຄອມມິດຫຼ້າສຸດ
+	Layer	ຊັ້ນງານ
+	Layer Delete	ລຶບຊັ້ນງານ
+	Layer Match	ກົງກັບຊັ້ນງານ
+	Layer Merge	ຮວມຊັ້ນງານ
+	Layer Off	ປິດຊັ້ນງານ
+	Layer Properties	ຄຸນສົມບັດຊັ້ນງານ
+	Layer Properties Manager	ຕົວຈັດການຄຸນສົມບັດຊັ້ນງານ
+	Layer Properties Manager — current viewport	ຕົວຈັດການຄຸນສົມບັດຊັ້ນງານ — ວິວພອດປະຈຸບັນ
+	Layer State	ສະຖານະຊັ້ນງານ
+	Layer States Manager...	ຕົວຈັດການສະຖານະຊັ້ນງານ...
+	Layer Tools	ເຄື່ອງມືຊັ້ນງານ
+	Layer contains objects (double-click to make current)	ຊັ້ນງານມີວັດຖຸຢູ່ (ດັບເບິນຄລິກເພື່ອຕັ້ງເປັນຊັ້ນງານປະຈຸບັນ)
+	Layer is empty (double-click to make current)	ຊັ້ນງານວ່າງເປົ່າ (ດັບເບິນຄລິກເພື່ອຕັ້ງເປັນຊັ້ນງານປະຈຸບັນ)
+	Layers	ຊັ້ນງານ
+	Layers Palette	ພາເລັດຊັ້ນງານ
+	Hide Palette	ເຊື່ອງພາເລັດ
+	Layers displayed: {shown} of {total}.   Current layer: {layer}	ຊັ້ນງານທີ່ສະແດງ: {shown} ຈາກ {total}.   ຊັ້ນງານປະຈຸບັນ: {layer}
+	Layout	ໜ້າຈັດວາງ
+	Layout list	ລາຍການໜ້າຈັດວາງ
+	Leader	ເສັ້ນຊີ້ບອກ
+	Leaders Only	ສະເພາະເສັ້ນຊີ້ບອກ
+	Left	ຊ້າຍ
+	Length	ຄວາມຍາວ
+	Length X	ຄວາມຍາວແກນ X
+	Length Y	ຄວາມຍາວແກນ Y
+	Lengthen	ປັບຄວາມຍາວ
+	Light	ແຈ້ງ
+	Line	ເສັ້ນຊື່
+	Line delta	ການປ່ຽນແປງແຖວໂຄ້ດ
+	Linear	ເສັ້ນຊື່
+	Lines +/−	ແຖວໂຄ້ດ +/−
+	Lines added	ແຖວໂຄ້ດທີ່ເພີ່ມ
+	Lines deleted	ແຖວໂຄ້ດທີ່ລຶບ
+	Lines of Command History	ຈຳນວນແຖວປະຫວັດຄຳສັ່ງ
+	Linetype	ຊະນິດເສັ້ນ
+	Linetype Scale	ມາດຕາສ່ວນຊະນິດເສັ້ນ
+	Linetype scale	ມາດຕາສ່ວນຊະນິດເສັ້ນ
+	Ltscale	ມາດຕາສ່ວນຊະນິດເສັ້ນ (Ltscale)
+	Linetype...	ຊະນິດເສັ້ນ...
+	Lineweight	ຄວາມໜາເສັ້ນ
+	Lineweight...	ຄວາມໜາເສັ້ນ...
+	List	ລາຍການ
+	List Blocks	ລາຍການບລັອກ
+	List Dimension Styles	ລາຍການຮູບແບບຂະໜາດ
+	List Groups	ລາຍການກຸ່ມ
+	List Layer States	ລາຍການສະຖານະຊັ້ນງານ
+	List Layouts	ລາຍການໜ້າຈັດວາງ
+	List System Variables	ລາຍການຕົວປ່ຽນລະບົບ
+	List Text Styles	ລາຍການຮູບແບບຂໍ້ຄວາມ
+	Load all	ໂຫລດທັງໝົດ
+	Load...	ໂຫລດ...
+	Loaded linetypes	ຊະນິດເສັ້ນທີ່ໂຫລດແລ້ວ
+	Lock	ລັອກ
+	Lock Layer	ລັອກຊັ້ນງານ
+	Lock viewport	ລັອກວິວພອດ
+	Lock/Unlock	ລັອກ/ປົດລັອກ
+	Loft	ຂຶ້ນຮູບຕາມໜ້າຕັດ (Loft)
+	MIT OR Apache-2.0. Not affiliated with Autodesk, Inc.	MIT OR Apache-2.0. ບໍ່ມີສ່ວນກ່ຽວຂ້ອງກັບ Autodesk, Inc.
+	MODEL	ໂມເດວ
+	MText	ຂໍ້ຄວາມຫຼາຍແຖວ
+	Magenta	ສີບົວບານເຢັນ
+	Major line every	ເສັ້ນຕາໜ່າງຫຼັກທຸກໆ
+	Make Current	ຕັ້ງເປັນປະຈຸບັນ
+	Make Object's Layer Current	ຕັ້ງຊັ້ນງານຂອງວັດຖຸໃຫ້ເປັນປະຈຸບັນ
+	Make...	ສ້າງ...
+	Match Layer	ກົງກັບຊັ້ນງານ
+	Match Properties	ຄັດລອກຄຸນສົມບັດ
+	Measure	ວັດແທກໄລຍະແບ່ງ
+	Measure Distance	ວັດແທກໄລຍະຫ່າງ
+	Measure Geometry	ວັດແທກເລຂາຄະນິດ
+	Merge Cells	ຮວມຫ້ອງຕາຕະລາງ
+	Merged PRs	PR ທີ່ຮວມແລ້ວ
+	Mid Between 2 Points	ຈຸດເຄິ່ງກາງລະຫວ່າງ 2 ຈຸດ
+	Midpoint	ຈຸດເຄິ່ງກາງ
+	Mirror	ສະທ້ອນເງົາ
+	Model	ໂມເດວ
+	Model Space (in viewport)	ພື້ນທີ່ໂມເດວ (ໃນວິວພອດ)
+	Modeling	ການສ້າງໂມເດວ
+	Models	ໂມເດວ
+	Modify	ດັດແກ້
+	Move	ຍ້າຍ
+	Multileader	ເສັ້ນຊີ້ບອກຫຼາຍຫົວ
+	Multileader Style...	ຮູບແບບເສັ້ນຊີ້ບອກຫຼາຍຫົວ...
+	Multileader style	ຮູບແບບເສັ້ນຊີ້ບອກຫຼາຍຫົວ
+	Multiline	ເສັ້ນຄູ່ຂະໜານ (Multiline)
+	Multiline Text	ຂໍ້ຄວາມຫຼາຍແຖວ
+	Multiline Text...	ຂໍ້ຄວາມຫຼາຍແຖວ...
+	Multiple	ຫຼາຍອັນ
+	Multiple Point	ຫຼາຍຈຸດ
+	My	ຂອງຂ້ອຍ
+	My properties: not available yet	ຄຸນສົມບັດຂອງຂ້ອຍ: ຍັງບໍ່ພ້ອມນຳໃຊ້
+	N	ເໜືອ
+	Name	ຊື່
+	Name (A–Z)	ຊື່ (A–Z)
+	Named Views...	ມຸມມອງທີ່ຕັ້ງຊື່...
+	Nearest	ຈຸດໃກ້ຄຽງສຸດ
+	New	ສ້າງໃໝ່
+	New (metric)	ສ້າງໃໝ່ (ລະບົບເມຕຣິກ)
+	New Drawing	ແບບແຕ້ມໃໝ່
+	New Drawing (⌘N)	ແບບແຕ້ມໃໝ່ (⌘N)
+	New Drawing...	ແບບແຕ້ມໃໝ່...
+	New Layer	ຊັ້ນງານໃໝ່
+	New Layout	ໜ້າຈັດວາງໃໝ່
+	New VP Freeze	ແຊ່ແຂງໃນວິວພອດໃໝ່
+	New Viewports...	ວິວພອດໃໝ່...
+	New from Template...	ສ້າງໃໝ່ຈາກແມ່ແບບ...
+	New layout	ໜ້າຈັດວາງໃໝ່
+	New state name	ຊື່ສະຖານະໃໝ່
+	Next Change	ການປ່ຽນແປງຖັດໄປ
+	No	ບໍ່
+	No blocks defined in this drawing.	ບໍ່ມີບລັອກທີ່ກຳນົດໄວ້ໃນແບບແຕ້ມນີ້.
+	No contributor data was built into this copy.	ບໍ່ມີຂໍ້ມູນຜູ້ປະກອບສ່ວນໃນສະບັບນີ້.
+	No model credits were built into this copy.	ບໍ່ມີຂໍ້ມູນເຄຣດິດໂມເດວໃນສະບັບນີ້.
+	No saved layer states	ບໍ່ມີສະຖານະຊັ້ນງານທີ່ບັນທຶກໄວ້
+	No selection	ບໍ່ມີສິ່ງທີ່ເລືອກ
+	Node	ໂນດ (Node)
+	None	ບໍ່ມີ
+	Not available	ບໍ່ພ້ອມນຳໃຊ້
+	Not available yet	ຍັງບໍ່ພ້ອມນຳໃຊ້
+	Numbered list	ລາຍການລຳດັບເລກ
+	OK	ຕົກລົງ
+	Object	ວັດຖຸ
+	Object Snap	ສະແນັບວັດຖຸ
+	Object Snap (F3)	ສະແນັບວັດຖຸ (F3)
+	Object Snap On (F3)	ເປີດສະແນັບວັດຖຸ (F3)
+	Object Snap Tracking	ຕິດຕາມສະແນັບວັດຖຸ
+	Object Snap Tracking (F11)	ຕິດຕາມສະແນັບວັດຖຸ (F11)
+	Object Snap Tracking Settings	ການຕັ້ງຄ່າຕິດຕາມສະແນັບວັດຖຸ
+	Object type:	ປະເພດວັດຖຸ:
+	Oblique	ອຽງ
+	Off	ປິດ
+	Offset	ໄລຍະຫ່າງຂະໜານ
+	On	ເປີດ
+	On/Off	ເປີດ/ປິດ
+	One of the Crafting Apps by the ArtCraft team and community.	ໜຶ່ງໃນ Crafting Apps ໂດຍທີມງານ ແລະ ຊຸມຊົນ ArtCraft.
+	Only in this drawing: {n}	ມີສະເພາະໃນແບບແຕ້ມນີ້: {n}
+	Only in {name}: {n}	ມີສະເພາະໃນ {name}: {n}
+	Open (⌘O)	ເປີດ (⌘O)
+	Open Sample Drawing	ເປີດແບບແຕ້ມຕົວຢ່າງ
+	Open sample drawing	ເປີດແບບແຕ້ມຕົວຢ່າງ
+	Open Xref	ເປີດການອ້າງອີງພາຍນອກ (Xref)
+	Open...	ເປີດ...
+	Operator:	ຕົວດຳເນີນການ:
+	Orbit	ໝຸນວົງໂຄຈອນ
+	Ordinate	ພິກັດແກນ
+	Ortho (F8)	ຕັ້ງສາກ (F8)
+	Ortho Mode	ໂໝດຕັ້ງສາກ
+	Ortho Mode (F8)	ໂໝດຕັ້ງສາກ (F8)
+	Osnap Settings...	ການຕັ້ງຄ່າ Osnap...
+	Out	ຫຍໍ້ອອກ
+	Over-constrained	ຜູກມັດເກີນກຳນົດ
+	Override	ຂຽນທັບ
+	PAPER	ເຈ້ຍ
+	Percent	ເປີເຊັນ
+	Polar (distance < angle)	ພິກັດຂົ້ວ (ໄລຍະທາງ < ມຸມ)
+	PRs	PR
+	Page Setup Manager	ຕົວຈັດການຕັ້ງຄ່າໜ້າເຈ້ຍ
+	Page Setup Manager...	ຕົວຈັດການຕັ້ງຄ່າໜ້າເຈ້ຍ...
+	Pan	ເລື່ອນມຸມມອງ
+	Pan Down	ເລື່ອນມຸມມອງລົງ
+	Pan Left	ເລື່ອນມຸມມອງໄປຊ້າຍ
+	Pan Right	ເລື່ອນມຸມມອງໄປຂວາ
+	Pan Up	ເລື່ອນມຸມມອງຂຶ້ນ
+	Paper Space	ພື້ນທີ່ໜ້າເຈ້ຍ
+	Parallel	ຂະໜານ
+	Parameters Manager	ຕົວຈັດການພາຣາມິເຕີ
+	Parametric	ພາຣາເມຕຣິກ
+	Paste	ວາງ
+	Paste as Block	ວາງເປັນບລັອກ
+	Paste to Command Line	ວາງໃສ່ແຖວຄຳສັ່ງ
+	Paste to Original Coordinates	ວາງໃສ່ພິກັດເດີມ
+	Path Array	ອາເຣຕາມເສັ້ນທາງ
+	Pattern	ລວດລາຍ
+	Perpendicular	ຕັ້ງສາກ
+	Plot	ພິມແບບ
+	Plot (click: do not plot)	ພິມແບບ (ຄລິກ: ບໍ່ພິມແບບ)
+	Plot Preview	ສະແດງຕົວຢ່າງກ່ອນພິມແບບ
+	Plot Window	ປ່ອງຢ້ຽມພິມແບບ
+	Plot style	ຮູບແບບການພິມແບບ
+	Plot style attached to	ຮູບແບບການພິມແບບນຳໃຊ້ກັບ
+	Plot style table	ຕາຕະລາງຮູບແບບການພິມແບບ
+	Plot Style...	ຮູບແບບການພິມແບບ...
+	Plot Style Manager	ຕົວຈັດການຮູບແບບການພິມແບບ
+	Plot Style Manager...	ຕົວຈັດການຮູບແບບການພິມແບບ...
+	Plot Styles...	ຮູບແບບການພິມແບບ...
+	Plotter Manager	ຕົວຈັດການເຄື່ອງພິມແບບ
+	Plotter Manager...	ຕົວຈັດການເຄື່ອງພິມແບບ...
+	New CTB	CTB ໃໝ່
+	New STB	STB ໃໝ່
+	New style	ຮູບແບບໃໝ່
+	Reset Panel Layout	ຕັ້ງຄ່າການຈັດວາງແຜງໃໝ່
+	Send Hatches to Back	ສົ່ງລວດລາຍແຮດຊ໌ໄປໄວ້ທາງຫຼັງສຸດ
+	Send Under Objects	ສົ່ງໄປກ້ອງວັດຖຸ
+	Text Objects Only	ສະເພາະວັດຖຸຂໍ້ຄວາມ
+	Use for this layout	ໃຊ້ສຳລັບການຈັດວາງນີ້
+	Display plot styles	ສະແດງຮູບແບບການພິມແບບ
+	No plot style tables.	ບໍ່ມີຕາຕະລາງຮູບແບບການພິມແບບ.
+	A built-in table: editing it keeps an edited copy in the drawing.	ຕາຕະລາງທີ່ມີມາພ້ອມລະບົບ: ການແກ້ໄຂຈະເກັບສຳເນົາທີ່ແກ້ໄຂແລ້ວໄວ້ໃນຮູບແຕ້ມ.
+	Keep an editable copy of this table in the drawing	ເກັບສຳເນົາທີ່ສາມາດແກ້ໄຂໄດ້ຂອງຕາຕະລາງນີ້ໄວ້ໃນຮູບແຕ້ມ
+	Layout {name}: {table}	ການຈັດວາງ {name}: {table}
+	Grayscale	ລະດັບສີເທົາ
+	Screening	ຄວາມເຂັ້ມຂອງການພິມ
+	Use object linetype	ໃຊ້ປະເພດເສັ້ນຂອງວັດຖຸ
+	Use object lineweight	ໃຊ້ນ້ຳໜັກເສັ້ນຂອງວັດຖຸ
+	Remove	ລຶບອອກ
+	Add	ເພີ່ມ
+	Open a drawing first.	ເປີດຮູບແຕ້ມກ່ອນ.
+	Plot table type	ປະເພດຕາຕະລາງການພິມແບບ
+	Color-dependent	ອີງຕາມສີ
+	Named	ຕາມຊື່ທີ່ກຳນົດ
+	Plus/minus	ບວກ/ລົບ
+	Point	ຈຸດ
+	Point Filters	ຕົວຕອງຈຸດ
+	Point Style...	ຮູບແບບຈຸດ...
+	Polar Array	ອາເຣແບບວົງມົນ
+	Polar Tracking	ການຕິດຕາມພິກັດໂພລາ
+	Polar Tracking (F10)	ການຕິດຕາມພິກັດໂພລາ (F10)
+	Polar Tracking On (F10)	ເປີດການຕິດຕາມພິກັດໂພລາ (F10)
+	Polar angle measurement	ການວັດແທກມຸມໂພລາ
+	Polar distance	ໄລຍະຫ່າງໂພລາ
+	Polar: {distance} < {angle}°	ໂພລາ: {distance} < {angle}°
+	PolarSnap	ສະແນັບໂພລາ
+	Polygon	ຮູບຫຼາຍແຈ
+	Polygonal	ແບບຫຼາຍແຈ
+	Polygonal Viewport	ພອດມຸມມອງແບບຫຼາຍແຈ
+	Polyline	ເສັ້ນໂພລີໄລນ໌
+	Polyline Edit	ແກ້ໄຂເສັ້ນໂພລີໄລນ໌
+	Position X	ຕຳແໜ່ງ X
+	Position Y	ຕຳແໜ່ງ Y
+	Position Z	ຕຳແໜ່ງ Z
+	Previous	ກ່ອນໜ້າ
+	Previous Change	ການປ່ຽນແປງກ່ອນໜ້າ
+	Previous Layer	ເລເຢີກ່ອນໜ້າ
+	Primitives	ຮູບຊົງພື້ນຖານ
+	Print	ພິມ
+	Print...	ພິມ...
+	Properties	ຄຸນລັກສະນະ
+	Properties Inspector	ຕົວຕວດສອບຄຸນລັກສະນະ
+	Properties:	ຄຸນລັກສະນະ:
+	Proxy	ພຣັອກຊີ
+	Purge	ລ້າງຂໍ້ມູນທີ່ບໍ່ໄດ້ໃຊ້
+	Pyramid	ຮູບປີຣາມິດ
+	Quadrant	ຈຸດຄວອດແດຣນຕ໌
+	Query Entities	ສອບຖາມຂໍ້ມູນວັດຖຸ
+	Quick	ດ່ວນ
+	Quick Dimension	ບອກຂະໜາດດ່ວນ
+	Quick Properties	ຄຸນລັກສະນະດ່ວນ
+	Quick Select	ເລືອກດ່ວນ
+	Quick Select Properties	ຄຸນລັກສະນະການເລືອກດ່ວນ
+	Quick Select...	ເລືອກດ່ວນ...
+	QuickCalc	ເຄື່ອງຄິດໄລ່ດ່ວນ
+	QuickCalc Pick	ເລືອກຈຸດສຳລັບເຄື່ອງຄິດໄລ່ດ່ວນ
+	Quit CADCraft	ອອກຈາກ CADCraft
+	Radius	ລັດສະໝີ
+	Raster Image	ຮູບພາບຣາສເຕີ
+	Ray	ເສັ້ນລັງສີ
+	Read-only	ອ່ານຢ່າງດຽວ
+	Real name	ຊື່ແທ້
+	Realtime	ແບບເວລາຈິງ
+	Reassociate Dimensions	ເຊື່ອມໂຍງຂະໜາດຄືນໃໝ່
+	Recent	ຫຼ້າສຸດ
+	Recent Commands	ຄຳສັ່ງຫຼ້າສຸດ
+	Recent Input	ຂໍ້ມູນທີ່ປ້ອນຫຼ້າສຸດ
+	Recover...	ກູ້ຄືນ...
+	Rectangle	ຮູບສີ່ແຈສາກ
+	Recalculate Table Formulas	ຄິດໄລ່ສູດຕາຕະລາງຄືນໃໝ່
+	Rectangular	ແບບສີ່ແຈສາກ
+	Rectangular snap	ສະແນັບແບບສີ່ແຈສາກ
+	Rectangular Array	ອາເຣແບບສີ່ແຈສາກ
+	Red	ສີແດງ
+	Redo	ເຮັດຄືນ
+	Redo (⇧⌘Z)	ເຮັດຄືນ (Shift+⌘Z)
+	Redraw	ແຕ້ມໃໝ່
+	Regen	ສ້າງໃໝ່
+	Regen All	ສ້າງໃໝ່ທັງໝົດ
+	Region	ພື້ນທີ່ປິດ
+	Region/Mass Properties	ຄຸນລັກສະນະພື້ນທີ່ປິດ/ມວນສານ
+	Reinitialize	ເລີ່ມຕົ້ນໃໝ່
+	Relative	ສຳພັດ
+	Relative to last segment	ສຳພັດກັບສ່ວນເສັ້ນສຸດທ້າຍ
+	Remove Leader	ລຶບເສັ້ນຊີ້ບອກອອກ
+	Remove the viewport override	ລຶບການກຳນົດທັບຂອງພອດມຸມມອງອອກ
+	Rename Dimension Style	ປ່ຽນຊື່ຮູບແບບການບອກຂະໜາດ
+	Rename Layer	ປ່ຽນຊື່ເລເຢີ
+	Rename Layer State	ປ່ຽນຊື່ສະຖານະເລເຢີ
+	Rename Layout	ປ່ຽນຊື່ການຈັດວາງ
+	Rename Text Style	ປ່ຽນຊື່ຮູບແບບຂໍ້ຄວາມ
+	Rename...	ປ່ຽນຊື່...
+	Repeat {command}	ເຮັດຊ້ຳ {command}
+	Requires a point (x,y, @dx,dy or @d<a).	ຕ້ອງການຈຸດ (x,y, @dx,dy ຫຼື @d<a).
+	Reset Palettes	ຕັ້ງຄ່າພາເລັດໃໝ່
+	Restore	ຟື້ນຟູ
+	Restore Layer State	ຟື້ນຟູສະຖານະເລເຢີ
+	Reverse	ກັບທິດທາງ
+	Reverse the order	ກັບລຳດັບ
+	Revision Cloud	ເມກໝາຍການແກ້ໄຂ
+	Revolve	ໝູນຂຶ້ນຮູບໂຊລິດ
+	Right	ຂວາ
+	Rotate	ໝູນ
+	Rotation	ມຸມໝູນ
+	S	ໃຕ້
+	Save	ບັນທຶກ
+	Save (⌘S)	ບັນທຶກ (⌘S)
+	Save As	ບັນທຶກເປັນ
+	Save As...	ບັນທຶກເປັນ...
+	Save Layer State	ບັນທຶກສະຖານະເລເຢີ
+	Save State	ບັນທຶກສະຖານະ
+	Scale	ມາດຕາສ່ວນ
+	Search for layer	ຄົ້ນຫາເລເຢີ
+	Search for parameter	ຄົ້ນຫາພາຣາມິເຕີ
+	Second and next points:	ຈຸດທີສອງ ແລະ ຈຸດຖັດໄປ:
+	Select	ເລືອກ
+	Select 2D polyline	ເລືອກເສັ້ນໂພລີໄລນ໌ 2D
+	Select All	ເລືອກທັງໝົດ
+	Select Objects	ເລືອກວັດຖຸ
+	Select Similar	ເລືອກວັດຖຸທີ່ຄ້າຍຄືກັນ
+	Select a 2D polyline.	ເລືອກເສັ້ນໂພລີໄລນ໌ 2D.
+	Select a block reference.	ເລືອກບລັອກອ້າງອີງ.
+	Select a circle or arc.	ເລືອກວົງມົນ ຫຼື ເສັ້ນໂຄ້ງ.
+	Select a closed polyline	ເລືອກເສັ້ນໂພລີໄລນ໌ປິດ
+	Select a closed polyline, circle, ellipse or closed spline.	ເລືອກເສັ້ນໂພລີໄລນ໌ປິດ, ວົງມົນ, ວົງຮີ ຫຼື ສະໄພລນ໌ປິດ.
+	Select a closed polyline.	ເລືອກເສັ້ນໂພລີໄລນ໌ປິດ.
+	Select a curve as the path.	ເລືອກເສັ້ນໂຄ້ງເປັນເສັ້ນທາງ.
+	Select a dimension constraint type	ເລືອກປະເພດເງື່ອນໄຂບັງຄັບການບອກຂະໜາດ
+	Select a line object	ເລືອກວັດຖຸເສັ້ນຊື່
+	Select a line object.	ເລືອກວັດຖຸເສັ້ນຊື່.
+	Select a line or an arc.	ເລືອກເສັ້ນຊື່ ຫຼື ເສັ້ນໂຄ້ງ.
+	Select a line or polyline segment	ເລືອກສ່ວນເສັ້ນຊື່ ຫຼື ສ່ວນເສັ້ນໂພລີໄລນ໌
+	Select a line, arc or open polyline.	ເລືອກເສັ້ນຊື່, ເສັ້ນໂຄ້ງ ຫຼື ເສັ້ນໂພລີໄລນ໌ເປີດ.
+	Select a line, arc, circle, polyline, ellipse or spline as the path.	ເລືອກເສັ້ນຊື່, ເສັ້ນໂຄ້ງ, ວົງມົນ, ເສັ້ນໂພລີໄລນ໌, ວົງຮີ ຫຼື ສະໄພລນ໌ ເປັນເສັ້ນທາງ.
+	Select a line, circle, arc or polyline segment.	ເລືອກເສັ້ນຊື່, ວົງມົນ, ເສັ້ນໂຄ້ງ ຫຼື ສ່ວນເສັ້ນໂພລີໄລນ໌.
+	Select a line.	ເລືອກເສັ້ນຊື່.
+	Select a polyline.	ເລືອກເສັ້ນໂພລີໄລນ໌.
+	Select a text, mtext, attribute definition or dimension.	ເລືອກຂໍ້ຄວາມ, ຂໍ້ຄວາມຫຼາຍແຖວ, ຄຳກຳນົດຄຸນລັກສະນະ ຫຼື ຂະໜາດ.
+	Select an annotation object	ເລືອກວັດຖຸຄຳອະທິບາຍປະກອບ
+	Select an arc or circle	ເລືອກເສັ້ນໂຄ້ງ ຫຼື ວົງມົນ
+	Select an arc.	ເລືອກເສັ້ນໂຄ້ງ.
+	Select an object	ເລືອກວັດຖຸ
+	Select an object to change or	ເລືອກວັດຖຸທີ່ຈະປ່ຽນແປງ ຫຼື
+	Select an object to measure or	ເລືອກວັດຖຸທີ່ຈະວັດແທກ ຫຼື
+	Select an object.	ເລືອກວັດຖຸ.
+	Select an open curve.	ເລືອກເສັ້ນໂຄ້ງເປີດ.
+	Select an open line, arc, polyline, ellipse arc or spline.	ເລືອກເສັ້ນຊື່ເປີດ, ເສັ້ນໂຄ້ງ, ເສັ້ນໂພລີໄລນ໌, ສ່ວນໂຄ້ງວົງຮີ ຫຼື ສະໄພລນ໌.
+	Select arc or circle	ເລືອກເສັ້ນໂຄ້ງ ຫຼື ວົງມົນ
+	Select arc or polyline arc segment	ເລືອກເສັ້ນໂຄ້ງ ຫຼື ສ່ວນໂຄ້ງຂອງເສັ້ນໂພລີໄລນ໌
+	Select arc style	ເລືອກຮູບແບບເສັ້ນໂຄ້ງ
+	Select arc, circle, line	ເລືອກເສັ້ນໂຄ້ງ, ວົງມົນ, ເສັ້ນຊື່
+	Select at least two objects to join.	ເລືອກວັດຖຸຢ່າງໜ້ອຍສອງອັນເພື່ອເຊື່ອມຕໍ່ກັນ.
+	Select circle or arc to add center mark	ເລືອກວົງມົນ ຫຼື ເສັ້ນໂຄ້ງເພື່ອເພີ່ມເຄື່ອງໝາຍຈຸດໃຈກາງ
+	Select closed objects (regions, closed polylines, circles).	ເລືອກວັດຖຸປິດ (ພື້ນທີ່ປິດ, ເສັ້ນໂພລີໄລນ໌ປິດ, ວົງມົນ).
+	Select first line	ເລືອກເສັ້ນຊື່ທຳອິດ
+	Select first line or arc	ເລືອກເສັ້ນຊື່ ຫຼື ເສັ້ນໂຄ້ງທຳອິດ
+	Select first object	ເລືອກວັດຖຸທຳອິດ
+	Select first object or	ເລືອກວັດຖຸທຳອິດ ຫຼື
+	Select first point	ເລືອກຈຸດທຳອິດ
+	Select nested objects to copy or	ເລືອກວັດຖຸຊ້ອນໃນເພື່ອສຳເນົາ ຫຼື
+	Select object	ເລືອກວັດຖຸ
+	Select object to dimension	ເລືອກວັດຖຸທີ່ຈະບອກຂະໜາດ
+	Select object to divide	ເລືອກວັດຖຸທີ່ຈະແບ່ງສ່ວນ
+	Select object to extend or shift-select to trim	ເລືອກວັດຖຸທີ່ຈະຕໍ່ຄວາມຍາວ ຫຼື ກົດ Shift ຄ້າງໄວ້ແລ້ວເລືອກເພື່ອຕັດ
+	Select object to measure	ເລືອກວັດຖຸທີ່ຈະວັດແທກໄລຍະ
+	Select object to offset	ເລືອກວັດຖຸທີ່ຈະສ້າງເສັ້ນຂະໜານ
+	Select object to trim or shift-select to extend	ເລືອກວັດຖຸທີ່ຈະຕັດ ຫຼື ກົດ Shift ຄ້າງໄວ້ແລ້ວເລືອກເພື່ອຕໍ່ຄວາມຍາວ
+	Select objects	ເລືອກວັດຖຸ
+	Select objects (crossing window first corner)	ເລືອກວັດຖຸ (ແຈທຳອິດຂອງກອບເລືອກຕັດຜ່ານ)
+	Select objects to array.	ເລືອກວັດຖຸທີ່ຈະຈັດແຖວອາເຣ.
+	Select objects to stretch by crossing-window or crossing-polygon...	ເລືອກວັດຖຸທີ່ຈະຢືດດ້ວຍກອບເລືອກຕັດຜ່ານ ຫຼື ຮູບຫຼາຍແຈຕັດຜ່ານ...
+	Select objects:	ເລືອກວັດຖຸ:
+	Select one polyline (Multiple is available through the JSON form).	ເລືອກເສັ້ນໂພລີໄລນ໌ອັນດຽວ (ສາມາດເລືອກຫຼາຍອັນໄດ້ຜ່ານຮູບແບບ JSON).
+	Select path curve	ເລືອກເສັ້ນໂຄ້ງເສັ້ນທາງ
+	Select point or object	ເລືອກຈຸດ ຫຼື ວັດຖຸ
+	Select polyline or	ເລືອກເສັ້ນໂພລີໄລນ໌ ຫຼື
+	Select second line	ເລືອກເສັ້ນຊື່ທີສອງ
+	Select second line or shift-select to apply corner	ເລືອກເສັ້ນຊື່ທີສອງ ຫຼື ກົດ Shift ຄ້າງໄວ້ແລ້ວເລືອກເພື່ອກຳນົດແຈ
+	Select second object	ເລືອກວັດຖຸທີສອງ
+	Select second object or shift-select to apply corner	ເລືອກວັດຖຸທີສອງ ຫຼື ກົດ Shift ຄ້າງໄວ້ແລ້ວເລືອກເພື່ອກຳນົດແຈ
+	Select second point	ເລືອກຈຸດທີສອງ
+	Select spline	ເລືອກສະໄພລນ໌
+	Select symmetry line	ເລືອກເສັ້ນແກນເຄິ່ງຄື
+	Select two points	ເລືອກສອງຈຸດ
+	Selection Cycling	ການເລືອກແບບວົນຮອບ
+	Send to Back	ສົ່ງໄປໄວ້ທາງຫຼັງສຸດ
+	Set Current	ຕັ້ງເປັນປັດຈຸບັນ
+	Set Current Dimension Style	ຕັ້ງເປັນຮູບແບບການບອກຂະໜາດປັດຈຸບັນ
+	Set Current Text Style	ຕັ້ງເປັນຮູບແບບຂໍ້ຄວາມປັດຈຸບັນ
+	Set Current Viewport	ຕັ້ງເປັນພອດມຸມມອງປັດຈຸບັນ
+	Set Layer Properties	ຕັ້ງຄຸນລັກສະນະເລເຢີ
+	Set Properties	ຕັ້ງຄຸນລັກສະນະ
+	Set Table Cell	ຕັ້ງຄ່າຫ້ອງຕາຕະລາງ
+	Set Table Cell Style	ຕັ້ງຮູບແບບຫ້ອງຕາຕະລາງ
+	Set Variable	ຕັ້ງຄ່າຕົວປ່ຽນ
+	Set View	ຕັ້ງມຸມມອງ
+	Share	ແບ່ງປັນ
+	Show	ສະແດງ
+	Show All	ສະແດງທັງໝົດ
+	Show All Constraint Bars	ສະແດງແຖບເງື່ອນໄຂບັງຄັບທັງໝົດ
+	Show All Dynamic Dimensions	ສະແດງຂະໜາດໄດນາມິກທັງໝົດ
+	Show and hide the tools of this category	ສະແດງ ແລະ ເຊື່ອງເຄື່ອງມືຂອງໝວດໝູ່ນີ້
+	Show in Tool Sets	ສະແດງໃນຊຸດເຄື່ອງມື
+	Show command prompting near the crosshairs	ສະແດງຄຳແນະນຳຄຳສັ່ງໃກ້ກັບເສັ້ນເລັງ
+	Show Layer List	ສະແດງລາຍການເລເຢີ
+	Show/Hide Lineweight	ສະແດງ/ເຊື່ອງ ນ້ຳໜັກເສັ້ນ
+	Show/Hide Transparency	ສະແດງ/ເຊື່ອງ ຄວາມໂປ່ງໃສ
+	Single Line Text	ຂໍ້ຄວາມແຖວດຽວ
+	Single Point	ຈຸດດຽວ
+	Single...	ດ່ຽວ...
+	Smooth	ລຽບນຽນ
+	Snap	ສະແນັບ
+	Snap Mode	ໂໝດສະແນັບ
+	Snap Mode (F9)	ໂໝດສະແນັບ (F9)
+	Snap On (F9)	ເປີດສະແນັບ (F9)
+	Snap Overrides	ການກຳນົດແທນສະແນັບ
+	Snap X spacing	ໄລຍະຫ່າງສະແນັບຕາມແກນ X
+	Snap and Grid	ສະແນັບ ແລະ ເສັ້ນຕາໜ່າງ
+	Snap type	ປະເພດສະແນັບ
+	Solid	ໂຊລິດ
+	Sort	ຈັດຮຽງ
+	Specify a point	ກຳນົດຈຸດ
+	Specify a scale for the hatch pattern	ກຳນົດມາດຕາສ່ວນສຳລັບລວດລາຍແຮດຊ໌
+	Specify a second extension line origin	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍບອກຂະໜາດທີສອງ
+	Specify an angle for the hatch pattern	ກຳນົດມຸມສຳລັບລວດລາຍແຮດຊ໌
+	Specify angle end point	ກຳນົດຈຸດສິ້ນສຸດຂອງມຸມ
+	Specify angle of dimension line	ກຳນົດມຸມຂອງເສັ້ນບອກຂະໜາດ
+	Specify angle of dimension text	ກຳນົດມຸມຂອງຂໍ້ຄວາມບອກຂະໜາດ
+	Specify angle start point	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງມຸມ
+	Specify angle vertex	ກຳນົດຈຸດຍອດຂອງມຸມ
+	Specify angle vertex point	ກຳນົດຈຸດຍອດຂອງມຸມ
+	Specify arc length dimension location	ກຳນົດຕຳແໜ່ງເສັ້ນບອກຄວາມຍາວເສັ້ນໂຄ້ງ
+	Specify axis endpoint of ellipse	ກຳນົດຈຸດສິ້ນສຸດແກນວົງຮີ
+	Specify base diameter	ກຳນົດເສັ້ນຜ່າສູນກາງຂອງພື້ນ
+	Specify base point	ກຳນົດຈຸດພື້ນຖານ
+	Specify base point or	ກຳນົດຈຸດພື້ນຖານ ຫຼື
+	Specify base point or displacement (drag with the middle mouse button for realtime pan)	ກຳນົດຈຸດພື້ນຖານ ຫຼື ໄລຍະເລື່ອນ (ລາກດ້ວຍປຸ່ມກາງເມົາສ໌ເພື່ອເລື່ອນມຸມມອງແບບເວລາຈິງ)
+	Specify base radius or	ກຳນົດລັດສະໝີຂອງພື້ນ ຫຼື
+	Specify center of donut	ກຳນົດຈຸດໃຈກາງຂອງໂດນັດ
+	Specify center of ellipse	ກຳນົດຈຸດໃຈກາງຂອງວົງຮີ
+	Specify center of polygon	ກຳນົດຈຸດໃຈກາງຂອງຮູບຫຼາຍແຈ
+	Specify center point for circle	ກຳນົດຈຸດໃຈກາງຂອງວົງມົນ
+	Specify center point of arc	ກຳນົດຈຸດໃຈກາງຂອງເສັ້ນໂຄ້ງ
+	Specify center point of array	ກຳນົດຈຸດໃຈກາງຂອງອາເຣ
+	Specify center point of base	ກຳນົດຈຸດໃຈກາງຂອງພື້ນ
+	Specify corner of viewport	ກຳນົດແຈຂອງພອດມຸມມອງ
+	Specify corner of window, enter a scale factor (nX or nXP)	ກຳນົດແຈຂອງປ່ອງຢ້ຽມ, ປ້ອນຄ່າມາດຕາສ່ວນ (nX ຫຼື nXP)
+	Specify diameter of circle	ກຳນົດເສັ້ນຜ່າສູນກາງຂອງວົງມົນ
+	Specify dimension arc line location	ກຳນົດຕຳແໜ່ງເສັ້ນໂຄ້ງບອກຂະໜາດ
+	Specify dimension line location	ກຳນົດຕຳແໜ່ງເສັ້ນບອກຂະໜາດ
+	Specify distance between turns	ກຳນົດໄລຍະຫ່າງລະຫວ່າງຮອບວຽນ
+	Specify distance to other axis	ກຳນົດໄລຍະຫ່າງໄປຫາອີກແກນໜຶ່ງ
+	Specify end angle	ກຳນົດມຸມສິ້ນສຸດ
+	Specify end point of arc	ກຳນົດຈຸດສິ້ນສຸດຂອງເສັ້ນໂຄ້ງ
+	Specify end point of arc (hold Ctrl to switch direction)	ກຳນົດຈຸດສິ້ນສຸດຂອງເສັ້ນໂຄ້ງ (ກົດ Ctrl ຄ້າງໄວ້ເພື່ອປ່ຽນທິດທາງ)
+	Specify ending width	ກຳນົດຄວາມກວ້າງຕອນທ້າຍ
+	Specify ending width for next segment	ກຳນົດຄວາມກວ້າງຕອນທ້າຍສຳລັບສ່ວນຖັດໄປ
+	Specify endpoint of arc	ກຳນົດຈຸດສິ້ນສຸດຂອງເສັ້ນໂຄ້ງ
+	Specify endpoint of axis	ກຳນົດຈຸດສິ້ນສຸດຂອງແກນ
+	Specify endpoint of line	ກຳນົດຈຸດສິ້ນສຸດຂອງເສັ້ນຊື່
+	Specify feature location	ກຳນົດຕຳແໜ່ງຮູບຮ່າງ
+	Specify fillet radius	ກຳນົດລັດສະໝີການມົນແຈ
+	Specify fillet radius for rectangles	ກຳນົດລັດສະໝີການມົນແຈສຳລັບຮູບສີ່ແຈສາກ
+	Specify first angle endpoint	ກຳນົດຈຸດສິ້ນສຸດມຸມທຳອິດ
+	Specify first chamfer distance	ກຳນົດໄລຍະການປາດແຈທຳອິດ
+	Specify first chamfer distance for rectangles	ກຳນົດໄລຍະການປາດແຈທຳອິດສຳລັບຮູບສີ່ແຈສາກ
+	Specify first constraint point	ກຳນົດຈຸດເງື່ອນໄຂບັງຄັບທຳອິດ
+	Specify first corner	ກຳນົດແຈທຳອິດ
+	Specify first corner point	ກຳນົດຈຸດແຈທຳອິດ
+	Specify first destination point	ກຳນົດຈຸດປາຍທາງທຳອິດ
+	Specify first end point of circle's diameter	ກຳນົດຈຸດສິ້ນສຸດທຳອິດຂອງເສັ້ນຜ່າສູນກາງວົງມົນ
+	Specify first endpoint of edge	ກຳນົດຈຸດສິ້ນສຸດທຳອິດຂອງຂອບ
+	Specify first extension line origin	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍບອກຂະໜາດທຳອິດ
+	Specify first point	ກຳນົດຈຸດທຳອິດ
+	Specify first point of mirror line	ກຳນົດຈຸດທຳອິດຂອງເສັ້ນແວ່ນເງົາ
+	Specify first point on circle	ກຳນົດຈຸດທຳອິດເທິງວົງມົນ
+	Specify first point on circle: _tan to	ກຳນົດຈຸດທຳອິດເທິງວົງມົນ: _tan ສຳຜັດກັບ
+	Specify first source point	ກຳນົດຈຸດຕົ້ນທາງທຳອິດ
+	Specify height	ກຳນົດຄວາມສູງ
+	Specify helix height or	ກຳນົດຄວາມສູງກ້ຽວວຽນ ຫຼື
+	Specify included angle	ກຳນົດມຸມປະກອບ
+	Specify insertion base point	ກຳນົດຈຸດພື້ນຖານການແຊກ
+	Specify insertion point	ກຳນົດຈຸດແຊກ
+	A drawing opened from a file keeps that file's format.	ຮູບແຕ້ມທີ່ເປີດຈາກໄຟລ໌ຈະຮັກສາຮູບແບບຂອງໄຟລ໌ນັ້ນໄວ້.
+	An array that would create more objects than this is refused.	ລະບົບຈະປະຕິເສດອາເຣທີ່ຈະສ້າງວັດຖຸຫຼາຍເກີນຂີດຈຳກັດນີ້.
+	CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts.	CADCraft ຈະບັນທຶກການຕັ້ງຄ່າເຫຼົ່ານີ້, ໂໝດສະແນັບວັດຖຸ ແລະ ສະຖານະເປີດ/ປິດການແຕ້ມແບບໄວ້ສຳລັບບັນຊີຜູ້ໃຊ້ຂອງທ່ານ ແລະ ຈະຟື້ນຟູຄືນເມື່ອເປີດໂປຣແກຣມ.
+	Changes apply at once and are kept for next time.	ການປ່ຽນແປງຈະມີຜົນທັນທີ ແລະ ຖືກບັນທຶກໄວ້ສຳລັບຄັ້ງຕໍ່ໄປ.
+	Command line history	ປະຫວັດແຖວຄຳສັ່ງ
+	Copy as JSON	ສຳເນົາເປັນ JSON
+	Crosshair size	ຂະໜາດເສັ້ນເລັງ
+	Display	ການສະແດງຜົນ
+	Grip size	ຂະໜາດຈຸດກຣິບ
+	Hold Shift to add to the selection	ກົດ Shift ຄ້າງໄວ້ເພື່ອເພີ່ມເຂົ້າໃນການເລືອກ
+	Interface language	ພາສາຂອງໜ້າຕ່າງໂປຣແກຣມ
+	Interface theme	ຮູບແບບສີສັນໜ້າຕ່າງໂປຣແກຣມ
+	Keep the system cursor visible over the drawing area	ສະແດງເຄີເຊີຂອງລະບົບໄວ້ເທິງພື້ນທີ່ແຕ້ມແບບ
+	Largest array	ຂະໜາດອາເຣສູງສຸດ
+	Layout paper	ເຈ້ຍການຈັດວາງ
+	Model background	ພື້ນຫຼັງໂມເດວ
+	Object snap aperture	ຂອບເຂດການຈັບສະແນັບວັດຖຸ
+	Object snap marker size	ຂະໜາດເຄື່ອງໝາຍສະແນັບວັດຖຸ
+	Open and Save	ເປີດ ແລະ ບັນທຶກ
+	Options	ຕົວເລືອກ
+	Options...	ຕົວເລືອກ...
+	Pickbox size	ຂະໜາດກ່ອງເລືອກວັດຖຸ
+	Profiles	ໂປຣໄຟລ໌
+	Reset keeps the interface language.	ການຕັ້ງຄ່າໃໝ່ຈະຍັງຄົງຮັກສາພາສາຂອງໜ້າຕ່າງໂປຣແກຣມໄວ້.
+	Reset to Defaults	ຕັ້ງຄ່າຄືນເປັນຄ່າເລີ່ມຕົ້ນ
+	Save new drawings as	ບັນທຶກຮູບແຕ້ມໃໝ່ເປັນ
+	Screen magnifiers, screen readers and recorders follow the system cursor.	ແວ່ນຂະຫຍາຍໜ້າຈໍ, ໂປຣແກຣມອ່ານໜ້າຈໍ ແລະ ໂປຣແກຣມບັນທຶກໜ້າຈໍຈະຕິດຕາມເຄີເຊີຂອງລະບົບ.
+	Select objects first, then choose a command	ເລືອກວັດຖຸກ່ອນ, ແລ້ວຈຶ່ງເລືອກຄຳສັ່ງ
+	Selection	ການເລືອກ
+	Settings...	ການຕັ້ງຄ່າ...
+	Show Quick Properties for selected objects	ສະແດງຄຸນລັກສະນະດ່ວນສຳລັບວັດຖຸທີ່ເລືອກ
+	Snap, grid, polar tracking and Dynamic Input:	ສະແນັບ, ເສັ້ນຕາໜ່າງ, ການຕິດຕາມພິກັດໂພລາ ແລະ ການປ້ອນຂໍ້ມູນແບບໄດນາມິກ:
+	The aperture is how near the cursor must come to a point for an object snap to find it.	ຂອບເຂດການຈັບຄືໄລຍະທີ່ເຄີເຊີຕ້ອງຢູ່ໃກ້ຈຸດໃດໜຶ່ງ ເພື່ອໃຫ້ສະແນັບວັດຖຸກວດພົບຈຸດນັ້ນໄດ້.
+	User Preferences	ການຕັ້ງຄ່າສ່ວນຕົວຂອງຜູ້ໃຊ້
+	objects	ວັດຖຸ
+	Specify inside diameter of donut	ກຳນົດເສັ້ນຜ່າສູນກາງທາງໃນຂອງໂດນັດ
+	Specify leader arrowhead location	ກຳນົດຕຳແໜ່ງຫົວລູກສອນເສັ້ນຊີ້ບອກ
+	Specify leader endpoint	ກຳນົດຈຸດສິ້ນສຸດຂອງເສັ້ນຊີ້ບອກ
+	Specify leader landing location	ກຳນົດຕຳແໜ່ງເສັ້ນແນວນອນຂອງເສັ້ນຊີ້ບອກ
+	Specify length for rectangles	ກຳນົດຄວາມຍາວສຳລັບຮູບສີ່ແຈສາກ
+	Specify length of chord	ກຳນົດຄວາມຍາວຂອງຄອດ
+	Specify length of segment	ກຳນົດຄວາມຍາວຂອງສ່ວນເສັ້ນ
+	Specify line width for rectangles	ກຳນົດຄວາມກວ້າງເສັ້ນສຳລັບຮູບສີ່ແຈສາກ
+	Specify location for new vertex	ກຳນົດຕຳແໜ່ງສຳລັບຈຸດຍອດໃໝ່
+	Specify minimum length of arc	ກຳນົດຄວາມຍາວຕ່ຳສຸດຂອງເສັ້ນໂຄ້ງ
+	Specify new end point	ກຳນົດຈຸດສິ້ນສຸດໃໝ່
+	Specify new location for marked vertex	ກຳນົດຕຳແໜ່ງໃໝ່ສຳລັບຈຸດຍອດທີ່ໝາຍໄວ້
+	Specify new width for all segments	ກຳນົດຄວາມກວ້າງໃໝ່ສຳລັບທຸກສ່ວນເສັ້ນ
+	Specify next point	ກຳນົດຈຸດຖັດໄປ
+	Specify offset distance	ກຳນົດໄລຍະຫ່າງການສ້າງເສັ້ນຂະໜານ
+	Specify offset distance or	ກຳນົດໄລຍະຫ່າງການສ້າງເສັ້ນຂະໜານ ຫຼື
+	Specify opposite corner	ກຳນົດແຈກົງກັນຂ້າມ
+	Specify other corner point	ກຳນົດຈຸດແຈອີກເບື້ອງໜຶ່ງ
+	Specify other endpoint of axis	ກຳນົດຈຸດສິ້ນສຸດອີກເບື້ອງໜຶ່ງຂອງແກນ
+	Specify outside diameter of donut	ກຳນົດເສັ້ນຜ່າສູນກາງທາງນອກຂອງໂດນັດ
+	Specify point	ກຳນົດຈຸດ
+	Specify point on object for first tangent of circle	ກຳນົດຈຸດເທິງວັດຖຸສຳລັບເສັ້ນສຳຜັດທຳອິດຂອງວົງມົນ
+	Specify point on object for second tangent of circle	ກຳນົດຈຸດເທິງວັດຖຸສຳລັບເສັ້ນສຳຜັດທີສອງຂອງວົງມົນ
+	Specify point on side to offset	ກຳນົດຈຸດໃນດ້ານທີ່ຈະສ້າງເສັ້ນຂະໜານ
+	Specify radius of arc	ກຳນົດລັດສະໝີຂອງເສັ້ນໂຄ້ງ
+	Specify radius of circle	ກຳນົດລັດສະໝີຂອງວົງມົນ
+	Specify rotation angle	ກຳນົດມຸມໝູນ
+	Specify rotation angle of text	ກຳນົດມຸມໝູນຂອງຂໍ້ຄວາມ
+	Specify rotation angle or	ກຳນົດມຸມໝູນ ຫຼື
+	Specify scale factor	ກຳນົດຄ່າມາດຕາສ່ວນ
+	Specify second angle endpoint	ກຳນົດຈຸດສິ້ນສຸດມຸມທີສອງ
+	Specify second break point	ກຳນົດຈຸດຕັດຂາດທີສອງ
+	Specify second chamfer distance for rectangles	ກຳນົດໄລຍະການປາດແຈທີສອງສຳລັບຮູບສີ່ແຈສາກ
+	Specify second constraint point	ກຳນົດຈຸດເງື່ອນໄຂບັງຄັບທີສອງ
+	Specify second destination point	ກຳນົດຈຸດປາຍທາງທີສອງ
+	Specify second end point of circle's diameter	ກຳນົດຈຸດສິ້ນສຸດທີສອງຂອງເສັ້ນຜ່າສູນກາງວົງມົນ
+	Specify second endpoint of edge	ກຳນົດຈຸດສິ້ນສຸດທີສອງຂອງຂອບ
+	Specify second extension line origin	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນຊ່ວຍບອກຂະໜາດທີສອງ
+	Specify second point	ກຳນົດຈຸດທີສອງ
+	Specify second point of arc	ກຳນົດຈຸດທີສອງຂອງເສັ້ນໂຄ້ງ
+	Specify second point of mirror line	ກຳນົດຈຸດທີສອງຂອງເສັ້ນແວ່ນເງົາ
+	Specify second point on circle	ກຳນົດຈຸດທີສອງເທິງວົງມົນ
+	Specify second point on circle: _tan to	ກຳນົດຈຸດທີສອງເທິງວົງມົນ: _tan ສຳຜັດກັບ
+	Specify second point or <use first point as displacement>	ກຳນົດຈຸດທີສອງ ຫຼື <ໃຊ້ຈຸດທຳອິດເປັນໄລຍະເລື່ອນ>
+	Specify second source point	ກຳນົດຈຸດຕົ້ນທາງທີສອງ
+	Specify side to offset	ກຳນົດດ້ານທີ່ຈະສ້າງເສັ້ນຂະໜານ
+	Specify start angle	ກຳນົດມຸມເລີ່ມຕົ້ນ
+	Specify start point	ກຳນົດຈຸດເລີ່ມຕົ້ນ
+	Specify start point of arc	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນໂຄ້ງ
+	Specify start point of polyline	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນໂພລີໄລນ໌
+	Specify start point of text	ກຳນົດຈຸດເລີ່ມຕົ້ນຂອງຂໍ້ຄວາມ
+	Specify starting width	ກຳນົດຄວາມກວ້າງເລີ່ມຕົ້ນ
+	Specify starting width for next segment	ກຳນົດຄວາມກວ້າງເລີ່ມຕົ້ນສຳລັບສ່ວນຖັດໄປ
+	Specify tangent direction for the start point of arc	ກຳນົດທິດທາງເສັ້ນສຳຜັດສຳລັບຈຸດເລີ່ມຕົ້ນຂອງເສັ້ນໂຄ້ງ
+	Specify the elevation for rectangles	ກຳນົດລະດັບຄວາມສູງສຳລັບຮູບສີ່ແຈສາກ
+	Specify thickness for rectangles	ກຳນົດຄວາມໜາສຳລັບຮູບສີ່ແຈສາກ
+	Specify third point on circle	ກຳນົດຈຸດທີສາມເທິງວົງມົນ
+	Specify third point on circle: _tan to	ກຳນົດຈຸດທີສາມເທິງວົງມົນ: _tan ສຳຜັດກັບ
+	Specify third source point or <continue>	ກຳນົດຈຸດຕົ້ນທາງທີສາມ ຫຼື <ສືບຕໍ່>
+	Specify through point	ກຳນົດຈຸດທີ່ເສັ້ນຜ່ານ
+	Specify top diameter	ກຳນົດເສັ້ນຜ່າສູນກາງຂອງຍອດ
+	Specify top radius or	ກຳນົດລັດສະໝີຂອງຍອດ ຫຼື
+	Specify total angle	ກຳນົດມຸມລວມ
+	Specify total length or	ກຳນົດຄວາມຍາວລວມ ຫຼື
+	Specify width for rectangles	ກຳນົດຄວາມກວ້າງສຳລັບຮູບສີ່ແຈສາກ
+	Sphere	ໜ່ວຍມົນ
+	Spline	ເສັ້ນສະໄພລນ໌
+	Spline Edit	ແກ້ໄຂເສັ້ນສະໄພລນ໌
+	Stack (type 1/2 then select)	ເສດສ່ວນຊ້ອນ (ພິມ 1/2 ແລ້ວເລືອກ)
+	Standard	ມາດຕະຖານ
+	Start	ເລີ່ມຕົ້ນ
+	Start Width	ຄວາມກວ້າງເລີ່ມຕົ້ນ
+	Start X	ຈຸດເລີ່ມຕົ້ນ X
+	Start Y	ຈຸດເລີ່ມຕົ້ນ Y
+	Start angle	ມຸມເລີ່ມຕົ້ນ
+	Start, Center, Angle	ຈຸດເລີ່ມຕົ້ນ, ຈຸດໃຈກາງ, ມຸມ
+	Start, Center, End	ຈຸດເລີ່ມຕົ້ນ, ຈຸດໃຈກາງ, ຈຸດສິ້ນສຸດ
+	Start, Center, Length	ຈຸດເລີ່ມຕົ້ນ, ຈຸດໃຈກາງ, ຄວາມຍາວ
+	Start, End, Angle	ຈຸດເລີ່ມຕົ້ນ, ຈຸດສິ້ນສຸດ, ມຸມ
+	Start, End, Direction	ຈຸດເລີ່ມຕົ້ນ, ຈຸດສິ້ນສຸດ, ທິດທາງ
+	Start, End, Radius	ຈຸດເລີ່ມຕົ້ນ, ຈຸດສິ້ນສຸດ, ລັດສະໝີ
+	Status	ສະຖານະ
+	Status Bar	ແຖບສະຖານະ
+	Stretch	ຢືດ
+	Style: Standard	ຮູບແບບ: Standard
+	Subtract	ລົບຮູບຊົງ
+	Sweep	ສະວີບ
+	Switch Drawing	ສະຫຼັບຮູບແຕ້ມ
+	Switch Layout	ສະຫຼັບການຈັດວາງ
+	Switch between model space in a viewport and paper space	ສະຫຼັບລະຫວ່າງພື້ນທີ່ໂມເດວໃນພອດມຸມມອງ ແລະ ພື້ນທີ່ໜ້າເຈ້ຍ
+	Symmetric	ສົມມາຕ
+	Synchronize Attributes	ປະສານຂໍ້ມູນຄຸນລັກສະນະ
+	To	ຫາ
+	Toggle PICKADD (off: each pick replaces the selection)	ສະຫຼັບ PICKADD (ປິດ: ແຕ່ລະການເລືອກຈະປ່ຽນແທນການເລືອກເດີມ)
+	Toggle PICKADD (on: picks add to the selection)	ສະຫຼັບ PICKADD (ເປີດ: ການເລືອກຈະເພີ່ມເຂົ້າໃນການເລືອກເດີມ)
+	TOP	ດ້ານເທິງ
+	Table	ຕາຕະລາງ
+	Table Breaks	ການແຍກຕາຕະລາງ
+	Table Cell Style	ຮູບແບບຫ້ອງຕາຕະລາງ
+	Table Style...	ຮູບແບບຕາຕະລາງ...
+	Table style	ຮູບແບບຕາຕະລາງ
+	Table...	ຕາຕະລາງ...
+	Tan, Tan, Radius	ສຳຜັດ, ສຳຜັດ, ລັດສະໝີ
+	Tan, Tan, Tan	ສຳຜັດ, ສຳຜັດ, ສຳຜັດ
+	Tangent	ສຳຜັດ
+	Temporary track point	ຈຸດຕິດຕາມຊົ່ວຄາວ
+	Text	ຂໍ້ຄວາມ
+	Text Editor	ຕົວແກ້ໄຂຂໍ້ຄວາມ
+	Text Height	ຄວາມສູງຂໍ້ຄວາມ
+	Text Style...	ຮູບແບບຂໍ້ຄວາມ...
+	Text height	ຄວາມສູງຂໍ້ຄວາມ
+	Text override	ການກຳນົດຂໍ້ຄວາມທັບ
+	Text style	ຮູບແບບຂໍ້ຄວາມ
+	Thaw All Layers	ລະລາຍທຸກເລເຢີ
+	Thaw Layer	ລະລາຍເລເຢີ
+	There is nothing here yet.	ຍັງບໍ່ທັນມີຫຍັງຢູ່ນີ້ເທື່ອ.
+	Thickness	ຄວາມໜາ
+	Time	ເວລາ
+	To get started, create or open a drawing.	ເພື່ອເລີ່ມຕົ້ນ, ໃຫ້ສ້າງ ຫຼື ເປີດຮູບແຕ້ມ.
+	Tool Bar	ແຖບເຄື່ອງມື
+	Tool Sets	ຊຸດເຄື່ອງມື
+	Tools	ເຄື່ອງມື
+	Torus	ວົງແຫວນ
+	Trace	ເສັ້ນເທຣສ
+	Track orthogonally only	ຕິດຕາມສະເພາະແນວຕັ້ງສາກ
+	Track using all polar angle settings	ຕິດຕາມໂດຍໃຊ້ການຕັ້ງຄ່າມຸມໂພລາທັງໝົດ
+	Transparency	ຄວາມໂປ່ງໃສ
+	Trim	ຕັດເສັ້ນ
+	True Color	ສີແທ້
+	Turn All Layers On	ເປີດທຸກເລເຢີ
+	Turn Off Layer	ປິດເລເຢີ
+	Turn On Layer	ເປີດເລເຢີ
+	Turn Quick Properties off (QPMODE)	ປິດຄຸນລັກສະນະດ່ວນ (QPMODE)
+	Type	ປະເພດ
+	Type a command	ພິມຄຳສັ່ງ
+	Type text; Enter starts a new paragraph	ພິມຂໍ້ຄວາມ; ກົດ Enter ເພື່ອເລີ່ມຫຍໍ້ໜ້າໃໝ່
+	UCS Icon	ໄອຄອນ UCS
+	Undo	ຍົກເລີກການກະທຳ
+	Undo (⌘Z)	ຍົກເລີກການກະທຳ (⌘Z)
+	Ungroup	ຍົກເລີກການຈັດກຸ່ມ
+	Union	ລວມຮູບຊົງ
+	Unisolate Layer	ຍົກເລີກການແຍກດ່ຽວເລເຢີ
+	Units Conversion	ການແປງຫົວໜ່ວຍ
+	Units...	ຫົວໜ່ວຍ...
+	Unlock Layer	ປົດລັອກເລເຢີ
+	Unlock viewport	ປົດລັອກພອດມຸມມອງ
+	Unmerge Cells	ຍົກເລີກການຮວມຫ້ອງ
+	Unsaved Layer State	ສະຖານະເລເຢີທີ່ຍັງບໍ່ໄດ້ບັນທຶກ
+	Up	ຂຶ້ນ
+	Update Data Links	ອັບເດດການເຊື່ອມໂຍງຂໍ້ມູນ
+	Update	ອັບເດດ
+	Use System Setting	ໃຊ້ການຕັ້ງຄ່າຂອງລະບົບ
+	User	ຜູ້ໃຊ້
+	User Parameters	ພາຣາມິເຕີຂອງຜູ້ໃຊ້
+	Username	ຊື່ຜູ້ໃຊ້
+	Volume	ບໍລິມາດ
+	VP Color	ສີພອດມຸມມອງ
+	VP Freeze	ແຊ່ແຂງພອດມຸມມອງ
+	Value	ຄ່າ
+	Value:	ຄ່າ:
+	Variables	ຕົວປ່ຽນ
+	Version	ເວີຊັນ
+	Version 2000	ເວີຊັນ 2000
+	Version 2004	ເວີຊັນ 2004
+	Version 2007	ເວີຊັນ 2007
+	Version 2010	ເວີຊັນ 2010
+	Version 2013	ເວີຊັນ 2013
+	Version 2018	ເວີຊັນ 2018
+	Version {version}	ເວີຊັນ {version}
+	Vertical	ແນວຕັ້ງ
+	VerticalDistance	ໄລຍະຫ່າງແນວຕັ້ງ
+	View	ມຸມມອງ
+	ViewCube	ວິວຄິວບ໌
+	Viewport	ພອດມຸມມອງ
+	Viewport Layer Freeze	ແຊ່ແຂງເລເຢີໃນພອດມຸມມອງ
+	Viewport Properties	ຄຸນລັກສະນະພອດມຸມມອງ
+	Viewport is locked	ພອດມຸມມອງຖືກລັອກໄວ້
+	Viewport scale	ມາດຕາສ່ວນພອດມຸມມອງ
+	Viewport {id}	ພອດມຸມມອງ {id}
+	Viewports	ພອດມຸມມອງ
+	W	ຕາເວັນຕົກ
+	WCS ⌄	WCS ⌄
+	White	ສີຂາວ
+	Width factor	ຕົວຄູນຄວາມກວ້າງ
+	Window	ປ່ອງຢ້ຽມ
+	Wipeout	ບັງພາບ
+	Workspace Switching	ການສະຫຼັບພື້ນທີ່ເຮັດວຽກ
+	Write Block	ຂຽນບລັອກ
+	Xline	ເສັ້ນໂຄງສ້າງບໍ່ມີທີ່ສິ້ນສຸດ
+	Yellow	ສີເຫຼືອງ
+	Yes	ແມ່ນ
+	Zoom	ຊູມ
+	Zoom All	ຊູມທັງໝົດ
+	Zoom Dynamic	ຊູມໄດນາມິກ
+	Zoom Extents	ຊູມເຕັມຂອບເຂດ
+	Zoom In	ຊູມເຂົ້າ
+	Zoom Object	ຊູມວັດຖຸ
+	Zoom Out	ຊູມອອກ
+	Zoom Previous	ຊູມກ່ອນໜ້າ
+	Zoom Realtime	ຊູມແບບເວລາຈິງ
+	Zoom Window	ຊູມຕາມປ່ອງຢ້ຽມ
+	error	ຂໍ້ຜິດພາດ
+	{contributors} · {commits}	{contributors} · {commits}
+	{kind} (constraint {id})	{kind} (ເງື່ອນໄຂບັງຄັບ {id})
+	{kind} constraint {name} = {expression}  (double-click to edit)	ເງື່ອນໄຂບັງຄັບ {kind} {name} = {expression}  (ດັບເບິນຄລິກເພື່ອແກ້ໄຂ)
+	{name}: {distance} < {angle}°	{name}: {distance} < {angle}°
+	ƒx  New User Parameter	ƒx  ພາຣາມິເຕີຜູ້ໃຊ້ໃໝ່
+	ΔLOC	ΔLOC
+	−Bin	−Bin
+	−LOC	−LOC
+	⌘↩ to finish	⌘↩ ເພື່ອສຳເລັດ
+@plural	{n} commit	{n} ຄອມມິດ
+@plural	{n} contributor	ຜູ້ປະກອບສ່ວນ {n} ຄົນ
+	Drawing as bytes	ຂໍ້ມູນໄບຕ໌ຂອງຮູບແຕ້ມ
+	Services	ການບໍລິການ
+	Hide CADCraft	ເຊື່ອງ CADCraft
+	Hide Others	ເຊື່ອງແອັບອື່ນໆ
+	Accessibility	ການຊ່ວຍເຂົ້າເຖິງ
+	Show System Cursor	ສະແດງເຄີເຊີຂອງລະບົບ
+	Import...	ນຳເຂົ້າ...
+	Export...	ສົ່ງອອກ...
+	Batch Publish...	ເຜີຍແຜ່ເປັນຊຸດ...
+	Scale List...	ລາຍການມາດຕາສ່ວນ...
+	Annotative Object Scale	ມາດຕາສ່ວນວັດຖຸຄຳອະທິບາຍປະກອບ
+	Add Current Scale	ເພີ່ມມາດຕາສ່ວນປັດຈຸບັນ
+	Delete Current Scale	ລຶບມາດຕາສ່ວນປັດຈຸບັນ
+	Add/Delete Scales...	ເພີ່ມ/ລຶບ ມາດຕາສ່ວນ...
+	Synchronize Multiple-scale Positions	ປະສານຕຳແໜ່ງຫຼາຍມາດຕາສ່ວນ
+	Annotative Update	ອັບເດດຄຳອະທິບາຍປະກອບ
+	Show Annotative Objects	ສະແດງວັດຖຸຄຳອະທິບາຍປະກອບ
+	Current Scale Only	ສະເພາະມາດຕາສ່ວນປັດຈຸບັນ
+	All Scales	ທຸກມາດຕາສ່ວນ
+	Drawing Recovery Manager...	ຕົວຈັດການການກູ້ຄືນຮູບແຕ້ມ...
+	Tolerance...	ຄ່າຄວາມຄາດເຄື່ອນ...
+	Add Vertex	ເພີ່ມຈຸດຍອດ
+	Remove Vertex	ລຶບຈຸດຍອດອອກ
+	Convert to Arc	ປ່ຽນເປັນເສັ້ນໂຄ້ງ
+	Convert to Line	ປ່ຽນເປັນເສັ້ນຊື່
+	Stretch Vertex	ຢືດຈຸດຍອດ
+	Edit Array	ແກ້ໄຂອາເຣ
+	Close Array Editing	ປິດການແກ້ໄຂອາເຣ
+	Multiline...	ເສັ້ນຫຼາຍເສັ້ນ...
+	Multiline Style...	ຮູບແບບເສັ້ນຫຼາຍເສັ້ນ...
+	Solid Editing	ການແກ້ໄຂໂຊລິດ
+	3D Mouse...	ເມົາສ໌ 3D...
+	3D Mouse	ເມົາສ໌ 3D
+	Calibrate 3D Mouse	ປັບທຽບເມົາສ໌ 3D
+	3D Mouse Navigation	ການນຳທາງດ້ວຍເມົາສ໌ 3D
+	3D mouse input is unavailable on this platform	ບໍ່ຮອງຮັບການປ້ອນຂໍ້ມູນເມົາສ໌ 3D ເທິງແພລັດຟອມນີ້
+	No supported 3D mouse found	ບໍ່ພົບເມົາສ໌ 3D ທີ່ຮອງຮັບ
+	Release the 3D mouse to calibrate its resting position	ປ່ອຍມືຈາກເມົາສ໌ 3D ເພື່ອປັບທຽບຕຳແໜ່ງພັກ
+	3D mouse connected	ເຊື່ອມຕໍ່ເມົາສ໌ 3D ແລ້ວ
+	3D mouse busy, possibly 3DxWare or missing device permissions	ເມົາສ໌ 3D ບໍ່ພ້ອມໃຊ້ງານ, ອາດແມ່ນຍ້ອນ 3DxWare ກຳລັງໃຊ້ຢູ່ ຫຼື ຂາດສິດການອະນຸຍາດອຸປະກອນ
+	3D mouse disconnected	ຕັດການເຊື່ອມຕໍ່ເມົາສ໌ 3D ແລ້ວ
+	3D mouse input could not be started	ບໍ່ສາມາດເລີ່ມຕົ້ນການປ້ອນຂໍ້ມູນເມົາສ໌ 3D ໄດ້
+	Enable 3D mouse navigation	ເປີດໃຊ້ງານການນຳທາງດ້ວຍເມົາສ໌ 3D
+	Pan sensitivity	ຄວາມໄວການເລື່ອນມຸມມອງ
+	Zoom sensitivity	ຄວາມໄວການຊູມ
+	Reverse zoom direction	ກັບທິດທາງການຊູມ
+	Calibrate	ປັບທຽບ
+	Move sideways to pan; push/pull or twist to zoom.	ຍ້າຍໄປທາງຂ້າງເພື່ອເລື່ອນມຸມມອງ; ຍູ້/ດຶງ ຫຼື ບິດເພື່ອຊູມ.
+	Left device button: zoom extents. Right device button: calibrate.	ປຸ່ມຊ້າຍຂອງອຸປະກອນ: ຊູມເຕັມຂອບເຂດ. ປຸ່ມຂວາຂອງອຸປະກອນ: ປັບທຽບ.
+	More toolbar commands	ຄຳສັ່ງແຖບເຄື່ອງມືເພີ່ມເຕີມ
+	Default save version	ເວີຊັນບັນທຶກເລີ່ມຕົ້ນ
+	Automatic save every	ບັນທຶກອັດຕະໂນມັດທຸກໆ
+	min	ນາທີ
+	Automatic save file location	ບ່ອນເກັບໄຟລ໌ບັນທຶກອັດຕະໂນມັດ
+	Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off.	ຮູບແຕ້ມທີ່ຍັງບໍ່ທັນມີໄຟລ໌ຈະຖືກບັນທຶກໃນເວີຊັນເລີ່ມຕົ້ນ. ການຕັ້ງຄ່າ 0 ນາທີຈະປິດການບັນທຶກອັດຕະໂນມັດ.
+	Time-sensitive right-click: a quick click is Enter, holding opens the menu	ແຍກການຄລິກຂວາຕາມເວລາ: ຄລິກໄວຄື Enter, ກົດຄ້າງໄວ້ຄືເປີດເມນູ
+	Turned off, a right-click while a command runs always opens the shortcut menu.	ເມື່ອປິດໃຊ້ງານ, ການຄລິກຂວາໃນຂະນະທີ່ຄຳສັ່ງກຳລັງເຮັດວຽກຈະເປີດເມນູທາງລັດສະເໝີ.
+	Hatch Pattern	ລວດລາຍແຮດຊ໌
+	Search for pattern	ຄົ້ນຫາລວດລາຍ
+	Run Script...	ຮັນສະຄຣິບ...
+	X	X
+	Y	Y
+	B	B
+	CADCraft	CADCraft
+menu	View	ມຸມມອງ
+menu	Draw	ແຕ້ມ
+menu	Dimension	ຂະໜາດ
+menu	Modify	ດັດແປງ

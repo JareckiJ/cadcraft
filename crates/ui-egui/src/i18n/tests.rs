@@ -39,7 +39,7 @@ fn catalog_is_valid_and_preserves_placeholders_and_ellipses() {
 /// to English for what they don't cover yet; their gaps are reported, not enforced, so adding a
 /// command doesn't require a row in every language.
 const REQUIRED: &[&str] = &["uk"];
-const REPORTED: &[&str] = &["pt-BR", "de", "es", "cs", "ru", "fr", "zh", "it", "ko", "sv", "ar"];
+const REPORTED: &[&str] = &["pt-BR", "de", "es", "cs", "ru", "fr", "zh", "it", "ko", "lo", "sv", "ar"];
 
 fn check(language: &str, what: &str, missing: Vec<String>) {
     if REQUIRED.contains(&language) {
@@ -151,6 +151,9 @@ fn locale_and_saved_preference_resolution() {
     for tag in ["de", "de-DE", "de_DE.UTF-8", "DE-at", "de-CH"] {
         assert_eq!(locale_language(tag), Some("de"), "{tag}");
     }
+    for tag in ["lo", "lo-LA", "lo_LA.UTF-8", "LO-la", " lo-LA "] {
+        assert_eq!(locale_language(tag), Some("lo"), "{tag}");
+    }
     for (tag, code) in [("ru", "ru"), ("ru-RU", "ru"), ("ru_RU.UTF-8", "ru"), ("fr", "fr"), ("fr-FR", "fr"), ("fr_CA.UTF-8", "fr")] {
         assert_eq!(locale_language(tag), Some(code), "{tag}");
     }
@@ -166,6 +169,7 @@ fn locale_and_saved_preference_resolution() {
     for tag in ["es", "es-ES", "es_MX.UTF-8", "ES-ar"] {
         assert_eq!(locale_language(tag), Some("es"), "{tag}");
     }
+    assert_eq!(Preference::parse("lo"), Some(Preference::Lao));
     assert_eq!(Preference::Auto.resolve(&["es-ES".into(), "pt-BR".into()]), "es");
     assert_eq!(Preference::parse("es"), Some(Preference::Spanish));
     assert_eq!(Preference::BrazilianPortuguese.resolve(&["uk-UA".into()]), "pt-BR");
