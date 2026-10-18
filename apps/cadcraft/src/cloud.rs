@@ -181,6 +181,8 @@ impl Worker {
         }
         let start = self.client.sign_in_start().map_err(fault)?;
         if let Err(e) = open_browser(&start.verify_url) {
+            // Not fatal. The interface shows the URL as a link, so the user can
+            // still follow it by hand.
             log::warn!("could not open a browser: {e}");
         }
         self.post(Event::Browser { url: start.verify_url.clone(), handle: None });
@@ -322,37 +324,46 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 fn open_browser(url: &str) -> std::io::Result<()> {
+    // Same rule as Services::open_url: only HTTPS. A compromised or malicious
+    // service could otherwise hand back a file: URL, UNC path, or local
+    // executable and have cmd/open/xdg-open launch it.
+    if !url.starts_with("https://") {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "only https URLs are opened"));
+    }
     #[cfg(target_os = "windows")]
-    // `cmd` splits its command line on `&` before anything else sees it, and an
-    // authorize URL is mostly `&`. Passed unquoted the browser receives the
-    // query up to the first one. The quotes survive Rust's argument escaping
-    // because the command line goes through raw. The empty pair is the window
-    // title, which `start` would otherwise take the URL to be.
-    let mut command = {
+    {
         use std::os::windows::process::CommandExt as _;
         let mut c = std::process::Command::new("cmd");
+        // `cmd` splits its command line on `&` before anything else sees it, and an
+        // authorize URL is mostly `&`. Passed unquoted the browser receives the
+        // query up to the first one. The quotes survive Rust's argument escaping
+        // because the command line goes through raw. The empty pair is the window
+        // title, which `start` would otherwise take the URL to be.
         c.raw_arg(format!("/C start \"\" \"{}\"", url.replace('"', "%22")));
-        c
-    };
+        c.spawn().map(|_| ())
+    }
     #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut c = std::process::Command::new("open");
-        c.arg(url);
-        c
-    };
+    {
+        std::process::Command::new("open").arg(url).spawn().map(|_| ())
+    }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let mut command = {
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-    command.spawn().map(|_| ())
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::token_for_service;
+    use super::{open_browser, token_for_service, write_private};
     use serde_json::json;
+
+    #[test]
+    fn open_browser_rejects_non_https() {
+        for bad in ["http://craft.example/auth", "file:///etc/passwd", "C:\\Windows\\System32\\calc.exe", ""] {
+            let err = open_browser(bad).expect_err("non-https must be refused");
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        }
+    }
 
     #[test]
     fn saved_token_is_bound_to_its_service() {
@@ -364,5 +375,33 @@ mod tests {
     #[test]
     fn legacy_token_without_a_service_is_not_loaded() {
         assert_eq!(token_for_service(&json!({"token": "secret"}), "https://one.example"), None);
+    }
+
+    #[test]
+    fn service_trailing_slash_is_ignored() {
+        let session = json!({"service": "https://craft.example/", "token": "abc"});
+        assert_eq!(token_for_service(&session, "https://craft.example").as_deref(), Some("abc"));
+        assert_eq!(token_for_service(&session, "https://craft.example/").as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn empty_token_is_rejected() {
+        let session = json!({"service": "https://one.example", "token": ""});
+        assert_eq!(token_for_service(&session, "https://one.example"), None);
+    }
+
+    /// The session file must be readable only by its owner. A world-readable
+    /// token file is a credential leak waiting for the next shared-home
+    /// operator to find it.
+    #[cfg(unix)]
+    #[test]
+    fn unix_token_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = std::env::temp_dir().join(format!("cadcraft-token-mode-test-{}", std::process::id()));
+        write_private(&tmp, b"{\"token\":\"test\",\"service\":\"https://x.example\"}")
+            .expect("write_private should succeed");
+        let mode = std::fs::metadata(&tmp).expect("stat").permissions().mode();
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(mode & 0o777, 0o600, "token file must be mode 0600 (got {:#o})", mode & 0o777);
     }
 }
