@@ -428,7 +428,7 @@ fn language(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 mod tests {
     use cadcraft_engine::doc::EntityKind;
     use cadcraft_engine::geom::Vec2;
-    use cadcraft_engine::{Input, Session};
+    use cadcraft_engine::{Input, PointInput, Session};
     use serde_json::json;
 
     use crate::{CadApp, Services};

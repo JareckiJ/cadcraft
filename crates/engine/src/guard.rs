@@ -14,7 +14,7 @@ use cadcraft_doc::EntityKind;
 use cadcraft_geom::Vec2;
 
 use crate::cmd::Factory;
-use crate::{Accept, EngineError, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub(crate) struct Guarded {
     inner: Box<dyn Interactive>,
@@ -107,7 +107,7 @@ impl Interactive for Guarded {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Running;
+    use crate::{PointInput, Running};
 
     fn dot(p: Vec2) -> EntityKind {
         EntityKind::Point(cadcraft_doc::Point { p: p.to3(0.0), angle: 0.0 })

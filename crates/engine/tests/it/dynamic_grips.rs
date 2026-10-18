@@ -5,7 +5,7 @@
 use cadcraft_engine::doc::dynblock::GripPart;
 use cadcraft_engine::doc::{Handle, Space};
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use serde_json::{Value, json};
 
 /// DXF text from lines of `code value`.
@@ -82,7 +82,7 @@ fn a_grip_drag_previews_the_reference_and_takes_a_point_or_a_distance() {
     s.start_dyn_grip(h, 2, GripPart::End).unwrap();
     // The preview is the reference re-evaluated at the cursor, and the rubber band.
     assert!(s.preview(Vec2::new(132.0, 0.0)).len() > 1);
-    s.input(Input::Point(Vec2::new(132.2, 3.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(132.2, 3.0)))).unwrap();
     assert!(s.running.is_none());
     assert_eq!(width(&mut s, h), "32.0000");
     // A typed distance (snapped to the list).

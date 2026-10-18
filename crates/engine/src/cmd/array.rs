@@ -18,7 +18,7 @@ use super::helpers::{line, v3};
 use super::machines::{SelOutcome, SelectPhase, number};
 use super::modify::transform_entities;
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 mod edit;
 
@@ -764,12 +764,13 @@ impl Interactive for RectM {
                 }
                 _ => return Err(other("Requires a number.")),
             },
-            (UnitCell, Input::Point(PointInput::Picked(p))) => match self.corner {
+            (UnitCell, Input::Point(pi)) => match self.corner {
                 None => {
-                    self.corner = Some(*p);
+                    self.corner = Some(pi.point());
                     UnitCell
                 }
                 Some(c) => {
+                    let p = pi.point();
                     let (dx, dy) = (p.x - c.x, p.y - c.y);
                     if dx.abs() <= 1e-12 || dy.abs() <= 1e-12 {
                         return Err(other("The unit cell must have a width and a height."));

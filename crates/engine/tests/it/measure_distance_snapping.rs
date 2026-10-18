@@ -3,7 +3,7 @@
 use cadcraft_engine::doc::{Block, Circle, Common, Drawing, Entity, EntityKind, Handle, Insert, Line, Space, Viewport};
 use cadcraft_engine::geom::{Vec2, Vec3};
 use cadcraft_engine::snap::{SnapCurve, SnapHit, mode, osnap};
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use serde_json::json;
 
 fn drawing() -> (Drawing, Space) {
@@ -108,9 +108,9 @@ fn typed_and_programmatic_points_are_measured_in_paper_units() {
         s.start("dist").unwrap();
         if snapped_first {
             s.input_snapped(pick(&s, Vec2::new(95.0, 50.0), mode::END)).unwrap();
-            s.input(Input::Point(Vec2::new(100.0, 50.0))).unwrap();
+            s.input(Input::Point(PointInput::Picked(Vec2::new(100.0, 50.0)))).unwrap();
         } else {
-            s.input(Input::Point(Vec2::new(95.0, 50.0))).unwrap();
+            s.input(Input::Point(PointInput::Picked(Vec2::new(95.0, 50.0)))).unwrap();
             s.input_snapped(pick(&s, Vec2::new(100.0, 50.0), mode::INT)).unwrap();
         }
         assert!(s.log.iter().any(|l| l.starts_with("Distance = 5.0000,")), "{:?}", s.log);
@@ -155,7 +155,7 @@ fn multiple_points_length_and_undo_keep_the_measurement_units() {
     assert_eq!(s.log.last().unwrap(), "Distance = 25.0000");
     assert_eq!(s.current_prompt().unwrap().base, Some(Vec2::new(107.5, 50.0)));
     s.input(Input::Keyword("Undo".into())).unwrap();
-    s.input(Input::Point(Vec2::new(102.0, 52.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(102.0, 52.0)))).unwrap();
     s.input(Input::Keyword("Undo".into())).unwrap();
     s.input(Input::Enter).unwrap();
     assert_eq!(s.log.last().unwrap(), "Distance = 20.0000");

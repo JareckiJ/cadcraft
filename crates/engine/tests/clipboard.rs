@@ -4,12 +4,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use cadcraft_engine::Session;
 use cadcraft_engine::cmd::clipboard;
 use cadcraft_engine::cmd::file::{IoHooks, set_io};
 use cadcraft_engine::doc::color::Color;
 use cadcraft_engine::doc::{Block, Common, Drawing, Entity, EntityKind, Handle, Insert, Layer, Line};
 use cadcraft_engine::geom::{Vec2, Vec3};
+use cadcraft_engine::{PointInput, Session};
 use serde_json::json;
 
 fn line(d: &mut Drawing, layer: &str, a: (f64, f64), b: (f64, f64)) -> Entity {
@@ -144,7 +144,7 @@ fn pasteorig_pastes_only_into_another_drawing() {
     // PASTECLIP asks for the insertion point and places the base point there.
     s.start("pasteclip").unwrap();
     assert!(s.prompt_text().contains("insertion point"), "{}", s.prompt_text());
-    s.input(cadcraft_engine::Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(cadcraft_engine::Input::Point(PointInput::Picked(Vec2::new(0.0, 0.0)))).unwrap();
     assert!(s.running.is_none());
     let pasted = model(&s);
     assert_eq!(pasted.len(), 4);

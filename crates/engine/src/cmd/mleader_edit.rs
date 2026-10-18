@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::helpers::v3;
 use super::machines::{SelOutcome, SelectPhase};
 use super::*;
-use crate::{Accept, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 /// Most arrowheads added by one call, and most multileaders aligned / collected by one call.
 const MAX_ITEMS: usize = 10_000;
@@ -558,7 +558,8 @@ impl Interactive for AlignM {
             }
             return Ok(Step::Continue);
         }
-        let Input::Point(PointInput::Picked(pt)) = i else { return Ok(Step::Continue) };
+        let Input::Point(pi) = i else { return Ok(Step::Continue) };
+        let pt = pi.point();
         if self.mode() == Spacing::Parallel {
             return self.finish(s, None);
         }

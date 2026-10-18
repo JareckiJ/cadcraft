@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
 use super::value::{Value, to_text};
-use crate::Session;
 use crate::cmd::file::{EntityCodec, set_entity_codec};
+use crate::{PointInput, Session};
 
 fn session() -> Session {
     set_entity_codec(EntityCodec { groups: cadcraft_io::entity_groups, entity: cadcraft_io::entity_from_groups });

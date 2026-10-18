@@ -1,7 +1,7 @@
 //! BREAK, BREAKATPOINT and JOIN leave objects on locked layers alone (#727).
 
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use serde_json::{Value, json};
 
 fn h(r: &Value) -> String {
@@ -116,8 +116,8 @@ fn interactive_break_and_join_refuse_locked_lines() {
     let before = snapshot(&s);
     // BREAK: pick the line, then the second break point.
     s.start("break").unwrap();
-    s.input(Input::Point(Vec2::new(3.0, 0.0))).unwrap();
-    let _ = s.input(Input::Point(Vec2::new(7.0, 0.0)));
+    s.input(Input::Point(PointInput::Picked(Vec2::new(3.0, 0.0)))).unwrap();
+    let _ = s.input(Input::Point(PointInput::Picked(Vec2::new(7.0, 0.0))));
     assert!(s.log.last().is_some_and(|m| m.contains("locked layer")), "{:?}", s.log.last());
     assert_eq!(snapshot(&s), before);
     // JOIN on a preselected pair reports the refusal on the command line.
@@ -129,7 +129,7 @@ fn interactive_break_and_join_refuse_locked_lines() {
     // Unlocked, the interactive commands still edit.
     set_lock(&mut s, false);
     s.start("break").unwrap();
-    s.input(Input::Point(Vec2::new(3.0, 0.0))).unwrap();
-    s.input(Input::Point(Vec2::new(7.0, 0.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(3.0, 0.0)))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(7.0, 0.0)))).unwrap();
     assert_ne!(snapshot(&s), before);
 }

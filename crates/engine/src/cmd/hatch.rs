@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::helpers::lwpoly;
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, Picker, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Picker, Prompt, Result, Session, Step};
 
 mod assoc;
 mod edit;
@@ -773,6 +773,7 @@ impl Interactive for BoundaryM {
 
 #[cfg(test)]
 mod tests {
+    use crate::PointInput;
     use serde_json::json;
 
     use super::*;

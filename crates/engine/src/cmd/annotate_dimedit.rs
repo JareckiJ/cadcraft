@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase};
 use super::*;
-use crate::{Accept, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 /// Most objects DIMBREAK Auto looks at, and most breaks it adds to one dimension.
 const MAX_BREAK_OBJECTS: usize = 20_000;
@@ -329,7 +329,7 @@ impl Interactive for JoggedM {
             return Ok(Step::Continue);
         }
         match (self.circle, self.center, self.at, i) {
-            (None, _, _, Input::Point(PointInput::Picked(p))) => match pick_at(s, p).and_then(|h| circle_of(s, h)) {
+            (None, _, _, Input::Point(pi)) => match pick_at(s, pi.point()).and_then(|h| circle_of(s, h)) {
                 Some(t) => self.circle = Some(t),
                 None => s.echo("Object selected is not a circle or arc."),
             },

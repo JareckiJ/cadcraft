@@ -2,7 +2,7 @@ use cadcraft_doc::{EntityKind, Handle, Space};
 use cadcraft_geom::{Arc, Polyline, Vec2};
 use serde_json::{Value, json};
 
-use crate::Session;
+use crate::{PointInput, Session};
 
 fn last(s: &Session) -> EntityKind {
     s.doc().unwrap().model.last().unwrap().kind.clone()

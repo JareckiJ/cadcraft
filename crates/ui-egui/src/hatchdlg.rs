@@ -604,7 +604,7 @@ mod tests {
     use cadcraft_color::Color;
     use cadcraft_doc::Handle;
     use cadcraft_engine::geom::Vec2;
-    use cadcraft_engine::{HatchPicks, PickMode, Session};
+    use cadcraft_engine::{HatchPicks, PickMode, PointInput, Session};
     use serde_json::json;
 
     use super::*;

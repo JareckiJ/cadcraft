@@ -461,7 +461,7 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cadcraft_engine::Session;
+    use cadcraft_engine::{PointInput, Session};
 
     use crate::Services;
 

@@ -3,7 +3,7 @@
 use cadcraft_doc::Handle;
 use serde_json::{Value, json};
 
-use crate::{Accept, EngineError, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 /// A "Select objects:" phase. Uses the pickfirst selection when there is one.
 #[derive(Clone, Debug, Default)]
@@ -223,7 +223,7 @@ mod tests {
     use cadcraft_geom::Vec2;
     use serde_json::json;
 
-    use crate::{Input, Session};
+    use crate::{Input, PointInput, Session};
 
     /// Menu/typed invocation of selection commands prompts "Select objects" when nothing is selected
     /// (#126), and acts on the picked objects in one undo step.

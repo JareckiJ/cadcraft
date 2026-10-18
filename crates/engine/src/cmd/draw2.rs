@@ -10,7 +10,7 @@ use super::curves::{self, Chain, MAX_GEN, TanObj};
 use super::helpers::*;
 use super::machines::number;
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub(crate) mod breakline;
 pub(crate) mod mline;
@@ -379,7 +379,7 @@ impl Interactive for SeqM {
         }
         let Some((_, ask)) = self.ask() else { return Ok(Step::Done) };
         let val = match (&i, ask) {
-            (Input::Point(PointInput::Picked(q)), _) => self.value_from_point(ask, *q),
+            (Input::Point(pi), _) => self.value_from_point(ask, pi.point()),
             (Input::Text(t), Ask::Angle(_) | Ask::Sweep(..)) => {
                 // The tangent direction is a direction; included angles are sizes.
                 let au = s.angle_settings();
@@ -1119,8 +1119,8 @@ impl Interactive for RevcloudM {
             return Ok(Step::Continue);
         }
         if self.object {
-            let Input::Point(PointInput::Picked(p)) = i else { return if i == Input::Enter { Ok(Step::Cancel) } else { Ok(Step::Continue) } };
-            let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
+            let Input::Point(pi) = i else { return if i == Input::Enter { Ok(Step::Cancel) } else { Ok(Step::Continue) } };
+            let h = curves::pick_at(s, pi.point()).ok_or_else(|| other("*Invalid selection*"))?;
             let pts = object_outline(s, h)?;
             let vs = cloud_vertices(&pts, self.arc_len, false, false).ok_or_else(|| other("The object has no area."))?;
             let nh = s.add_entity(cloud_entity(vs, self.calligraphy, self.arc_len))?;

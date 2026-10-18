@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::helpers::v3;
 use super::machines::{SelOutcome, SelectPhase, SelectRun};
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, LeaderOrder, MLeaderOptions, PointInput, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, LeaderOrder, MLeaderOptions, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -1370,8 +1370,8 @@ impl Interactive for ArcLenM {
         }
         if let Some(picked) = self.partial.take() {
             match (i, picked.first().copied(), self.arc) {
-                (Input::Point(PointInput::Picked(p)), None, _) => self.partial = Some(vec![p]),
-                (Input::Point(PointInput::Picked(q)), Some(p), Some(g)) => match arc_part(&g, p, q) {
+                (Input::Point(pi), None, _) => self.partial = Some(vec![pi.point()]),
+                (Input::Point(pi), Some(p), Some(g)) => match arc_part(&g, p, pi.point()) {
                     Some(part) => self.arc = Some(part),
                     None => s.echo("The two points must be different."),
                 },
