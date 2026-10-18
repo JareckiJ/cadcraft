@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (R12 and older DWGs open with a read note naming the version and the missing blocks instead of opening empty without a word) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -39,7 +39,7 @@ title/header suppression.
 
 | DWG version | Code | AutoCAD 2027 | CADCraft read | CADCraft write | Tested how |
 |---|---|---|---|---|---|
-| R1.0–R2.6, R9, R10, R11/R12 | MC0.0–AC1009 | read | **no** (`is_dwg` accepts only `AC10xx` magic; acadrust doesn't target pre-R13) | no | — |
+| R1.0–R2.6, R9, R10, R11/R12 | MC0.0–AC1009 | read | **no**: `AC1004`–`AC1009` open with a read note naming the version and the missing blocks (acadrust returns their layers and block references but none of their blocks; they used to open as empty drawings without a word), and a failed read says the same in its error; older magic isn't recognised as DWG | no | `pre_r13_dwg_names_its_version_in_the_note_or_the_error` |
 | R13 | AC1012 | read | acadrust claims support; untested | no | none |
 | R14 | AC1014 | read, write | acadrust claims support; untested | **no** | none |
 | 2000–2002 | AC1015 | read, write | yes via bridge | yes, when asked for (no true colours, transparency or table styles: the format has none) | synthetic round trips (`dwg_at_every_version_reads_back`, `dwg_roundtrip_keeps_non_ascii_text`) |
