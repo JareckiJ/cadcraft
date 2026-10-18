@@ -83,7 +83,7 @@ each language, which needs humans. Translations parallelise fully once the catal
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-18 | minor | Czech completed: 115 rows for strings added since (3D mouse, Hatch and Gradient dialog, Block Editor, dynamic blocks, multileader editing, Options selection and save settings, MTEXT editor, recent files); 1,329 rows, every key of the Ukrainian reference catalog the code looks up |
+| 2026-10-18 | minor | Czech completed: 115 rows for strings added since (3D mouse, Hatch and Gradient dialog, Block Editor, dynamic blocks, multileader editing, Options selection and save settings, MTEXT editor, recent files); 1,214 → 1,329 rows (the 1,202 in the previous Czech entry had grown to 1,214 through later UI commits), every key of the Ukrainian reference catalog the code looks up |
 | 2026-10-13 | minor | Swedish added: 1,235 rows, one/other plurals, menu headings, locale/preferences/menu/font/render tests; no gaps in the marked UI literals; terminology and the running app reviewed by a native speaker |
 | 2026-10-13 | minor | Korean added: full 1,235-row existing catalog union, single count form, locale/persistence/live-switch tests, and validated Hangul UI fonts; native review and platform verification pending |
 | 2026-10-12 | minor | Italian added: 1,227 rows, one/other plurals, two `menu` headings, locale/preference/plural/font tests; AI-assisted, native proofreading pending |
