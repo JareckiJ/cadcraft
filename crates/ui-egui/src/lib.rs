@@ -108,6 +108,9 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// AutoComplete ranks the commands used before first and remembers the command chosen for a
+    /// typed prefix (AutoCAD's adaptive suggestions).
+    pub adaptive_suggestions: bool,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -179,6 +182,7 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            adaptive_suggestions: true,
         }
     }
 }
@@ -376,6 +380,12 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if !self.ui.adaptive_suggestions {
+            prefs["adaptiveSuggestions"] = json!(false);
+        }
+        if !self.cmd.usage.is_empty() {
+            prefs["commandUsage"] = self.cmd.usage.to_json();
+        }
         prefs.to_string()
     }
 
@@ -399,6 +409,12 @@ impl CadApp {
         }
         if let Some(v) = v.get("saveVersion").and_then(Value::as_str).and_then(SaveVersion::parse) {
             self.ui.save_version = v.year().to_string();
+        }
+        if let Some(on) = v.get("adaptiveSuggestions").and_then(Value::as_bool) {
+            self.ui.adaptive_suggestions = on;
+        }
+        if let Some(u) = v.get("commandUsage") {
+            self.cmd.usage = cmdline::Usage::from_json(u);
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();

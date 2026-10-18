@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (animation effects follow the operating system's setting) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (AutoComplete: Enter takes the suggestion, adaptive suggestions) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -140,7 +140,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Feature | AutoCAD | CADCraft |
 |---|---|---|
-| AutoComplete (commands, sysvars, mid-string, synonyms) | yes | command list with Tab to accept (`cmdline.rs:30,176,317`); no sysvar or mid-string search confirmed |
+| AutoComplete (commands, sysvars, mid-string, synonyms) | partial | command list; Enter, Tab or a click takes the highlighted suggestion (a word that is already a command, alias, LISP command or system variable runs as typed); adaptive suggestions rank the commands used most and the one last chosen for a prefix first, kept with the preferences (`adaptiveSuggestions`, `commandUsage`); no sysvar, mid-string or synonym search |
 | Aliases | about 250 in `acad.pgp` | 144 aliases across the commands (counted from source) |
 | History (F2), Up/Down recall | yes | yes |
 | Transparent commands (`'zoom`, `'pan`, `'osnap`) | yes | yes (`lib.rs:496-503`) |
@@ -202,6 +202,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | AutoComplete: Enter takes the highlighted suggestion ("str" runs STRETCH); adaptive suggestions put the most used commands and the one chosen for a prefix first, remembered across restarts |
 | 2026-10-12 | minor | Selected and hovered objects redrawn in the selection colour (text and arrowheads included); Options ▸ Selection laid out as AutoCAD's: Object grouping, Show grips, grip object limit, selection preview, Visual Effect Settings (selection area, preview filter) |
 | 2026-10-12 | minor | Animation effects (dialog and menu fades, smoothed wheel scrolling and ⌘/Ctrl+wheel zoom) follow the operating system's setting; View ▸ Accessibility ▸ Animation Effects chooses System, On or Off |
 | 2026-10-12 | minor | Hatch and Gradient / Hatch Edit dialogs (HATCH, GRADIENT, HATCHEDIT, double-click a hatch; HPDLGMODE) |

@@ -924,6 +924,18 @@ impl Session {
     // ---------------- interactive commands ----------------
 
     /// Start a command by name or alias as if typed at the command line.
+    /// Whether [`Self::start`] knows `name` (a command, alias, LISP-defined command or system
+    /// variable), so typing it at Command: is not refused as an unknown command.
+    pub fn knows_command_word(&self, name: &str) -> bool {
+        let name = name.trim().trim_start_matches('\'');
+        let lower = name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase();
+        let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
+        find_command(&dashed).is_some()
+            || find_command(&cmd::resolve_alias(&lower)).is_some()
+            || self.lisp_command(&lower).is_some()
+            || (!name.starts_with(['_', '.', '-']) && sysvars::get(self, &lower.to_ascii_uppercase()).is_some())
+    }
+
     pub fn start(&mut self, name: &str) -> Result<()> {
         self.last_polar = None;
         let name = name.trim();
