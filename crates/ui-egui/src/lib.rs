@@ -8,6 +8,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod ai_studio;
 pub mod animation;
 pub mod autosave;
 pub mod bedit;
@@ -191,6 +193,8 @@ pub struct Services {
 }
 
 pub struct CadApp {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub ai_studio: ai_studio::Studio,
     pub system_languages: Vec<String>,
     /// Whether the operating system shows animations, as the host reads it; `None` when the OS
     /// states nothing or the host cannot ask ([`animation`]).
@@ -250,6 +254,8 @@ impl CadApp {
         CadApp {
             system_languages: Vec::new(),
             system_animations: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            ai_studio: Default::default(),
             session,
             ui: UiState::default(),
             options: options::UiOptions::default(),
@@ -618,6 +624,8 @@ impl CadApp {
         let t0 = now_ms();
         control::begin_frame(ui.ctx());
         let t = theme::Tokens::get();
+        #[cfg(not(target_arch = "wasm32"))]
+        ai_studio::show(self, ui);
         chrome::title_and_toolbar(self, ui);
         if self.ui.in_window_menu {
             menus::menu_bar(self, ui);
