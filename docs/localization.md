@@ -33,8 +33,8 @@ dialogs, and the About window's controls. The command reference can be searched 
 command ID, English label, or translated label. Ukrainian has enforced coverage;
 missing entries in the other catalogs are reported by tests and fall back to English.
 
-Czech has 1,202 catalog rows, covering the reference catalog and every marked UI
-literal, including Options. Four `menu` entries distinguish menu headings from object/command
+Czech has 1,329 catalog rows, covering every key of the reference catalog that the code
+looks up and every marked UI literal, including Options. Four `menu` entries distinguish menu headings from object/command
 labels: **Zobrazení / Pohled**, **Kreslení / Kreslit**, **Kótování / Kóta**, and **Modifikace / Upravit**.
 The translation is AI-assisted work by @Losminek, reviewed against Czech desktop and CAD UI
 conventions and an independent review pass; it has not yet been proofread by a native speaker.
