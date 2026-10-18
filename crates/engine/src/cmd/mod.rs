@@ -211,6 +211,14 @@ pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
     command_specs().iter().find(|c| c.id == l)
 }
 
+/// The command a name typed at the command line starts (no transparent `'`): a command-line form
+/// with an id of its own (-ATTEDIT) before the command it prefixes, with `_` and `.` dropped and
+/// aliases resolved.
+pub fn typed_command(name: &str) -> Option<&'static CommandSpec> {
+    let dashed = resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
+    find_command(&dashed).or_else(|| find_command(&resolve_alias(&name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase())))
+}
+
 /// Resolve a typed name or alias (AutoCAD-style short names such as `L`, `C`, `PL`) to an id.
 /// Command names win; the user's aliases (ALIASEDIT, REINIT) come before the built-in ones.
 pub fn resolve_alias(name: &str) -> String {

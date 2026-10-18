@@ -476,9 +476,8 @@ pub fn submit(app: &mut CadApp) {
     if !app.session.prompting() && !text.trim().contains(' ') {
         let word = text.trim();
         if known_word(app, word) {
-            let id = cadcraft_engine::cmd::resolve_alias(&word.trim_start_matches(['\'', '_', '.', '-']).to_ascii_lowercase());
-            if cadcraft_engine::cmd::find_command(&id).is_some() {
-                app.cmd.usage.record_use(&id);
+            if let Some(spec) = cadcraft_engine::cmd::typed_command(word.trim_start_matches('\'')) {
+                app.cmd.usage.record_use(spec.id);
             }
         } else if let Some(s) = ranked_suggestions(word, app.ui.adaptive_suggestions.then_some(&app.cmd.usage)).first() {
             // Not a command: Enter takes the highlighted AutoComplete suggestion ("str" → STRETCH).
@@ -974,6 +973,11 @@ mod autocomplete_tests {
         assert_eq!(a.session.log.last().map(String::as_str), Some("3"));
         enter(&mut a, "zzqq");
         assert!(a.session.log.last().is_some_and(|l| l.contains("zzqq")), "refused: {:?}", a.session.log.last());
+        // A command-line form with an id of its own is counted as itself, not the command it prefixes.
+        enter(&mut a, "-attedit");
+        assert_eq!(running(&a).as_deref(), Some("-ATTEDIT"));
+        assert_eq!((a.cmd.usage.counts.get("-attedit"), a.cmd.usage.counts.get("attedit")), (Some(&1), None));
+        a.session.cancel();
         // A line with spaces is a script, read as typed.
         enter(&mut a, "sty 0,0");
         assert_ne!(running(&a).as_deref(), Some("STYLE"));
