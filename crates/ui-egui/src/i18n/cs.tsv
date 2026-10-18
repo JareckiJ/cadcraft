@@ -1243,12 +1243,12 @@
 	3D Mouse...	3D myš...
 	3D Mouse	3D myš
 	Calibrate 3D Mouse	Kalibrovat 3D myš
-	3D Mouse Navigation	Ovládat pohled 3D myší
+	3D Mouse Navigation	Ovládání pohledu 3D myší
 	3D mouse input is unavailable on this platform	Vstup z 3D myši není na této platformě dostupný
 	No supported 3D mouse found	Nebyla nalezena žádná podporovaná 3D myš
 	Release the 3D mouse to calibrate its resting position	Uvolněte 3D myš pro kalibraci její klidové polohy
 	3D mouse connected	3D myš je připojena
-	3D mouse busy, possibly 3DxWare or missing device permissions	3D myš je obsazená, příčinou může být 3DxWare nebo chybějící oprávnění k zařízení
+	3D mouse busy, possibly 3DxWare or missing device permissions	3D myš je obsazena, příčinou může být 3DxWare nebo chybějící oprávnění k zařízení
 	3D mouse disconnected	3D myš je odpojena
 	3D mouse input could not be started	Příjem vstupu z 3D myši se nepodařilo spustit
 	Enable 3D mouse navigation	Zapnout ovládání pohledu 3D myší
@@ -1267,7 +1267,7 @@
 	Automatic save every	Interval automatického ukládání
 	min	min
 	Automatic save file location	Umístění souborů automatického ukládání
-	Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off.	Výkresy bez souboru se ukládají ve výchozí verzi formátu. Hodnota 0 minut vypíná automatické ukládání.
+	Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off.	Výkresy, které ještě nemají soubor, se ukládají ve výchozí verzi formátu. Hodnota 0 minut vypíná automatické ukládání.
 	Time-sensitive right-click: a quick click is Enter, holding opens the menu	Rozlišovat délku stisku pravého tlačítka: krátké kliknutí odpovídá klávese Enter, podržení otevře místní nabídku
 	Turned off, a right-click while a command runs always opens the shortcut menu.	Při vypnuté volbě kliknutí pravým tlačítkem během příkazu vždy otevře místní nabídku.
 menu	View	Zobrazení
@@ -1301,7 +1301,7 @@ menu	Modify	Modifikace
 	Text color	Barva textu
 	Click the ruler to add a tab stop, right-click to remove one	Kliknutím na pravítko přidáte zarážku tabulátoru, kliknutím pravým tlačítkem ji odeberete
 	Query Texts	Dotaz na texty
-	Hatch Pick	Vybrat vstupy pro šrafy
+	Hatch Pick	Výběr pro šrafy
 	Hatch and Gradient	Šrafy a přechod
 	Color 1	Barva 1
 	Color 2	Barva 2
