@@ -660,41 +660,18 @@ fn adaptive(unit: f64, scale: f64, min_px: f64) -> f64 {
 fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
     let t = Tokens::get();
     let s = app.session.drafting_settings();
-    let wb = xf.world_bounds();
     if s.gridmode && s.isodraft {
         draw_iso_grid(app, p, xf);
     } else if s.gridmode {
-        let major_n = f64::from(s.gridmajor.max(1));
         let unit = if s.gridunit.x == 0.0 { s.snapunit.x } else { s.gridunit.x };
         let minor = adaptive(unit, xf.scale, 8.0);
-        let major = minor * major_n;
         // The grid lies in the snap frame: SNAPBASE and SNAPANG in the current UCS.
         let space = app.session.space();
         let (origin, angle) = app.session.doc().map(|d| cadcraft_engine::snap::grid_frame_in(d, &space)).unwrap_or((Vec2::ZERO, 0.0));
-        let to_world = |q: Vec2| origin + q.rotate(angle);
-        // The view's corners in grid coordinates bound the lines needed.
-        let corners = [wb.min, Vec2::new(wb.max.x, wb.min.y), wb.max, Vec2::new(wb.min.x, wb.max.y)].map(|c| (c - origin).rotate(-angle));
-        let lo = Vec2::new(corners.iter().map(|c| c.x).fold(f64::INFINITY, f64::min), corners.iter().map(|c| c.y).fold(f64::INFINITY, f64::min));
-        let hi =
-            Vec2::new(corners.iter().map(|c| c.x).fold(f64::NEG_INFINITY, f64::max), corners.iter().map(|c| c.y).fold(f64::NEG_INFINITY, f64::max));
-        let (x0, x1) = ((lo.x / minor).floor(), (hi.x / minor).ceil());
-        let (y0, y1) = ((lo.y / minor).floor(), (hi.y / minor).ceil());
-        let mut lines = Vec::new();
-        if [x0, x1, y0, y1].iter().all(|v| v.is_finite()) && (x1 - x0) < 2000.0 && (y1 - y0) < 2000.0 {
-            let is_major = |v: f64| ((v / major) - (v / major).round()).abs() < 1e-6;
-            let stroke = |m: bool| Stroke::new(1.0, if m { t.grid_major } else { t.grid_minor });
-            for i in (x0 as i64)..=(x1 as i64) {
-                let x = i as f64 * minor;
-                let (a, b) = (to_world(Vec2::new(x, lo.y)), to_world(Vec2::new(x, hi.y)));
-                lines.push(Shape::line_segment([xf.to_screen(a), xf.to_screen(b)], stroke(is_major(x))));
-            }
-            for j in (y0 as i64)..=(y1 as i64) {
-                let y = j as f64 * minor;
-                let (a, b) = (to_world(Vec2::new(lo.x, y)), to_world(Vec2::new(hi.x, y)));
-                lines.push(Shape::line_segment([xf.to_screen(a), xf.to_screen(b)], stroke(is_major(y))));
-            }
-        }
-        p.extend(lines);
+        let lines = cadcraft_engine::snap::iso::rect_grid_lines(xf.world_bounds(), minor, origin, angle, s.gridmajor);
+        p.extend(lines.into_iter().map(|l| {
+            Shape::line_segment([xf.to_screen(l.a), xf.to_screen(l.b)], Stroke::new(1.0, if l.major { t.grid_major } else { t.grid_minor }))
+        }));
     }
     // The current UCS's X and Y axes through its origin.
     let u = app.session.input_ucs();
@@ -1115,6 +1092,12 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
     p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
 }
 
+/// The whole degrees (0–359) a tracking tooltip shows for the path `from` → `to`, measured from
+/// the current UCS's X axis at `ucs` radians.
+fn tooltip_angle(from: Vec2, to: Vec2, ucs: f64) -> i64 {
+    ((from.angle_to(to) - ucs).to_degrees().round() as i64).rem_euclid(360)
+}
+
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
 /// is on and the tooltip naming them ("Endpoint: 5.0000 < 90°").
 /// `ucs`: the current UCS's X axis (radians), which the tooltips measure angles from.
@@ -1153,10 +1136,7 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
             }
         };
         p.extend(Shape::dotted_line(&pts, t.snap, 6.0, 1.0));
-        let (distance, angle) = (
-            cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4),
-            ((path.from.angle_to(tr.point) - ucs).to_degrees().round() as i64).rem_euclid(360),
-        );
+        let (distance, angle) = (cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4), tooltip_angle(path.from, tr.point, ucs));
         tips.push(if path.name == "Polar" {
             crate::tf!("Polar: {distance} < {angle}°", distance = distance, angle = angle)
         } else {
@@ -2390,6 +2370,22 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
 pub(crate) mod tests {
     use super::*;
     use cadcraft_render::DPrim;
+
+    /// Tracking tooltips give angles in the current UCS: a path along a UCS turned 30° reads 0°,
+    /// one along World X reads 330°, and the World UCS reads world angles.
+    #[test]
+    fn tooltip_angles_are_measured_from_the_ucs_x_axis() {
+        let o = Vec2::new(2.0, 1.0);
+        let at = |deg: f64| o + Vec2::from_angle(deg.to_radians()) * 5.0;
+        assert_eq!(tooltip_angle(o, at(90.0), 0.0), 90);
+        assert_eq!(tooltip_angle(o, at(-45.0), 0.0), 315);
+        let ucs = 30f64.to_radians();
+        assert_eq!(tooltip_angle(o, at(30.0), ucs), 0);
+        assert_eq!(tooltip_angle(o, at(0.0), ucs), 330);
+        assert_eq!(tooltip_angle(o, at(120.0), ucs), 90);
+        // A non-finite angle shows a number, not a panic.
+        assert!((0..360).contains(&tooltip_angle(o, o, f64::NAN)));
+    }
 
     fn list(handles: &[u64]) -> DisplayList {
         let prim =

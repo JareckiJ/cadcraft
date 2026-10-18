@@ -805,7 +805,8 @@ impl crate::Session {
             return CursorSnap { point: h.point, snap: Some(h), track: None, wait };
         }
         // Isometric snap (SNAPSTYL 1): its lattice in place of the rectangular grid.
-        let (raw, s) = super::iso::grid_snap(&doc, &space, s, raw);
+        let snapmode = s.snapmode;
+        let (raw, mut s) = super::iso::grid_snap(&doc, &space, s, raw);
         let mut p = raw;
         if s.snapmode && !s.polarsnap {
             let (origin, angle) = super::grid_frame_in(&doc, &space);
@@ -827,9 +828,10 @@ impl crate::Session {
             && s.orthomode
             && !q.corner
         {
-            // The drafting settings as they are (`s` has grid snap turned off once the isometric
-            // lattice took it), with the UCS axes.
-            p = super::iso::ortho(&self.drafting_settings(), b, p);
+            // Grid snap as it was before the isometric lattice took it (`grid_snap` turns it off),
+            // so ortho keeps whole snap steps along the isometric axes.
+            s.snapmode = snapmode;
+            p = super::iso::ortho(&s, b, p);
         }
         CursorSnap { point: p, snap: None, track: None, wait }
     }
