@@ -1,22 +1,22 @@
 # Parity checklist
 
-> **Generated:** 2026-10-17 by `cargo xtask parity`. Do not edit by hand.
+> **Generated:** 2026-10-18 by `cargo xtask parity`. Do not edit by hand.
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 315 / 491 items (64%)** · 468 registered commands.
+**Menu breadth: 327 / 491 items (67%)** · 479 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
 | File | 22 | 13 | 59% |
 | Edit | 13 | 11 | 85% |
-| View | 75 | 54 | 72% |
+| View | 75 | 60 | 80% |
 | Insert | 11 | 5 | 45% |
 | Format | 27 | 25 | 93% |
 | Tools | 85 | 68 | 80% |
-| Draw | 87 | 56 | 64% |
+| Draw | 87 | 57 | 66% |
 | Dimension | 28 | 28 | 100% |
-| Modify | 113 | 52 | 46% |
+| Modify | 113 | 57 | 50% |
 | Window | 22 | 3 | 14% |
 | Help | 8 | 0 | 0% |
 
@@ -39,19 +39,13 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - View > Camera > Adjust Distance
 - View > Camera > Swivel
 - View > Viewports > Named Viewports...
-- View > Hide
 - View > Render > Light > New Point Light
 - View > Render > Light > New Spotlight
 - View > Render > Light > New Distant Light
 - View > Render > Light > Light Glyphs
 - View > Render > Materials Browser
-- View > UCS Icon > On
 - View > UCS Icon > Properties...
-- View > ViewCube > On
 - View > ViewCube > Settings
-- View > Attribute Display > Normal
-- View > Attribute Display > On
-- View > Attribute Display > Off
 - View > Lights
 - View > Enter Full Screen
 - Insert > PDF Underlay...
@@ -103,7 +97,6 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Draw > 3D Modeling > Meshes > Primitives > Torus
 - Draw > 3D Modeling > Meshes > Primitives > Pyramid
 - Draw > 3D Modeling > Meshes > Smooth Mesh
-- Draw > 3D Modeling > Meshes > 3D Face
 - Draw > 3D Modeling > Meshes > Meshes, Revolved Surface
 - Draw > 3D Modeling > Meshes > Meshes, Tabulated Surface
 - Draw > 3D Modeling > Meshes > Meshes, Ruled Surface
@@ -118,11 +111,6 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Modify > Object > Block Description...
 - Modify > Clip > Image
 - Modify > Clip > Xref
-- Modify > 3D Operations > 3D Move
-- Modify > 3D Operations > 3D Rotate
-- Modify > 3D Operations > 3D Align
-- Modify > 3D Operations > 3D Mirror
-- Modify > 3D Operations > 3D Array
 - Modify > 3D Operations > Interference Checking
 - Modify > 3D Operations > Slice
 - Modify > 3D Operations > Thicken

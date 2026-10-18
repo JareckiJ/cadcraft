@@ -85,7 +85,30 @@ pub fn specs() -> Vec<CommandSpec> {
         ]),
         CommandSpec::new("vscurrent.sketchy", "Sketchy", |s, _| run_vscurrent_style(s, "Sketchy")).menu(&["View", "Visual Styles", "Sketchy"]),
         CommandSpec::new("vscurrent.xray", "X-Ray", |s, _| run_vscurrent_style(s, "X-Ray")).menu(&["View", "Visual Styles", "X-Ray"]),
+        // View > Hide
+        CommandSpec::new("hide", "Hide", |s, _| run_vscurrent_style(s, "Hidden")).alias(&["hi"]).menu(&["View", "Hide"]),
+        // View > UCS Icon > On
+        CommandSpec::new("ucsicon.on", "On", run_ucsicon_on).menu(&["View", "UCS Icon", "On"]),
+        // View > Attribute Display
+        CommandSpec::new("attdisp.normal", "Normal", |s, _| set_attdisp(s, 1)).menu(&["View", "Attribute Display", "Normal"]),
+        CommandSpec::new("attdisp.on", "On", |s, _| set_attdisp(s, 2)).menu(&["View", "Attribute Display", "On"]),
+        CommandSpec::new("attdisp.off", "Off", |s, _| set_attdisp(s, 0)).menu(&["View", "Attribute Display", "Off"]),
     ]
+}
+
+fn run_ucsicon_on(s: &mut Session, p: &Value) -> Result<Value> {
+    let on = p.get("on").and_then(Value::as_bool).unwrap_or(true);
+    let d = s.doc_mut()?;
+    let current = d.header.i64("UCSICON", 3);
+    let next = if on { current | 1 } else { current & !1 };
+    d.header.set_i64("UCSICON", next);
+    Ok(json!({ "status": "ok", "ucsicon": next }))
+}
+
+fn set_attdisp(s: &mut Session, mode: i64) -> Result<Value> {
+    let d = s.doc_mut()?;
+    d.header.set_i64("ATTMODE", mode);
+    Ok(json!({ "status": "ok", "attmode": mode }))
 }
 
 fn vec3_from_value(v: &Value) -> Option<Vec3> {

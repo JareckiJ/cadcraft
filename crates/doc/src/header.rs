@@ -142,6 +142,14 @@ impl Header {
         self.set_str("VSCURRENT", style);
     }
 
+    pub fn elevation(&self) -> f64 {
+        self.f64("ELEVATION", 0.0)
+    }
+
+    pub fn set_elevation(&mut self, elev: f64) {
+        self.set_f64("ELEVATION", elev);
+    }
+
     fn common() -> Header {
         let mut h = Header::default();
         h.set_str("ACADVER", "AC1032");

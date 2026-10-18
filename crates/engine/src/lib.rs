@@ -952,21 +952,32 @@ impl Session {
             Some(n) => (true, n),
             None => (false, name),
         };
-        let lower = name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase();
-        // A command-line form with an id of its own (-ATTEDIT) is not the command it prefixes.
-        let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
-        let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
-        let Some(spec) = find_command(&id) else {
-            // A command defined in LISP: (defun c:NAME …).
-            if !transparent && let Some(f) = self.lisp_command(&lower) {
-                if self.running.is_some() {
-                    self.cancel();
-                }
-                self.last_command = Some(lower.clone());
-                self.echo(format!("Command: {}", lower.to_ascii_uppercase()));
-                return self.lisp_run_command(&lower, f);
+        let unadorned = name.trim_start_matches(['_', '.']).to_ascii_lowercase();
+        let lower = unadorned.trim_start_matches('-').to_string();
+
+        // AutoCAD command precedence:
+        // 1. Direct built-in command name (e.g. LINE, HIDE, -ATTEDIT)
+        // 2. AutoLISP command (c:NAME) takes precedence over aliases (acad.pgp)
+        // 3. Command alias (e.g. L -> LINE, HI -> HIDE)
+        // 4. Bare system variable (e.g. ORTHOMODE)
+        let spec = if let Some(spec) = find_command(&unadorned) {
+            Some(spec)
+        } else if let Some(spec) = find_command(&lower) {
+            Some(spec)
+        } else if !transparent && let Some(f) = self.lisp_command(&lower) {
+            if self.running.is_some() {
+                self.cancel();
             }
-            // A bare system variable name (ORTHOMODE, GRIDMODE…) acts as SETVAR on that variable.
+            self.last_command = Some(lower.clone());
+            self.echo(format!("Command: {}", lower.to_ascii_uppercase()));
+            return self.lisp_run_command(&lower, f);
+        } else {
+            let dashed = cmd::resolve_alias(&unadorned);
+            let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
+            find_command(&id)
+        };
+
+        let Some(spec) = spec else {
             let var = lower.to_ascii_uppercase();
             if !name.starts_with(['_', '.', '-']) && sysvars::get(self, &var).is_some() {
                 self.start(if transparent { "'setvar" } else { "setvar" })?;

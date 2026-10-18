@@ -260,3 +260,150 @@ fn visual_styles_and_vscurrent() {
     s.cmdline("shademode wireframe").unwrap();
     assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Wireframe"));
 }
+
+#[test]
+fn test_3dmove_and_3drotate() {
+    let mut s = Session::new();
+
+    // Create a 3D line from (0,0,0) to (10,0,0)
+    let res = s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let h = res["handles"][0].as_str().unwrap().to_string();
+
+    // 3D Move by delta (5, 5, 20)
+    s.execute("3dmove", &json!({ "handles": [h], "delta": [5, 5, 20] })).unwrap();
+
+    let doc = s.doc().unwrap();
+    let l = doc.model.iter().find_map(|e| if let EntityKind::Line(l) = &e.kind { Some(l.clone()) } else { None }).unwrap();
+    assert_eq!(l.a, cadcraft_geom::Vec3::new(5.0, 5.0, 20.0));
+    assert_eq!(l.b, cadcraft_geom::Vec3::new(15.0, 5.0, 20.0));
+
+    // 3D Rotate around Z axis through (5, 5, 20) by 90 degrees
+    s.execute("3drotate", &json!({ "handles": [h], "base": [5, 5, 20], "axis": "Z", "angle": 90.0 })).unwrap();
+
+    let doc = s.doc().unwrap();
+    let l_rot = doc.model.iter().find_map(|e| if let EntityKind::Line(l) = &e.kind { Some(l.clone()) } else { None }).unwrap();
+    assert!(l_rot.a.near(cadcraft_geom::Vec3::new(5.0, 5.0, 20.0), 1e-5));
+    assert!(l_rot.b.near(cadcraft_geom::Vec3::new(5.0, 15.0, 20.0), 1e-5));
+}
+
+#[test]
+fn test_align_and_3dalign() {
+    let mut s = Session::new();
+
+    let res = s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    let h = res["handles"][0].as_str().unwrap().to_string();
+
+    // 3D Align from [0,0,0] -> [10,20,5] and [10,0,0] -> [10,30,5]
+    s.execute(
+        "3dalign",
+        &json!({
+            "handles": [h],
+            "source": [[0, 0, 0], [10, 0, 0]],
+            "dest": [[10, 20, 5], [10, 30, 5]]
+        }),
+    )
+    .unwrap();
+
+    let doc = s.doc().unwrap();
+    let l = doc.model.iter().find_map(|e| if let EntityKind::Line(l) = &e.kind { Some(l.clone()) } else { None }).unwrap();
+    assert!(l.a.near(cadcraft_geom::Vec3::new(10.0, 20.0, 5.0), 1e-5));
+    assert!(l.b.near(cadcraft_geom::Vec3::new(10.0, 30.0, 5.0), 1e-5));
+}
+
+#[test]
+fn test_mirror3d_and_3darray() {
+    let mut s = Session::new();
+
+    // Create a 3D face with points having z=3
+    let res = s.execute("3dface", &json!({ "points": [[1, 2, 3], [5, 2, 3], [5, 6, 3], [1, 6, 3]] })).unwrap();
+    let h = res["handle"].as_str().unwrap().to_string();
+
+    // Mirror across XY plane (reflect Z)
+    let m_res = s.execute("mirror3d", &json!({ "handles": [h], "plane": "XY", "erase": false })).unwrap();
+    let new_h = m_res["mirrored"][0].as_str().unwrap();
+
+    let doc = s.doc().unwrap();
+    let orig = doc
+        .model
+        .iter()
+        .find_map(|e| if e.handle.hex() == h { if let EntityKind::Face3d(f) = &e.kind { Some(f.corners[0]) } else { None } } else { None })
+        .unwrap();
+    let mirr = doc
+        .model
+        .iter()
+        .find_map(|e| if e.handle.hex() == new_h { if let EntityKind::Face3d(f) = &e.kind { Some(f.corners[0]) } else { None } } else { None })
+        .unwrap();
+    assert_eq!(orig, cadcraft_geom::Vec3::new(1.0, 2.0, 3.0));
+    assert_eq!(mirr, cadcraft_geom::Vec3::new(1.0, 2.0, -3.0));
+
+    // 3D Array: 2 rows, 2 cols, 2 levels
+    let arr_res = s
+        .execute(
+            "3darray",
+            &json!({
+                "handles": [h],
+                "type": "rectangular",
+                "rows": 2,
+                "cols": 2,
+                "levels": 2,
+                "rowDist": 10,
+                "colDist": 10,
+                "levelDist": 10
+            }),
+        )
+        .unwrap();
+
+    // 2*2*2 - 1 original = 7 copies created
+    assert_eq!(arr_res["created"].as_array().unwrap().len(), 7);
+}
+
+#[test]
+fn test_3dface_command() {
+    let mut s = Session::new();
+
+    // Create a 3D Face with 4 corners and edge 1 invisible
+    let res = s
+        .execute(
+            "3dface",
+            &json!({
+                "points": [[0, 0, 0], [10, 0, 5], [10, 10, 5], [0, 10, 0]],
+                "invisible": [1]
+            }),
+        )
+        .unwrap();
+
+    let h = res["handle"].as_str().unwrap();
+    let doc = s.doc().unwrap();
+    let face = doc
+        .model
+        .iter()
+        .find_map(|e| if e.handle.hex() == h { if let EntityKind::Face3d(f) = &e.kind { Some(f.clone()) } else { None } } else { None })
+        .unwrap();
+
+    assert_eq!(face.corners[0], cadcraft_geom::Vec3::new(0.0, 0.0, 0.0));
+    assert_eq!(face.corners[1], cadcraft_geom::Vec3::new(10.0, 0.0, 5.0));
+    assert_eq!(face.corners[2], cadcraft_geom::Vec3::new(10.0, 10.0, 5.0));
+    assert_eq!(face.corners[3], cadcraft_geom::Vec3::new(0.0, 10.0, 0.0));
+    assert_eq!(face.hidden_edges, 2); // bit 1 = edge 1 (1 << 1)
+}
+
+#[test]
+fn test_view_commands_hide_ucsicon_attdisp() {
+    let mut s = Session::new();
+
+    s.execute("hide", &json!({})).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "VSCURRENT" })).unwrap()["value"], json!("Hidden"));
+
+    s.execute("ucsicon.on", &json!({ "on": true })).unwrap();
+    let ucsicon = s.doc().unwrap().header.i64("UCSICON", 0);
+    assert_eq!(ucsicon & 1, 1);
+
+    s.execute("attdisp.off", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().header.i64("ATTMODE", -1), 0);
+
+    s.execute("attdisp.on", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().header.i64("ATTMODE", -1), 2);
+
+    s.execute("attdisp.normal", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().header.i64("ATTMODE", -1), 1);
+}

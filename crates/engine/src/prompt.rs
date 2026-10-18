@@ -26,6 +26,19 @@ impl Accept {
     pub const SELECT: Accept = Accept { point: true, number: false, text: false, select: true, enter: true };
 }
 
+impl std::ops::BitOr for Accept {
+    type Output = Accept;
+    fn bitor(self, rhs: Accept) -> Accept {
+        Accept {
+            point: self.point || rhs.point,
+            number: self.number || rhs.number,
+            text: self.text || rhs.text,
+            select: self.select || rhs.select,
+            enter: self.enter || rhs.enter,
+        }
+    }
+}
+
 /// A prompt shown on the command line.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
