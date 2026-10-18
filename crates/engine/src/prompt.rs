@@ -220,6 +220,11 @@ pub trait Interactive: Send {
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         None
     }
+    /// The settings dialog the UI shows while the command waits at its settings prompt
+    /// (MATCHPROP's Settings: `"matchprop"`); the typed keywords keep working meanwhile.
+    fn settings_dialog(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// See [`Interactive::drag`].

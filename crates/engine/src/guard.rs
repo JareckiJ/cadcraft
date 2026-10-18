@@ -93,6 +93,12 @@ impl Interactive for Guarded {
             None
         })
     }
+    fn settings_dialog(&self) -> Option<&'static str> {
+        if self.broken.get().is_some() {
+            return None;
+        }
+        self.inner.settings_dialog()
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! MATCHPROP (#439): the typed source/destination picker with Settings, and the JSON form with a
-//! property list.
+//! property list. Settings asks the UI for the Property Settings dialog; the keywords stay.
 
 use cadcraft_engine::doc::color::Color;
 use cadcraft_engine::doc::{EntityKind, Handle};
@@ -135,4 +135,33 @@ fn matchprop_skips_locked_layers() {
     let r = s.execute("matchprop", &json!({ "source": src.hex(), "targets": [a.hex()] })).unwrap();
     assert_eq!(r["changed"], 0);
     assert_eq!(props(&s, a).0, "L");
+}
+
+#[test]
+fn matchprop_settings_asks_for_the_dialog_only_at_its_prompt() {
+    let (mut s, src, _, _) = setup();
+    assert_eq!(s.settings_dialog(), None);
+    s.cmdline("ma").unwrap();
+    assert_eq!(s.settings_dialog(), None, "source prompt");
+    s.input(Input::Pick(vec![src])).unwrap();
+    assert_eq!(s.settings_dialog(), None, "destination prompt");
+    s.cmdline("s").unwrap();
+    assert_eq!(s.settings_dialog(), Some("matchprop"));
+    s.cmdline("").unwrap();
+    assert!(s.prompt_text().contains("Select destination object(s)"), "{}", s.prompt_text());
+    assert_eq!(s.settings_dialog(), None, "back at the destinations");
+    s.cancel();
+    assert_eq!(s.settings_dialog(), None);
+}
+
+#[test]
+fn matchprop_settings_keywords_still_work_from_a_script() {
+    // The source at (5,0), the destination at (5,5): LAyer turned off at the Settings prompt.
+    let (mut s, _, a, _) = setup();
+    s.script("matchprop\n5,0\nS\nLA\n\n5,5\n\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(s.settings_dialog(), None);
+    assert!(!s.last_used.matchprop.layer);
+    assert!(s.last_used.matchprop.color);
+    assert_eq!(props(&s, a), ("0".into(), Color::Index(1), 2.5));
 }

@@ -35,6 +35,7 @@ pub mod i18n;
 pub mod icons;
 pub mod layers;
 pub mod managers;
+pub mod matchpropdlg;
 pub mod menus;
 pub mod opening;
 pub mod options;
@@ -241,6 +242,8 @@ pub struct CadApp {
     pub gpu_notice: Option<autosave::GpuNotice>,
     /// The Hatch and Gradient dialog while open or picking ([`hatchdlg`]).
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
+    /// The Property Settings dialog of MATCHPROP while open: its ticks ([`matchpropdlg`]).
+    pub matchprop_dlg: Option<cadcraft_engine::cmd::MatchProps>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
 }
@@ -280,6 +283,7 @@ impl CadApp {
             gpu_faults: std::sync::Arc::default(),
             gpu_notice: None,
             hatch_dlg: None,
+            matchprop_dlg: None,
             bedit: bedit::State::default(),
         }
     }

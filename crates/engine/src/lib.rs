@@ -1347,6 +1347,11 @@ impl Session {
         self.running.as_ref().and_then(|r| r.machine.editing_mtext())
     }
 
+    /// The settings dialog the running command wants shown ([`Interactive::settings_dialog`]).
+    pub fn settings_dialog(&self) -> Option<&'static str> {
+        self.running.as_ref().and_then(|r| r.machine.settings_dialog())
+    }
+
     pub fn current_prompt(&self) -> Option<Prompt> {
         if let Some(p) = self.lisp_prompt() {
             return Some(p);

@@ -1,6 +1,7 @@
 //! MATCHPROP (alias MA, PAINTER): copy properties from a source object to destination objects.
 //! Typed: "Select source object", then "Select destination object(s) or [Settings]" until Enter;
-//! Settings toggles which properties are copied (remembered for the next typed MATCHPROP). The
+//! Settings toggles which properties are copied (remembered for the next typed MATCHPROP): the UI
+//! shows the Property Settings dialog at that prompt, whose keywords keep working for scripts. The
 //! JSON form copies every property unless `properties` names some.
 
 use cadcraft_doc::{Entity, EntityKind, Handle};
@@ -329,6 +330,9 @@ impl Interactive for MatchPropM {
         }
         s.set_selection(Vec::new());
         Ok(Step::Continue)
+    }
+    fn settings_dialog(&self) -> Option<&'static str> {
+        (self.stage == Stage::Settings).then_some("matchprop")
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.stage {
