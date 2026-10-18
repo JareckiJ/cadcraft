@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (animation effects follow the operating system's setting) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** trivial (in-place layout tab rename) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -195,13 +195,14 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
   Clipboard ▸, Isolate ▸, the selection's editing commands, Draw Order ▸, Group, the selected
   object type's edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom; #325, #512).
   The command line, drawing tabs, layout tabs, Layers palette rows and the Properties palette
-  have menus too (#512). Still missing: in-place layout tab rename, Move or Copy, Select All
-  Layouts.
+  have menus too (#512). A double-click on a layout tab renames it in place. Still missing: Move
+  or Copy, Select All Layouts.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-16 | trivial | A double-click on a layout tab renames it in place, as in AutoCAD |
 | 2026-10-12 | minor | Selected and hovered objects redrawn in the selection colour (text and arrowheads included); Options ▸ Selection laid out as AutoCAD's: Object grouping, Show grips, grip object limit, selection preview, Visual Effect Settings (selection area, preview filter) |
 | 2026-10-12 | minor | Animation effects (dialog and menu fades, smoothed wheel scrolling and ⌘/Ctrl+wheel zoom) follow the operating system's setting; View ▸ Accessibility ▸ Animation Effects chooses System, On or Off |
 | 2026-10-12 | minor | Hatch and Gradient / Hatch Edit dialogs (HATCH, GRADIENT, HATCHEDIT, double-click a hatch; HPDLGMODE) |

@@ -294,6 +294,45 @@ fn visible_tabs(widths: &[f32], active: Option<usize>, room: f32) -> std::ops::R
     start..active + 1
 }
 
+/// The name of the layout tab being renamed in place (a double-click, as in AutoCAD). Enter or a
+/// click elsewhere renames it through `layout.rename`, Escape keeps the old name. A name the
+/// command refuses shows its message; after Enter the field stays open to correct it.
+fn layout_rename_field(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect, name: &str) {
+    let Some((from, mut buf)) = app.layout_rename.take() else { return };
+    let id = ui.id().with(("lt_rename", name));
+    let resp = ui.put(rect.shrink2(vec2(1.0, 2.0)), egui::TextEdit::singleline(&mut buf).id(id).font(crate::theme::body()));
+    let focus_all = |buf: &str| {
+        resp.request_focus();
+        if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), id) {
+            let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(buf.chars().count()));
+            st.cursor.set_char_range(Some(all));
+            st.store(ui.ctx(), id);
+        }
+    };
+    if !resp.has_focus() && !resp.lost_focus() {
+        focus_all(&buf);
+    }
+    if !resp.lost_focus() {
+        app.layout_rename = Some((from, buf));
+        return;
+    }
+    // The keys that closed the field are not the command line's: Enter would repeat the last
+    // command and Escape cancel the running one.
+    let (enter, escape) =
+        ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::Enter), i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)));
+    if escape || buf.trim() == from {
+        return;
+    }
+    if let Err(e) = app.run("layout.rename", json!({ "from": from, "to": buf })) {
+        app.status = Some((e, crate::now_ms()));
+        // Focus is taken back in this frame: egui reports the loss for two frames.
+        if enter {
+            focus_all(&buf);
+            app.layout_rename = Some((from, buf));
+        }
+    }
+}
+
 /// Status bar: layout tabs on the left, coordinates and drafting toggles on the right.
 pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -411,8 +450,14 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             if i > 0 && !shown.contains(&(i - 1)) {
                 continue;
             }
-            let w = g.size().x + 26.0;
+            let renaming = app.layout_rename.as_ref().is_some_and(|(n, _)| n == name);
+            let w = if renaming { (g.size().x + 26.0).max(110.0) } else { g.size().x + 26.0 };
             let tr = Rect::from_min_size(pos2(x, r.top() + 1.0), vec2(w, r.height() - 2.0)).intersect(clip);
+            if renaming {
+                layout_rename_field(app, ui, tr, name);
+                x += w + 2.0;
+                continue;
+            }
             let active = active_tab == Some(i);
             let resp = ui.interact(tr, ui.id().with(("lt", i)), Sense::click());
             if active {
@@ -425,6 +470,9 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             let resp = if cut { resp.on_hover_text(shown_name(i, name)) } else { resp };
             if resp.clicked() {
                 switch = Some(name.clone());
+            }
+            if i > 0 && resp.double_clicked() {
+                app.layout_rename = Some((name.clone(), name.clone()));
             }
             crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
             x += w + 2.0;
@@ -441,6 +489,9 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
                 }
                 x += 22.0;
             }
+        }
+        if app.layout_rename.as_ref().is_some_and(|(n, _)| !tabs.contains(n)) {
+            app.layout_rename = None;
         }
         // The layouts that didn't fit, behind a button after the last tab shown.
         let more = hidden.then(|| {

@@ -205,6 +205,8 @@ pub struct CadApp {
     pub spacemouse: spacemouse::State,
     pub cmd: cmdline::CmdLine,
     pub status: Option<(String, f64)>,
+    /// The layout tab being renamed in place: (its name, the name typed so far).
+    pub layout_rename: Option<(String, String)>,
     /// Drawings being read on worker threads ([`opening`]).
     pub opening: opening::Opening,
     pub integrated_titlebar: bool,
@@ -258,6 +260,7 @@ impl CadApp {
             spacemouse: spacemouse::State::default(),
             cmd: cmdline::CmdLine::default(),
             status: None,
+            layout_rename: None,
             opening: opening::Opening::default(),
             integrated_titlebar: false,
             control_rx: None,
