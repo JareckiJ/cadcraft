@@ -568,8 +568,8 @@ impl Out {
         let tags = cadcraft_dxf::parse(text.as_bytes()).expect("parse written DXF");
         let mut recs = Vec::new();
         for s in sections(&tags) {
-            for (k, t) in records(&s.tags) {
-                recs.push((s.name.clone(), k, t));
+            for (k, t) in records(s.tags) {
+                recs.push((s.name.to_string(), k.to_string(), t.to_vec()));
             }
         }
         Out { recs }

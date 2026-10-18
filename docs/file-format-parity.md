@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (DWG read memory measured on 381 office files; tag list no longer copied) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -55,8 +55,14 @@ Everything lost in the DXF read/write paths below is also lost through DWG, plus
 report #57: a 10 MB DWG failed after about two minutes; limits now stop runaway conversions
 early (#175), but the throughput problem remains. DGN line style components that no line style
 definition uses (leftovers of DGN imports, hundreds of thousands in some drawings) are left out
-on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG ≈ 30% read,
-≈ 15% write.**
+on read with a note, so such files no longer exceed the DXF limit (#1482). Measured 2026-10-18 on 381 office files
+(BricsCAD, AutoCAD and Revit, 0.02–238 MB, R12 to 2018): every file opens and renders; opening takes
+about 0.35 s per MB and peaks at about 140 times the file in memory, most of it the DXF rendition
+(6–11× the file) and its tag list. The two copies of that list are gone (#1076), which cut the peak by 40% (a 58 MB plan
+8.9 → 5.4 GB). A 238 MB architect's plan is still refused: its rendition is 2.4 GB against the
+fixed 1 GB limit, and a limit that follows the machine's memory is a decision of its own. R12 (AC1009) DWGs read as
+empty drawings: their blocks are not understood, and the read should say so instead (#1589).
+**DWG ≈ 30% read, ≈ 15% write.**
 
 ## DXF, version by version
 
