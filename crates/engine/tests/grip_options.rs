@@ -325,3 +325,76 @@ fn grip_option_json_form() {
         assert!(s.execute("grip.option", &p).is_err(), "{p}");
     }
 }
+
+/// Centre and radius of the polyline segment that starts at vertex `i`.
+fn segment_circle(s: &Session, h: Handle, i: usize) -> (Vec2, f64) {
+    let v = vertices(s, h);
+    let (a, bulge) = v[i];
+    let b = v[(i + 1) % v.len()].0;
+    let (arc, _) = cadcraft_engine::geom::bulge_to_arc(a, b, bulge).unwrap_or_else(|| panic!("segment {i} is straight: {v:?}"));
+    (arc.center, arc.radius)
+}
+
+/// An open polyline 0,0 → 10,0 whose segment is turned into a half circle through `through`.
+fn half_circle(s: &mut Session, through: [f64; 2]) -> Handle {
+    let h = pline(s, &[[0.0, 0.0], [10.0, 0.0]], false);
+    let mid = grip_index(s, h, 5.0, 0.0);
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": mid, "option": "toArc", "to": through })).unwrap();
+    h
+}
+
+#[test]
+fn add_vertex_on_an_arc_segment_keeps_two_arcs_on_its_circle() {
+    // Clockwise above the chord, counterclockwise below it; the vertex goes 60° from the end,
+    // away from the arc's midpoint so that splitting the bulge in halves would not do.
+    let y = 5.0 * 60f64.to_radians().sin();
+    for (through, at) in [([5.0, 5.0], [7.5, y]), ([5.0, -5.0], [7.5, -y])] {
+        let mut s = Session::new();
+        let h = half_circle(&mut s, through);
+        let sign = vertices(&s, h)[0].1.signum();
+        s.set_selection(vec![h]);
+        s.start_grip_edit(&[(h, grip_index(&s, h, through[0], through[1]))]).unwrap();
+        typed(&mut s, &["A", &format!("{},{}", at[0], at[1])]);
+        let v = vertices(&s, h);
+        assert_eq!(v.len(), 3, "{v:?}");
+        assert!(near(v[1].0, at[0], at[1]), "{v:?}");
+        for i in 0..2 {
+            assert_eq!(v[i].1.signum(), sign, "segment {i} turns the same way: {v:?}");
+            let (c, r) = segment_circle(&s, h, i);
+            assert!(c.near(Vec2::new(5.0, 0.0), 1e-9) && (r - 5.0).abs() < 1e-9, "segment {i}: centre {c:?} radius {r}");
+        }
+    }
+}
+
+#[test]
+fn add_vertex_off_the_arc_keeps_the_picked_point() {
+    // The vertex goes where it is picked, not onto the old arc; both pieces then lie on the one
+    // circle through the segment's ends and the new vertex.
+    let mut s = Session::new();
+    let h = half_circle(&mut s, [5.0, 5.0]);
+    let mid = grip_index(&s, h, 5.0, 5.0);
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": mid, "option": "addVertex", "to": [8.0, 8.0] })).unwrap();
+    let v = vertices(&s, h);
+    assert!(v.len() == 3 && near(v[1].0, 8.0, 8.0), "{v:?}");
+    let circle = cadcraft_engine::geom::Arc::from_3_points(v[0].0, v[1].0, v[2].0).unwrap();
+    for i in 0..2 {
+        let (c, r) = segment_circle(&s, h, i);
+        assert!(c.near(circle.center, 1e-9) && (r - circle.radius).abs() < 1e-9, "segment {i}: centre {c:?} radius {r}, want {circle:?}");
+    }
+}
+
+#[test]
+fn add_vertex_on_an_arc_is_one_undo_step() {
+    let mut s = Session::new();
+    let h = half_circle(&mut s, [5.0, 5.0]);
+    let before = vertices(&s, h);
+    s.set_selection(vec![h]);
+    let undo = s.state().unwrap().undo.len();
+    s.start_grip_edit(&[(h, grip_index(&s, h, 5.0, 5.0))]).unwrap();
+    typed(&mut s, &["A", "0.5,3"]);
+    assert!(s.running.is_none());
+    assert_eq!(vertices(&s, h).len(), 3);
+    assert_eq!(s.state().unwrap().undo.len(), undo + 1);
+    s.undo().unwrap();
+    assert_eq!(vertices(&s, h), before, "one Undo brings the whole arc back");
+}

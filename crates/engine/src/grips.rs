@@ -387,6 +387,18 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
     }
 }
 
+/// Bulges of the arcs `a`→`m` and `m`→`b` on the circle through the three points (the old arc's
+/// own circle when `m` lies on it); straight when the points are in line.
+fn split_arc(a: Vec2, m: Vec2, b: Vec2) -> (f64, f64) {
+    let (u, w) = (b - a, m - a);
+    if u.cross(w).abs() <= 1e-12 * u.len() * w.len() {
+        return (0.0, 0.0);
+    }
+    // Inscribed angles: the arc a→m is seen from b under half its sweep, m→b from a.
+    let angle = |p: Vec2, q: Vec2| p.cross(q).atan2(p.dot(q));
+    (cadcraft_geom::arc_to_bulge(2.0 * angle(a - b, m - b)), cadcraft_geom::arc_to_bulge(2.0 * angle(m - a, b - a)))
+}
+
 /// The object after the multifunctional `action` on grip `index`, with the picked point `to`
 /// (Add Vertex: the new vertex; Convert to Arc: a point on the arc; Lengthen: the new end,
 /// projected onto the object; Radius: a point on the new circle) or the typed `value` (Lengthen:
@@ -406,10 +418,15 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             if at >= p.vertices.len() {
                 return None;
             }
+            let end = p.vertices.get(at + 1).or_else(|| p.vertices.first().filter(|_| p.closed)).map(|v| v.p);
             let v = p.vertices.get_mut(at)?;
-            // The segment is split in two straight ones.
-            v.bulge = 0.0;
-            let nv = cadcraft_geom::PolyVertex { p: to, bulge: 0.0, ..*v };
+            // An arc segment is split in two arcs, as AutoCAD does; a straight one in two straight ones.
+            let (b0, b1) = match end {
+                Some(b) if v.bulge.abs() > 1e-12 => split_arc(v.p, to, b),
+                _ => (0.0, 0.0),
+            };
+            v.bulge = b0;
+            let nv = cadcraft_geom::PolyVertex { p: to, bulge: b1, ..*v };
             p.vertices.insert(at + 1, nv);
         }
         (EntityKind::LwPolyline(p), GripAction::RemoveVertex) => {
