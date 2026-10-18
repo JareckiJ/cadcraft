@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cadcraft_doc::Handle;
+use cadcraft_doc::{EntityKind, Handle};
 use serde_json::{Value, json};
 
 use super::super::*;
@@ -23,39 +23,119 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// The commands whose object prompts pick single members, not whole groups.
-const MEMBER_PICKS: &[&str] = &["groupedit", "-group"];
+const MEMBER_PICKS: &[&str] = &["groupedit", "-group", "hatchedit", "-hatchedit"];
 
 /// `hs` plus the other members of the selectable groups they belong to (in the space being
-/// edited, visible), when PICKSTYLE has group selection on. Order: `hs` first.
+/// edited, visible), when PICKSTYLE has group selection on (bit 1), and associative hatches
+/// and their boundary sources when PICKSTYLE has associative hatch selection on (bit 2).
+/// Order: `hs` first.
 pub(crate) fn expand(s: &Session, hs: Vec<Handle>) -> Vec<Handle> {
-    if s.settings.pickstyle & 1 == 0 || hs.is_empty() || s.running.as_ref().is_some_and(|r| MEMBER_PICKS.contains(&r.id.as_str())) {
+    if hs.is_empty() || s.running.as_ref().is_some_and(|r| MEMBER_PICKS.contains(&r.id.as_str())) {
+        return hs;
+    }
+    let pick_groups = s.settings.pickstyle & 1 != 0;
+    let pick_hatch = s.settings.pickstyle & 2 != 0;
+    if !pick_groups && !pick_hatch {
         return hs;
     }
     let Ok(d) = s.doc() else { return hs };
-    if !d.groups.iter().any(|g| g.selectable) {
-        return hs;
-    }
     let space = s.space();
     let Some(store) = d.space(&space) else { return hs };
-    // Member → its selectable groups, built once (window selections may hold many objects).
-    let mut of: HashMap<Handle, Vec<usize>> = HashMap::new();
-    for (i, g) in d.groups.iter().enumerate().filter(|(_, g)| g.selectable) {
-        for m in &g.members {
-            of.entry(*m).or_default().push(i);
+
+    // Member → its selectable groups, built once.
+    let mut groups_of: HashMap<Handle, Vec<usize>> = HashMap::new();
+    if pick_groups && d.groups.iter().any(|g| g.selectable) {
+        for (i, g) in d.groups.iter().enumerate().filter(|(_, g)| g.selectable) {
+            for m in &g.members {
+                groups_of.entry(*m).or_default().push(i);
+            }
         }
     }
-    let mut seen: HashSet<Handle> = hs.iter().copied().collect();
-    let mut done: HashSet<usize> = HashSet::new();
-    let mut out = hs.clone();
-    for h in &hs {
-        for gi in of.get(h).into_iter().flatten() {
-            if !done.insert(*gi) {
-                continue;
+
+    // Associative hatch <-> boundary sources mapping, built once.
+    let mut hatch_to_sources: HashMap<Handle, Vec<Handle>> = HashMap::new();
+    let mut source_to_hatches: HashMap<Handle, Vec<Handle>> = HashMap::new();
+    if pick_hatch {
+        for e in store.iter() {
+            if let EntityKind::Hatch(ref h) = e.kind
+                && h.associative
+                && d.is_visible(e)
+            {
+                let mut sources = Vec::new();
+                for l in &h.loops {
+                    for src in &l.sources {
+                        if store.get(*src).is_some_and(|be| d.is_visible(be)) {
+                            sources.push(*src);
+                            source_to_hatches.entry(*src).or_default().push(e.handle);
+                        }
+                    }
+                }
+                if !sources.is_empty() {
+                    hatch_to_sources.insert(e.handle, sources);
+                }
             }
-            let Some(g) = d.groups.get(*gi) else { continue };
-            for m in &g.members {
-                if store.get(*m).is_some_and(|e| d.is_visible(e)) && seen.insert(*m) {
-                    out.push(*m);
+        }
+    }
+
+    // Clipped viewport <-> boundary entity pairing.
+    let mut vp_to_boundary: HashMap<Handle, Handle> = HashMap::new();
+    let mut boundary_to_vp: HashMap<Handle, Handle> = HashMap::new();
+    for e in store.iter() {
+        if let EntityKind::Viewport(ref vp) = e.kind
+            && let Some(bh) = vp.clip
+            && store.get(bh).is_some_and(|be| d.is_visible(be))
+        {
+            vp_to_boundary.insert(e.handle, bh);
+            boundary_to_vp.insert(bh, e.handle);
+        }
+    }
+
+    let mut seen: HashSet<Handle> = hs.iter().copied().collect();
+    let mut done_groups: HashSet<usize> = HashSet::new();
+    let mut out = hs.clone();
+    let mut i = 0;
+    while i < out.len() {
+        let h = out[i];
+        i += 1;
+
+        if let Some(&bh) = vp_to_boundary.get(&h)
+            && seen.insert(bh)
+        {
+            out.push(bh);
+        }
+        if let Some(&vh) = boundary_to_vp.get(&h)
+            && seen.insert(vh)
+        {
+            out.push(vh);
+        }
+
+        if pick_groups {
+            for gi in groups_of.get(&h).into_iter().flatten() {
+                if !done_groups.insert(*gi) {
+                    continue;
+                }
+                let Some(g) = d.groups.get(*gi) else { continue };
+                for m in &g.members {
+                    if store.get(*m).is_some_and(|e| d.is_visible(e)) && seen.insert(*m) {
+                        out.push(*m);
+                    }
+                }
+            }
+        }
+
+        if pick_hatch {
+            if let Some(sources) = hatch_to_sources.get(&h) {
+                for src in sources {
+                    if seen.insert(*src) {
+                        out.push(*src);
+                    }
+                }
+            }
+            if let Some(hatches) = source_to_hatches.get(&h) {
+                for hatch in hatches {
+                    if seen.insert(*hatch) {
+                        out.push(*hatch);
+                    }
                 }
             }
         }

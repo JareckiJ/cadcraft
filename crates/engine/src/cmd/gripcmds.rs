@@ -211,6 +211,7 @@ pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[
     let edits = stretched(s, hot, others, delta);
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    let mut old_to_new = std::collections::HashMap::new();
     for (h, k) in edits {
         if copy {
             let (Some(sp), Some(e)) = (d.space_of(h), d.entity(h).map(|e| (**e).clone())) else { continue };
@@ -218,11 +219,15 @@ pub(super) fn stretch_grips(s: &mut Session, hot: &[(Handle, usize)], others: &[
             if let Some(st) = d.space_mut(&sp) {
                 st.push(Entity { handle: nh, kind: k, ..e });
                 out.push(nh);
+                old_to_new.insert(h, nh);
             }
         } else {
             d.modify_entity(h, |e| e.kind = k)?;
             out.push(h);
         }
+    }
+    if copy && !old_to_new.is_empty() {
+        super::groups::copy_groups(d, &old_to_new);
     }
     Ok(out)
 }

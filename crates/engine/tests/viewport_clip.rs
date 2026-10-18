@@ -241,3 +241,39 @@ fn polygonal_viewport_menu_item_asks_for_points() {
     s.execute("mview.polygonal", &json!({"points": [[120, 10], [200, 10], [160, 80]]})).unwrap();
     assert_eq!(layout_viewports(&s).len(), 2);
 }
+
+#[test]
+fn clipped_viewport_and_boundary_move_together_and_update_extents() {
+    let mut s = session();
+    let r = s.execute("mview", &json!({"option": "polygonal", "points": [[10, 10], [90, 10], [90, 70], [10, 70]]})).unwrap();
+    let vh = Handle::parse_hex(r["viewport"].as_str().unwrap()).unwrap();
+    let bh = viewport(&s, &vh.hex()).clip.unwrap();
+
+    let orig_vp_center = viewport(&s, &vh.hex()).center;
+    let orig_be_bounds = cadcraft_doc::entity_bounds(s.doc().unwrap(), s.doc().unwrap().entity(bh).unwrap(), 0);
+
+    // 1. Moving the viewport moves its clip boundary too.
+    s.execute("move", &json!({"handles": [vh.hex()], "delta": [20, 30]})).unwrap();
+    let moved_vp_center = viewport(&s, &vh.hex()).center;
+    let moved_be_bounds = cadcraft_doc::entity_bounds(s.doc().unwrap(), s.doc().unwrap().entity(bh).unwrap(), 0);
+    assert!((moved_vp_center.x - (orig_vp_center.x + 20.0)).abs() < 1e-6);
+    assert!((moved_vp_center.y - (orig_vp_center.y + 30.0)).abs() < 1e-6);
+    assert!((moved_be_bounds.center().x - (orig_be_bounds.center().x + 20.0)).abs() < 1e-6);
+    assert!((moved_be_bounds.center().y - (orig_be_bounds.center().y + 30.0)).abs() < 1e-6);
+
+    // 2. Moving the clip boundary moves the viewport too.
+    s.execute("move", &json!({"handles": [bh.hex()], "delta": [-10, -10]})).unwrap();
+    let back_vp_center = viewport(&s, &vh.hex()).center;
+    let back_be_bounds = cadcraft_doc::entity_bounds(s.doc().unwrap(), s.doc().unwrap().entity(bh).unwrap(), 0);
+    assert!((back_vp_center.x - (moved_vp_center.x - 10.0)).abs() < 1e-6);
+    assert!((back_be_bounds.center().x - (moved_be_bounds.center().x - 10.0)).abs() < 1e-6);
+
+    // 3. Selection expansion pairs them.
+    s.idle_click(Vec2::new(back_be_bounds.center().x, back_be_bounds.min.y), false).unwrap();
+    assert!(s.selection().contains(&vh));
+    assert!(s.selection().contains(&bh));
+
+    // 4. Erasing the boundary reverts the viewport to unclipped rectangle.
+    s.execute("erase", &json!({"handles": [bh.hex()]})).unwrap();
+    assert_eq!(viewport(&s, &vh.hex()).clip, None);
+}

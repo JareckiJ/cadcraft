@@ -22,7 +22,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["View", "Named Views..."])
             .alias(&["v"])
             .params(
-                "{option: save|window|restore|delete|list|settings, name? (save/window/restore), names?: \"a,b*\" | [names] (delete/list; wildcards), p1?, p2? (window), layerSnapshot?: bool (save: default the Layer snapshot setting; settings: change it)} (typed VIEW / -VIEW: option prompts)",
+                "{option: save|window|restore|delete|list|settings|orthographic, name? (save/window/restore), names?: \"a,b*\" | [names] (delete/list; wildcards), view?: top|bottom|front|left|right|back (orthographic), p1?, p2? (window), layerSnapshot?: bool, ucs?: bool, ucsName?: string, background?: string} (typed VIEW / -VIEW: option prompts)",
             )
             .interactive(|_| Ok(Box::new(ViewM::default()))),
     ]
@@ -72,7 +72,13 @@ fn run_view(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => None,
             };
             let snapshot = p.get("layerSnapshot").and_then(Value::as_bool).unwrap_or(s.settings.view_layer_snapshot);
-            save(s, name, window, snapshot)
+            let save_ucs = p.get("saveUcs").or_else(|| p.get("ucs")).and_then(Value::as_bool).unwrap_or(s.settings.view_save_ucs);
+            let ucs_name = str_param(p, "ucsName").or_else(|| str_param(p, "ucs"));
+            let bg = str_param(p, "background")
+                .map(str::trim)
+                .map(str::to_string)
+                .or_else(|| (s.settings.view_background != "None").then(|| s.settings.view_background.clone()));
+            save(s, name, window, snapshot, save_ucs, bg, ucs_name)
         }
         "restore" | "r" => {
             let name = str_param(p, "name").ok_or_else(|| bad("view", "`name` is required"))?;
@@ -89,15 +95,59 @@ fn run_view(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(b) = p.get("layerSnapshot").and_then(Value::as_bool) {
                 s.settings.view_layer_snapshot = b;
             }
-            Ok(json!({ "layerSnapshot": s.settings.view_layer_snapshot }))
+            if let Some(b) = p.get("saveUcs").or_else(|| p.get("ucs")).and_then(Value::as_bool) {
+                s.settings.view_save_ucs = b;
+            }
+            if let Some(bg) = str_param(p, "background") {
+                s.settings.view_background = bg.trim().to_string();
+            }
+            Ok(json!({
+                "layerSnapshot": s.settings.view_layer_snapshot,
+                "ucs": s.settings.view_save_ucs,
+                "background": s.settings.view_background,
+            }))
         }
-        "orthographic" | "o" => Err(EngineError::Other("Orthographic views are not available yet: CADCraft views are 2D.".into())),
-        _ => Err(bad("view", "option must be save, window, restore, delete, list or settings")),
+        "orthographic" | "o" => {
+            let view_name = str_param(p, "view").or_else(|| str_param(p, "name")).unwrap_or("top");
+            orthographic(s, view_name)
+        }
+        _ => Err(bad("view", "option must be save, window, restore, delete, list, settings or orthographic")),
     }
 }
 
+/// Set the view to an orthographic direction (Top, Bottom, Front, Back, Left, Right).
+fn orthographic(s: &mut Session, view: &str) -> Result<Value> {
+    let canonical = match view.trim().to_ascii_lowercase().as_str() {
+        "top" | "t" => "Top",
+        "bottom" | "bo" | "b" => "Bottom",
+        "front" | "f" => "Front",
+        "back" | "ba" | "a" => "Back",
+        "left" | "l" => "Left",
+        "right" | "r" => "Right",
+        _ => return Err(bad("view", "orthographic view must be top, bottom, front, left, right or back")),
+    };
+    if canonical == "Top" {
+        let st = s.state_mut()?;
+        if st.active_viewport().is_none() && st.space == Space::Model {
+            let f = st.view();
+            st.set_view(View { center: f.center, height: f.height });
+        }
+    }
+    s.touch();
+    let msg = format!("Restoring {canonical} view.");
+    Ok(json!({ "orthographic": canonical, "message": msg }))
+}
+
 /// Save the current view (or `window`) as `name`, replacing a view of that name.
-fn save(s: &mut Session, name: &str, window: Option<Bounds2>, snapshot: bool) -> Result<Value> {
+fn save(
+    s: &mut Session,
+    name: &str,
+    window: Option<Bounds2>,
+    snapshot: bool,
+    save_ucs: bool,
+    background: Option<String>,
+    explicit_ucs: Option<&str>,
+) -> Result<Value> {
     if !valid_name(name) {
         return Err(EngineError::Other(format!("\"{name}\" is not a valid view name.")));
     }
@@ -123,6 +173,7 @@ fn save(s: &mut Session, name: &str, window: Option<Bounds2>, snapshot: bool) ->
         }
     };
     let replaced = find(&st.doc.views, name).map(|v| v.name.clone());
+    let ucs = explicit_ucs.map(|u| u.trim().to_string()).or_else(|| save_ucs.then(|| "World".to_string()));
     let d = s.doc_mut()?;
     let layer_state = snapshot.then(|| {
         let state = snapshot_name(name);
@@ -138,9 +189,28 @@ fn save(s: &mut Session, name: &str, window: Option<Bounds2>, snapshot: bool) ->
         }
         d.views.retain(|v| !v.name.eq_ignore_ascii_case(old));
     }
-    d.views.push(NamedView { name: name.to_string(), center, height, width, layer_state, twist: 0.0, layout });
+    d.views.push(NamedView {
+        name: name.to_string(),
+        center,
+        height,
+        width,
+        layer_state,
+        twist: 0.0,
+        layout,
+        ucs: ucs.clone(),
+        background: background.clone(),
+    });
     let msg = if replaced.is_some() { format!("View \"{name}\" replaced.") } else { format!("View \"{name}\" saved.") };
-    Ok(json!({ "name": name, "center": [center.x, center.y], "height": height, "width": width, "message": msg }))
+    Ok(json!({
+        "name": name,
+        "center": [center.x, center.y],
+        "height": height,
+        "width": width,
+        "layerSnapshot": snapshot,
+        "ucs": ucs,
+        "background": background,
+        "message": msg,
+    }))
 }
 
 /// Restore view `name`: switch to its space, show its area, and restore its layer snapshot.
@@ -194,8 +264,14 @@ fn restore(s: &mut Session, name: &str) -> Result<Value> {
             None => msg.push_str(&format!(" Its layer snapshot \"{state}\" is missing.")),
         }
     }
+    if let Some(ucs_name) = &v.ucs {
+        msg.push_str(&format!(" Restoring UCS \"{ucs_name}\"."));
+    }
+    if let Some(bg) = &v.background {
+        msg.push_str(&format!(" Background set to {bg}."));
+    }
     s.touch();
-    Ok(json!({ "name": v.name, "message": msg }))
+    Ok(json!({ "name": v.name, "ucs": v.ucs, "background": v.background, "message": msg }))
 }
 
 fn delete(s: &mut Session, pats: &[String]) -> Result<Value> {
@@ -218,7 +294,14 @@ fn list(s: &mut Session, pats: &[String]) -> Result<Value> {
         lines.push("  (none)".into());
     }
     for v in &views {
-        lines.push(format!("  {:<31} {}", v.name, space_label(v)));
+        let mut extra = String::new();
+        if let Some(u) = &v.ucs {
+            extra.push_str(&format!(" [UCS: {u}]"));
+        }
+        if let Some(b) = &v.background {
+            extra.push_str(&format!(" [BG: {b}]"));
+        }
+        lines.push(format!("  {:<31} {}{}", v.name, space_label(v), extra));
     }
     let rows: Vec<Value> = views
         .iter()
@@ -226,6 +309,7 @@ fn list(s: &mut Session, pats: &[String]) -> Result<Value> {
             json!({
                 "name": v.name, "space": space_label(v), "center": [v.center.x, v.center.y], "height": v.height,
                 "width": v.width, "layerSnapshot": v.layer_state.is_some(),
+                "ucs": v.ucs, "background": v.background,
             })
         })
         .collect();
@@ -247,6 +331,9 @@ enum Stage {
     WindowSecond(Vec2),
     Settings,
     Snapshot,
+    SaveUcs,
+    Background,
+    Orthographic,
 }
 
 /// -VIEW: "Enter an option [?/Delete/Orthographic/Restore/Save/sEttings/Window]:".
@@ -280,10 +367,20 @@ impl Interactive for ViewM {
             Stage::Save | Stage::WindowName => Prompt::new("Enter view name to save", Accept::TEXT),
             Stage::WindowFirst => Prompt::new("Specify first corner", Accept::POINT),
             Stage::WindowSecond(a) => Prompt::new("Specify opposite corner", Accept::POINT).base(a),
-            Stage::Settings => Prompt::new("Enter an option", Accept::TEXT).kw(&["Layer snapshot"]),
+            Stage::Settings => Prompt::new("Enter an option", Accept::TEXT).kw(&["Background", "Layer snapshot", "Ucs"]),
             Stage::Snapshot => {
                 let on = if s.settings.view_layer_snapshot { "Yes" } else { "No" };
                 Prompt::new("Save layer settings with views?", Accept::TEXT).kw(&["Yes", "No"]).default(on)
+            }
+            Stage::SaveUcs => {
+                let on = if s.settings.view_save_ucs { "Yes" } else { "No" };
+                Prompt::new("Save UCS with views?", Accept::TEXT).kw(&["Yes", "No"]).default(on)
+            }
+            Stage::Background => {
+                Prompt::new("Enter background type", Accept::TEXT).kw(&["None", "Solid", "Gradient", "Image"]).default(&s.settings.view_background)
+            }
+            Stage::Orthographic => {
+                Prompt::new("Enter an option", Accept::TEXT).kw(&["Top", "Bottom", "Front", "Left", "Right", "bAck"]).default("Top")
             }
         }
     }
@@ -304,10 +401,7 @@ impl Interactive for ViewM {
                     "save" | "s" => Stage::Save,
                     "window" | "w" => Stage::WindowName,
                     "settings" | "e" => Stage::Settings,
-                    "orthographic" | "o" => {
-                        s.echo("Orthographic views are not available yet: CADCraft views are 2D.");
-                        return Ok(Step::Done);
-                    }
+                    "orthographic" | "o" => Stage::Orthographic,
                     _ => return Err(EngineError::Other("Invalid option keyword.".into())),
                 };
                 Ok(Step::Continue)
@@ -335,7 +429,9 @@ impl Interactive for ViewM {
                     return Ok(Step::Continue);
                 }
                 let snapshot = s.settings.view_layer_snapshot;
-                report(s, |s| save(s, &name, None, snapshot))
+                let save_ucs = s.settings.view_save_ucs;
+                let bg = (s.settings.view_background != "None").then(|| s.settings.view_background.clone());
+                report(s, |s| save(s, &name, None, snapshot, save_ucs, bg, None))
             }
             Stage::WindowFirst => match i {
                 Input::Point(a) => {
@@ -348,8 +444,10 @@ impl Interactive for ViewM {
             Stage::WindowSecond(a) => match i {
                 Input::Point(b) => {
                     let snapshot = s.settings.view_layer_snapshot;
+                    let save_ucs = s.settings.view_save_ucs;
+                    let bg = (s.settings.view_background != "None").then(|| s.settings.view_background.clone());
                     let name = std::mem::take(&mut self.name);
-                    report(s, |s| save(s, &name, Some(Bounds2::new(a, b)), snapshot))
+                    report(s, |s| save(s, &name, Some(Bounds2::new(a, b)), snapshot, save_ucs, bg, None))
                 }
                 Input::Enter => Ok(Step::Done),
                 _ => Err(EngineError::Other("Requires a point.".into())),
@@ -357,6 +455,14 @@ impl Interactive for ViewM {
             Stage::Settings => match text.map(|t| t.to_ascii_lowercase()) {
                 Some(t) if t == "l" || "layer snapshot".starts_with(t.as_str()) && !t.is_empty() => {
                     self.stage = Stage::Snapshot;
+                    Ok(Step::Continue)
+                }
+                Some(t) if t == "u" || "ucs".starts_with(t.as_str()) && !t.is_empty() => {
+                    self.stage = Stage::SaveUcs;
+                    Ok(Step::Continue)
+                }
+                Some(t) if t == "b" || "background".starts_with(t.as_str()) && !t.is_empty() => {
+                    self.stage = Stage::Background;
                     Ok(Step::Continue)
                 }
                 None if i == Input::Enter => Ok(Step::Done),
@@ -371,6 +477,36 @@ impl Interactive for ViewM {
                 };
                 s.settings.view_layer_snapshot = on;
                 Ok(Step::Done)
+            }
+            Stage::SaveUcs => {
+                let on = match text.map(|t| t.to_ascii_lowercase()) {
+                    None if i == Input::Enter => s.settings.view_save_ucs,
+                    Some(t) if t == "y" || t == "yes" => true,
+                    Some(t) if t == "n" || t == "no" => false,
+                    _ => return Err(EngineError::Other("Requires Yes or No.".into())),
+                };
+                s.settings.view_save_ucs = on;
+                Ok(Step::Done)
+            }
+            Stage::Background => {
+                let bg = match text.map(|t| t.to_ascii_lowercase()) {
+                    None if i == Input::Enter => s.settings.view_background.clone(),
+                    Some(t) if t == "n" || t == "none" => "None".to_string(),
+                    Some(t) if t == "s" || t == "solid" => "Solid".to_string(),
+                    Some(t) if t == "g" || t == "gradient" => "Gradient".to_string(),
+                    Some(t) if t == "i" || t == "image" => "Image".to_string(),
+                    _ => return Err(EngineError::Other("Requires None, Solid, Gradient or Image.".into())),
+                };
+                s.settings.view_background = bg;
+                Ok(Step::Done)
+            }
+            Stage::Orthographic => {
+                let view_name = match text {
+                    Some(ref t) if !t.is_empty() => t.as_str(),
+                    _ if i == Input::Enter => "Top",
+                    _ => return Err(EngineError::Other("Invalid option keyword.".into())),
+                };
+                report(s, |s| orthographic(s, view_name))
             }
         }
     }

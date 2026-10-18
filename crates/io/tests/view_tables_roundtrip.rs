@@ -14,7 +14,16 @@ fn round_trip(d: &Drawing) -> Drawing {
 fn model_and_paper_views_round_trip() {
     let mut d = Drawing::new_imperial();
     let layout = d.layouts.first().map(|l| l.name.clone()).expect("a layout");
-    d.views.push(NamedView { name: "Plan".into(), center: Vec2::new(5.0, 5.0), height: 20.0, width: 30.0, twist: 0.5, ..Default::default() });
+    d.views.push(NamedView {
+        name: "Plan".into(),
+        center: Vec2::new(5.0, 5.0),
+        height: 20.0,
+        width: 30.0,
+        twist: 0.5,
+        ucs: Some("World".into()),
+        background: Some("Gradient".into()),
+        ..Default::default()
+    });
     d.views.push(NamedView {
         name: "Sheet".into(),
         center: Vec2::new(4.0, 3.0),
@@ -30,8 +39,8 @@ fn model_and_paper_views_round_trip() {
     assert_eq!(r.views.len(), 3);
     for (a, b) in d.views.iter().zip(&r.views) {
         assert_eq!(
-            (&a.name, a.center, a.height, a.width, &a.layer_state, &a.layout),
-            (&b.name, b.center, b.height, b.width, &b.layer_state, &b.layout)
+            (&a.name, a.center, a.height, a.width, &a.layer_state, &a.layout, &a.ucs, &a.background),
+            (&b.name, b.center, b.height, b.width, &b.layer_state, &b.layout, &b.ucs, &b.background)
         );
         assert!((a.twist - b.twist).abs() < 1e-12, "{}: {} vs {}", a.name, a.twist, b.twist);
     }

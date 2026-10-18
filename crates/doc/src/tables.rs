@@ -810,6 +810,12 @@ pub struct NamedView {
     /// paper space view whose layout is not known).
     #[serde(default)]
     pub layout: Option<String>,
+    /// Associated UCS name, if any (restored when the view is restored).
+    #[serde(default)]
+    pub ucs: Option<String>,
+    /// Background mode or colour override (e.g. "None", "Solid", "Gradient", "Image").
+    #[serde(default)]
+    pub background: Option<String>,
 }
 
 /// One tiled model space viewport of a [`VportConfig`] (a VPORT table record): its corners as

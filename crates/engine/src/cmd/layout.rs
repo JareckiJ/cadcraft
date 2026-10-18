@@ -17,6 +17,8 @@ mod plotstyle;
 mod prompts;
 mod viewports;
 
+pub(crate) use viewports::update_clipped_viewports;
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("layout", "Layout", run_layout)

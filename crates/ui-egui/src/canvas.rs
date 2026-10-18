@@ -1,6 +1,8 @@
 //! The drawing area: grid, entities, selection highlighting, grips, rubber bands, object-snap
 //! markers, crosshair cursor, ViewCube, UCS icon and mouse handling.
 
+use std::collections::HashSet;
+
 use cadcraft_color::Rgb;
 use cadcraft_doc::Handle;
 use cadcraft_engine::Input;
@@ -1751,7 +1753,51 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && let Ok(st) = app.session.state()
     {
         let gs = app.session.settings.gripsize as f32;
+        let gdm = app.session.settings.groupdisplaymode;
+        let mut suppressed = HashSet::new();
+        let mut group_centers = Vec::new();
+        if gdm != 0 && !st.doc.groups.is_empty() {
+            let sel_set: HashSet<Handle> = sel.iter().copied().collect();
+            for g in &st.doc.groups {
+                if !g.selectable || g.members.is_empty() {
+                    continue;
+                }
+                let live: Vec<Handle> = g.members.iter().copied().filter(|h| st.doc.entity(*h).is_some()).collect();
+                if !live.is_empty() && live.iter().all(|h| sel_set.contains(h)) {
+                    let mut b: Option<cadcraft_geom::Bounds2> = None;
+                    for h in &live {
+                        if let Some(e) = st.doc.entity(*h) {
+                            let eb = cadcraft_doc::entity_bounds(&st.doc, e, 0);
+                            if !eb.is_empty() && eb.min.is_finite() && eb.max.is_finite() {
+                                b = Some(match b {
+                                    Some(prev) => prev.union(&eb),
+                                    None => eb,
+                                });
+                            }
+                        }
+                    }
+                    if let Some(box2) = b {
+                        let min_sp = xf.to_screen(box2.min);
+                        let max_sp = xf.to_screen(box2.max);
+                        let r = Rect::from_two_pos(min_sp, max_sp).expand(4.0);
+                        if rect.intersects(r) {
+                            let pts = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+                            painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, Color32::from_rgba_unmultiplied(100, 160, 240, 200)), 5.0, 3.0));
+                        }
+                        if gdm == 1 {
+                            for h in &live {
+                                suppressed.insert(*h);
+                            }
+                            group_centers.push((live[0], box2.center()));
+                        }
+                    }
+                }
+            }
+        }
         for h in sel.iter().take(200) {
+            if suppressed.contains(h) {
+                continue;
+            }
             if let Some(e) = st.doc.entity(*h) {
                 for (gi, g) in e.kind.grips().into_iter().enumerate() {
                     let sp = xf.to_screen(g);
@@ -1773,6 +1819,26 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                         painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
                     }
                 }
+            }
+        }
+        for (h, center) in &group_centers {
+            let sp = xf.to_screen(*center);
+            if rect.contains(sp) {
+                let r = Rect::from_center_size(sp, vec2(gs * 2.0, gs * 2.0));
+                let hot = app.canvas.hot_grips.iter().any(|(x, _)| *x == *h);
+                let warm = !hot && hover_pos.is_some_and(|hp| r.expand(2.0).contains(hp));
+                painter.rect_filled(
+                    r,
+                    0.0,
+                    if hot {
+                        t.grip_hot
+                    } else if warm {
+                        Color32::from_rgb(0xff, 0x7f, 0x9f)
+                    } else {
+                        t.grip
+                    },
+                );
+                painter.rect_stroke(r, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
             }
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
@@ -2348,7 +2414,44 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
     if !app.session.shows_grips(sel.len()) {
         return None;
     }
+    let gdm = app.session.settings.groupdisplaymode;
+    let mut suppressed = HashSet::new();
+    if gdm == 1 && !st.doc.groups.is_empty() {
+        let sel_set: HashSet<Handle> = sel.iter().copied().collect();
+        for g in &st.doc.groups {
+            if !g.selectable || g.members.is_empty() {
+                continue;
+            }
+            let live: Vec<Handle> = g.members.iter().copied().filter(|h| st.doc.entity(*h).is_some()).collect();
+            if !live.is_empty() && live.iter().all(|h| sel_set.contains(h)) {
+                let mut b: Option<cadcraft_geom::Bounds2> = None;
+                for h in &live {
+                    if let Some(e) = st.doc.entity(*h) {
+                        let eb = cadcraft_doc::entity_bounds(&st.doc, e, 0);
+                        if !eb.is_empty() && eb.min.is_finite() && eb.max.is_finite() {
+                            b = Some(match b {
+                                Some(prev) => prev.union(&eb),
+                                None => eb,
+                            });
+                        }
+                    }
+                }
+                if let Some(box2) = b {
+                    for h in &live {
+                        suppressed.insert(*h);
+                    }
+                    let sp = xf.to_screen(box2.center());
+                    if (sp.x - hp.x).abs() <= gs && (sp.y - hp.y).abs() <= gs {
+                        return Some((live[0], 0));
+                    }
+                }
+            }
+        }
+    }
     for h in sel.iter().take(200) {
+        if suppressed.contains(h) {
+            continue;
+        }
         let e = st.doc.entity(*h)?;
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;

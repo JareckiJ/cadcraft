@@ -96,6 +96,35 @@ pub(crate) fn create(s: &mut Session, name: Option<&str>, description: &str, hs:
     Ok(name)
 }
 
+/// When objects are copied (COPY, MIRROR with copy, etc.), any group whose surviving members
+/// are all among the copied objects is duplicated into a new anonymous group (*A1, *A2…) holding
+/// the copied objects, matching AutoCAD behaviour.
+pub(crate) fn copy_groups(d: &mut Drawing, old_to_new: &std::collections::HashMap<Handle, Handle>) {
+    if d.groups.is_empty() || old_to_new.is_empty() || d.groups.len() >= MAX_GROUPS {
+        return;
+    }
+    let mut new_groups = Vec::new();
+    for g in &d.groups {
+        let live_members: Vec<Handle> = g.members.iter().copied().filter(|h| d.entity(*h).is_some()).collect();
+        if live_members.is_empty() {
+            continue;
+        }
+        if live_members.iter().all(|h| old_to_new.contains_key(h)) {
+            let copied_members: Vec<Handle> = live_members.iter().filter_map(|h| old_to_new.get(h).copied()).collect();
+            if !copied_members.is_empty() {
+                new_groups.push((g.description.clone(), g.selectable, copied_members));
+            }
+        }
+    }
+    for (desc, selectable, members) in new_groups {
+        if d.groups.len() >= MAX_GROUPS {
+            break;
+        }
+        let name = next_unnamed(d);
+        d.groups.push(Group { name, description: desc, selectable, members });
+    }
+}
+
 /// Remove the groups at `idx`; their objects stay. Returns the names removed.
 pub(crate) fn ungroup(s: &mut Session, idx: &[usize]) -> Result<Vec<String>> {
     let names: Vec<String> = idx.iter().filter_map(|i| s.doc().ok()?.groups.get(*i).map(|g| g.name.clone())).collect();

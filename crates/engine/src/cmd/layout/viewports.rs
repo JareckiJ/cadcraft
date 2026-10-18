@@ -951,3 +951,58 @@ impl Interactive for VpclipM {
         }
     }
 }
+
+/// Update clipped viewports after a command:
+/// - If a viewport's boundary entity was moved or modified, update the viewport's center, width, height.
+/// - If a viewport's boundary was erased, clear `vp.clip = None`.
+pub(crate) fn update_clipped_viewports(d: &mut Drawing) {
+    let mut updates = Vec::new();
+    for l in &d.layouts {
+        for e in l.entities.iter() {
+            if let EntityKind::Viewport(ref vp) = e.kind
+                && let Some(bh) = vp.clip
+            {
+                match l.entities.get(bh) {
+                    Some(be) => {
+                        if let Some(poly) = cadcraft_render::clip::boundary_polygon(&be.kind) {
+                            let mut b = Bounds2::from_points(poly);
+                            let eb = cadcraft_doc::entity_bounds(d, be, 0);
+                            if !eb.is_empty() && eb.min.is_finite() && eb.max.is_finite() {
+                                b = b.union(&eb);
+                            }
+                            if b.width() >= 1e-6 && b.height() >= 1e-6 {
+                                let new_center = b.center().to3(0.0);
+                                if !vp.center.xy().near(new_center.xy(), 1e-9)
+                                    || (vp.width - b.width()).abs() > 1e-9
+                                    || (vp.height - b.height()).abs() > 1e-9
+                                {
+                                    updates.push((e.handle, Some((new_center, b.width(), b.height()))));
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        // Boundary was deleted; revert to rectangular unclipped viewport
+                        updates.push((e.handle, None));
+                    }
+                }
+            }
+        }
+    }
+    for (vh, upd) in updates {
+        let _ = d.modify_entity(vh, |e| {
+            if let EntityKind::Viewport(ref mut vp) = e.kind {
+                match upd {
+                    Some((c, w, h)) => {
+                        vp.center = c;
+                        vp.width = w;
+                        vp.height = h;
+                    }
+                    None => {
+                        vp.clip = None;
+                    }
+                }
+            }
+        });
+    }
+}

@@ -81,7 +81,7 @@ fn window_option_and_json_forms() {
         assert!(s.execute("view", &bad).is_err(), "{bad}");
     }
     assert!(s.execute("view", &json!({ "option": "window", "name": "Flat", "p1": [0, 0], "p2": [10, 0] })).is_err());
-    assert!(s.execute("view", &json!({ "option": "orthographic" })).is_err());
+    assert!(s.execute("view", &json!({ "option": "orthographic", "view": "invalid" })).is_err());
 }
 
 #[test]
@@ -179,4 +179,61 @@ fn zoomfactor_scales_the_wheel() {
     assert!(at100 > at60 && at60 > at3 && at3 > 1.0, "{at3} {at60} {at100}");
     assert!(close(s.wheel_zoom_factor(-50.0), 1.0 / at3));
     assert_eq!(s.wheel_zoom_factor(f64::INFINITY), 1.0);
+}
+
+#[test]
+fn orthographic_views_and_prompts() {
+    let mut s = session();
+    // JSON orthographic options
+    for opt in ["top", "bottom", "front", "back", "left", "right"] {
+        let res = s.execute("view", &json!({ "option": "orthographic", "view": opt })).unwrap();
+        assert!(res["message"].as_str().unwrap().contains("Restoring"));
+    }
+    // Interactive -VIEW O Top and Enter default
+    typed(&mut s, &["-view", "o", "t"]);
+    assert!(s.log.iter().any(|l| l.contains("Restoring Top view.")));
+    typed(&mut s, &["-view", "o", ""]);
+    assert!(s.log.iter().any(|l| l.contains("Restoring Top view.")));
+    // Interactive -VIEW O Front
+    typed(&mut s, &["-view", "o", "f"]);
+    assert!(s.log.iter().any(|l| l.contains("Restoring Front view.")));
+}
+
+#[test]
+fn view_ucs_and_background_settings() {
+    let mut s = session();
+    // Default settings: view_save_ucs is true, view_background is None
+    assert!(s.settings.view_save_ucs);
+    assert_eq!(s.settings.view_background, "None");
+
+    // Change settings via JSON
+    s.execute("view", &json!({ "option": "settings", "ucs": false, "background": "Solid" })).unwrap();
+    assert!(!s.settings.view_save_ucs);
+    assert_eq!(s.settings.view_background, "Solid");
+
+    // Save view without UCS but with background
+    s.execute("view", &json!({ "option": "save", "name": "V1" })).unwrap();
+    let v1 = s.doc().unwrap().views.iter().find(|v| v.name == "V1").cloned().unwrap();
+    assert_eq!(v1.ucs, None);
+    assert_eq!(v1.background.as_deref(), Some("Solid"));
+
+    // Interactive settings: toggle UCS back on, background to None
+    typed(&mut s, &["-view", "e", "u", "y"]);
+    assert!(s.settings.view_save_ucs);
+    typed(&mut s, &["-view", "e", "b", "none"]);
+    assert_eq!(s.settings.view_background, "None");
+
+    // Save view V2: saves with UCS "World"
+    typed(&mut s, &["-view", "s", "V2"]);
+    let v2 = s.doc().unwrap().views.iter().find(|v| v.name == "V2").cloned().unwrap();
+    assert_eq!(v2.ucs.as_deref(), Some("World"));
+
+    // Restoring V2 echoes UCS restoration
+    typed(&mut s, &["-view", "r", "V2"]);
+    assert!(s.log.iter().any(|l| l.contains("Restoring UCS \"World\".")));
+
+    // List shows UCS and BG info
+    let list = s.execute("view", &json!({ "option": "list" })).unwrap();
+    let views = list["views"].as_array().unwrap();
+    assert_eq!(views.len(), 2);
 }

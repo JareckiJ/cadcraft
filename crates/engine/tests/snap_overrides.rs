@@ -116,3 +116,21 @@ fn a_command_keyword_wins_over_a_snap_word() {
     s.cmdline("arc _cen").unwrap();
     assert!(s.prompt_text().ends_with("Center of:"), "{}", s.prompt_text());
 }
+
+#[test]
+fn tab_cycling_offers_every_candidate_including_same_mode() {
+    let mut s = Session::new();
+    // Three lines whose endpoints are near each other within aperture:
+    // Line 1: (0,0) to (10.0, 0.0)
+    // Line 2: (9.98, 0.02) to (20.0, 0.0)
+    // Line 3: (10.02, -0.01) to (10.02, 10.0)
+    s.script("LINE 0,0 10,0\n\nLINE 9.98,0.02 20,0\n\nLINE 10.02,-0.01 10.02,10\n\n").unwrap();
+    let d = s.doc().unwrap();
+    let space = s.space();
+    let cursor = Vec2::new(10.0, 0.0);
+    let aperture = 0.125;
+    let cands = snap_candidates(d, &space, cursor, aperture, mode::END, None, false);
+    // All 3 distinct endpoints within aperture are returned for Tab cycling
+    let end_points: Vec<Vec2> = cands.iter().filter(|h| h.mode == mode::END).map(|h| h.point).collect();
+    assert_eq!(end_points.len(), 3, "expected 3 distinct endpoint candidates for Tab cycling: {end_points:?}");
+}

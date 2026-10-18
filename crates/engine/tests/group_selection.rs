@@ -157,3 +157,76 @@ fn dash_group_json() {
     assert!(s.execute("-group", &json!({ "option": "bogus" })).is_err());
     assert!(s.running.is_none());
 }
+
+#[test]
+fn copying_whole_group_creates_new_anonymous_group() {
+    let (mut s, hs) = lines();
+    s.execute("group", &json!({ "name": "Original", "handles": hex(&hs[..2]) })).unwrap();
+    assert_eq!(s.doc().unwrap().groups.len(), 1);
+
+    // Copying both members together creates a new anonymous group (*A1) for the copies.
+    let r = s.execute("copy", &json!({ "handles": hex(&hs[..2]), "delta": [0, 20] })).unwrap();
+    let copies: Vec<String> = r["handles"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(copies.len(), 2);
+    assert_eq!(s.doc().unwrap().groups.len(), 2);
+    let g2 = &s.doc().unwrap().groups[1];
+    assert_eq!(g2.name, "*A1");
+    assert_eq!(hex(&g2.members), copies);
+
+    // Copying only one member of "Original" does NOT create a new group.
+    s.execute("copy", &json!({ "handles": [hs[0].hex()], "delta": [0, 40] })).unwrap();
+    assert_eq!(s.doc().unwrap().groups.len(), 2);
+}
+
+#[test]
+fn pickstyle_associative_hatch_selection() {
+    let mut s = Session::new();
+    // Create a closed rectangular polyline boundary.
+    s.execute("pline", &json!({ "points": [[0, 0], [10, 0], [10, 10], [0, 10]], "closed": true })).unwrap();
+    let rect_h = s.doc().unwrap().model.iter().last().unwrap().handle;
+
+    // Create associative hatch with rect_h as boundary.
+    let r = s.execute("hatch", &json!({ "handles": [rect_h.hex()] })).unwrap();
+    let hatch_h = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+
+    // PICKSTYLE 0 (no group, no hatch expansion):
+    s.execute("setvar", &json!({ "name": "PICKSTYLE", "value": 0 })).unwrap();
+    s.idle_click(Vec2::new(0.0, 5.0), false).unwrap();
+    assert_eq!(s.selection(), vec![rect_h]);
+
+    // PICKSTYLE 1 (group only):
+    s.set_selection(Vec::new());
+    s.execute("setvar", &json!({ "name": "PICKSTYLE", "value": 1 })).unwrap();
+    s.idle_click(Vec2::new(0.0, 5.0), false).unwrap();
+    assert_eq!(s.selection(), vec![rect_h]);
+
+    // PICKSTYLE 2 (associative hatch selection):
+    s.set_selection(Vec::new());
+    s.execute("setvar", &json!({ "name": "PICKSTYLE", "value": 2 })).unwrap();
+    s.idle_click(Vec2::new(0.0, 5.0), false).unwrap();
+    assert_eq!(s.selection(), vec![rect_h, hatch_h]);
+
+    // Clicking the hatch also expands to select the boundary:
+    s.set_selection(Vec::new());
+    s.idle_click(Vec2::new(5.0, 5.0), false).unwrap();
+    assert_eq!(s.selection(), vec![hatch_h, rect_h]);
+}
+
+#[test]
+fn groupdisplaymode_system_variable() {
+    let mut s = Session::new();
+    // Default is 2 (bounding box only).
+    assert_eq!(s.execute("getvar", &json!({ "name": "GROUPDISPLAYMODE" })).unwrap()["value"], 2);
+
+    s.execute("setvar", &json!({ "name": "GROUPDISPLAYMODE", "value": 0 })).unwrap();
+    assert_eq!(s.settings.groupdisplaymode, 0);
+
+    s.execute("setvar", &json!({ "name": "GROUPDISPLAYMODE", "value": 1 })).unwrap();
+    assert_eq!(s.settings.groupdisplaymode, 1);
+
+    s.execute("setvar", &json!({ "name": "GROUPDISPLAYMODE", "value": 2 })).unwrap();
+    assert_eq!(s.settings.groupdisplaymode, 2);
+
+    assert!(s.execute("setvar", &json!({ "name": "GROUPDISPLAYMODE", "value": -1 })).is_err());
+    assert!(s.execute("setvar", &json!({ "name": "GROUPDISPLAYMODE", "value": 3 })).is_err());
+}

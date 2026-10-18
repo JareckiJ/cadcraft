@@ -2002,7 +2002,13 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.i(71, 0);
         w.i(281, 0);
         w.i(72, 0);
-        let xdata = [("LAYERSTATE", v.layer_state.as_deref()), ("LAYOUT", v.layout.as_deref().filter(|l| !l.is_empty()))];
+        w.i(73, i64::from(v.ucs.is_some()));
+        let xdata = [
+            ("LAYERSTATE", v.layer_state.as_deref()),
+            ("LAYOUT", v.layout.as_deref().filter(|l| !l.is_empty())),
+            ("UCS", v.ucs.as_deref()),
+            ("BACKGROUND", v.background.as_deref()),
+        ];
         if xdata.iter().any(|(_, x)| x.is_some()) {
             w.s(1001, dxf_ext::APP);
             for (key, value) in xdata {
