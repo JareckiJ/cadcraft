@@ -241,3 +241,138 @@ fn polygonal_viewport_menu_item_asks_for_points() {
     s.execute("mview.polygonal", &json!({"points": [[120, 10], [200, 10], [160, 80]]})).unwrap();
     assert_eq!(layout_viewports(&s).len(), 2);
 }
+
+/// The vertices of the closed polyline `h`.
+fn outline(s: &Session, h: Handle) -> Vec<Vec2> {
+    match s.doc().unwrap().entity(h).map(|e| e.kind.clone()) {
+        Some(EntityKind::LwPolyline(p)) => p.vertices.iter().map(|v| v.p).collect(),
+        k => panic!("not a polyline: {k:?}"),
+    }
+}
+
+fn shifted(pts: &[[f64; 2]], d: Vec2) -> Vec<Vec2> {
+    pts.iter().map(|p| Vec2::new(p[0], p[1]) + d).collect()
+}
+
+fn same(a: &[Vec2], b: &[Vec2]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.near(*q, 1e-9))
+}
+
+/// A polygonal viewport over `L`: (viewport, boundary).
+fn clipped(s: &mut Session) -> (String, Handle) {
+    let r = s.execute("mview", &json!({"option": "polygonal", "points": L})).unwrap();
+    let vh = r["viewport"].as_str().unwrap().to_string();
+    let b = Handle::parse_hex(r["boundary"].as_str().unwrap()).unwrap();
+    (vh, b)
+}
+
+#[test]
+fn moving_a_clipped_viewport_or_its_boundary_moves_both() {
+    let mut s = session();
+    let (vh, b) = clipped(&mut s);
+    // The viewport alone: its boundary follows.
+    s.execute("move", &json!({"handles": [vh], "delta": [100, 0]})).unwrap();
+    assert!(same(&outline(&s, b), &shifted(&L, Vec2::new(100.0, 0.0))), "{:?}", outline(&s, b));
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(160.0, 60.0), 1e-9));
+    // The boundary alone: the viewport follows.
+    s.execute("move", &json!({"handles": [b.hex()], "delta": [0, 50]})).unwrap();
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(160.0, 110.0), 1e-9), "{:?}", viewport(&s, &vh).center);
+    assert!(same(&outline(&s, b), &shifted(&L, Vec2::new(100.0, 50.0))));
+    // Both selected: each moves once.
+    s.execute("move", &json!({"handles": [vh, b.hex()], "delta": [-100, -50]})).unwrap();
+    assert!(same(&outline(&s, b), &shifted(&L, Vec2::ZERO)));
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(60.0, 60.0), 1e-9));
+    // One Undo puts both back.
+    s.execute("move", &json!({"handles": [b.hex()], "delta": [7, 0]})).unwrap();
+    s.execute("undo", &json!({})).unwrap();
+    assert!(same(&outline(&s, b), &shifted(&L, Vec2::ZERO)), "{:?}", outline(&s, b));
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(60.0, 60.0), 1e-9), "{:?}", viewport(&s, &vh).center);
+}
+
+#[test]
+fn scaling_and_rotating_a_clipped_viewport_carry_its_boundary() {
+    let mut s = session();
+    let (vh, b) = clipped(&mut s);
+    // Scale the boundary: the viewport grows with it.
+    s.execute("scale", &json!({"handles": [b.hex()], "base": [10, 10], "factor": 2})).unwrap();
+    let v = viewport(&s, &vh);
+    assert!(v.center.xy().near(Vec2::new(110.0, 110.0), 1e-9) && (v.width - 200.0).abs() < 1e-9, "{v:?}");
+    assert!(outline(&s, b).iter().any(|p| p.near(Vec2::new(210.0, 10.0), 1e-9)));
+
+    // Rotate a wide viewport by a quarter turn: the boundary turns and the viewport keeps its
+    // extents, at the same scale.
+    let mut s = session();
+    let r = s.execute("mview", &json!({"option": "polygonal", "points": [[0, 0], [200, 0], [200, 100], [0, 100]]})).unwrap();
+    let vh = r["viewport"].as_str().unwrap().to_string();
+    let b = Handle::parse_hex(r["boundary"].as_str().unwrap()).unwrap();
+    let k = viewport(&s, &vh).view_height / viewport(&s, &vh).height;
+    s.execute("rotate", &json!({"handles": [vh], "base": [0, 0], "angle": 90})).unwrap();
+    assert!(outline(&s, b).iter().any(|p| p.near(Vec2::new(-100.0, 200.0), 1e-9)), "{:?}", outline(&s, b));
+    let v = viewport(&s, &vh);
+    assert!(v.center.xy().near(Vec2::new(-50.0, 100.0), 1e-9) && (v.width - 100.0).abs() < 1e-9 && (v.height - 200.0).abs() < 1e-9, "{v:?}");
+    assert!((v.view_height / v.height - k).abs() < 1e-9);
+}
+
+#[test]
+fn erasing_a_clipped_viewport_or_its_boundary_erases_both() {
+    for pick_boundary in [false, true] {
+        let mut s = session();
+        let (vh, b) = clipped(&mut s);
+        let h = if pick_boundary { b.hex() } else { vh.clone() };
+        s.execute("erase", &json!({"handles": [h]})).unwrap();
+        assert!(layout_viewports(&s).is_empty(), "boundary picked: {pick_boundary}");
+        assert!(s.doc().unwrap().entity(b).is_none(), "boundary picked: {pick_boundary}");
+        s.execute("undo", &json!({})).unwrap();
+        assert_eq!(viewport(&s, &vh).clip, Some(b));
+        assert!(s.doc().unwrap().entity(b).is_some());
+    }
+}
+
+#[test]
+fn copies_of_a_clipped_viewport_get_their_own_boundary() {
+    for cmd in ["copy", "mirror"] {
+        let mut s = session();
+        let (vh, b) = clipped(&mut s);
+        let p = if cmd == "copy" { json!({"handles": [vh], "delta": [200, 0]}) } else { json!({"handles": [vh], "p1": [150, 0], "p2": [150, 10]}) };
+        s.execute(cmd, &p).unwrap();
+        let vps = layout_viewports(&s);
+        assert_eq!(vps.len(), 2, "{cmd}");
+        let (ch, cv) = vps.iter().find(|(h, _)| h.hex() != vh).cloned().unwrap();
+        let cb = cv.clip.expect("the copy is clipped");
+        assert_ne!(cb, b, "{cmd}: the copy has its own boundary");
+        assert!(outline(&s, cb).iter().any(|q| q.near(Vec2::new(210.0, 10.0), 1e-9) || q.near(Vec2::new(290.0, 10.0), 1e-9)), "{cmd}");
+        // Moving and erasing the copy leave the original alone.
+        s.execute("move", &json!({"handles": [ch.hex()], "delta": [0, 300]})).unwrap();
+        assert!(same(&outline(&s, b), &shifted(&L, Vec2::ZERO)), "{cmd}");
+        assert!(viewport(&s, &vh).center.xy().near(Vec2::new(60.0, 60.0), 1e-9), "{cmd}");
+        s.execute("erase", &json!({"handles": [ch.hex()]})).unwrap();
+        assert!(s.doc().unwrap().entity(b).is_some() && s.doc().unwrap().entity(cb).is_none(), "{cmd}");
+        assert_eq!(viewport(&s, &vh).clip, Some(b), "{cmd}");
+    }
+}
+
+#[test]
+fn a_clipped_viewport_with_a_locked_half_stays_whole() {
+    let mut s = session();
+    let (vh, b) = clipped(&mut s);
+    s.execute("layer.new", &json!({"name": "L"})).unwrap();
+    s.execute("properties.set", &json!({"handles": [b.hex()], "layer": "L"})).unwrap();
+    s.execute("layer.set", &json!({"name": "L", "locked": true})).unwrap();
+    s.execute("move", &json!({"handles": [vh], "delta": [100, 0]})).unwrap();
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(60.0, 60.0), 1e-9), "{:?}", viewport(&s, &vh).center);
+    assert!(same(&outline(&s, b), &shifted(&L, Vec2::ZERO)));
+    s.execute("erase", &json!({"handles": [vh]})).unwrap();
+    assert_eq!(viewport(&s, &vh).clip, Some(b));
+}
+
+#[test]
+fn stretch_moves_a_crossed_boundary_once() {
+    let mut s = session();
+    let (vh, b) = clipped(&mut s);
+    // The viewport picked whole (Last), the boundary crossed by a window around its right side.
+    s.script("STRETCH\nL\nC\n100,0\n120,70\n\n0,0\n5,0\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert!(viewport(&s, &vh).center.xy().near(Vec2::new(65.0, 60.0), 1e-9), "{:?}", viewport(&s, &vh).center);
+    let o = outline(&s, b);
+    assert!(o.iter().any(|q| q.near(Vec2::new(115.0, 10.0), 1e-9)) && o.iter().any(|q| q.near(Vec2::new(10.0, 10.0), 1e-9)), "{o:?}");
+}

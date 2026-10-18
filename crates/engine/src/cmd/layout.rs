@@ -12,6 +12,7 @@ use super::file::{base64_encode, io};
 use super::*;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 use viewports::MviewM;
+pub(crate) use viewports::{refit_clipped, relink_copies, with_clip_partners};
 
 mod plotstyle;
 mod prompts;

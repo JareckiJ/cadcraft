@@ -100,8 +100,15 @@ pub fn specs() -> Vec<CommandSpec> {
 // ---------------- core operations ----------------
 
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
+    let hs = super::layout::with_clip_partners(s.doc()?, hs, !copy);
+    transform_listed(s, &hs, m, copy)
+}
+
+/// [`transform_entities`] on exactly `hs` (clip boundaries and their viewports already paired).
+fn transform_listed(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    let mut copies = Vec::new();
     for h in hs {
         let Some(sp) = d.space_of(*h) else { continue };
         if copy {
@@ -112,6 +119,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
+                copies.push((*h, nh));
             }
         } else {
             let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -122,13 +130,18 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             out.push(*h);
         }
     }
+    if copy {
+        super::layout::relink_copies(d, &copies)?;
+    } else {
+        super::layout::refit_clipped(d, &out)?;
+    }
     Ok(out)
 }
 
 fn erase(s: &mut Session, hs: &[Handle]) -> Result<usize> {
     let d = s.doc_mut()?;
     let mut n = 0;
-    for h in hs {
+    for h in &super::layout::with_clip_partners(d, hs, true) {
         let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
         if !locked && d.remove_entity(*h).is_some() {
             n += 1;
@@ -459,7 +472,10 @@ impl StretchM {
 
     fn apply(&self, s: &mut Session, d: Vec2) -> Result<Step> {
         let whole: Vec<Handle> = self.objs.iter().filter(|h| self.whole.contains(h)).copied().collect();
-        transform_entities(s, &whole, &Mat3::translate(d), false)?;
+        // A clip boundary whose vertices this stretch moves doesn't also move whole with its viewport.
+        let mut whole = super::layout::with_clip_partners(s.doc()?, &whole, true);
+        whole.retain(|h| self.whole.contains(h) || !self.objs.contains(h));
+        transform_listed(s, &whole, &Mat3::translate(d), false)?;
         let doc = s.doc_mut()?;
         for h in self.objs.iter().filter(|h| !self.whole.contains(h)) {
             let locked = doc.entity(*h).and_then(|e| doc.layer(&e.common.layer)).is_some_and(|l| l.locked);

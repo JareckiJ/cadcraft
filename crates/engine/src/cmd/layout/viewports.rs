@@ -4,9 +4,10 @@
 //!
 //! A clipped viewport keeps its rectangle as the boundary's extents and points at a paper-space
 //! entity (a closed polyline, circle, ellipse or spline) whose outline clips what it shows
-//! ([`Viewport::clip`], DXF group 340).
+//! ([`Viewport::clip`], DXF group 340). As in AutoCAD, the two move, rotate, scale and erase
+//! together: picking either one carries the other ([`with_clip_partners`]).
 
-use cadcraft_doc::{Drawing, EntityKind, Handle, Space, Viewport, VportConfig, VportTile};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Space, Viewport, VportConfig, VportTile};
 use cadcraft_geom::{Bounds2, PolyVertex, Vec2};
 use serde_json::{Value, json};
 
@@ -99,14 +100,102 @@ fn check_boundary(cmd: &str, d: &Drawing, space: &Space, h: Handle) -> Result<Bo
     if viewport_of_boundary(d, space, h).is_some() {
         return Err(bad(cmd, "the object already clips a viewport"));
     }
-    let b = boundary_bounds(&e.kind).ok_or_else(|| bad(cmd, "the object must be a closed polyline, circle, ellipse or spline"))?;
-    // The exact extents (the tessellated outline runs just inside curves).
-    let eb = cadcraft_doc::entity_bounds(d, e, 0);
-    let b = if eb.is_empty() || !eb.min.is_finite() || !eb.max.is_finite() { b } else { b.union(&eb) };
+    let b = clip_extents(d, e).ok_or_else(|| bad(cmd, "the object must be a closed polyline, circle, ellipse or spline"))?;
     if b.width() > 1e7 || b.height() > 1e7 {
         return Err(bad(cmd, "the viewport is too large"));
     }
     Ok(b)
+}
+
+/// The extents of a clip boundary entity; `None` if it can't be one.
+fn clip_extents(d: &Drawing, e: &Entity) -> Option<Bounds2> {
+    let b = boundary_bounds(&e.kind)?;
+    // The exact extents (the tessellated outline runs just inside curves).
+    let eb = cadcraft_doc::entity_bounds(d, e, 0);
+    Some(if eb.is_empty() || !eb.min.is_finite() || !eb.max.is_finite() { b } else { b.union(&eb) })
+}
+
+/// `v` fitted to `b`, its clip boundary's extents; model space stays where it was on the sheet.
+fn fit_to(v: &mut Viewport, b: Bounds2) {
+    let k = v.view_height / v.height.max(1e-12);
+    let c = b.center();
+    let view_center = v.view_center + (c - v.center.xy()) * k;
+    let view_height = b.height() * k;
+    if view_center.is_finite() && view_height.is_finite() && view_height > 0.0 {
+        v.view_center = view_center;
+        v.view_height = view_height;
+    }
+    v.center = c.to3(v.center.z);
+    v.width = b.width();
+    v.height = b.height();
+}
+
+/// The clipped viewports of every layout with their boundaries: (viewport, boundary).
+fn clip_pairs(d: &Drawing) -> Vec<(Handle, Handle)> {
+    d.layouts
+        .iter()
+        .flat_map(|l| {
+            l.entities.iter().filter_map(|e| match &e.kind {
+                EntityKind::Viewport(v) => v.clip.filter(|b| *b != e.handle && l.entities.get(*b).is_some()).map(|b| (e.handle, b)),
+                _ => None,
+            })
+        })
+        .collect()
+}
+
+/// `hs` with the boundary of each clipped viewport among them and the viewport of each clip
+/// boundary: MOVE, ROTATE, SCALE, COPY and ERASE act on the two together, as in AutoCAD. With
+/// `skip_locked` (edits in place) a pair with either half on a locked layer is left out whole,
+/// so the two never come apart.
+pub(crate) fn with_clip_partners(d: &Drawing, hs: &[Handle], skip_locked: bool) -> Vec<Handle> {
+    let mut out = hs.to_vec();
+    let locked = |h: Handle| d.entity(h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
+    for (v, b) in clip_pairs(d) {
+        let (has_v, has_b) = (hs.contains(&v), hs.contains(&b));
+        if !(has_v || has_b) {
+            continue;
+        }
+        if skip_locked && (locked(v) || locked(b)) {
+            out.retain(|h| *h != v && *h != b);
+        } else if !has_b {
+            out.push(b);
+        } else if !has_v {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// Point each copied clipped viewport at the copy of its boundary (`copies`: original → copy).
+pub(crate) fn relink_copies(d: &mut Drawing, copies: &[(Handle, Handle)]) -> Result<()> {
+    for (old, new) in copies {
+        let Some(EntityKind::Viewport(v)) = d.entity(*new).map(|e| &e.kind) else { continue };
+        let Some(b) = v.clip.filter(|b| b != old) else { continue };
+        let nb = copies.iter().find(|(o, _)| *o == b).map(|(_, n)| *n);
+        d.modify_entity(*new, |e| {
+            if let EntityKind::Viewport(v) = &mut e.kind {
+                v.clip = nb;
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// Refit each clipped viewport among `hs` whose boundary is also among them to the boundary's
+/// new extents (a rotation turns the outline but leaves the viewport's rectangle upright).
+pub(crate) fn refit_clipped(d: &mut Drawing, hs: &[Handle]) -> Result<()> {
+    for (vh, bh) in clip_pairs(d) {
+        if !(hs.contains(&vh) && hs.contains(&bh)) {
+            continue;
+        }
+        let Some(b) = d.entity(bh).and_then(|e| clip_extents(d, e)) else { continue };
+        d.modify_entity(vh, |e| {
+            if let EntityKind::Viewport(v) = &mut e.kind {
+                fit_to(v, b);
+            }
+        })?;
+    }
+    Ok(())
 }
 
 /// The viewport in `space` clipped by `h`.
@@ -325,19 +414,8 @@ pub(super) fn run_vpclip(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad(cmd, "pass `object`, `points` or `delete`")),
     };
     let b = check_boundary(cmd, s.doc()?, &space, boundary)?;
-    // The viewport takes the boundary's extents; model space stays where it was on the sheet.
-    let k = cur.view_height / cur.height.max(1e-12);
     let mut v = cur;
-    let c = b.center();
-    let view_center = v.view_center + (c - v.center.xy()) * k;
-    let view_height = b.height() * k;
-    if view_center.is_finite() && view_height.is_finite() && view_height > 0.0 {
-        v.view_center = view_center;
-        v.view_height = view_height;
-    }
-    v.center = c.to3(v.center.z);
-    v.width = b.width();
-    v.height = b.height();
+    fit_to(&mut v, b);
     v.clip = Some(boundary);
     s.doc_mut()?.modify_entity(vh, |e| e.kind = EntityKind::Viewport(v))?;
     if let Some(o) = old.filter(|o| *o != boundary) {
