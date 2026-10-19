@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (multiline attributes read, drawn and saved: F17 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (L5 added: legacy Vietnamese TCVN3/VNI text) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -105,6 +105,7 @@ Detail: [localization-parity.md](localization-parity.md).
 | L2 | AutoCAD for Mac's other languages (zh-Hans, es, fr, ja, ko, it; de landed 2026-10-11) plus pt, hi, ar, id, vi from the standard's list | 35–55 + native review |
 | L3 | Complex-script shaping for Devanagari and other Indic scripts in drawing text; RTL (mirrored) UI. Arabic-script shaping and bidi in drawing text landed (#287) | 20–30 |
 | L4 | IME fixes on every platform (PRs #110–#119); vertical text styles | 6–10 |
+| L5 | Legacy Vietnamese text: many Vietnamese drawings store text in the 8-bit TCVN3 (ABC) or VNI encodings with `.VnTime`/`.VnArial`/`VNI-*` fonts (`.VnTimeH`-style fonts are capitals only), so it opens as garbled Latin-1. No converter command to Unicode (find suspect strings, preview, convert, uppercase for `…H` fonts; tables from TCVN 5712:1993, not other programs), no prompt on open when such fonts are found, and the stroke font's stacked diacritics (Ơ, ư, ạ, ế…) are untested. `ANSI_1258` already decodes (`dxf/src/codepage.rs`) | 6–10 |
 
 ## Stability
 
@@ -145,6 +146,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | L5 added: legacy Vietnamese TCVN3/VNI drawing text has no converter to Unicode; Vietnamese diacritics in the stroke font untested |
 | 2026-10-12 | minor | Object transparency (entity, ByLayer, ByBlock) is drawn: on screen (TRANSPARENCYDISPLAY, on by default), in PNG/SVG exports, and in plots when the page setup's "Plot transparency" is on (PDF alpha, PNG blending, SVG opacity; PLOTTRANSPARENCYOVERRIDE): F14 narrowed |
 | 2026-10-12 | minor | Hatch and Gradient dialog (HATCH, GRADIENT; HPDLGMODE) and Hatch Edit dialog (HATCHEDIT, right-click, double-click a hatch): F13 narrowed to Preview, Inherit Properties and boundary add/remove in edit mode |
 | 2026-10-12 | minor | A bare system variable name typed at the command line (ORTHOMODE, GRIDMODE…) runs SETVAR on that variable, as in AutoCAD; U10 narrowed |
