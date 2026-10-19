@@ -308,11 +308,18 @@ fn model_ucs(d: &Drawing) -> Ucs {
         (Some(x), Some(y)) if x.cross(y).len() > 1e-9 * x.len() * y.len() => (x, y, true),
         _ => (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), false),
     };
-    // The name only of a UCS table record, and only with the axes it came with: a name read from a
-    // file without its record, or beside axes replaced by the World UCS's, is dropped.
+    // The name only of a UCS table record whose frame the current UCS still is: a name read from
+    // a file without its record, beside axes replaced by the World UCS's, or beside an origin or
+    // axes of its own (restoring the name would move the UCS) is dropped.
+    let origin = p("UCSORG").unwrap_or(Vec3::ZERO);
     let raw = h.str("UCSNAME", "");
-    let name = d.ucss.iter().find(|u| usable && u.name.eq_ignore_ascii_case(raw.trim())).map(|u| u.name.clone()).unwrap_or_default();
-    Ucs { name, origin: p("UCSORG").unwrap_or(Vec3::ZERO), x_axis: x, y_axis: y }
+    let name = d
+        .ucss
+        .iter()
+        .find(|u| usable && u.name.eq_ignore_ascii_case(raw.trim()) && crate::dxf_ext::is_named_frame(u, origin, x, y))
+        .map(|u| u.name.clone())
+        .unwrap_or_default();
+    Ucs { name, origin, x_axis: x, y_axis: y }
 }
 
 fn header_vars(w: &mut W, d: &Drawing) {

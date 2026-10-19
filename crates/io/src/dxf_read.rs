@@ -2021,9 +2021,7 @@ impl Objects {
             && let Some(name) = self.xrecord_text(crate::dxf_ext::UCS_NAME_KEY).map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
             && let Some(u) = d.ucss.iter().find(|u| u.name.eq_ignore_ascii_case(&name))
             && let (Some(o), Some(x), Some(y)) = (d.header.point("UCSORG"), d.header.point("UCSXDIR"), d.header.point("UCSYDIR"))
-            && (o - u.origin).len() <= 1e-9 * (1.0 + o.len())
-            && (x - u.x_axis).len() <= 1e-9
-            && (y - u.y_axis).len() <= 1e-9
+            && crate::dxf_ext::is_named_frame(u, o, x, y)
         {
             let n = u.name.clone();
             d.header.set_str("UCSNAME", &n);
