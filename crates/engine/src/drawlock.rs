@@ -124,8 +124,8 @@ mod native {
         serde_json::from_slice(&std::fs::read(&lock).ok()?).ok()
     }
 
-    /// Write this instance's lock on `drawing` (staged, then renamed over any stale one).
-    fn write(drawing: &Path, h: &Holder) -> std::io::Result<()> {
+    /// This instance's lock contents for `drawing`, staged next to its lock file.
+    fn stage(drawing: &Path, h: &Holder) -> std::io::Result<PathBuf> {
         let lock = lock_path(drawing);
         let tmp = lock.with_file_name(format!(
             "{}.{}.tmp",
@@ -133,9 +133,50 @@ mod native {
             std::process::id()
         ));
         std::fs::write(&tmp, serde_json::to_vec(h).unwrap_or_default())?;
-        std::fs::rename(&tmp, &lock).inspect_err(|_| {
+        Ok(tmp)
+    }
+
+    /// Write this instance's lock on `drawing` (staged, then renamed over any stale one).
+    fn write(drawing: &Path, h: &Holder) -> std::io::Result<()> {
+        let tmp = stage(drawing, h)?;
+        std::fs::rename(&tmp, lock_path(drawing)).inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
         })
+    }
+
+    /// Take the lock on `drawing` when there is none or it is stale: whether it is now this
+    /// instance's. With no lock file it is created atomically (two apps opening the drawing at
+    /// once can't both get it); a stale one is replaced and read back, so of two apps taking it
+    /// over at once only the last one keeps it.
+    fn claim(drawing: &Path, h: &Holder) -> std::io::Result<bool> {
+        let lock = lock_path(drawing);
+        if lock.exists() {
+            // Taken meanwhile by another app (its lock is fresh again): leave it.
+            if holder(drawing).is_some_and(|o| o.instance != h.instance) {
+                return Ok(false);
+            }
+            write(drawing, h)?;
+        } else {
+            let tmp = stage(drawing, h)?;
+            // A hard link appears with the whole lock written, or fails when the lock exists.
+            let linked = std::fs::hard_link(&tmp, &lock);
+            let _ = std::fs::remove_file(&tmp);
+            match linked {
+                Ok(()) => return Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+                // No hard links on this file system: create it only if it isn't there.
+                Err(_) => {
+                    use std::io::Write;
+                    match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+                        Ok(mut f) => f.write_all(&serde_json::to_vec(h).unwrap_or_default())?,
+                        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+        let back = std::fs::read(&lock).ok().and_then(|b| serde_json::from_slice::<Holder>(&b).ok());
+        Ok(back.is_some_and(|b| b.instance == h.instance))
     }
 
     /// Touch a held lock (its modification time is the heartbeat).
@@ -150,6 +191,12 @@ mod native {
         if ours {
             let _ = std::fs::remove_file(lock);
         }
+    }
+
+    /// The note that `h` also has the drawing at `path` (named `p`) open.
+    fn also_open(path: &Path, p: &str, h: &Holder) -> String {
+        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.to_string());
+        format!("{name} is also open by {}. Saving it here can overwrite their changes (or theirs yours).", h.describe())
     }
 
     /// This instance's lock contents.
@@ -220,21 +267,25 @@ mod native {
                 match holder(path) {
                     Some(h) if h.instance != instance => {
                         if !self.others.contains_key(&p) {
-                            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.clone());
-                            self.notes.push(format!(
-                                "{name} is also open by {}. Saving it here can overwrite their changes (or theirs yours).",
-                                h.describe()
-                            ));
+                            self.notes.push(also_open(path, &p, &h));
                         }
                         self.others.insert(p, Instant::now());
                     }
-                    _ => {
-                        // No lock, a stale one or our own: take it (a folder we can't write to
-                        // just gets no lock).
-                        let _ = write(path, &me(instance));
-                        self.others.remove(&p);
-                        self.held.insert(p, Instant::now());
-                    }
+                    _ => match claim(path, &me(instance)) {
+                        // Another app took it first: tell the user as for a lock found.
+                        Ok(false) => {
+                            if let Some(h) = holder(path).filter(|h| h.instance != instance) {
+                                self.notes.push(also_open(path, &p, &h));
+                            }
+                            self.others.insert(p, Instant::now());
+                        }
+                        // No lock, a stale one or our own: now ours (a folder we can't write
+                        // to just gets no lock).
+                        _ => {
+                            self.others.remove(&p);
+                            self.held.insert(p, Instant::now());
+                        }
+                    },
                 }
             }
         }
@@ -250,6 +301,31 @@ mod native {
                 release(Path::new(&p), instance);
             }
             self.others.clear();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Of two apps claiming a drawing that has no lock, only the first gets it: the second
+        /// finds it taken and leaves it. A stale lock is taken over.
+        #[test]
+        fn only_one_app_claims_a_free_lock() {
+            let dir = std::env::temp_dir().join(format!("cadcraft-claim-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("Plan.dxf");
+            std::fs::write(&file, b"").unwrap();
+            assert!(claim(&file, &me("1-a")).unwrap());
+            assert!(!claim(&file, &me("2-b")).unwrap(), "a fresh lock stays the first app's");
+            assert_eq!(holder(&file).map(|h| h.instance), Some("1-a".to_string()));
+            assert!(claim(&file, &me("1-a")).unwrap(), "its own lock is still its own");
+            let stale = SystemTime::now() - Duration::from_secs(STALE_SECS + 60);
+            std::fs::OpenOptions::new().write(true).open(lock_path(&file)).unwrap().set_modified(stale).unwrap();
+            assert!(claim(&file, &me("2-b")).unwrap(), "a stale lock is taken over");
+            assert_eq!(holder(&file).map(|h| h.instance), Some("2-b".to_string()));
+            let _ = std::fs::remove_dir_all(&dir);
         }
     }
 }
