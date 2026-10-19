@@ -318,10 +318,14 @@ fn autocad_r2000_jog_xdata_reads() {
     });
     assert!(!plain.contains(JOG_APP));
     let rad60 = 60f64.to_radians().to_string();
-    assert_eq!(jog_of(&with_style_xdata(&plain, "Detail", &autocad_jog("   384", &rad60)), "Detail"), 60.0);
-    // Another marker, no angle a style takes (AutoCAD kept CADCraft 0.6.2's 0.785° as 0.0137 rad),
-    // NaN or a real of another kind: ignored.
-    for bad in [autocad_jog("383", &rad60), autocad_jog("384", "0.0137077838904019"), autocad_jog("384", "NaN")] {
+    let at60 = with_style_xdata(&plain, "Detail", &autocad_jog("   384", &rad60));
+    assert_eq!(jog_of(&at60, "Detail"), 60.0);
+    // Saved and opened again, the style comes back whole.
+    let back = read_dxf(write_dxf(&read_dxf(at60.as_bytes()).unwrap()).as_bytes()).unwrap();
+    assert_eq!(back.dim_style("Detail").unwrap(), &DimStyle { jog_angle: 60.0, ..styled() });
+    // Another marker, no angle a style takes (AutoCAD kept CADCraft 0.6.2's 0.785° as 0.0137 rad;
+    // 5.5 is radians there, not 5.5°), NaN or a real of another kind: ignored.
+    for bad in [autocad_jog("383", &rad60), autocad_jog("384", "0.0137077838904019"), autocad_jog("384", "5.5"), autocad_jog("384", "NaN")] {
         assert_eq!(jog_of(&with_style_xdata(&plain, "Detail", &bad), "Detail"), 45.0, "{bad:?}");
     }
     let other_real = ["1001", JOG_APP, "1070", "384", "1041", rad60.as_str()];
@@ -368,11 +372,24 @@ fn autocad_jog_xdata_is_written_once_and_current() {
     let again = write_dxf(&d);
     assert_eq!((pairs(&again, "2", JOG_APP), pairs(&again, "1001", JOG_APP)), (1, 1));
     assert!(record_of(&again, "Detail").windows(6).any(|w| w == autocad_jog("384", &rad60)));
+    assert_eq!(jog_of(&again, "Detail"), 60.0);
     d.dim_styles.iter_mut().filter(|s| s.name == "Detail").for_each(|s| s.jog_angle = 30.0);
     let edited = write_dxf(&d);
     assert!(record_of(&edited, "Detail").windows(6).any(|w| w == autocad_jog("384", &30f64.to_radians().to_string())));
     assert_eq!(pairs(&edited, "1001", JOG_APP), 1);
+    assert_eq!(read_dxf(edited.as_bytes()).unwrap().dim_style("Detail").unwrap(), &styled(), "opened again");
     let newer = dxf(&d, Version::R2018);
     assert!(!newer.contains(JOG_APP), "2018 has group 50 instead");
     assert_eq!(jog_of(&newer, "Detail"), 30.0);
+}
+
+#[test]
+fn an_unusable_group_leaves_the_variable_to_the_xdata() {
+    // An R2000 record (the newer variables in CADCraft's DIMVARS xdata) with DIMARCSYM 7 in group
+    // 90, no arc symbol a style takes: the xdata's 1 is read, not the default.
+    let text = write_dxf(&drawing());
+    let mut lines: Vec<&str> = text.lines().collect();
+    let name = style_record(&lines, "Detail").unwrap().start;
+    lines.splice(name + 2..name + 2, [" 90", "7"]);
+    assert_eq!(read_dxf(lines.join("\r\n").as_bytes()).unwrap().dim_style("Detail").unwrap(), &styled());
 }

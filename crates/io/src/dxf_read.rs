@@ -1568,6 +1568,9 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                         fields.insert(field.to_string(), v);
                     }
                 }
+                // A group value the style can't take leaves its variable to the xdata below.
+                let refused = DimStyle::default().apply_fields(&fields);
+                fields.retain(|k, _| !refused.contains(k));
                 // Then what the groups leave out (R2000 has no groups for the newer variables):
                 // AutoCAD's jog angle xdata first, since AutoCAD keeps its own xdata current but
                 // leaves CADCraft's as it was, then CADCraft's.

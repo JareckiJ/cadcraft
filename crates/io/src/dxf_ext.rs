@@ -164,7 +164,7 @@ pub(crate) const JOG_MARKER: i64 = 384;
 /// The jog angle (degrees) in a style's [`JOG_APP`] xdata; `None` without one a style takes.
 pub(crate) fn read_jog_xdata(tags: &[Tag]) -> Option<f64> {
     xdata(tags, JOG_APP).windows(2).find_map(|w| match w {
-        [m, v] if m.code == 1070 && m.i64() == JOG_MARKER && v.code == 1040 => jog_degrees(v.f64()),
+        [m, v] if m.code == 1070 && m.i64() == JOG_MARKER && v.code == 1040 => jog_from_radians(v.f64()),
         _ => None,
     })
 }
@@ -233,9 +233,18 @@ const JOG_DEGREES: std::ops::RangeInclusive<f64> = 5.0..=90.0;
 /// radians. Usable angles don't overlap in the two units (5 to 90 degrees, 0.087 to 1.571
 /// radians), so the value says which it is. NaN and infinities are in neither range.
 pub(crate) fn jog_degrees(x: f64) -> Option<f64> {
-    // Rounded so that whole degrees come back whole from either unit.
-    let round = |deg: f64| (deg * 1e9).round() / 1e9;
-    [round(x), round(x.to_degrees())].into_iter().find(|deg| JOG_DEGREES.contains(deg))
+    [rounded(x), rounded(x.to_degrees())].into_iter().find(|deg| JOG_DEGREES.contains(deg))
+}
+
+/// A jog angle in radians, as AutoCAD's [`JOG_APP`] xdata holds it, in degrees; `None` when it
+/// is no jog angle a style takes. Radians only: 5.5 there is no 5.5°.
+pub(crate) fn jog_from_radians(x: f64) -> Option<f64> {
+    Some(rounded(x.to_degrees())).filter(|deg| JOG_DEGREES.contains(deg))
+}
+
+/// Degrees rounded so that whole degrees come back whole from radians.
+fn rounded(deg: f64) -> f64 {
+    (deg * 1e9).round() / 1e9
 }
 
 /// Decode a group value into the JSON a [`DimStyle`] field takes. `styles` / `blocks` /
@@ -921,6 +930,15 @@ mod tests {
         let takes = |deg: f64| canonical("jogAngle", &serde_json::json!(deg)).is_some();
         assert!(takes(*JOG_DEGREES.start()) && takes(*JOG_DEGREES.end()));
         assert!(!takes(JOG_DEGREES.start() - 1e-6) && !takes(JOG_DEGREES.end() + 1e-6));
+    }
+
+    #[test]
+    fn xdata_jog_angle_is_radians_only() {
+        assert_eq!(jog_from_radians(std::f64::consts::FRAC_PI_6), Some(30.0));
+        // 5.5 is 315° in radians, no jog angle, though it would be 5.5° in degrees.
+        for x in [5.5, 30.0, 0.0, -0.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(jog_from_radians(x), None, "{x}");
+        }
     }
 
     #[test]
