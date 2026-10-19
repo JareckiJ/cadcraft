@@ -71,3 +71,17 @@ fn point_takes_a_snapped_z_and_line_a_typed_one() {
     s.cmdline("").unwrap();
     assert!(lines(&s).contains(&(Vec3::new(100.0, 100.0, 3.0), Vec3::new(110.0, 100.0, 5.0))), "{:?}", lines(&s));
 }
+
+/// M2P between two snapped points is midway in Z too: halfway between a survey point's level
+/// and a contour's elevation.
+#[test]
+fn m2p_between_two_snapped_points_is_midway_in_z() {
+    let mut s = Session::new();
+    survey(&mut s);
+    s.cmdline("point").unwrap();
+    s.cmdline("m2p").unwrap();
+    click(&mut s, Vec2::new(0.01, 0.0), mode::NOD);
+    click(&mut s, Vec2::new(10.0, 0.01), mode::END);
+    let pts: Vec<Vec3> = s.doc().unwrap().model.iter().filter_map(|e| if let EntityKind::Point(p) = &e.kind { Some(p.p) } else { None }).collect();
+    assert!(pts.contains(&Vec3::new(5.0, 0.0, 1880.5)), "{pts:?}");
+}
