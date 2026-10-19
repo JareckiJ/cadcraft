@@ -396,6 +396,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::hatchdlg::open_create(app, matches!(id, "gradient" | "gd"));
             Ok(Value::Null)
         }
+        // Typed or from the Tools menu: the Command Aliases dialog. JSON calls keep the JSON form.
+        "aliasedit" if params.is_null() => {
+            crate::aliasdlg::open(app);
+            Ok(Value::Null)
+        }
         "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() => {
             crate::hatchdlg::open_edit(app);
             Ok(Value::Null)
@@ -569,8 +574,11 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         ui,
         |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                for (name, entries) in &tree {
-                    ui.menu_button(crate::i18n::menu(name), |ui| {
+                // Titles first, so a hovered title can take over before any menu is drawn.
+                let titles: Vec<egui::Response> = tree.iter().map(|(name, _)| ui.add(egui::Button::new(crate::i18n::menu(name)))).collect();
+                switch_on_hover(ui.ctx(), &titles);
+                for ((_, entries), title) in tree.iter().zip(&titles) {
+                    egui::Popup::menu(title).show(|ui| {
                         for e in entries {
                             entry_ui(ui, e, &mut clicked);
                         }
@@ -581,6 +589,18 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     );
     if let Some(id) = clicked {
         activate(app, &id);
+    }
+}
+
+/// While one menu of the bar is open, pointing at another title opens that menu instead.
+fn switch_on_hover(ctx: &egui::Context, titles: &[egui::Response]) {
+    let is_open = |title: &egui::Response| egui::Popup::is_id_open(ctx, egui::Popup::default_response_id(title));
+    if !titles.iter().any(is_open) {
+        return;
+    }
+    // A click on a title toggles its menu by itself.
+    if let Some(title) = titles.iter().find(|t| t.hovered() && !t.clicked() && !is_open(t)) {
+        egui::Popup::open_id(ctx, egui::Popup::default_response_id(title));
     }
 }
 
