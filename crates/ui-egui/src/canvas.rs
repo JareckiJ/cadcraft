@@ -1258,6 +1258,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         )
     });
     let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
+    // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
+    // previews that read `Session::ctrl_down` always see the current state. The engine
+    // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
+    // #407's Limits note: modifiers used to be dropped on the floor at this point).
+    app.session.ctrl_down = mods.ctrl;
     // Which device is scrolling? On macOS, trackpads (and Magic Mouse) report precise point
     // deltas; notched mouse wheels report lines. The answer is sticky because egui spreads a wheel
     // notch over several frames. Elsewhere (browsers, Wayland smooth-scroll mice) ordinary wheels
@@ -1527,10 +1532,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.session.echo(e.to_string());
         }
     }
-    // Press-and-drag selection window (AutoCAD's PICKDRAG = 2; click-click still works): a drag
+    // Press-and-drag selection window (PICKDRAG = 2; click-click still works): a drag
     // that starts while objects are being selected opens a window where the button went down,
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
-    if resp.drag_started_by(egui::PointerButton::Primary)
+    if !app.session.settings.pickdrag {
+        app.canvas.drag_window = false;
+    }
+    if app.session.settings.pickdrag
+        && resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1850,9 +1859,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if app.session.settings.dynmode
             && let Some(hp) = hover_pos
         {
-            // A stretched grip shows its dimensions instead of the pointer boxes.
-            if !crate::grip_dyn::draw(app, &painter) {
-                dynamic_input(app, &painter, hp);
+            // A stretched grip shows its dimensions instead of the pointer boxes; a prompt asking
+            // for a distance shows its one field and keeps the prompt and its options.
+            let fields = crate::grip_dyn::draw(app, &painter);
+            if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
+                dynamic_input(app, &painter, hp, fields);
             }
         }
     }
@@ -2018,8 +2029,9 @@ fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox
 
 /// The Dynamic Input tooltip beside the cursor, styled like the command line. At a point prompt
 /// it shows the pair of value boxes, a view of the command-line text (see [`crate::dyninput`]);
-/// otherwise the prompt with what is being typed, or the live distance and angle.
-fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
+/// otherwise the prompt with what is being typed, or the live distance and angle. With `fields`
+/// (a distance prompt's field is on show, [`crate::grip_dyn`]) only the prompt and its options.
+fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool) {
     app.cmd.option_rows.clear();
     // While the options menu is open the tooltip stays where it opened, so the menu can be reached.
     let at = match app.cmd.options {
@@ -2033,7 +2045,8 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
     // DYNPROMPT = 0: no prompt beside the cursor (the value boxes stay).
     let show_prompt = app.session.settings.dynprompt;
     let options = show_prompt && !prompt.keywords.is_empty();
-    if let Some(f) = crate::cmdline::dyn_frame(app)
+    if !fields
+        && let Some(f) = crate::cmdline::dyn_frame(app)
         && let Some(e) = crate::dyninput::parse(&app.cmd.buffer, &f)
         && let Some(c) = app.canvas.cursor
     {
@@ -2046,7 +2059,9 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
         return;
     }
     let mut text = crate::i18n::t(&prompt.message).to_string();
-    if !app.cmd.buffer.is_empty() {
+    if fields {
+        // The field shows the distance and what is typed.
+    } else if !app.cmd.buffer.is_empty() {
         text = format!("{}: {}", crate::i18n::t(&prompt.message), app.cmd.buffer);
     } else if let (Some(base), Some(c)) = (prompt.base, app.canvas.cursor) {
         text = format!(
@@ -2266,10 +2281,18 @@ fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
     let (c, ring) = (l.center, l.ring);
     let p = ui.painter_at(rect);
     crate::viewcube::show(app, ui, &l);
-    // WCS pill.
+    // WCS pill: the label and a down chevron, drawn as lines rather than a "⌄" glyph that a UI
+    // font may lack (it showed as a box, #1541).
     let pill = Rect::from_center_size(c + vec2(0.0, ring + 26.0), vec2(56.0, 16.0));
     p.rect_filled(pill, 8.0, Color32::from_rgb(0x48, 0x50, 0x5c));
-    p.text(pill.center(), egui::Align2::CENTER_CENTER, crate::tl!("WCS ⌄"), crate::theme::small(), Tokens::DARK.canvas_ink);
+    let ink = Tokens::DARK.canvas_ink;
+    let label = p.layout_no_wrap(crate::tl!("WCS").to_string(), crate::theme::small(), ink);
+    let (gap, chevron) = (4.0, 6.0);
+    let left = pill.center().x - (label.size().x + gap + chevron) / 2.0;
+    let mid = pill.center().y;
+    p.galley(pos2(left, mid - label.size().y / 2.0), label.clone(), ink);
+    let x = left + label.size().x + gap;
+    p.line(vec![pos2(x, mid - 1.5), pos2(x + chevron / 2.0, mid + 1.5), pos2(x + chevron, mid - 1.5)], Stroke::new(1.2, ink));
 }
 
 /// A click on grip `g` (idle): Shift+click makes it hot or cold again; a plain click starts
