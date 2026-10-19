@@ -153,12 +153,17 @@ pub(super) fn plotstyle(s: &mut Session, from: &str, to: &str) -> Result<()> {
         return Err(bad("rename", format!("the {from} plot style cannot be renamed")));
     }
     let d = s.doc_mut()?;
+    let named = |t: &cadcraft_doc::PlotStyleTable| {
+        t.kind == cadcraft_doc::PlotStyleKind::Named && t.styles.iter().any(|st| st.name.eq_ignore_ascii_case(from))
+    };
+    if !to.eq_ignore_ascii_case(from)
+        && d.plot_style_tables.iter().filter(|t| named(t)).any(|t| t.styles.iter().any(|st| st.name.eq_ignore_ascii_case(&to)))
+    {
+        return Err(bad("rename", format!("a plot style `{to}` already exists")));
+    }
     let mut changed = false;
     for table in &mut d.plot_style_tables {
-        if table.kind == cadcraft_doc::PlotStyleKind::Named && table.styles.iter().any(|st| st.name.eq_ignore_ascii_case(from)) {
-            if !to.eq_ignore_ascii_case(from) && table.styles.iter().any(|st| st.name.eq_ignore_ascii_case(&to)) {
-                return Err(bad("rename", format!("a plot style `{to}` already exists")));
-            }
+        if table.kind == cadcraft_doc::PlotStyleKind::Named {
             for st in &mut table.styles {
                 if st.name.eq_ignore_ascii_case(from) {
                     st.name = to.clone();
@@ -264,9 +269,16 @@ fn exists(d: &Drawing, table: &str, name: &str) -> bool {
         "ucs" => any_named(d.ucss.iter().map(|t| &t.name), name),
         "material" => any_named(d.materials.iter().map(|m| &m.name), name),
         "plotstyle" => {
-            d.plot_style_tables.iter().flat_map(|t| &t.styles).any(|s| s.name.eq_ignore_ascii_case(name))
+            let ent = |e: &std::sync::Arc<cadcraft_doc::Entity>| e.common.plot_style.eq_ignore_ascii_case(name);
+            d.plot_style_tables
+                .iter()
+                .filter(|t| t.kind == cadcraft_doc::PlotStyleKind::Named)
+                .flat_map(|t| &t.styles)
+                .any(|s| s.name.eq_ignore_ascii_case(name))
                 || d.layers.iter().any(|l| l.plot_style.eq_ignore_ascii_case(name))
-                || d.model.iter().any(|e| e.common.plot_style.eq_ignore_ascii_case(name))
+                || d.model.iter().any(ent)
+                || d.layouts.iter().any(|l| l.entities.iter().any(ent))
+                || d.blocks.values().any(|b| b.entities.iter().any(ent))
         }
         "vport" => d.vports.iter().any(|c| !c.is_active() && c.name.eq_ignore_ascii_case(name)),
         _ => true,

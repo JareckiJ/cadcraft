@@ -633,7 +633,7 @@ impl HatchM {
         Ok(())
     }
     fn inherit(&mut self, s: &mut Session, h: Handle) -> Result<()> {
-        let (pattern, scale, angle, style, associative, is_grad) = {
+        let (pattern, scale, angle, style, associative, grad) = {
             let d = s.doc()?;
             let Some(e) = d.entity(h) else {
                 s.echo("No such object.");
@@ -643,14 +643,15 @@ impl HatchM {
                 s.echo("Selected object is not a hatch.");
                 return Ok(());
             };
-            (hh.pattern.clone(), hh.scale, hh.angle, hh.style, hh.associative, hh.gradient.is_some())
+            (hh.pattern.clone(), hh.scale, hh.angle, hh.style, hh.associative, hh.gradient.clone())
         };
         self.settings.pattern = pattern.clone();
         self.settings.scale = scale;
         self.settings.angle = angle;
         self.settings.style = style;
         self.settings.associative = associative;
-        self.gradient = is_grad;
+        self.gradient = grad.is_some();
+        self.settings.gradient = grad;
         let doc = s.doc_mut()?;
         doc.header.set_str("HPNAME", &pattern);
         doc.header.set_f64("HPSCALE", scale);
@@ -861,6 +862,11 @@ pub fn run_mpolygon(s: &mut Session, p: &Value) -> Result<Value> {
 
     if pts.len() < 3 {
         return Err(bad("mpolygon", "at least 3 points required to create an MPolygon"));
+    }
+
+    let up = pattern.to_ascii_uppercase();
+    if cadcraft_doc::library::pattern(&up).is_none() && patfile::user_pattern(&up).is_none() {
+        return Err(bad("mpolygon", format!("unknown pattern {up}")));
     }
 
     let verts = pts.iter().map(|&p| PolyVertex::new(p)).collect();

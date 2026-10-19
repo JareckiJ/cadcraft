@@ -786,7 +786,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
     // The contents are in paper units now: draw their pens before clipping.
     pen::apply(&mut sub.list, paper::paper_unit_mm(d));
     b.list.expanded = b.list.expanded.saturating_add(sub.list.expanded);
-    append_clipped(&mut b.list, &sub.list, clip);
+    append_clipped(&mut b.list, &sub.list, clip, false);
 }
 
 /// The clip region of a clipped viewport: the outline of its clip boundary entity, when that
@@ -809,32 +809,51 @@ enum Clip<'a> {
 }
 
 /// Append `src` to `dst`, clipped to `clip`.
-fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
-    for p in &src.prims {
+fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip, copy_layers: bool) {
+    let has_layers = copy_layers && !src.prim_layers.is_empty();
+    let has_pens = !src.pens.is_empty();
+    if has_pens && !dst.prims.is_empty() {
+        dst.pens.resize(dst.prims.len(), Pen::default());
+    }
+    for (src_idx, p) in src.prims.iter().enumerate() {
         let pts = src.points(p);
+        let layer = if has_layers { src.prim_layers.get(src_idx).copied().unwrap_or(NO_LAYER) } else { NO_LAYER };
+        let pen = if has_pens { src.pens.get(src_idx).copied().unwrap_or_default() } else { Pen::default() };
+        let push = |dst: &mut DisplayList, kind: Kind, piece: &[Vec2]| {
+            let before = dst.prims.len();
+            push_raw(dst, p, kind, piece);
+            if dst.prims.len() > before {
+                if has_layers {
+                    dst.prim_layers.push(layer);
+                }
+                if has_pens {
+                    dst.pens.push(pen);
+                }
+            }
+        };
         match (p.kind, clip) {
             (Kind::Polyline, Clip::Rect(rect)) => {
                 for piece in clip::clip_polyline(pts, rect) {
-                    push_raw(dst, p, Kind::Polyline, &piece);
+                    push(dst, Kind::Polyline, &piece);
                 }
             }
             (Kind::Polyline, Clip::Poly(c)) => {
                 for piece in c.clip_polyline(pts) {
-                    push_raw(dst, p, Kind::Polyline, &piece);
+                    push(dst, Kind::Polyline, &piece);
                 }
             }
             (Kind::Polyline, Clip::InvertedPoly(c)) => {
                 for piece in c.clip_polyline_inverted(pts) {
-                    push_raw(dst, p, Kind::Polyline, &piece);
+                    push(dst, Kind::Polyline, &piece);
                 }
             }
             (Kind::Tris | Kind::Mask, Clip::Rect(rect)) => {
                 let t = clip::clip_triangles(pts, rect);
-                push_raw(dst, p, p.kind, &t);
+                push(dst, p.kind, &t);
             }
             (Kind::Tris | Kind::Mask, Clip::Poly(c)) => {
                 let t = c.clip_triangles(pts);
-                push_raw(dst, p, p.kind, &t);
+                push(dst, p.kind, &t);
             }
             (Kind::Tris | Kind::Mask, Clip::InvertedPoly(c)) => {
                 let mut out_tris = Vec::new();
@@ -844,7 +863,7 @@ fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
                         out_tris.extend_from_slice(t);
                     }
                 }
-                push_raw(dst, p, p.kind, &out_tris);
+                push(dst, p.kind, &out_tris);
             }
             (Kind::Point, _) => {
                 let inside = |q: Vec2| match clip {
@@ -855,27 +874,27 @@ fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
                 if let Some(q) = pts.first()
                     && inside(*q)
                 {
-                    push_raw(dst, p, Kind::Point, &[*q]);
+                    push(dst, Kind::Point, &[*q]);
                 }
             }
             (Kind::Infinite { ray }, Clip::Rect(rect)) => {
                 if let (Some(base), Some(dir)) = (pts.first(), pts.get(1))
                     && let Some((a, c)) = clip::clip_infinite(*base, *dir, ray, rect)
                 {
-                    push_raw(dst, p, Kind::Polyline, &[a, c]);
+                    push(dst, Kind::Polyline, &[a, c]);
                 }
             }
             (Kind::Infinite { ray }, Clip::Poly(c)) => {
                 if let (Some(base), Some(dir)) = (pts.first(), pts.get(1)) {
                     for piece in c.clip_infinite(*base, *dir, ray) {
-                        push_raw(dst, p, Kind::Polyline, &piece);
+                        push(dst, Kind::Polyline, &piece);
                     }
                 }
             }
             (Kind::Infinite { ray }, Clip::InvertedPoly(c)) => {
                 if let (Some(base), Some(dir)) = (pts.first(), pts.get(1)) {
                     for piece in c.clip_infinite_inverted(*base, *dir, ray) {
-                        push_raw(dst, p, Kind::Polyline, &piece);
+                        push(dst, Kind::Polyline, &piece);
                     }
                 }
             }
@@ -1552,7 +1571,8 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                         cb.points.clone()
                     };
                     let world_pts: Vec<Vec2> = raw_pts.iter().map(|p| m.apply(*p)).collect();
-                    if let Some(poly_clip) = clip::PolyClip::new(&world_pts) {
+                    let display_pts: Vec<Vec2> = raw_pts.iter().map(|p| sub.xf.apply(*p)).collect();
+                    if let Some(poly_clip) = clip::PolyClip::new(&display_pts) {
                         let mut sub_b = Builder {
                             list: DisplayList::default(),
                             opts: b.opts,
@@ -1566,13 +1586,21 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                             if matches!(be.kind, EntityKind::AttDef(_)) {
                                 continue;
                             }
-                            if !sub_b.expand() {
+                            if !sub_b.expand() || b.list.expanded.saturating_add(sub_b.list.expanded) > MAX_BLOCK_EXPANSION {
                                 break 'copies;
                             }
                             entity(&mut sub_b, &sub, be);
                         }
+                        b.list.expanded = b.list.expanded.saturating_add(sub_b.list.expanded);
+                        if b.list.expanded > MAX_BLOCK_EXPANSION {
+                            break 'copies;
+                        }
+                        if let Some(sheet) = b.list.sheet {
+                            pen::apply(&mut sub_b.list, sheet.unit_mm);
+                        }
                         let cl = if cb.inverted { Clip::InvertedPoly(&poly_clip) } else { Clip::Poly(&poly_clip) };
-                        append_clipped(&mut b.list, &sub_b.list, &cl);
+                        let copy_layers = ctx.top != VIEWPORT_CONTENT && b.plotting;
+                        append_clipped(&mut b.list, &sub_b.list, &cl, copy_layers);
 
                         let xclipframe = ctx.d.header.i64("XCLIPFRAME", 2);
                         let show_frame = if b.plotting { xclipframe == 1 } else { xclipframe != 0 };

@@ -233,17 +233,29 @@ fn copy_props(src: &Entity, dst: &mut Entity, m: &MatchProps) {
         _ => {}
     }
     if m.center {
-        let center_xdata: Vec<_> = src
-            .common
-            .xdata
-            .iter()
-            .filter(|t| t.code == 1001 && (t.value.eq_ignore_ascii_case("ACAD_CENTERLINE") || t.value.eq_ignore_ascii_case("ACAD_CENTERMARK")))
-            .cloned()
-            .collect();
+        let is_center = |v: &str| v.eq_ignore_ascii_case("ACAD_CENTERLINE") || v.eq_ignore_ascii_case("ACAD_CENTERMARK");
+        let mut center_xdata = Vec::new();
+        let mut in_center = false;
+        for t in &src.common.xdata {
+            if t.code == 1001 {
+                in_center = is_center(&t.value);
+            }
+            if in_center {
+                center_xdata.push(t.clone());
+            }
+        }
         if !center_xdata.is_empty() {
-            dst.common.xdata.retain(|t| {
-                !(t.code == 1001 && (t.value.eq_ignore_ascii_case("ACAD_CENTERLINE") || t.value.eq_ignore_ascii_case("ACAD_CENTERMARK")))
-            });
+            let mut kept = Vec::new();
+            let mut in_dst_center = false;
+            for t in &dst.common.xdata {
+                if t.code == 1001 {
+                    in_dst_center = is_center(&t.value);
+                }
+                if !in_dst_center {
+                    kept.push(t.clone());
+                }
+            }
+            dst.common.xdata = kept;
             dst.common.xdata.extend(center_xdata);
         }
     }
@@ -317,7 +329,19 @@ pub(super) fn run_matchprop_settings(s: &mut Session, p: &Value) -> Result<Value
     if let Some(v) = p.get("properties")
         && !v.is_null()
     {
-        s.last_used.matchprop = MatchProps::from_json(v)?;
+        s.last_used.matchprop = match v {
+            Value::Object(o) => {
+                let mut m = s.last_used.matchprop;
+                for (n, x) in o {
+                    let on = x.as_bool().ok_or_else(|| bad("matchprop.settings", format!("`properties.{n}` must be true or false")))?;
+                    if !m.set(n, on) {
+                        return Err(bad("matchprop.settings", format!("unknown property `{n}`")));
+                    }
+                }
+                m
+            }
+            other => MatchProps::from_json(other)?,
+        };
     }
     let m = s.last_used.matchprop;
     Ok(json!({

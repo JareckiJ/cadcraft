@@ -327,7 +327,14 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
             h.origin = mode.unwrap_or_default().origin(&h.loops, origin.unwrap_or(h.origin));
         }
         if !remove_bounds.is_empty() {
+            let before = h.loops.len();
             h.loops.retain(|l| !l.sources.iter().any(|s| remove_bounds.contains(s)));
+            if h.loops.is_empty() {
+                return Err(bad("hatchedit", "removing these boundaries would leave the hatch without loops"));
+            }
+            if h.loops.len() == before {
+                notes.push(format!("Hatch {}: no loop is linked to the given boundaries.", handle.hex()));
+            }
             if !h.loops.iter().any(|l| l.outer)
                 && let Some(first) = h.loops.first_mut()
             {

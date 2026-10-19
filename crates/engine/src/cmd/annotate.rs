@@ -488,12 +488,9 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
     let st = str_param(p, "style").map(str::to_string).unwrap_or_else(|| style(s));
     let arrow = bool_or(p, "arrow", true);
     let spline = bool_or(p, "spline", false);
-    let h =
-        s.add_entity(EntityKind::Leader(cadcraft_doc::Leader { vertices: pts.iter().map(|q| v3(*q)).collect(), arrow, spline, style: st.clone() }))?;
-    let mut out = vec![h.hex()];
     let last = pts.last().copied().unwrap_or(Vec2::ZERO);
 
-    if let Some(tol_val) = p.get("tolerance") {
+    let tol_entity = if let Some(tol_val) = p.get("tolerance") {
         let text = match tol_val {
             Value::String(t) => t.chars().take(cadcraft_doc::MAX_FRAME_CHARS).collect(),
             Value::Object(_) => super::tolerance::frame_text(tol_val)?,
@@ -512,14 +509,29 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             last
         };
-        let t = cadcraft_doc::Tolerance { insert: v3(insert_pt), dir: Vec3::new(1.0, 0.0, 0.0), style: st, text };
-        out.push(s.add_entity(EntityKind::Tolerance(t))?.hex());
-    } else if let Some(blk_name) = str_param(p, "block") {
+        Some(cadcraft_doc::Tolerance { insert: v3(insert_pt), dir: Vec3::new(1.0, 0.0, 0.0), style: st.clone(), text })
+    } else {
+        None
+    };
+
+    let block_name = if let Some(blk_name) = str_param(p, "block") {
         if s.doc()?.block(blk_name).is_none() {
             return Err(bad("leader", format!("no such block `{blk_name}`")));
         }
+        Some(blk_name.to_string())
+    } else {
+        None
+    };
+
+    let h =
+        s.add_entity(EntityKind::Leader(cadcraft_doc::Leader { vertices: pts.iter().map(|q| v3(*q)).collect(), arrow, spline, style: st.clone() }))?;
+    let mut out = vec![h.hex()];
+
+    if let Some(t) = tol_entity {
+        out.push(s.add_entity(EntityKind::Tolerance(t))?.hex());
+    } else if let Some(blk_name) = block_name {
         let ins = cadcraft_doc::Insert {
-            block: blk_name.to_string(),
+            block: blk_name,
             insert: v3(last),
             scale: Vec3::new(1.0, 1.0, 1.0),
             rotation: 0.0,

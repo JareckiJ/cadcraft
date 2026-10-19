@@ -30,6 +30,7 @@ const RAL_ENTRIES: &[Entry] = &[
     Entry { code: "1001", name: "Beige", rgb: Rgb(208, 176, 132) },
     Entry { code: "1002", name: "Sand yellow", rgb: Rgb(210, 170, 109) },
     Entry { code: "1003", name: "Signal yellow", rgb: Rgb(237, 164, 4) },
+    Entry { code: "1004", name: "Golden yellow", rgb: Rgb(226, 144, 0) },
     Entry { code: "1013", name: "Oyster white", rgb: Rgb(227, 224, 213) },
     Entry { code: "1015", name: "Light ivory", rgb: Rgb(230, 214, 185) },
     Entry { code: "2000", name: "Yellow orange", rgb: Rgb(218, 110, 0) },
@@ -82,6 +83,7 @@ const STANDARD_ENTRIES: &[Entry] = &[
     Entry { code: "pink", name: "Pink", rgb: Rgb(255, 192, 203) },
     Entry { code: "plum", name: "Plum", rgb: Rgb(221, 160, 221) },
     Entry { code: "purple", name: "Purple", rgb: Rgb(128, 0, 128) },
+    Entry { code: "red", name: "Red", rgb: Rgb(255, 0, 0) },
     Entry { code: "salmon", name: "Salmon", rgb: Rgb(250, 128, 114) },
     Entry { code: "silver", name: "Silver", rgb: Rgb(192, 192, 192) },
     Entry { code: "teal", name: "Teal", rgb: Rgb(0, 128, 128) },
@@ -100,7 +102,7 @@ pub fn lookup_color_book(book: &str, color: &str) -> Result<Rgb, ColorBookError>
     if b_norm.is_empty() {
         return Err(ColorBookError::BookNotFound(book.to_string()));
     }
-    let entries = if b_norm.contains("ral") {
+    let entries = if ["ral", "ralclassic", "raldesign", "raldigital"].iter().any(|k| b_norm == *k) {
         RAL_ENTRIES
     } else if ["standard", "colors", "css", "html", "color"].iter().any(|k| b_norm == *k) {
         STANDARD_ENTRIES
@@ -124,8 +126,11 @@ mod tests {
     fn test_lookup_color_book() {
         assert_eq!(lookup_color_book("RAL Classic", "RAL 1000"), Ok(Rgb(206, 198, 140)));
         assert_eq!(lookup_color_book("RAL", "1000"), Ok(Rgb(206, 198, 140)));
+        assert_eq!(lookup_color_book("RAL", "1004"), Ok(Rgb(226, 144, 0)));
         assert_eq!(lookup_color_book("ral", "green beige"), Ok(Rgb(206, 198, 140)));
         assert_eq!(lookup_color_book("Standard", "Coral"), Ok(Rgb(255, 127, 80)));
+        assert_eq!(lookup_color_book("HTML", "red"), Ok(Rgb(255, 0, 0)));
+        assert_eq!(lookup_color_book("General", "1000"), Err(ColorBookError::BookNotFound("General".into())));
         assert!(lookup_color_book("UnknownBook", "Red").is_err());
         assert!(lookup_color_book("RAL", "9999").is_err());
     }

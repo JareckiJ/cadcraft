@@ -48,14 +48,14 @@ fn object_boundary_points(d: &Drawing, h: Handle) -> Result<Vec<Vec2>> {
 
 /// Convert an image's pixel coordinate to world coordinates.
 fn image_pixel_to_world(img: &Image, px: Vec2) -> Vec2 {
-    img.insert.xy() + img.u.xy() * (px.x * img.pixel_size.x) + img.v.xy() * (px.y * img.pixel_size.y)
+    img.insert.xy() + img.u.xy() * px.x + img.v.xy() * px.y
 }
 
 /// Convert a world coordinate to an image's pixel coordinates.
 fn image_world_to_pixel(img: &Image, w: Vec2) -> Option<Vec2> {
     let rel = w - img.insert.xy();
-    let ux = img.u.xy() * img.pixel_size.x;
-    let vy = img.v.xy() * img.pixel_size.y;
+    let ux = img.u.xy();
+    let vy = img.v.xy();
     let det = ux.cross(vy);
     if det.abs() < 1e-12 {
         return None;
@@ -801,7 +801,6 @@ impl Interactive for ClipM {
             }
             EntityKind::Viewport(_) => {
                 let mut vp = Box::new(crate::cmd::layout::viewports::VpclipM::default());
-                let _ = vp.begin(s)?;
                 let _ = vp.input(s, Input::Pick(vec![h]))?;
                 self.sub = Some(vp);
                 Ok(Step::Continue)

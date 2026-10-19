@@ -139,27 +139,7 @@ fn parse_vec3(v: &Value) -> Option<Vec3> {
     }
 }
 
-fn parse_point3d(s: &Session, t: &str) -> Option<Vec3> {
-    let t = t.trim();
-    let is_wcs = t.starts_with('*');
-    let s_clean = if is_wcs { &t[1..] } else { t };
-    let parts: Vec<&str> = s_clean.split(',').map(str::trim).collect();
-    if parts.len() >= 2 {
-        let x: f64 = parts[0].parse().ok()?;
-        let y: f64 = parts[1].parse().ok()?;
-        let z: f64 = if parts.len() >= 3 { parts[2].parse().ok()? } else { s.doc().map(|d| d.header.elevation()).unwrap_or(0.0) };
-        if x.is_finite() && y.is_finite() && z.is_finite() {
-            let pt = Vec3::new(x, y, z);
-            return Some(if is_wcs {
-                pt
-            } else {
-                let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                ucs.to_wcs(pt)
-            });
-        }
-    }
-    None
-}
+use super::modeling3d::{parse_point3d, point_to_vec3};
 
 // ---------------- 3DMOVE ----------------
 
@@ -231,9 +211,7 @@ impl Interactive for Move3dM {
 
         match (self.base, i) {
             (None, Input::Point(p)) => {
-                let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                self.base = Some(ucs.to_wcs(Vec3::new(p.x, p.y, elev)));
+                self.base = Some(point_to_vec3(s, p));
                 Ok(Step::Continue)
             }
             (None, Input::Text(t)) => {
@@ -245,9 +223,7 @@ impl Interactive for Move3dM {
                 }
             }
             (Some(b), Input::Point(p)) => {
-                let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                let p2 = ucs.to_wcs(Vec3::new(p.x, p.y, elev));
+                let p2 = point_to_vec3(s, p);
                 let delta = p2 - b;
                 transform_entities_3d(s, &self.sel.picked, &Mat4::translate(delta), false)?;
                 Ok(Step::Done)
@@ -356,9 +332,7 @@ impl Interactive for Rotate3dM {
         if self.base.is_none() {
             match i {
                 Input::Point(p) => {
-                    let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                    let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                    self.base = Some(ucs.to_wcs(Vec3::new(p.x, p.y, elev)));
+                    self.base = Some(point_to_vec3(s, p));
                     return Ok(Step::Continue);
                 }
                 Input::Text(t) => {
@@ -513,11 +487,7 @@ impl Interactive for AlignM {
 
         let parse_pt = |s: &Session, i: &Input| -> Option<Vec3> {
             match i {
-                Input::Point(p) => {
-                    let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                    let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                    Some(ucs.to_wcs(Vec3::new(p.x, p.y, elev)))
-                }
+                Input::Point(p) => Some(point_to_vec3(s, *p)),
                 Input::Text(t) => parse_point3d(s, t),
                 _ => None,
             }
@@ -641,11 +611,7 @@ impl Interactive for Mirror3dM {
 
         let parse_pt = |s: &Session, i: &Input| -> Option<Vec3> {
             match i {
-                Input::Point(p) => {
-                    let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                    let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                    Some(ucs.to_wcs(Vec3::new(p.x, p.y, elev)))
-                }
+                Input::Point(p) => Some(point_to_vec3(s, *p)),
                 Input::Text(t) => parse_point3d(s, t),
                 _ => None,
             }
@@ -710,6 +676,10 @@ fn run_3darray(s: &mut Session, p: &Value) -> Result<Value> {
         let rows = p.get("rows").and_then(Value::as_u64).unwrap_or(1) as usize;
         let cols = p.get("cols").and_then(Value::as_u64).unwrap_or(1) as usize;
         let levels = p.get("levels").and_then(Value::as_u64).unwrap_or(1) as usize;
+        let total = rows.saturating_mul(cols).saturating_mul(levels).saturating_mul(hs.len());
+        if (total as u64) > s.settings.maxarray {
+            return Err(bad("3darray", format!("Maximum array size ({}) exceeded", s.settings.maxarray)));
+        }
         let row_dist = p.get("rowDist").or_else(|| p.get("rowSpacing")).and_then(Value::as_f64).unwrap_or(0.0);
         let col_dist = p.get("colDist").or_else(|| p.get("colSpacing")).and_then(Value::as_f64).unwrap_or(0.0);
         let level_dist = p.get("levelDist").or_else(|| p.get("levelSpacing")).and_then(Value::as_f64).unwrap_or(0.0);
@@ -824,6 +794,10 @@ impl Interactive for Array3dM {
                 4 => self.col_dist = num,
                 _ => {
                     self.level_dist = num;
+                    let total = self.rows.saturating_mul(self.cols).saturating_mul(self.levels).saturating_mul(self.sel.picked.len());
+                    if (total as u64) > s.settings.maxarray {
+                        return Err(bad("3darray", format!("Maximum array size ({}) exceeded", s.settings.maxarray)));
+                    }
                     for l in 0..self.levels {
                         for r in 0..self.rows {
                             for c in 0..self.cols {
@@ -850,10 +824,10 @@ impl Interactive for Array3dM {
 // ---------------- Slice ----------------
 
 pub fn run_slice(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
+    let targets = target_handles(s, p);
+    if targets.is_empty() {
+        return Err(bad("slice", "no objects selected"));
+    }
     let p1 = p.get("p1").and_then(parse_vec3).unwrap_or(Vec3::ZERO);
     let p2 = p.get("p2").and_then(parse_vec3).unwrap_or(Vec3::new(1.0, 0.0, 0.0));
     let p3 = p.get("p3").and_then(parse_vec3).unwrap_or(Vec3::new(0.0, 1.0, 0.0));
@@ -862,9 +836,6 @@ pub fn run_slice(s: &mut Session, p: &Value) -> Result<Value> {
     let v1 = p2 - p1;
     let v2 = p3 - p1;
     let normal = if v1.cross(v2).len() > 1e-6 { v1.cross(v2).normalized() } else { Vec3::Z };
-
-    let doc = s.doc()?;
-    let targets = if handles.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { handles };
 
     let mut sliced_handles = Vec::new();
     for h in targets {
@@ -878,12 +849,9 @@ pub fn run_slice(s: &mut Session, p: &Value) -> Result<Value> {
             let all_pos = d0 >= -1e-6 && d1 >= -1e-6 && d2 >= -1e-6 && d3 >= -1e-6;
             let all_neg = d0 <= 1e-6 && d1 <= 1e-6 && d2 <= 1e-6 && d3 <= 1e-6;
 
-            if all_pos || keep_both {
-                sliced_handles.push(h);
-            } else if all_neg {
+            if all_neg && !keep_both {
                 s.doc_mut()?.remove_entity(h);
-            } else {
-                // Face crosses plane: for simplicity keep positive half
+            } else if all_pos || keep_both {
                 sliced_handles.push(h);
             }
         }
@@ -1067,14 +1035,15 @@ pub fn run_interfere(s: &mut Session, p: &Value) -> Result<Value> {
 
     let doc = s.doc()?;
     let set1 = if first.is_empty() { doc.model.iter().map(|e| e.handle).collect::<Vec<_>>() } else { first };
-    let set2 = if second.is_empty() { set1.clone() } else { second };
+    let same_set = second.is_empty();
+    let set2 = if same_set { set1.clone() } else { second };
 
     let mut interference_count = 0;
     for &h1 in &set1 {
         let Some(e1) = doc.entity(h1) else { continue };
         let b1 = cadcraft_doc::entity_bounds(doc, e1, 0);
         for &h2 in &set2 {
-            if h1 == h2 {
+            if h1 == h2 || (same_set && h1 >= h2) {
                 continue;
             }
             let Some(e2) = doc.entity(h2) else { continue };
@@ -1132,13 +1101,8 @@ impl Interactive for InterfereM {
 
 // ---------------- Convert to Solid / Surface ----------------
 
-pub fn run_convtosolid(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    s.echo(format!("Convert to Solid: {} objects converted.", handles.len()));
-    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+pub fn run_convtosolid(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("convtosolid", "CONVTOSOLID is not available yet"))
 }
 
 pub struct ConvToSolidM {
@@ -1182,13 +1146,8 @@ impl Interactive for ConvToSolidM {
     }
 }
 
-pub fn run_convtosurface(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    s.echo(format!("Convert to Surface: {} objects converted.", handles.len()));
-    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+pub fn run_convtosurface(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("convtosurface", "CONVTOSURFACE is not available yet"))
 }
 
 pub struct ConvToSurfaceM {
@@ -1314,13 +1273,8 @@ impl Interactive for XEdgesM {
 
 // ---------------- Extract Isolines ----------------
 
-pub fn run_extract_isolines(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    s.echo(format!("Extract Isolines: isolines extracted for {} entities.", handles.len()));
-    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+pub fn run_extract_isolines(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("extractisolines", "EXTRACTISOLINES is not available yet"))
 }
 
 pub struct ExtractIsolinesM {

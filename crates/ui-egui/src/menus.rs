@@ -414,8 +414,16 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "tolerance.edit" | "toledit" if params.is_null() => {
-            if let Some(h) = app.session.selection().first() {
-                crate::tolerancedlg::open_edit(app, *h);
+            let tol_h = app
+                .session
+                .selection()
+                .iter()
+                .find(|&&h| {
+                    app.session.doc().ok().and_then(|d| d.entity(h)).is_some_and(|e| matches!(e.kind, cadcraft_doc::EntityKind::Tolerance(_)))
+                })
+                .copied();
+            if let Some(h) = tol_h {
+                crate::tolerancedlg::open_edit(app, h);
             } else {
                 crate::tolerancedlg::open_create(app);
             }

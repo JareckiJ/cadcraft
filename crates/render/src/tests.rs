@@ -961,4 +961,26 @@ fn insert_clipping_clips_block_geometry() {
     let piece1 = inv_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(0.0, 0.0), 1e-4) && pts[1].near(Vec2::new(20.0, 0.0), 1e-4));
     let piece2 = inv_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(50.0, 0.0), 1e-4) && pts[1].near(Vec2::new(100.0, 0.0), 1e-4));
     assert!(piece1.is_some() && piece2.is_some(), "inverted keeps both outside pieces: {inv_pts:?}");
+
+    // Test clipped block nested inside a transformed parent insert:
+    let mut parent_blk = cadcraft_doc::Block::new("PARENT_BLK");
+    parent_blk.entities.push(cadcraft_doc::Entity::new(
+        cadcraft_doc::Handle(2),
+        EntityKind::Insert(cadcraft_doc::Insert {
+            block: "TEST_BLK".into(),
+            insert: Vec3::ZERO,
+            clip: Some(cadcraft_doc::ClipBoundary { points: vec![Vec2::new(20.0, -10.0), Vec2::new(50.0, 10.0)], enabled: true, inverted: false }),
+            ..Default::default()
+        }),
+    ));
+    d.blocks.insert("PARENT_BLK".into(), std::sync::Arc::new(parent_blk));
+
+    let parent_ins = cadcraft_doc::Insert { block: "PARENT_BLK".into(), insert: Vec3::new(100.0, 200.0, 0.0), ..Default::default() };
+    d.add(&Space::Model, Common::default(), EntityKind::Insert(parent_ins)).unwrap();
+
+    let nested_list = build(&d, &Space::Model, &Options::default());
+    let nested_pts: Vec<_> = nested_list.prims.iter().filter(|p| p.kind == Kind::Polyline).map(|p| nested_list.points(p)).collect();
+    let nested_piece =
+        nested_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(120.0, 200.0), 1e-4) && pts[1].near(Vec2::new(150.0, 200.0), 1e-4));
+    assert!(nested_piece.is_some(), "found transformed nested piece from 120 to 150: {nested_pts:?}");
 }

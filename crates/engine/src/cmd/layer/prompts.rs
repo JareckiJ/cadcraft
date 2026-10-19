@@ -342,10 +342,13 @@ impl LayerM {
             Stage::ColorBookColor(book) => match text {
                 None => Ok(Step::Continue),
                 Some(t) if t.trim().is_empty() => back(self, Stage::Option),
-                Some(t) => {
-                    let rgb = cadcraft_color::lookup_color_book(&book, t.trim()).map_err(|e| retry(e.to_string()))?;
-                    back(self, Stage::Layers(Change::Color(format!("{},{},{}", rgb.0, rgb.1, rgb.2))))
-                }
+                Some(t) => match cadcraft_color::lookup_color_book(&book, t.trim()) {
+                    Ok(rgb) => back(self, Stage::Layers(Change::Color(format!("{},{},{}", rgb.0, rgb.1, rgb.2)))),
+                    Err(e) => {
+                        self.stage = Stage::ColorBookColor(book);
+                        Err(retry(e.to_string()))
+                    }
+                },
             },
             Stage::TrueColor => match text.as_deref().map(Color::parse) {
                 None => Ok(Step::Continue),

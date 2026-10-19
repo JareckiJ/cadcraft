@@ -1,6 +1,6 @@
 # Target-app parity: CADCraft vs AutoCAD 2027
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (3D modeling primitives, meshes, 3D operations, 3D navigation, format commands, mpolygon; menu breadth 371 / 491 = 76% engine, 383 / 491 = 78% total) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (3D modeling primitives, meshes, 3D operations, 3D navigation, format commands, mpolygon; menu breadth 373 / 491 = 76% engine, 385 / 491 = 78% total) · **Target:** Autodesk AutoCAD 2027
 
 The authoritative assessment of how close CADCraft is to AutoCAD, and how much Opus 5.5 work
 remains. [ROADMAP.md](../ROADMAP.md) summarises it, [gaps.md](gaps.md) lists every shortfall,
@@ -12,7 +12,7 @@ and the deep checklists are [geometry-parity.md](geometry-parity.md),
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (AutoCAD for Mac menu items with a live command) | **383 / 491 = 78%** (371 = 76% counted by `cargo xtask parity`, which sees engine commands only; +12 UI-only items) | measured ([parity-checklist.md](parity-checklist.md), source scan) |
+| **Feature breadth** (AutoCAD for Mac menu items with a live command) | **385 / 491 = 78%** (373 = 76% counted by `cargo xtask parity`, which sees engine commands only; +12 UI-only items) | measured ([parity-checklist.md](parity-checklist.md), source scan) |
 | Feature breadth, 2D menus only (excluding 150 3D items) | **≈ 65%** (222 / 341 by `cargo xtask parity`'s rule) | measured (source scan, 2026-10-10) |
 | Feature depth, weighted by use (features dimension) | **≈ 41%** | estimated (table below) |
 | **Ready for real work** | **≈ 38%** | estimated (dimension table below; weighted 37.7%) |
@@ -157,8 +157,7 @@ presence: an option that prints "not available yet" doesn't count.
 | Blocks, attributes, xrefs, groups | 9% | 25% | 80–120 | static blocks and attributes; ATTSYNC, BATTMAN editing, DATAEXTRACTION/EATTEXT (#433); xrefs (#525); groups (#417); Block Editor for static blocks (BEDIT, BSAVE, BSAVEAS, BCLOSE); REFEDIT; dynamic block references read and edited; no dynamic-block authoring, XCLIP, DesignCenter | [gaps](gaps.md#features) |
 | Layouts, viewports, plotting | 9% | 35% | 35–50 | layouts, per-VP layers, page setups, plot styles (CTB/STB), Plot dialog (#160), Plot Preview and PUBLISH (#186), plotter devices (#564), PDF with text, layers and sheets (#567, #571), polygonal/object/clipped viewports (#453), annotative scales (#468); no MVIEW Restore, no system printers | [gaps](gaps.md#features) |
 | Inquiry and utilities | 4% | 30% | 30–45 | DIST, AREA, ID, LIST, MEASUREGEOM, CAL, FIND, COUNT across layouts, QuickCalc, COMPARE (#563), MASSPROP on regions (#510), autosave/recovery, AUDIT, RECOVER (#406), OPTIONS (#23); no SPELL (open PR #551), ETRANSMIT | [gaps](gaps.md#features) |
-| Parametric constraints | 2% | 50% | 20–30 | all 12 geometric and the dimensional constraints, own solver; DOF report, G2 Smooth, ellipse/spline/block geometry and CONSTRAINTINFER landed (#546) | [geometry-parity](geometry-parity.md#constraint-solver--50) |
-| 3D modelling, visualisation, rendering | 5% | 2% | 300–450 | no UCS, 3D views, orbit, solids, surfaces, meshes, sections, visual styles, materials, lights or rendering; 150 of the 491 menu items | [gaps](gaps.md#features) |
+| 3D modelling, visualisation, rendering | 5% | 25% | 160–240 | UCS management, PLAN, ELEVATION, THICKNESS; 3D Views (VPOINT, 10 presets), visual styles, 3D navigation (Orbit, Swivel); 3D operations (Move, Rotate, Align, Mirror, Array, Slice, Thicken, Interfere); 3D solids, surfaces and mesh primitives (Box, Wedge, Cone, Sphere, Cylinder, Torus, Pyramid, Polysolid, 3DFACE, Revsurf, Tabsurf, Rulesurf, Edgesurf); remaining gaps: materials, lights, camera, rendering, true ACIS solid modelling | [gaps](gaps.md#features) |
 | Collaboration and cloud (Sheet Set Manager, Share, Traces, Markup Import, Activity Insights, DWG Compare) | 2% | 5% | 40–70 | none of these exist | [gaps](gaps.md#features) |
 | **Features dimension** | 100% | **≈ 41%** | **735–1,115** | | |
 

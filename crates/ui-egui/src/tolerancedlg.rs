@@ -234,10 +234,11 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
     if apply {
         let mut lines = Vec::new();
-        if st.line1.symbol.is_some() || st.line1.tol1.is_some() || !st.line1.datums.is_empty() {
+        let used = |l: &cadcraft_doc::GdtLine| l.symbol.is_some() || l.tol1.is_some() || l.tol2.is_some() || !l.datums.is_empty();
+        if used(&st.line1) {
             lines.push(st.line1.clone());
         }
-        if st.line2.symbol.is_some() || st.line2.tol2.is_some() || !st.line2.datums.is_empty() {
+        if used(&st.line2) {
             lines.push(st.line2.clone());
         }
 

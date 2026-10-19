@@ -31,27 +31,7 @@ fn parse_vec3(v: &Value) -> Option<Vec3> {
     }
 }
 
-fn parse_point3d(s: &Session, t: &str) -> Option<Vec3> {
-    let t = t.trim();
-    let is_wcs = t.starts_with('*');
-    let s_clean = if is_wcs { &t[1..] } else { t };
-    let parts: Vec<&str> = s_clean.split(',').map(str::trim).collect();
-    if parts.len() >= 2 {
-        let x: f64 = parts[0].parse().ok()?;
-        let y: f64 = parts[1].parse().ok()?;
-        let z: f64 = if parts.len() >= 3 { parts[2].parse().ok()? } else { s.doc().map(|d| d.header.elevation()).unwrap_or(0.0) };
-        if x.is_finite() && y.is_finite() && z.is_finite() {
-            let pt = Vec3::new(x, y, z);
-            return Some(if is_wcs {
-                pt
-            } else {
-                let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                ucs.to_wcs(pt)
-            });
-        }
-    }
-    None
-}
+use super::modeling3d::{parse_point3d, point_to_vec3};
 
 fn run_3dface(s: &mut Session, p: &Value) -> Result<Value> {
     let pts: Vec<Vec3> = p.get("points").and_then(Value::as_array).map(|arr| arr.iter().filter_map(parse_vec3).collect()).unwrap_or_default();
@@ -143,9 +123,7 @@ impl Interactive for Face3dM {
                 }
             }
             Input::Point(p) => {
-                let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
-                let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-                let pt = ucs.to_wcs(Vec3::new(p.x, p.y, elev));
+                let pt = point_to_vec3(s, p);
                 self.add_pt(s, pt)?;
             }
             Input::Text(t) => {

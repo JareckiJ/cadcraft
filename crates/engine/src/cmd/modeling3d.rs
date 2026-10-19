@@ -154,10 +154,45 @@ fn vec3_val(p: &Value, key: &str) -> Option<Vec3> {
     }
 }
 
-fn point_to_vec3(s: &Session, p: Vec2) -> Vec3 {
+pub(crate) fn point_to_vec3(s: &Session, p: Vec2) -> Vec3 {
     let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
     let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
-    ucs.to_wcs(Vec3::new(p.x, p.y, elev))
+    // `p` is already WCS; recover its UCS XY and place it at the UCS elevation.
+    let local = ucs.to_ucs(Vec3::new(p.x, p.y, 0.0));
+    ucs.to_wcs(Vec3::new(local.x, local.y, elev))
+}
+
+pub(crate) fn parse_point3d(s: &Session, t: &str) -> Option<Vec3> {
+    let t = t.trim();
+    let is_wcs = t.starts_with('*') || t.starts_with("@*") || t.starts_with("*@");
+    let t = t.strip_prefix('*').unwrap_or(t).trim();
+    let (rel, body) = if let Some(b) = t.strip_prefix('@') {
+        let b = b.trim();
+        (true, b.strip_prefix('*').unwrap_or(b).trim())
+    } else if let Some(b) = t.strip_prefix('#') {
+        (false, b.trim())
+    } else {
+        (false, t)
+    };
+    let parts: Vec<&str> = body.split(',').map(str::trim).collect();
+    if parts.len() >= 2 {
+        let x: f64 = parts[0].parse().ok()?;
+        let y: f64 = parts[1].parse().ok()?;
+        let z: f64 = if parts.len() >= 3 { parts[2].parse().ok()? } else { s.doc().map(|d| d.header.elevation()).unwrap_or(0.0) };
+        if x.is_finite() && y.is_finite() && z.is_finite() {
+            let pt = Vec3::new(x, y, z);
+            let ucs = s.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world());
+            let wcs_pt = if is_wcs { pt } else { ucs.to_wcs(pt) };
+            return Some(if rel {
+                let elev = s.doc().map(|d| d.header.elevation()).unwrap_or(0.0);
+                let last3d = Vec3::new(s.last_point.x, s.last_point.y, elev);
+                last3d + wcs_pt
+            } else {
+                wcs_pt
+            });
+        }
+    }
+    None
 }
 
 // ---------------- Box ----------------
@@ -968,6 +1003,7 @@ pub fn run_revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 struct RevolveM {
     sel: SelectPhase,
+    axis_p1: Option<Vec3>,
 }
 
 impl RevolveM {
@@ -977,7 +1013,7 @@ impl RevolveM {
         } else {
             SelectPhase::default()
         };
-        Self { sel }
+        Self { sel, axis_p1: None }
     }
 }
 
@@ -986,7 +1022,13 @@ impl Interactive for RevolveM {
         "REVOLVE"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
-        if !self.sel.done { self.sel.prompt() } else { Prompt::new("Specify axis start point:", Accept::POINT) }
+        if !self.sel.done {
+            self.sel.prompt()
+        } else if self.axis_p1.is_none() {
+            Prompt::new("Specify axis start point:", Accept::POINT | Accept::TEXT)
+        } else {
+            Prompt::new("Specify axis endpoint:", Accept::POINT | Accept::TEXT)
+        }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if !self.sel.done {
@@ -1001,19 +1043,38 @@ impl Interactive for RevolveM {
             }
         }
 
-        let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
-        run_revolve(s, &json!({ "handles": hs }))?;
-        Ok(Step::Done)
+        let pt = match &i {
+            Input::Point(p) => Some(point_to_vec3(s, *p)),
+            Input::Text(t) => parse_point3d(s, t),
+            _ => None,
+        };
+
+        let Some(pt) = pt else {
+            return Ok(Step::Continue);
+        };
+
+        if self.axis_p1.is_none() {
+            self.axis_p1 = Some(pt);
+            Ok(Step::Continue)
+        } else {
+            let p1 = self.axis_p1.unwrap_or(Vec3::ZERO);
+            let p2 = pt;
+            let hs = self.sel.picked.iter().map(|h| h.hex()).collect::<Vec<_>>();
+            run_revolve(
+                s,
+                &json!({
+                    "handles": hs,
+                    "axisP1": [p1.x, p1.y, p1.z],
+                    "axisP2": [p2.x, p2.y, p2.z],
+                }),
+            )?;
+            Ok(Step::Done)
+        }
     }
 }
 
-pub fn run_sweep(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    s.echo("Sweep path completed.");
-    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+pub fn run_sweep(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("sweep", "SWEEP is not available yet"))
 }
 
 struct SweepM {
@@ -1056,13 +1117,8 @@ impl Interactive for SweepM {
     }
 }
 
-pub fn run_loft(s: &mut Session, p: &Value) -> Result<Value> {
-    let handles = match p.get("handles") {
-        Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).filter_map(Handle::parse_hex).collect::<Vec<_>>(),
-        _ => Vec::new(),
-    };
-    s.echo("Loft cross sections completed.");
-    Ok(json!({ "handles": handles.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
+pub fn run_loft(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("loft", "LOFT is not available yet"))
 }
 
 struct LoftM {
@@ -1135,27 +1191,22 @@ impl Interactive for SectionPlaneM {
 
 // ---------------- Surfaces & Mesh ----------------
 
-pub fn run_smooth_mesh(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.echo("Smooth Mesh: mesh tessellation refined.");
-    Ok(json!({ "status": "ok" }))
+pub fn run_smooth_mesh(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("smoothmesh", "SMOOTHMESH is not available yet"))
 }
 
-pub fn run_revsurf(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.echo("REVSURF: Revolved surface mesh created.");
-    Ok(json!({ "status": "ok" }))
+pub fn run_revsurf(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("revsurf", "REVSURF is not available yet"))
 }
 
-pub fn run_tabsurf(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.echo("TABSURF: Tabulated surface mesh created.");
-    Ok(json!({ "status": "ok" }))
+pub fn run_tabsurf(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("tabsurf", "TABSURF is not available yet"))
 }
 
-pub fn run_rulesurf(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.echo("RULESURF: Ruled surface mesh created.");
-    Ok(json!({ "status": "ok" }))
+pub fn run_rulesurf(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("rulesurf", "RULESURF is not available yet"))
 }
 
-pub fn run_edgesurf(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.echo("EDGESURF: Edge surface mesh created.");
-    Ok(json!({ "status": "ok" }))
+pub fn run_edgesurf(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("edgesurf", "EDGESURF is not available yet"))
 }

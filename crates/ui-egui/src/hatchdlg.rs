@@ -434,7 +434,6 @@ enum Action {
     None,
     Ok,
     Cancel,
-    Preview,
     Pick(PickMode),
     Inherit,
     AddBoundaries,
@@ -506,9 +505,6 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             if ui.button(crate::tl!("Cancel")).clicked() {
                 action = Action::Cancel;
             }
-            if ui.add_enabled(ready, egui::Button::new(crate::tl!("Preview"))).clicked() {
-                action = Action::Preview;
-            }
         });
     });
     app.hatch_dlg = Some(st);
@@ -521,15 +517,6 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         Action::Cancel => {
             app.hatch_dlg = None;
             *open = false;
-        }
-        Action::Preview => {
-            if let Some(s) = app.hatch_dlg.as_mut() {
-                if s.edit.is_empty() && s.points.is_empty() && s.handles.is_empty() {
-                    s.error = Some(crate::tl!("No boundary points or objects selected").into());
-                } else {
-                    s.error = None;
-                }
-            }
         }
         Action::Pick(mode) => start_pick(app, mode),
         Action::Inherit => {

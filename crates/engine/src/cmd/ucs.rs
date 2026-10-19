@@ -152,8 +152,14 @@ pub fn run_ucs_zaxis(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn run_ucs_view(s: &mut Session) -> Result<Value> {
     let mut cur = s.current_ucs();
     cur.name.clear();
-    cur.x_axis = Vec3::new(1.0, 0.0, 0.0);
-    cur.y_axis = Vec3::new(0.0, 1.0, 0.0);
+    let z_axis = s.doc().map(|d| d.header.view_dir()).unwrap_or(Vec3::Z);
+    let ax = if z_axis.x.abs() < (1.0 / 64.0) && z_axis.y.abs() < (1.0 / 64.0) {
+        Vec3::new(0.0, 1.0, 0.0).cross(z_axis)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0).cross(z_axis)
+    };
+    cur.x_axis = ax.normalized();
+    cur.y_axis = z_axis.cross(cur.x_axis);
     s.set_current_ucs(cur)?;
     s.echo("UCS plane set parallel to view");
     Ok(json!({ "view": true }))
@@ -313,11 +319,14 @@ pub fn run_plan_mode(s: &mut Session, mode: &str) -> Result<Value> {
     let mode = mode.trim().to_ascii_lowercase();
     match mode.as_str() {
         "world" | "w" => {
+            s.doc_mut()?.header.set_view_dir(Vec3::new(0.0, 0.0, 1.0));
             s.touch();
             s.echo("Regenerating model (WCS plan view).");
             Ok(json!({ "plan": "world" }))
         }
         "current" | "c" => {
+            let z = s.current_ucs().z_axis();
+            s.doc_mut()?.header.set_view_dir(z);
             s.touch();
             s.echo("Regenerating model (Current UCS plan view).");
             Ok(json!({ "plan": "current" }))
@@ -328,10 +337,10 @@ pub fn run_plan_mode(s: &mut Session, mode: &str) -> Result<Value> {
 
 pub fn run_plan_named(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").ok_or_else(|| bad("plan", "`name` required"))?;
-    let found = s.doc()?.ucss.iter().any(|u| u.name.eq_ignore_ascii_case(name));
-    if !found {
-        return Err(bad("plan", format!("UCS \"{name}\" not found")));
-    }
+    let ucs =
+        s.doc()?.ucss.iter().find(|u| u.name.eq_ignore_ascii_case(name)).cloned().ok_or_else(|| bad("plan", format!("UCS \"{name}\" not found")))?;
+    let z = ucs.z_axis();
+    s.doc_mut()?.header.set_view_dir(z);
     s.touch();
     s.echo(format!("Regenerating model (UCS \"{name}\" plan view)."));
     Ok(json!({ "plan": name }))

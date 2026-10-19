@@ -136,7 +136,72 @@ fn run_tolerance(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Handle::parse_hex)
         .or_else(|| p.get("handles").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).and_then(Handle::parse_hex))
     {
-        let text = frame_text(p)?;
+        if crate::cmd::curves::is_locked(s, h) {
+            return Err(bad("tolerance", "object is on a locked layer"));
+        }
+        let cur_text = match s.doc()?.entity(h).map(|e| &e.kind) {
+            Some(EntityKind::Tolerance(t)) => t.text.clone(),
+            _ => return Err(bad("tolerance", "specified entity is not a tolerance")),
+        };
+        let has_frame_fields = p.get("text").is_some()
+            || p.get("symbol").is_some()
+            || p.get("tol1").is_some()
+            || p.get("tol2").is_some()
+            || p.get("datums").is_some()
+            || p.get("line2").is_some()
+            || p.get("height").is_some()
+            || p.get("projected").is_some()
+            || p.get("datumId").is_some();
+
+        let text = if !has_frame_fields {
+            cur_text
+        } else if let Some(t) = str_param(p, "text") {
+            t.chars().take(MAX_FRAME_CHARS).collect()
+        } else {
+            let mut f = cadcraft_doc::deconstruct_frame(&cur_text);
+            if f.lines.is_empty() {
+                f.lines.push(GdtLine::default());
+            }
+            if p.get("symbol").is_some() {
+                f.lines[0].symbol = symbol_value("tolerance", p.get("symbol"))?;
+            }
+            if p.get("tol1").is_some() {
+                f.lines[0].tol1 = tol_value(p.get("tol1"));
+            }
+            if p.get("tol2").is_some() {
+                f.lines[0].tol2 = tol_value(p.get("tol2"));
+            }
+            if p.get("datums").is_some() {
+                f.lines[0].datums = datums_value(p.get("datums"));
+            }
+            if let Some(l2) = p.get("line2") {
+                if l2.is_object() {
+                    let line2 = line_value("tolerance", l2)?;
+                    if f.lines.len() > 1 {
+                        f.lines[1] = line2;
+                    } else {
+                        f.lines.push(line2);
+                    }
+                } else if l2.is_null() && f.lines.len() > 1 {
+                    f.lines.truncate(1);
+                }
+            }
+            if let Some(h_val) = p.get("height") {
+                f.height = match h_val {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                };
+            }
+            if let Some(proj) = p.get("projected").and_then(Value::as_bool) {
+                f.projected = proj;
+            }
+            if let Some(did) = str_param(p, "datumId") {
+                f.datum_id = did.to_string();
+            }
+            cadcraft_doc::compose_frame(&f)
+        };
+
         if cadcraft_doc::parse_frame(&text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
             return Err(bad("tolerance", "the feature control frame is empty"));
         }
@@ -188,7 +253,7 @@ fn run_tolerance(s: &mut Session, p: &Value) -> Result<Value> {
 /// then the location.
 struct ToleranceM {
     step: usize,
-    line: GdtLine,
+    frame: GdtFrame,
     style: String,
     edit_handle: Option<Handle>,
 }
@@ -217,7 +282,7 @@ const VALUE: Accept = Accept { point: false, number: false, text: false, select:
 impl ToleranceM {
     fn new(s: &Session) -> Self {
         let mut edit_handle = None;
-        let mut line = GdtLine { symbol: Some(GdtSymbol::Position), ..Default::default() };
+        let mut frame = GdtFrame { lines: vec![GdtLine { symbol: Some(GdtSymbol::Position), ..Default::default() }], ..Default::default() };
         let mut style = current_dimstyle(s);
 
         if s.selection().len() == 1 {
@@ -225,18 +290,29 @@ impl ToleranceM {
             if let Some((h, EntityKind::Tolerance(t))) = entity_tol {
                 edit_handle = Some(h);
                 style = t.style.clone();
-                let f = cadcraft_doc::deconstruct_frame(&t.text);
-                if let Some(l) = f.lines.first() {
-                    line = l.clone();
+                frame = cadcraft_doc::deconstruct_frame(&t.text);
+                if frame.lines.is_empty() {
+                    frame.lines.push(GdtLine::default());
                 }
             }
         }
 
-        ToleranceM { step: 0, line, style, edit_handle }
+        ToleranceM { step: 0, frame, style, edit_handle }
+    }
+
+    fn line(&self) -> Option<&GdtLine> {
+        self.frame.lines.first()
+    }
+
+    fn line_mut(&mut self) -> &mut GdtLine {
+        if self.frame.lines.is_empty() {
+            self.frame.lines.push(GdtLine::default());
+        }
+        &mut self.frame.lines[0]
     }
 
     fn text(&self) -> String {
-        cadcraft_doc::compose_frame(&GdtFrame { lines: vec![self.line.clone()], ..Default::default() })
+        cadcraft_doc::compose_frame(&self.frame)
     }
     fn at_location(&mut self, s: &mut Session) -> Step {
         self.step = 6;
@@ -255,20 +331,20 @@ impl Interactive for ToleranceM {
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.step {
             0 => {
-                let def = self.line.symbol.map(|s| s.name()).unwrap_or("Position");
+                let def = self.line().and_then(|l| l.symbol).map(|s| s.name()).unwrap_or("Position");
                 Prompt::new("Enter geometric characteristic", VALUE).kw(SYMBOL_KW).default(def)
             }
             1 => {
-                let def = self.line.tol1.as_ref().map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
+                let def = self.line().and_then(|l| l.tol1.as_ref()).map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
                 Prompt::new("Enter first tolerance value", VALUE).default(def)
             }
             2 => {
-                let def = self.line.tol2.as_ref().map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
+                let def = self.line().and_then(|l| l.tol2.as_ref()).map(|t| t.value.as_str()).filter(|v| !v.is_empty()).unwrap_or("none");
                 Prompt::new("Enter second tolerance value", VALUE).default(def)
             }
             n @ 3..=5 => {
                 let idx = n - 3;
-                let def = self.line.datums.get(idx).map(|d| d.letter.as_str()).filter(|l| !l.is_empty()).unwrap_or("none");
+                let def = self.line().and_then(|l| l.datums.get(idx)).map(|d| d.letter.as_str()).filter(|l| !l.is_empty()).unwrap_or("none");
                 Prompt::new(format!("Enter datum reference {}", idx + 1), VALUE).default(def)
             }
             _ => {
@@ -293,9 +369,9 @@ impl Interactive for ToleranceM {
             0 => {
                 match (&i, &text) {
                     (Input::Enter, _) => {}
-                    (_, Some(t)) if t.eq_ignore_ascii_case("none") => self.line.symbol = None,
+                    (_, Some(t)) if t.eq_ignore_ascii_case("none") => self.line_mut().symbol = None,
                     (_, Some(t)) => match GdtSymbol::parse(t).filter(|g| g.is_characteristic()) {
-                        Some(g) => self.line.symbol = Some(g),
+                        Some(g) => self.line_mut().symbol = Some(g),
                         None => {
                             s.echo("Requires a geometric characteristic or None.");
                             return Ok(Step::Continue);
@@ -311,9 +387,9 @@ impl Interactive for ToleranceM {
                     Input::Text(_) | Input::Keyword(_) => {
                         let v = (!none(&text)).then(|| parse_tol(text.as_deref().unwrap_or("")));
                         if self.step == 1 {
-                            self.line.tol1 = v;
+                            self.line_mut().tol1 = v;
                         } else {
-                            self.line.tol2 = v;
+                            self.line_mut().tol2 = v;
                         }
                     }
                     _ => return Ok(Step::Continue),
@@ -324,19 +400,21 @@ impl Interactive for ToleranceM {
                 let idx = self.step - 3;
                 match &i {
                     Input::Enter => {
-                        if self.line.datums.get(idx).is_none() {
+                        if self.line().and_then(|l| l.datums.get(idx)).is_none() {
                             return Ok(self.at_location(s));
                         }
                     }
                     Input::Text(_) | Input::Keyword(_) => {
                         if none(&text) {
+                            self.line_mut().datums.truncate(idx);
                             return Ok(self.at_location(s));
                         }
                         let d = parse_datum(text.as_deref().unwrap_or(""));
-                        if idx < self.line.datums.len() {
-                            self.line.datums[idx] = d;
+                        let line = self.line_mut();
+                        if idx < line.datums.len() {
+                            line.datums[idx] = d;
                         } else {
-                            self.line.datums.push(d);
+                            line.datums.push(d);
                         }
                         if self.step == 5 {
                             return Ok(self.at_location(s));

@@ -962,6 +962,9 @@ impl Session {
         // 4. Bare system variable (e.g. ORTHOMODE)
         let spec = if let Some(spec) = find_command(&unadorned) {
             Some(spec)
+        } else if unadorned.starts_with('-') {
+            let dashed = cmd::resolve_alias(&unadorned);
+            find_command(&dashed).or_else(|| find_command(&lower))
         } else if let Some(spec) = find_command(&lower) {
             Some(spec)
         } else if !transparent && let Some(f) = self.lisp_command(&lower) {
@@ -1569,7 +1572,15 @@ impl Session {
         {
             return self.input(Input::Keyword(k));
         }
-        if prompt.accept.point {
+        let is_3d_coord = prompt.accept.text && {
+            let t = tt.trim();
+            let body = t.strip_prefix('*').unwrap_or(t);
+            let body = body.strip_prefix('@').or_else(|| body.strip_prefix('#')).unwrap_or(body);
+            let body = body.strip_prefix('*').unwrap_or(body);
+            let parts: Vec<&str> = body.split(',').collect();
+            parts.len() == 3 && parts.iter().all(|s| crate::units::parse_distance(s.trim()).is_some())
+        };
+        if prompt.accept.point && !is_3d_coord {
             let ucs = self.doc().ok().map(|d| d.header.ucs());
             if let Some(p) = prompt::parse_point_ucs(tt, self.last_point, &self.angle_settings(), ucs.as_ref()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
