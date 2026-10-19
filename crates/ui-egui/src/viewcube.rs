@@ -298,11 +298,15 @@ fn ucs_menu(app: &mut CadApp, popup: egui::Popup<'_>) {
             ui.close();
         }
     });
-    if let Some((id, params)) = action
-        && let Err(e) = app.run(id, params)
-    {
-        app.session.echo(e);
+    if let Some((id, params)) = action {
+        menu_action(app, id, params);
     }
+}
+
+/// Run a coordinate-system menu pick. A failure is already in the command history:
+/// [`CadApp::run`] echoes it (and the icon switch runs UCSICON through it).
+fn menu_action(app: &mut CadApp, id: &str, params: serde_json::Value) {
+    let _ = app.run(id, params);
 }
 
 #[cfg(test)]
@@ -346,6 +350,22 @@ mod tests {
 
     fn canvas(app: &CadApp) -> Rect {
         app.canvas.rect.unwrap_or(Rect::NOTHING)
+    }
+
+    /// A menu pick that fails (a tilted named UCS) tells the user once, not twice.
+    #[test]
+    fn a_failed_menu_pick_is_reported_once() {
+        let (mut app, _ctx) = app_and_ctx();
+        let tilted = cadcraft_engine::doc::Ucs {
+            name: "T".into(),
+            origin: cadcraft_engine::geom::Vec3::ZERO,
+            x_axis: cadcraft_engine::geom::Vec3::new(1.0, 0.0, 0.0),
+            y_axis: cadcraft_engine::geom::Vec3::new(0.0, 0.0, 1.0),
+        };
+        app.session.doc_mut().unwrap().ucss.push(tilted);
+        menu_action(&mut app, "ucs", json!({"option": "named", "action": "restore", "name": "T"}));
+        let told = app.session.log.iter().filter(|l| l.contains("tilted out of the XY plane")).count();
+        assert_eq!(told, 1, "{:?}", app.session.log);
     }
 
     fn view(app: &CadApp) -> (f64, f64, f64) {

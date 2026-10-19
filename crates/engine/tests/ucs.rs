@@ -475,6 +475,26 @@ fn ucsicon_options() {
     assert!(cadcraft_engine::sysvars::set(&mut s, "UCSICON", &json!(9)).is_err());
 }
 
+/// UCSICON is its own undo step: undoing it brings the icon back, and an undo never undoes the
+/// edit before it while leaving the icon setting behind (or the other way round).
+#[test]
+fn ucsicon_is_undone_on_its_own() {
+    let mut s = session();
+    let lines = |s: &Session| s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
+    s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    typed(&mut s, &["ucsicon off"]);
+    assert_eq!(s.ucsicon_bits() & 1, 0);
+    s.undo().unwrap();
+    assert_eq!(s.ucsicon_bits() & 1, 1, "undo takes back UCSICON OFF");
+    assert_eq!(lines(&s), 1, "and leaves the line drawn before it");
+    s.undo().unwrap();
+    assert_eq!(lines(&s), 0);
+    assert_eq!(s.ucsicon_bits() & 1, 1);
+    s.redo().unwrap();
+    s.redo().unwrap();
+    assert_eq!((lines(&s), s.ucsicon_bits() & 1), (1, 0), "redo brings both back");
+}
+
 #[test]
 fn a_tilted_ucs_from_a_file_is_kept_and_input_stays_in_the_world_ucs() {
     let mut s = session();

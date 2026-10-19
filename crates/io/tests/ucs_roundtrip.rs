@@ -183,6 +183,32 @@ fn broken_ucs_values_are_not_written_back() {
     assert!(back.layouts[0].ucs.is_none());
 }
 
+/// Model space's UCS name is written only for a UCS the drawing has, with the axes it came with:
+/// a name without its record, or beside axes replaced by the World UCS's, is left out of both
+/// $UCSNAME and CADCraft's copy of it.
+#[test]
+fn a_ucs_name_without_its_ucs_is_not_written() {
+    let name_written = |d: &Drawing| {
+        let text = cadcraft_io::write_dxf(d);
+        let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+        (
+            group(&header_var(&text, "UCSNAME"), "2").unwrap_or_default().trim().to_string(),
+            text.contains("CADCRAFT_UCSNAME"),
+            back.header.str("UCSNAME", ""),
+        )
+    };
+    // Kept: SITE is in the UCS table and its axes are current.
+    assert_eq!(name_written(&drawing()), ("SITE".to_string(), true, "SITE".to_string()));
+    // No such record (as a file can say).
+    let mut ghost = drawing();
+    ghost.header.set_str("UCSNAME", "GHOST");
+    assert_eq!(name_written(&ghost), (String::new(), false, String::new()));
+    // The record is there, but the axes beside the name are unusable: written as the World UCS.
+    let mut broken = drawing();
+    broken.header.set("UCSXDIR", HVal::Point(Vec3::ZERO));
+    assert_eq!(name_written(&broken), (String::new(), false, String::new()));
+}
+
 #[test]
 fn hostile_layout_ucs_groups_are_ignored() {
     let d = Drawing::default();
