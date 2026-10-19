@@ -1007,6 +1007,8 @@ fn refedit_dims_locked_drawing_and_faded_block_copies() {
         items: vec![cadcraft_doc::WorkItem { copy: h_work, source: None }],
         ghosts: vec![(h_ghost, cadcraft_doc::Handle(888))],
         released: Vec::new(),
+        xref_file: None,
+        nested_path: Vec::new(),
     });
 
     let list = build(&d, &Space::Model, &Options::default());

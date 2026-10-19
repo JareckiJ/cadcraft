@@ -68,7 +68,7 @@ pub(crate) fn after_open(s: &mut Session, i: usize) {
 }
 
 /// The open drawing's path (xref paths are relative to its folder).
-fn host(s: &Session) -> Option<String> {
+pub(crate) fn host(s: &Session) -> Option<String> {
     s.state().ok().and_then(|st| st.path.clone())
 }
 

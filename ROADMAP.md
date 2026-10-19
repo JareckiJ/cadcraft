@@ -1,8 +1,8 @@
 # CADCraft roadmap
 
-**Stage: pre-alpha** · next: alpha, ~70–110 Opus 5.5 hours away (the remaining failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
+**Stage: pre-alpha** · next: alpha, ~65–100 Opus 5.5 hours away (the remaining failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (F14 closed for alpha: model-space page setup, printable margins, plot transparency in DXF; Layers, layouts and plotting a sheet passes gate; remaining to alpha ≈ 70–110 h) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (In-place XREF editing with write-back to source disk files and nested block picking; F2 closed; remaining to alpha ≈ 65–100 h) · **Target:** Autodesk AutoCAD 2027
 
 CADCraft targets full parity with AutoCAD (2D drafting first, then annotation, layouts and
 plotting, DWG, parametrics and 3D), plus what AutoCAD doesn't have: agent control over MCP, a
@@ -10,10 +10,10 @@ scriptable CLI, a web build, Linux and FreeBSD builds, and a free licence.
 
 **Why pre-alpha:** two of AutoCAD's five core workflows fail the [alpha gate](docs/roadmap.md#alpha-gate).
 Precise drafting, dimensioning, and layers/layouts/plotting pass; blocks
-have in-place reference editing (REFEDIT with dimmed locked drawing, banner, and ATTSYNC), xrefs and dynamic blocks remain; and a DWG saved by
+have in-place reference editing (REFEDIT with dimmed locked drawing, banner, ATTSYNC, XREFs with disk write-back, and nested hierarchy picking), dynamic blocks remain (F3); and a DWG saved by
 CADCraft drops foreign data it doesn't model and has never been checked in
 AutoCAD. Ready for real work reaches ≈ 40% (the alpha bar). Beta
-is ≈ 600–930 h away.
+is ≈ 590–920 h away.
 
 ## Headline numbers
 
@@ -23,7 +23,7 @@ is ≈ 600–930 h away.
 | Ready for real work | **≈ 40%** | estimated ([target-app-parity.md](docs/target-app-parity.md)) |
 | Mainstream practitioner (2D drafter) | **≈ 30%** (lower than the full number: file exchange, stability and interaction discounts multiply) | estimated ([target-app-parity.md](docs/target-app-parity.md#mainstream-practitioner)) |
 | Essentials user | **≈ 50%** | estimated ([target-app-parity.md](docs/target-app-parity.md#essentials-user)) |
-| Remaining to alpha | **≈ 70–110 h** (the gate rows) | estimated |
+| Remaining to alpha | **≈ 65–100 h** (the gate rows) | estimated |
 | Remaining to beta | **≈ 600–930 h** (≈ 150–250 h elapsed with 4–6 agents) | estimated |
 | Remaining to full parity | **≈ 1,300–2,100 h** (≈ 330–550 h elapsed) | estimated |
 
@@ -133,6 +133,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | In-place XREF editing with disk write-back and nested reference picking landed (F2 closed); remaining to alpha ≈ 65–100 h |
 | 2026-10-12 | trivial | Progress log: closed-polyline TRIM (#726) |
 | 2026-10-12 | trivial | Progress log: HATCHEDIT numeric validation (#724) |
 | 2026-10-10 | minor | Merged main's changes (Ukrainian catalog, dynamic input pointer boxes, DXF fixes); UI/UX and localization numbers updated |

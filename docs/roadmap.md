@@ -1,6 +1,6 @@
 # CADCraft roadmap detail
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (F14 closed for alpha: model-space page setup, printable margins, plot transparency in DXF; Layers, layouts and plotting a sheet passes gate; remaining to alpha ≈ 70–110 h) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (In-place XREF editing with write-back to source disk files and nested block picking; F2 closed; remaining to alpha ≈ 65–100 h) · **Target:** Autodesk AutoCAD 2027
 
 Forward-looking plan: milestones with status, the current focus, and what comes next with
 estimates. The summary is [ROADMAP.md](../ROADMAP.md); the work items behind every line are in
@@ -19,8 +19,8 @@ Opus 5.5 agent-hours.
    overrides, editable dynamic input (U1–U4). ≈ 25–35 h.
 5. **Unstub the prompt options** of the most-used commands (F1). ≈ 15–25 h.
 6. **Autosave, recovery, AUDIT, RECOVER** (F4). ≈ 10–15 h.
-7. **The rest of the alpha gate:** block editor and REFEDIT, xref attach (F2, F3), and plot styles
-   with a plot dialog and preview (F14). ≈ 50–80 h.
+7. **The rest of the alpha gate:** dynamic blocks (F3), and plot styles
+   with a plot dialog and preview (F14 closed). ≈ 35–55 h.
 
 Items 2–5 and 7 are the [alpha gate](#alpha-gate) rows.
 
@@ -34,10 +34,10 @@ the alpha checklist. Main platform: macOS.
 |---|---|---|---|
 | Draw and modify precisely with object snaps and tracking | **yes, passes gate** | Running snaps, polar, ortho, coordinate entry, object snap tracking (OTRACK, #379), Extension, Parallel and Apparent Intersection work; FROM, M2P/MTP, TK, TT, point filters and typed snap overrides work (#392, #393, #441); Tab cycles all candidate snaps under the aperture (U4 closed); TRIM/EXTEND standard mode, OFFSET Erase/Layer/Multiple and ROTATE Reference work (#397); ellipse/spline intersections approximate ([ui-parity.md](ui-parity.md), [geometry-parity.md](geometry-parity.md)) | 0 for the gate (beta work: exact ellipse/spline geometry) |
 | Dimension and annotate | partial, not blocking | All core DIM types, associativity, DIMSTYLE variables (43 of ~80), TEXT/MTEXT, MLEADER, tables work; no DIMSTYLE dialog, MTEXT editor not in place, MLEADER thin (F7, F9, F10). A drafter can dimension a sheet end to end | 0 for the gate (beta work) |
-| Use blocks (insert library blocks, edit them, attributes, xrefs) | **partial, blocking** | Static BLOCK/INSERT/attributes, ATTSYNC, BATTMAN editing, xrefs (#525), Block Editor (BEDIT/BSAVE/BCLOSE), clipping (XCLIP, IMAGECLIP, CLIP), and in-place reference editing (REFEDIT with dimmed locked drawing, canvas banner with Save/Discard/Working Set controls, and REFCLOSE ATTSYNC) work; left: xrefs in place and dynamic-block persistence (F2, F3) | 30–50 |
+| Use blocks (insert library blocks, edit them, attributes, xrefs) | **partial, blocking** | Static BLOCK/INSERT/attributes, ATTSYNC, BATTMAN editing, xrefs (#525), Block Editor (BEDIT/BSAVE/BCLOSE), clipping (XCLIP, IMAGECLIP, CLIP), and in-place reference editing (REFEDIT with XREFs write-back on save, nested reference picking, dimmed locked drawing, canvas banner with Save/Discard/Working Set controls, and REFCLOSE ATTSYNC) work; left: dynamic-block persistence (F3) | 25–40 |
 | Layers, layouts and plotting a sheet | **yes, passes gate** | Layers, layouts, viewports, page setups (including Model space, #F14), PDF output, plot styles (CTB/STB, #410), the Plot dialog (#160), Plot Preview and PUBLISH (#186), plotter devices (#564), and DXF plot transparency xdata work; printers only via PDF/PNG/SVG files (H3) | 0 for the gate (beta work: native OS printer spooler) |
 | Save DWG that AutoCAD opens without loss, and reopen others' DWGs | **no** | DXF keeps what we don't model (#528) and writes native MULTILEADERs (#459, not yet tested through DWG); through DWG, acadrust drops custom-class entities and objects and some foreign data; never checked in AutoCAD; no real-file tests; a 10 MB DWG failed after ~2 min (#57) (FF1–FF6) | 40–60 + owner (real-file corpus, AutoCAD check) |
-| **To alpha** | | | **≈ 70–110** |
+| **To alpha** | | | **≈ 65–100** |
 
 Ready for real work is ≈ 40%, reaching the ~40% alpha bar; closing the remaining gate rows lifts it past
 40%.
@@ -103,6 +103,7 @@ AutoLISP surface, AI features with openly licensed local models, and every remai
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | In-place XREF editing with disk write-back and nested reference picking landed (F2 closed); "Use blocks" evidence and remaining alpha hours updated |
 | 2026-10-12 | minor | Block Editor for static blocks landed: "Use blocks" evidence updated; status and hours unchanged (REFEDIT and dynamic blocks remain) |
 | 2026-10-11 | minor | Alpha-gate evidence refreshed for merged work (#459, #525, #528, #160, #186, #564); statuses and hours unchanged |
 | 2026-10-10 | minor | Merged main: fmt fixed, Ukrainian catalog noted in M13, ready for real work 38% |

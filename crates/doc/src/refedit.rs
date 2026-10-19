@@ -42,6 +42,10 @@ pub struct RefEdit {
     /// Block objects taken out of the working set with their edits (block coordinates, the block
     /// object's handle).
     pub released: Vec<Entity>,
+    /// If this edit is for an external reference (XREF), the path to its file on disk.
+    pub xref_file: Option<String>,
+    /// The nested block path from the picked top-level insert down to the edited block (if nested).
+    pub nested_path: Vec<String>,
 }
 
 impl RefEdit {
