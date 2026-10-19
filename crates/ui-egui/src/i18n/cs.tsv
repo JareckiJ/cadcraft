@@ -74,6 +74,7 @@
 	Area	Plocha
 	Arrange Panel	Uspořádat panel
 	Array	Pole
+	Arrow size	Velikost šipky
 	Attach	Připojit
 	Attribute	Atribut
 	Attribute Definition	Definice atributu
@@ -104,6 +105,7 @@
 	Box	Kvádr
 	Break	Přerušit
 	Break At Point	Přerušit v bodě
+	Break-line Symbol	Značka přerušení čáry
 	Bring Above Objects	Přenést nad objekty
 	Bring Annotations to Front	Přenést popisy dopředu
 	Bring to Front	Přenést dopředu
@@ -170,6 +172,7 @@
 	Contributors	Přispěvatelé
 	Control Vertices	Řídicí vrcholy
 	Convert	Převést
+	Convert Text to Mtext	Převést text na víceřádkový text
 	Copy	Kopírovat
 	Copy Full File Path	Kopírovat úplnou cestu k souboru
 	Copy History	Kopírovat historii
@@ -219,6 +222,7 @@
 	Description	Popis
 	Deselect All	Zrušit celý výběr
 	Diameter	Průměr
+	Dim scale overall	Celkové měřítko kót
 	Dim style	Kótovací styl
 	Dimension Break	Přerušení kóty
 	Dimension Edit	Upravit kótu
@@ -321,9 +325,11 @@
 	Evaluate LISP	Vyhodnotit LISP
 	Exclude from new selection set	Vyloučit z nové výběrové množiny
 	Explode	Rozložit
+	Explode Attributes to Text	Rozložit atributy na text
 	Export	Exportovat
 	Export Table	Exportovat tabulku
 	Export to PDF...	Exportovat do PDF...
+	Express Tools	Doplňkové nástroje
 	Expression	Výraz
 	Extend	Prodloužit
 	Extension	Prodloužení
@@ -499,6 +505,9 @@
 	Load all	Načíst vše
 	Load...	Načíst...
 	Load Application...	Načíst aplikaci...
+	Enter name of LISP file to load	Zadejte název souboru LISP k načtení
+	Enter geometric characteristic	Zadejte geometrickou charakteristiku
+	Enter block names to extract	Zadejte názvy bloků pro extrakci dat
 	Loaded linetypes	Načtené typy čar
 	Lock	Zamknout
 	Lock Layer	Zamknout hladinu
@@ -529,6 +538,7 @@
 	Models	Modely
 	Modify	Upravit
 	Move	Posunout
+	Move/Copy/Rotate	Posunout/Kopírovat/Otočit
 	Multileader	Multiodkaz
 	Multileader Style...	Styl multiodkazu...
 	Multileader style	Styl multiodkazů
@@ -680,6 +690,7 @@
 	Position X	Poloha X
 	Position Y	Poloha Y
 	Position Z	Poloha Z
+	Precision	Přesnost
 	Previous	Předchozí
 	Previous Change	Předchozí změna
 	Previous Layer	Předchozí hladina
@@ -1215,6 +1226,7 @@
 	Show System Cursor	Zobrazit systémový kurzor
 	Animation Effects	Efekty animace
 	Animation effects	Efekty animace
+	Interface scale	Měřítko uživatelského rozhraní
 	Import...	Importovat...
 	Export...	Exportovat...
 	Batch Publish...	Dávkově publikovat...
@@ -1300,6 +1312,25 @@ menu	Modify	Modifikace
 	Justify	Do bloku
 	Text color	Barva textu
 	Click the ruler to add a tab stop, right-click to remove one	Kliknutím na pravítko přidáte zarážku tabulátoru, kliknutím pravým tlačítkem ji odeberete
+	Select using two clicks only	Vybírat pouze dvěma kliknutími
+	Define each corner of the selection window with a separate click.	Každý roh výběrového okna určete samostatným kliknutím.
+	Type an alias name.	Zadejte název aliasu.
+	Choose the command the alias starts.	Zvolte příkaz, který alias spouští.
+	{command} is an unknown command.	{command} je neznámý příkaz.
+	{alias} is already defined; select it and use Edit.	Alias {alias} je již definován; vyberte jej a použijte tlačítko „Upravit…“.
+	More than {n} aliases.	Byl překročen limit {n} aliasů.
+	Alias file: {file}	Soubor aliasů: {file}
+	No alias file loaded. REINIT replaces these aliases with a file's.	Není načten žádný soubor aliasů. Příkaz REINIT nahradí tyto aliasy aliasy ze souboru.
+	Alias	Alias
+	Command	Příkaz
+	overrides built-in	nahrazuje vestavěný alias
+	built-in	vestavěný
+	Add…	Přidat…
+	Edit…	Upravit…
+	Save alias	Uložit alias
+	Discard	Zahodit úpravy
+	Customize	Přizpůsobit
+	Edit Command Aliases (PGP)...	Upravit aliasy příkazů (PGP)...
 	Query Texts	Dotaz na texty
 	Analyze Shapes	Analyzovat tvary
 	Hatch Pick	Výběr pro šrafy
@@ -1325,6 +1356,8 @@ menu	Modify	Modifikace
 	Add: Pick points	Přidat: vybrat body
 	Add: Select objects	Přidat: vybrat objekty
 	Boundaries picked: {n}	Počet vybraných hranic: {n}
+	Select boundaries to remove	Vyberte hranice k odebrání
+	Island	Ostrov
 	Associative	Asociativní
 	Create separate hatches	Vytvářet samostatné šrafy
 	Island detection	Detekce ostrovů
