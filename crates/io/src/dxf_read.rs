@@ -1651,7 +1651,13 @@ fn ltype_pattern(tags: &[Tag], styles: &HashMap<String, String>) -> Vec<DashElem
 
 /// Read a DXF file into a drawing.
 pub fn read(bytes: &[u8]) -> Result<Drawing> {
-    let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
+    read_with_limit(bytes, cadcraft_dxf::MAX_TAGS)
+}
+
+/// [`read`] with an explicit group-code limit: the DWG bridge's renditions are bounded by their
+/// own size limit, so their group codes may outnumber what a file of unknown origin gets.
+pub fn read_with_limit(bytes: &[u8], max_tags: usize) -> Result<Drawing> {
+    let tags = cadcraft_dxf::parse_with_limit(bytes, max_tags).map_err(|e| IoError::Format(e.to_string()))?;
     let secs = sections(&tags);
     if secs.is_empty() {
         return Err(IoError::Format("no sections found".into()));
