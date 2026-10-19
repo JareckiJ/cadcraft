@@ -97,6 +97,8 @@ pub struct Drawing {
     pub mline_styles: Vec<MLineStyle>,
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
+    /// Page setup of model space.
+    pub model_page: PageSetup,
     pub layouts: Vec<Layout>,
     pub views: Vec<NamedView>,
     /// Model space viewport configurations (VPORTS): the tiles shown and named ones.
@@ -151,6 +153,26 @@ impl Drawing {
         d.scales = metric_scales();
         d.dim_styles.push(DimStyle::iso25());
         d.header.set_str("DIMSTYLE", "ISO-25");
+        d.model_page = PageSetup {
+            paper: "A4".into(),
+            width_mm: 210.0,
+            height_mm: 297.0,
+            margins_mm: [5.0, 5.0, 5.0, 5.0],
+            landscape: true,
+            plot_area: "extents".into(),
+            scale_to_fit: true,
+            ..PageSetup::default()
+        };
+        for l in &mut d.layouts {
+            l.page = PageSetup {
+                paper: "A4".into(),
+                width_mm: 210.0,
+                height_mm: 297.0,
+                margins_mm: [5.0, 5.0, 5.0, 5.0],
+                landscape: true,
+                ..PageSetup::default()
+            };
+        }
         d
     }
     fn bare() -> Self {
@@ -170,6 +192,7 @@ impl Drawing {
             mline_styles: vec![MLineStyle::default()],
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
+            model_page: PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() },
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],
             views: Vec::new(),
             vports: Vec::new(),

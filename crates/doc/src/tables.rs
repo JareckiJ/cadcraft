@@ -748,7 +748,7 @@ pub struct PageSetup {
     /// applied ("Display plot styles"; DXF plot layout flag 2).
     pub show_plot_styles: bool,
     /// Plot objects with their transparency ("Plot transparency"; PLOTTRANSPARENCYOVERRIDE can
-    /// override it). The DXF plot layout flags have no bit for it, so it is not saved in DXF.
+    /// override it). Saved in CADCraft xdata on the LAYOUT object (PLOTTRANSPARENCY).
     pub plot_transparency: bool,
 }
 

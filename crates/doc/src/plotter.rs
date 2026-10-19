@@ -191,7 +191,14 @@ impl PlotterConfig {
         if text.len() > MAX_PLOTTER_FILE {
             return Err("the plotter configuration file is too large".into());
         }
-        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not a CADCraft plotter configuration: {e}"))?;
+        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+            if text.as_bytes().iter().take(128).any(|&b| b == 0) || text.as_bytes().starts_with(b"\x1f\x8b") || text.as_bytes().starts_with(b"PK") {
+                "binary AutoCAD .pc3 plotter files are not supported (use CADCraft *.plotter.json configurations or built-in CADCraft PDF/PNG/SVG)"
+                    .to_string()
+            } else {
+                format!("not a CADCraft plotter configuration: {e}")
+            }
+        })?;
         match v.get(FILE_MARKER).and_then(serde_json::Value::as_u64) {
             Some(FILE_VERSION) => {}
             Some(n) => return Err(format!("plotter configuration format version {n} is newer than this CADCraft reads")),

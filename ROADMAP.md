@@ -1,18 +1,18 @@
 # CADCraft roadmap
 
-**Stage: pre-alpha** · next: alpha, ~1 point (39% → 40% ready for real work) and ~85–135 Opus 5.5 hours away (the remaining failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
+**Stage: pre-alpha** · next: alpha, ~70–110 Opus 5.5 hours away (the remaining failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (In-place reference editing: dimmed drawing, canvas banner, REFCLOSE ATTSYNC landed; remaining to alpha ≈ 85–135 h) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (F14 closed for alpha: model-space page setup, printable margins, plot transparency in DXF; Layers, layouts and plotting a sheet passes gate; remaining to alpha ≈ 70–110 h) · **Target:** Autodesk AutoCAD 2027
 
 CADCraft targets full parity with AutoCAD (2D drafting first, then annotation, layouts and
 plotting, DWG, parametrics and 3D), plus what AutoCAD doesn't have: agent control over MCP, a
 scriptable CLI, a web build, Linux and FreeBSD builds, and a free licence.
 
-**Why pre-alpha:** three of AutoCAD's five core workflows fail the [alpha gate](docs/roadmap.md#alpha-gate).
-Precise drafting and dimensioning pass; blocks
-have in-place reference editing (REFEDIT with dimmed locked drawing, banner, and ATTSYNC), xrefs and dynamic blocks remain; plots lack system printers; and a DWG saved by
+**Why pre-alpha:** two of AutoCAD's five core workflows fail the [alpha gate](docs/roadmap.md#alpha-gate).
+Precise drafting, dimensioning, and layers/layouts/plotting pass; blocks
+have in-place reference editing (REFEDIT with dimmed locked drawing, banner, and ATTSYNC), xrefs and dynamic blocks remain; and a DWG saved by
 CADCraft drops foreign data it doesn't model and has never been checked in
-AutoCAD. Ready for real work (≈ 39%) is just under the ~40% alpha bar. Beta
+AutoCAD. Ready for real work reaches ≈ 40% (the alpha bar). Beta
 is ≈ 600–930 h away.
 
 ## Headline numbers
@@ -20,10 +20,10 @@ is ≈ 600–930 h away.
 | Number | Value | Kind |
 |---|---|---|
 | Feature breadth (AutoCAD for Mac menu items with a live command) | **78%** (385 / 491 total, 373 / 491 engine; 2D menus only ≈ 65%) | measured ([parity-checklist.md](docs/parity-checklist.md) + UI-only commands) |
-| Ready for real work | **≈ 39%** | estimated ([target-app-parity.md](docs/target-app-parity.md)) |
-| Mainstream practitioner (2D drafter) | **≈ 29%** (lower than the full number: file exchange, stability and interaction discounts multiply) | estimated ([target-app-parity.md](docs/target-app-parity.md#mainstream-practitioner)) |
-| Essentials user | **≈ 48%** | estimated ([target-app-parity.md](docs/target-app-parity.md#essentials-user)) |
-| Remaining to alpha | **≈ 85–135 h** (the gate rows) | estimated |
+| Ready for real work | **≈ 40%** | estimated ([target-app-parity.md](docs/target-app-parity.md)) |
+| Mainstream practitioner (2D drafter) | **≈ 30%** (lower than the full number: file exchange, stability and interaction discounts multiply) | estimated ([target-app-parity.md](docs/target-app-parity.md#mainstream-practitioner)) |
+| Essentials user | **≈ 50%** | estimated ([target-app-parity.md](docs/target-app-parity.md#essentials-user)) |
+| Remaining to alpha | **≈ 70–110 h** (the gate rows) | estimated |
 | Remaining to beta | **≈ 600–930 h** (≈ 150–250 h elapsed with 4–6 agents) | estimated |
 | Remaining to full parity | **≈ 1,300–2,100 h** (≈ 330–550 h elapsed) | estimated |
 

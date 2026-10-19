@@ -2449,13 +2449,16 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.f(1040, height);
             w.s(1002, "}");
         }
+        if page.plot_transparency {
+            w.s(1001, dxf_ext::APP);
+            w.s(1000, "PLOTTRANSPARENCY");
+            w.s(1002, "{");
+            w.i(1071, 1);
+            w.s(1002, "}");
+        }
     };
-    // Model space has no page setup of its own: write what PLOT does for it, the drawing extents
-    // fitted to the paper (plot type 1, scaled to fit). The default page's "layout" area is
-    // plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group 74), which means
-    // nothing for model space: another program's Plot dialog then shows no plot area or scale.
-    let model_page = PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() };
-    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None);
+    // Model space's page setup.
+    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &d.model_page, None);
     for (i, (_, brh, l)) in ps_brs.iter().enumerate() {
         let h = layout_handles.get(i).cloned().unwrap_or_default();
         layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, 1, &l.page, l.view);

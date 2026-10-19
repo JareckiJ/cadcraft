@@ -1752,7 +1752,12 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
                         // LAYOUT has two 330s: owner dict and the block record; take the last.
                         let br = tg.iter().rfind(|x| x.code == 330).map(Tag::str).unwrap_or_default();
                         let plot = T(tg.get(..start).unwrap_or(&[]));
-                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page_setup(&plot)));
+                        let mut page = page_setup(&plot);
+                        let pt_list = crate::dxf_ext::xdata_list(crate::dxf_ext::xdata(&tg, crate::dxf_ext::APP), "PLOTTRANSPARENCY");
+                        if pt_list.iter().any(|tag| tag.code == 1071 && tag.i64() == 1) {
+                            page.plot_transparency = true;
+                        }
+                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page));
                     }
                 }
             }
@@ -1767,6 +1772,7 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
     layout_objs.sort_by_key(|l| l.1);
     for (name, order, br, page) in &layout_objs {
         if name.eq_ignore_ascii_case("Model") {
+            d.model_page = page.clone();
             continue;
         }
         d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });

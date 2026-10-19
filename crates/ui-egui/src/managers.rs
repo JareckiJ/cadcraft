@@ -472,9 +472,10 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
         no_drawing(ctx, "Page Setup Manager", open);
         return None;
     };
-    let mut layouts: Vec<(u32, String, cadcraft_doc::PageSetup)> = d.layouts.iter().map(|l| (l.tab_order, l.name.clone(), l.page.clone())).collect();
+    let mut layouts: Vec<(u32, String, cadcraft_doc::PageSetup)> = vec![(0, "Model".to_string(), d.model_page.clone())];
+    layouts.extend(d.layouts.iter().map(|l| (l.tab_order.max(1), l.name.clone(), l.page.clone())));
     layouts.sort_by_key(|l| l.0);
-    let shown = app.session.layout_space().layout().map(str::to_string);
+    let shown = app.session.layout_space().layout().map(str::to_string).or_else(|| Some("Model".to_string()));
     let mut sel = temp::<String>(ctx, "pagesetup_sel")
         .filter(|s| layouts.iter().any(|l| l.1 == *s))
         .or(shown)
@@ -499,8 +500,11 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
             });
             let Some((_, name, page)) = layouts.iter().find(|l| l.1 == sel) else { return };
             right.label(RichText::new(format!("Page setup of {name}")).strong());
-            // Layout plotting always prints the whole sheet, so only that area is offered.
-            let rows = PageRows { areas: &["layout"], scale: true, center: true };
+            let rows = if name == "Model" {
+                PageRows { areas: &["extents", "display", "limits", "window"], scale: true, center: true }
+            } else {
+                PageRows { areas: &["layout"], scale: true, center: true }
+            };
             egui::Grid::new("pagesetup_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
                 if let Some((k, v)) = page_rows(ui, egui::Id::new(("pagesetup", name)), page, &rows, &choices, None) {
                     action = Some(("pagesetup", json!({ "layout": name, k: v })));

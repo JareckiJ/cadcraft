@@ -272,23 +272,16 @@ fn links_json(v: Option<&Value>) -> Vec<(Handle, String)> {
 pub fn page_for(d: &Drawing, space: &Space, o: &PdfOptions) -> Result<PageSetup> {
     let mut page = match space.layout() {
         Some(n) => d.layout(n).map(|l| l.page.clone()).ok_or_else(|| IoError::Format(format!("no layout `{n}`")))?,
-        None => {
-            let mut p = PageSetup::default();
-            if paper::paper_unit_mm(d) == 1.0
-                && let Some(a4) = paper::paper_size("A4")
-            {
-                p.paper = a4.name.into();
-                p.width_mm = a4.width_mm;
-                p.height_mm = a4.height_mm;
-            }
-            p
-        }
+        None => d.model_page.clone(),
     };
     if let Some(name) = &o.paper {
         let ps = paper::paper_size(name).ok_or_else(|| IoError::Format(format!("unknown paper size `{name}`")))?;
         page.paper = ps.name.into();
         page.width_mm = ps.width_mm;
         page.height_mm = ps.height_mm;
+        if o.margins.is_none() {
+            page.margins_mm = ps.margins_mm();
+        }
     }
     if let Some((w, h)) = o.paper_mm {
         page.paper = format!("User ({w:.2} x {h:.2} MM)");
