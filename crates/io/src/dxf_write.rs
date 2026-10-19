@@ -21,6 +21,9 @@ struct W {
     layers: HashMap<String, String>,
     /// Upper-case UCS name → its UCS table record handle (group 345 of layouts and viewports).
     ucss: HashMap<String, String>,
+    /// Active VPORT group-345 tags (their index in `t`) waiting for the handle of the named UCS
+    /// (upper case) they refer to, filled in after the UCS table is written.
+    vport_ucs: Vec<(usize, String)>,
     /// Persistent reactors of boundary objects: each source object of an associative hatch →
     /// the hatches (groups `{ACAD_REACTORS 330 …}`), from [`hatch_reactors`].
     reactors: HashMap<Handle, Vec<String>>,
@@ -203,7 +206,15 @@ fn annotative_xdata(w: &mut W) {
 
 /// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
 fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
-    let mut ov = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), ucss: HashMap::new(), reactors: HashMap::new() };
+    let mut ov = W {
+        t: Vec::new(),
+        next: 0,
+        pstyles: HashMap::new(),
+        layers: HashMap::new(),
+        ucss: HashMap::new(),
+        vport_ucs: Vec::new(),
+        reactors: HashMap::new(),
+    };
     let mut sah = false;
     for (k, v) in &dm.overrides {
         let Some(field) = DimStyle::field_name(k) else { continue };
@@ -313,12 +324,7 @@ fn model_ucs(d: &Drawing) -> Ucs {
     // axes of its own (restoring the name would move the UCS) is dropped.
     let origin = p("UCSORG").unwrap_or(Vec3::ZERO);
     let raw = h.str("UCSNAME", "");
-    let name = d
-        .ucss
-        .iter()
-        .find(|u| usable && u.name.eq_ignore_ascii_case(raw.trim()) && crate::dxf_ext::is_named_frame(u, origin, x, y))
-        .map(|u| u.name.clone())
-        .unwrap_or_default();
+    let name = crate::dxf_ext::named_ucs(&d.ucss, &raw, origin, x, y).filter(|_| usable).map(|u| u.name.clone()).unwrap_or_default();
     Ucs { name, origin, x_axis: x, y_axis: y }
 }
 
@@ -1565,6 +1571,12 @@ fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
             w.p(111, ucs.x_axis);
             w.p(112, ucs.y_axis);
             w.i(79, 0);
+            // The named UCS it is (none: unnamed). The UCS table comes after VPORT, so the
+            // handle is filled in once that table has given it one ([`W::vport_ucs`]).
+            if !ucs.name.is_empty() {
+                w.s(345, "0");
+                w.vport_ucs.push((w.t.len() - 1, ucs.name.to_ascii_uppercase()));
+            }
             w.f(146, 0.0);
         }
     }
@@ -1636,6 +1648,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         pstyles: HashMap::new(),
         layers: HashMap::new(),
         ucss: HashMap::new(),
+        vport_ucs: Vec::new(),
         reactors: hatch_reactors(d),
     };
     // Pre-allocate handles for block records.
@@ -2082,6 +2095,13 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
+    // The active VPORT's named UCS (written before this table had handles).
+    for (i, name) in std::mem::take(&mut w.vport_ucs) {
+        let h = w.ucss.get(&name).cloned();
+        if let (Some(h), Some(t)) = (h, w.t.get_mut(i)) {
+            *t = Tag::s(345, h);
+        }
+    }
     let apps = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
     let th = table_head(&mut w, "APPID", apps.len());
     for app in apps {
@@ -2109,7 +2129,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.i(70, 0);
         let v = serde_json::to_value(s).unwrap_or_default();
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
-        let mut newer = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), ucss: HashMap::new(), reactors: HashMap::new() };
+        let mut newer = W {
+            t: Vec::new(),
+            next: 0,
+            pstyles: HashMap::new(),
+            layers: HashMap::new(),
+            ucss: HashMap::new(),
+            vport_ucs: Vec::new(),
+            reactors: HashMap::new(),
+        };
         for (field, code, kind) in dxf_ext::DIM_CODES {
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(*kind, x)) else { continue };
             if !dxf_ext::NEWER_CODES.contains(code) {
@@ -2489,11 +2517,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.i(76, 0);
             w.s(330, brh);
             // The named UCS it is, only while its frame is still that record's (as for model space).
-            let named = u.filter(|u| {
-                !u.name.trim().is_empty()
-                    && d.ucss.iter().any(|r| r.name.eq_ignore_ascii_case(u.name.trim()) && dxf_ext::is_named_frame(r, u.origin, u.x_axis, u.y_axis))
-            });
-            if let Some(h) = named.and_then(|u| w.ucss.get(&u.name.trim().to_ascii_uppercase())).cloned() {
+            let named = u.and_then(|u| dxf_ext::named_ucs(&d.ucss, &u.name, u.origin, u.x_axis, u.y_axis));
+            if let Some(h) = named.and_then(|u| w.ucss.get(&u.name.to_ascii_uppercase())).cloned() {
                 w.s(345, h);
             }
             // The saved paper-space view (centre, height) as CADCraft xdata.
@@ -2738,6 +2763,7 @@ pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
         pstyles: HashMap::new(),
         layers: HashMap::new(),
         ucss: HashMap::new(),
+        vport_ucs: Vec::new(),
         reactors: HashMap::new(),
     };
     let cx = Ctx { target: Version::R2018, ..Ctx::default() };

@@ -2015,16 +2015,23 @@ impl Objects {
         if let Some(style) = self.xrecord_text(crate::dxf_ext::MLEADER_STYLE_KEY).filter(|s| !s.trim().is_empty()) {
             d.header.set_str("CMLEADERSTYLE", &style);
         }
-        // Model space's UCS name when the file lost it ($UCSNAME empty, as through DWG): only
-        // while the current UCS is still exactly that named UCS.
-        if d.header.str("UCSNAME", "").trim().is_empty()
-            && let Some(name) = self.xrecord_text(crate::dxf_ext::UCS_NAME_KEY).map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
-            && let Some(u) = d.ucss.iter().find(|u| u.name.eq_ignore_ascii_case(&name))
-            && let (Some(o), Some(x), Some(y)) = (d.header.point("UCSORG"), d.header.point("UCSXDIR"), d.header.point("UCSYDIR"))
-            && crate::dxf_ext::is_named_frame(u, o, x, y)
-        {
-            let n = u.name.clone();
-            d.header.set_str("UCSNAME", &n);
+        // Model space's UCS name ($UCSNAME, or CADCraft's copy when the file lost it, as through
+        // DWG): kept only while the current UCS is still exactly that named UCS, else unnamed.
+        let header_name = d.header.str("UCSNAME", "").trim().to_string();
+        let name = if header_name.is_empty() {
+            self.xrecord_text(crate::dxf_ext::UCS_NAME_KEY).map(|n| n.trim().to_string()).unwrap_or_default()
+        } else {
+            header_name.clone()
+        };
+        let frame = (d.header.point("UCSORG"), d.header.point("UCSXDIR"), d.header.point("UCSYDIR"));
+        let named = match frame {
+            (Some(o), Some(x), Some(y)) => crate::dxf_ext::named_ucs(&d.ucss, &name, o, x, y).map(|u| u.name.clone()),
+            _ => None,
+        };
+        match named {
+            Some(n) => d.header.set_str("UCSNAME", &n),
+            None if !header_name.is_empty() => d.header.set_str("UCSNAME", ""),
+            None => {}
         }
         // Table styles (named by their ACAD_TABLESTYLE dictionary entries).
         for (h, tags) in &self.table_styles {
@@ -2108,7 +2115,14 @@ impl Objects {
         // Layouts' UCSs: the World UCS, unusable axes or no such layout leave it unset.
         for (name, origin, x, y, named) in &self.layout_ucss {
             let usable = origin.is_finite() && crate::dxf_ext::usable_axes(*x, *y);
-            let ucs_name = named.as_ref().and_then(|h| rx.ucss.get(&h.trim().to_ascii_uppercase())).cloned().unwrap_or_default();
+            // The named UCS group 345 points at, only while the layout's frame is still that
+            // record's: a valid frame with a stale reference is kept, unnamed.
+            let ucs_name = named
+                .as_ref()
+                .and_then(|h| rx.ucss.get(&h.trim().to_ascii_uppercase()))
+                .and_then(|n| crate::dxf_ext::named_ucs(&d.ucss, n, *origin, *x, *y))
+                .map(|u| u.name.clone())
+                .unwrap_or_default();
             let world = origin.len() <= 1e-12 && (*x - Vec3::new(1.0, 0.0, 0.0)).len() <= 1e-12 && (*y - Vec3::new(0.0, 1.0, 0.0)).len() <= 1e-12;
             if !usable || (world && ucs_name.is_empty()) {
                 continue;

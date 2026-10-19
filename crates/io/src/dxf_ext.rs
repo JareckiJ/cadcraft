@@ -41,10 +41,27 @@ pub(crate) const UCS_NAME_KEY: &str = "CADCRAFT_UCSNAME";
 
 /// Whether the UCS at `origin` with axes `x`, `y` is exactly the named UCS `u` (to rounding):
 /// only then is the current UCS still that named one, read or written. The origin may differ by
-/// printing round-off only (we write the shortest exact form; other programs 15–16 digits), so
-/// even far from the World origin a real move is a different UCS.
+/// printing round-off only: we write the shortest exact form and other programs 15–16
+/// significant digits (half a unit in the 15th is 5e-16 of the value), so 1e-14 of the value,
+/// plus 1e-9 near the World origin, covers it while even 1e12 away a 0.5 move is a different UCS.
 pub(crate) fn is_named_frame(u: &cadcraft_doc::Ucs, origin: cadcraft_geom::Vec3, x: cadcraft_geom::Vec3, y: cadcraft_geom::Vec3) -> bool {
-    (origin - u.origin).len() <= 1e-12 * (1.0 + origin.len()) && (x - u.x_axis).len() <= 1e-9 && (y - u.y_axis).len() <= 1e-9
+    (origin - u.origin).len() <= 1e-9 + 1e-14 * origin.len() && (x - u.x_axis).len() <= 1e-9 && (y - u.y_axis).len() <= 1e-9
+}
+
+/// The UCS table record named `name` whose frame the UCS at `origin`, `x`, `y` still is: the only
+/// case in which a current UCS (model space's or a layout's, read or written) keeps that name.
+pub(crate) fn named_ucs<'a>(
+    ucss: &'a [cadcraft_doc::Ucs],
+    name: &str,
+    origin: cadcraft_geom::Vec3,
+    x: cadcraft_geom::Vec3,
+    y: cadcraft_geom::Vec3,
+) -> Option<&'a cadcraft_doc::Ucs> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    ucss.iter().find(|u| u.name.eq_ignore_ascii_case(name) && is_named_frame(u, origin, x, y))
 }
 
 /// Whether `x` and `y` can be a UCS's axes: finite, not zero and not along each other (relative
