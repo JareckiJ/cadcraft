@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-15 · **Change:** minor (compact tags and reused foreign-data merge buffer) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -70,7 +70,10 @@ handler remains an alternate; it does not change the default app.
 Everything lost in the DXF read/write paths below is also lost through DWG, plus whatever
 `acadrust`'s own DXF output omits (proxy objects, ACIS data, custom objects: not measured). User
 report #57: a 10 MB DWG failed after about two minutes; limits now stop runaway conversions
-early (#175), but the throughput problem remains. **DWG ≈ 30% read, ≈ 15% write.**
+early (#175), but the throughput problem remains. DGN line style components that no line style
+definition uses (leftovers of DGN imports, hundreds of thousands in some drawings) are left out
+on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG ≈ 30% read,
+≈ 15% write.**
 
 ## DXF, version by version
 
@@ -134,7 +137,7 @@ early (#175), but the throughput problem remains. **DWG ≈ 30% read, ≈ 15% wr
 | Plot styles (`.ctb`, `.stb`), plotter configs (`.pc3`), `.pmp` | yes | plot style tables in our own JSON format ([plot-styles.md](plot-styles.md)) and kept in the drawing; plotter devices with papers and printable areas in our own JSON format ([plotters.md](plotters.md), #564); binary `.ctb`/`.stb`/`.pc3`/`.pmp` not read (no public spec) | 4–8 |
 | Scripts (`.scr`) | SCRIPT | script text through the CLI, MCP and control channel; no SCRIPT command reading a `.scr` file | 1–2 |
 | Aliases (`.pgp`), CUI(x), workspaces | yes | user alias files and ALIASEDIT (#552); no CUI(x) or workspaces | 4–8 |
-| SVG import (`.svg`, `.svgz`) | yes (via scripts) | OPEN reads shapes, paths, groups and Inkscape layers into entities (#636); no CSS classes, `use`, fills, text or images | 2–4 |
+| SVG import (`.svg`, `.svgz`) | yes (via scripts) | OPEN reads shapes, paths, groups and Inkscape layers into entities (#636); no CSS classes, `use`, fills, text or images (what the drawing loses is named in a note on open, #627) | 2–4 |
 | AutoLISP (`.lsp`, `.fas`, `.vlx`), `.dll`/`.arx` plug-ins | yes | `.lsp` loads (APPLOAD, `(load)`, a dropped file; #758); no Visual LISP ActiveX (`vlax-`), DCL dialogs or reactors; `.fas`/`.vlx` are compiled and undocumented; no `.dll`/`.arx` | see [gaps.md](gaps.md) (E1) |
 | Data extraction (`.csv`, `.xls`) and data links | yes | DATAEXTRACTION/EATTEXT to CSV or a table (#433); table data links read CSV (#534); no `.xls`, no `.dxe` templates | 3–5 |
 | eTransmit (`.zip` packages) | yes | no | 4–6 |
@@ -211,6 +214,7 @@ round trip. This is not full streaming; the DWG document and DXF bridge still ma
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-15 | minor | Compact immutable tag text and one-allocation foreign-data merge with bounded record scratch space; size/allocation/order regressions. File-format semantics and import limits unchanged |
 | 2026-10-14 | minor | Large imports reuse shared entity allocations and bound spare tag capacity; foreign-data saves move unchanged records, reserve retained groups and avoid whole-file APPID metadata. Public heavy-drawing equivalence/round-trip checks and allocation regressions; streaming/progress remain open |
 | 2026-10-14 | minor | Layout paper and printable origins agree with rotated device margins; per-layout plot offsets survive DXF/DWG, with shared screen/plot placement and synthetic two-layout/PDF/PNG regressions |

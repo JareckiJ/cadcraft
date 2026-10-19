@@ -1,8 +1,9 @@
 //! Paper sizes and the layout sheet (paper rectangle, printable area) for paper space.
 //!
-//! Paper-space units are millimetres in metric drawings (`MEASUREMENT` = 1) and inches
-//! otherwise. A layout's origin is at the printable area's lower-left corner, plus its
-//! plot offset; the physical sheet consequently extends into negative paper coordinates.
+//! Paper-space units are millimetres in metric drawings (`MEASUREMENT` = 1) and on layouts whose
+//! page setup is in millimetres, and inches otherwise.
+//! Layout paper coordinates place the printable-area origin at the plot offset;
+//! the physical sheet may therefore extend into negative paper coordinates.
 
 use cadcraft_doc::{Drawing, PageSetup};
 use cadcraft_geom::{Bounds2, Vec2};
@@ -82,6 +83,19 @@ pub fn paper_unit_mm(d: &Drawing) -> f64 {
     if d.header.i64("MEASUREMENT", 0) == 1 { 1.0 } else { 25.4 }
 }
 
+/// Millimetres per paper-space unit on a layout with page setup `page`: millimetres when the
+/// page says so (plot paper units mm), else as the drawing's MEASUREMENT says. Drawings from
+/// AutoCAD often have MEASUREMENT 0 with layouts in millimetres (#1058).
+pub fn page_unit_mm(d: &Drawing, page: &PageSetup) -> f64 {
+    if page.paper_mm { 1.0 } else { paper_unit_mm(d) }
+}
+
+/// Millimetres per paper-space unit on the layout holding the paper-space entity `h` (the
+/// drawing's when no layout holds it).
+pub fn unit_mm_of(d: &Drawing, h: cadcraft_doc::Handle) -> f64 {
+    d.layouts.iter().find(|l| l.entities.contains(h)).map_or_else(|| paper_unit_mm(d), |l| page_unit_mm(d, &l.page))
+}
+
 /// The paper sheet of a layout, in paper-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sheet {
@@ -131,7 +145,7 @@ impl Sheet {
 /// The sheet of a named layout (`None` if there is no such layout).
 pub fn sheet(d: &Drawing, layout: &str) -> Option<Sheet> {
     let l = d.layouts.iter().find(|l| l.name == layout).or_else(|| d.layout(layout))?;
-    Some(Sheet::for_layout(&l.page, paper_unit_mm(d)))
+    Some(Sheet::for_layout(&l.page, page_unit_mm(d, &l.page)))
 }
 
 #[cfg(test)]
