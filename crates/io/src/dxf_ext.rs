@@ -38,6 +38,12 @@ pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
 /// Named-object-dictionary key of the XRECORD holding model space's current UCS name ($UCSNAME,
 /// which the DWG bridge drops).
 pub(crate) const UCS_NAME_KEY: &str = "CADCRAFT_UCSNAME";
+
+/// Whether the UCS at `origin` with axes `x`, `y` is exactly the named UCS `u` (to rounding):
+/// only then is the current UCS still that named one, read or written.
+pub(crate) fn is_named_frame(u: &cadcraft_doc::Ucs, origin: cadcraft_geom::Vec3, x: cadcraft_geom::Vec3, y: cadcraft_geom::Vec3) -> bool {
+    (origin - u.origin).len() <= 1e-9 * (1.0 + origin.len()) && (x - u.x_axis).len() <= 1e-9 && (y - u.y_axis).len() <= 1e-9
+}
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
 pub(crate) const MAX_PLOT_STYLE_NAMES: usize = 100_000;

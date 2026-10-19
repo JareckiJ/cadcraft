@@ -207,6 +207,15 @@ fn a_ucs_name_without_its_ucs_is_not_written() {
     let mut broken = drawing();
     broken.header.set("UCSXDIR", HVal::Point(Vec3::ZERO));
     assert_eq!(name_written(&broken), (String::new(), false, String::new()));
+    // Usable but not SITE's frame (moved, or turned): restoring SITE would move the UCS, so the
+    // current one is unnamed.
+    let mut moved = drawing();
+    moved.header.set("UCSORG", HVal::Point(Vec3::new(101.0, 50.0, 0.0)));
+    assert_eq!(name_written(&moved), (String::new(), false, String::new()));
+    let mut turned = drawing();
+    turned.header.set("UCSXDIR", HVal::Point(Vec3::new(1.0, 0.0, 0.0)));
+    turned.header.set("UCSYDIR", HVal::Point(Vec3::new(0.0, 1.0, 0.0)));
+    assert_eq!(name_written(&turned), (String::new(), false, String::new()));
 }
 
 #[test]
