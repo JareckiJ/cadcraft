@@ -299,7 +299,16 @@ impl Session {
 
     /// A point given while modifiers are pending: complete the top frame, and when it has its
     /// point, hand that to the frame (or command) below.
-    pub(crate) fn modifier_point(&mut self, mut p: Vec2) -> Result<()> {
+    pub(crate) fn modifier_point(&mut self, p: Vec2) -> Result<()> {
+        // The frames below may give the point another Z (a snap's, a midpoint's); the next
+        // point starts from the Z it comes with.
+        let z = self.point_z;
+        let result = self.modifier_point_frames(p);
+        self.point_z = z;
+        result
+    }
+
+    fn modifier_point_frames(&mut self, mut p: Vec2) -> Result<()> {
         if !p.is_finite() {
             self.echo("Invalid point.");
             return Ok(());
@@ -354,7 +363,11 @@ impl Session {
                     let hit = crate::snap::osnap(self.doc()?, &space, p, aperture, mode | hatch, base, deferred);
                     match hit {
                         Some(h) if self.point_mods.is_empty() => return self.input_snapped(h),
-                        Some(h) => p = h.point,
+                        Some(h) => {
+                            // The Z of what it snapped to, as for a snapped pick (OSNAPZ-aware).
+                            self.point_z = if h.viewport.is_none() { self.snap_z(h.point) } else { 0.0 };
+                            p = h.point;
+                        }
                         None => {
                             self.echo(format!("No {} found for specified point.", snap_name(mode)));
                             return Ok(());

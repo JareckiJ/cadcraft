@@ -85,3 +85,22 @@ fn m2p_between_two_snapped_points_is_midway_in_z() {
     let pts: Vec<Vec3> = s.doc().unwrap().model.iter().filter_map(|e| if let EntityKind::Point(p) = &e.kind { Some(p.p) } else { None }).collect();
     assert!(pts.contains(&Vec3::new(5.0, 0.0, 1880.5)), "{pts:?}");
 }
+
+/// A one-off snap typed for an M2P point gives that point the Z of what it snapped to, and
+/// the next plain point is back at z = 0.
+#[test]
+fn m2p_with_a_typed_snap_for_each_point_takes_their_levels() {
+    let mut s = Session::new();
+    survey(&mut s);
+    s.cmdline("point").unwrap();
+    s.cmdline("m2p").unwrap();
+    s.cmdline("nod").unwrap();
+    s.input(cadcraft_engine::Input::Point(Vec2::new(0.01, 0.0))).unwrap();
+    s.cmdline("end").unwrap();
+    s.input(cadcraft_engine::Input::Point(Vec2::new(10.0, 0.01))).unwrap();
+    s.cmdline("point").unwrap();
+    s.input(cadcraft_engine::Input::Point(Vec2::new(50.0, 50.0))).unwrap();
+    let pts: Vec<Vec3> = s.doc().unwrap().model.iter().filter_map(|e| if let EntityKind::Point(p) = &e.kind { Some(p.p) } else { None }).collect();
+    assert!(pts.contains(&Vec3::new(5.0, 0.0, 1880.5)), "{pts:?}");
+    assert!(pts.contains(&Vec3::new(50.0, 50.0, 0.0)), "{pts:?}");
+}
