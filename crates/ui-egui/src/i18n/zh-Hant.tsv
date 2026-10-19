@@ -932,7 +932,6 @@
 	Viewport {id}	視埠 {id}
 	Viewports	視埠
 	W	W
-	WCS ⌄	WCS ⌄
 	White	白色
 	Width factor	寬度係數
 	Window	視窗
@@ -1327,3 +1326,34 @@
 	Justify	對齊
 	Text color	文字顏色
 	Click the ruler to add a tab stop, right-click to remove one	按一下尺規以加入定位點，按右鍵以移除
+
+# Mainline integration: Express Tools, selection, scaling and command aliases.
+	Break-line Symbol	折斷線符號
+	Convert Text to Mtext	將文字轉換為多行文字
+	Explode Attributes to Text	將屬性分解為文字
+	Express Tools	Express 工具
+	Move/Copy/Rotate	移動／複製／旋轉
+	WCS	WCS
+	Interface scale	介面縮放比例
+	Analyze Shapes	分析形狀
+	Select boundaries to remove	選取要移除的邊界
+	Island	孤島
+	Select using two clicks only	僅以兩次點選進行選取
+	Define each corner of the selection window with a separate click.	分別點選以指定選取視窗的兩個角點。
+	Type an alias name.	輸入別名。
+	Choose the command the alias starts.	選擇此別名要執行的指令。
+	{command} is an unknown command.	未知的指令：{command}。
+	{alias} is already defined; select it and use Edit.	{alias} 已定義；請選取後使用「編輯」。
+	More than {n} aliases.	別名超過 {n} 個。
+	Alias file: {file}	別名檔案：{file}
+	No alias file loaded. REINIT replaces these aliases with a file's.	尚未載入別名檔案。REINIT 會以檔案中的別名取代目前的別名。
+	Alias	別名
+	Command	指令
+	overrides built-in	覆寫內建別名
+	built-in	內建
+	Add…	新增…
+	Edit…	編輯…
+	Save alias	儲存別名
+	Discard	捨棄
+	Customize	自訂
+	Edit Command Aliases (PGP)...	編輯指令別名 (PGP)...

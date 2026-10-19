@@ -1,7 +1,7 @@
 # Interface languages
 
 Choose **Edit → Interface Language** and select **Auto (system language)**, **English**,
-**Українська**, **Português (Brasil)**, **Deutsch**, **Español**, **Čeština** (Czech), **Русский**, **Français**, **简体中文**, **Italiano**, **한국어** (Korean), **Svenska** (Swedish), or **العربية** (Arabic).
+**Українська**, **Português (Brasil)**, **Deutsch**, **Español**, **Čeština** (Czech), **Русский**, **Français**, **简体中文**, **Italiano**, **한국어** (Korean), **Svenska** (Swedish), **العربية** (Arabic), **Magyar** (Hungarian), **Türkçe** (Turkish), or **Ελληνικά** (Greek).
 The interface updates without restarting, including the native macOS menus.
 The choice is saved with the other interface preferences (`cadcraft.prefs`, beside the theme):
 eframe storage on the desktop, browser local storage on the web. Installations without a saved
@@ -11,7 +11,7 @@ Auto uses the first supported language in the operating system's preferred local
 browser's `navigator.languages` on the web. BCP 47 and POSIX tags select their primary language:
 `uk-UA` → `uk`, `de_AT.UTF-8` → `de`, `es-MX` → `es`, `pt_BR.UTF-8` → `pt-BR`,
 `cs-CZ` and `cs_CZ.UTF-8` → `cs`, `it-IT` and `it_CH.UTF-8` → `it`, `ko-KR` and `ko_KR.UTF-8` → `ko`,
-`sv-SE`, `sv-FI` and `sv_SE.UTF-8` → `sv`. Unsupported languages fall back to English.
+`sv-SE`, `sv-FI` and `sv_SE.UTF-8` → `sv`, `hu-HU` and `hu_HU.UTF-8` → `hu`, `tr-TR` and `tr_TR.UTF-8` → `tr`. Unsupported languages fall back to English.
 Set `CADCRAFT_LOCALE=cs-CZ` to override the desktop's locale for a launch.
 An explicit saved language choice takes precedence over that override.
 
@@ -22,7 +22,7 @@ Automation can select the language through the existing control channel:
 ```
 
 The `ui.set` method also accepts `{"interfaceLanguage":"cs"}`. Supported values are `auto`,
-`en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv`, and `ar`; invalid values are rejected without changing the current
+`en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv`, `ar`, `hu`, `tr`, and `el`; invalid values are rejected without changing the current
 selection. Resetting palettes keeps the language choice.
 
 ## Translation coverage
@@ -53,6 +53,25 @@ for `pt`, and the catalog's accented letters (`Á Â Í Ó Ú à á â ã ç é 
 bundled fonts. The original catalog was contributed by @WladmirJunior; the remaining rows were completed
 by @RicSchonfelder with AI assistance and have not yet been proofread by a native speaker.
 
+Hungarian has **1,326 rows**: 1,320 ordinary labels, four contextual menu headings, and two
+single-form count templates. It covers the reference catalog and every marked UI literal,
+including Options, prompts, dialogs, and tooltips; only **Méretezés / Méret** (Dimension) differs
+between the menu heading and the object label. The interface addresses the user informally, and
+a count takes one form because a Hungarian numeral is followed by the singular. The translation
+was written from the meaning of CADCraft's English strings; no other product's localization was
+used as a source. It has not yet been proofread by an independent native speaker.
+
+Turkish has **1,330 rows**: the union of the existing catalogs, four contextual menu headings
+(**Ölçülendirme** for the Dimension menu, **Ölçü** for the object) and two single-form count
+templates, since a Turkish noun stays singular after a number ("3 commit"). No marked UI literal
+falls back to English. Prompts read "… girin" for Enter and "… belirtin" for Specify, and clickable
+keywords (`Top`, `Zero`, `Bottom`, `_tan to`, `nX`/`nXP`) keep the spelling the engine accepts.
+The translation is original, AI-assisted work by @ogzhnklvz, written from the English strings with
+Turkish desktop-CAD vocabulary (Katman, Tarama, Yuvarlatma, Pah, Öteleme, Nesne Kenetleme,
+Görünüm Penceresi); the running app was reviewed by a native speaker, and line-by-line
+proofreading is still to do. The bundled
+egui fonts cover `Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü`.
+
 Drawing titles, layer/layout/block/style names, parameter names and expressions, text in a
 drawing, and command-line input are user data and retain their original spelling. Clickable
 command keywords retain their English spelling so the text shown matches the input accepted
@@ -60,8 +79,9 @@ by the engine. CLI/MCP/control responses, engine diagnostics and command history
 English. Uncatalogued text also falls back to English. Number formatting and the operating
 system's own file-picker controls follow the existing behavior.
 
-The bundled egui fonts cover Ukrainian (`Ґґ Єє Іі Її`), German (`ÄÖÜ äöü ß`), and Czech
-(`ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ áčďéěíňóřšťúůýž`, including typographic quotes `„…“`).
+The bundled egui fonts cover Ukrainian (`Ґґ Єє Іі Її`), German (`ÄÖÜ äöü ß`), Czech
+(`ÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ áčďéěíňóřšťúůýž`, including typographic quotes `„…“`), and Hungarian
+(`ÁÉÍÓÖŐÚÜŰ áéíóöőúüű`, including `„…”`).
 The translations add no font assets and work on the web without system fonts.
 
 Korean needs a font that covers **every Hangul character in its catalog** and the language
@@ -78,6 +98,23 @@ catalog, the saved `ko` preference is kept but the interface falls back to Engli
 command reports that a font is needed, and the picker uses the readable label **Korean** wherever
 Hangul can't be shown. This change does not fix platform IME issues or localize engine output.
 
+## Greek (`el`) interface
+
+The Greek translation covers all **1,330** distinct source keys collected from the existing
+language catalogs: **1,324** ordinary interface labels, **4** contextual menu headings and
+**2** integer-count templates. The interface can be selected as **Ελληνικά** under
+Edit → Interface Language, or automatically when the system language is `el-GR` or `el-CY`.
+Greek integer plurals distinguish 1 from all other counts.
+
+The terminology follows native Greek CAD vocabulary; specialist terms retain the English
+name in parentheses when it helps professionals match a known CAD command (for example,
+**Επίπεδο (Layer)**, **Πολυγραμμή (Polyline)** and **Διαγράμμιση (Hatch)**).
+Common actions such as Open and Save appear simply in Greek. Existing command identifiers,
+drawing content, names of user objects and file formats remain unchanged. The translation is
+original AI-assisted work contributed by @Camthalion77 with language review; it is not sourced
+from Autodesk localization files. Independent native proofreading and visual checks remain
+follow-up work.
+
 ## Adding translations
 
 The implementation follows the display-time catalog pattern used by
@@ -92,7 +129,7 @@ The implementation follows the display-time catalog pattern used by
 - `@plural` entries hold the language's forms for integer counts: Ukrainian `one|few|many`,
   German and Spanish `one|other`, Brazilian Portuguese `one|other` (0 and 1 are `one`),
   Czech `one|few|other` (1; 2–4; everything else, including 0, 11, 21 and 22).
-  Korean has one form (`other`) for all integer counts.
+  Korean and Hungarian have one form (`other`) for all integer counts.
   The API takes `u64`, so fractional counts are not accepted.
 - Register a new catalog in `i18n::LANGUAGES`, add its preference variant and code/name,
   and set its integer plural rule and form count on the `Language` row.
@@ -123,26 +160,21 @@ wins over the system locale. Auto recognizes `zh-Hant` and unscripted `zh-TW`, `
 region and does not select Traditional Chinese; bare `zh` and explicit `Hans` select Simplified Chinese (`zh`). BCP 47
 extensions do not change script selection.
 
-The original catalog covers all 1322 entries in the pinned reference catalog, including
-menus, layers and fixed drafting prompts. Future uncovered strings fall back to English. Commands, accepted English
+The catalog covers all 1350 entries in the current Ukrainian reference catalog. This
+integration adds 29 keys and removes the obsolete `WCS ⌄` key. Commands, accepted English
 keywords, CLI/MCP/control labels, drawing text and user names retain their source spelling.
-Traditional Chinese count entries have one form, through the per-language plural rule, independently of Ukrainian and Portuguese rules.
+Traditional Chinese count entries have one plural form.
 
-Traditional Chinese uses the same theme::cjk_font, can_show and install_fonts path as
-Simplified Chinese. Installed CJK fonts are shared across native platforms, including
-Microsoft JhengHei on Windows. No font files are bundled. Without an installed CJK font,
-the interface shows English while retaining the saved Chinese preference. Web cannot read
-host font files and therefore shows English. Both Chinese catalogs share the existing
-font installation cache; this contribution has no separate font discovery module.
+Traditional Chinese prefers Microsoft JhengHei on Windows; other interfaces retain their
+existing system-font choices. All embedded CJK faces remain available. The Traditional
+interface orders Hant faces first, while Simplified Chinese orders Hans faces first.
+The availability gate accepts installed CJK fonts or embedded Hans/Hant faces, including
+web builds made with CRAFT_FONTS_DIR. Without either, English is shown while the saved
+Chinese preference remains intact. No font files are added by this contribution.
 
-The prototype adds tests for script/region priority, saved selection, count templates,
-English/Chinese/English rendering, unchanged automation/user data, and installed native
-CJK glyphs. These tests have not run. Native compilation and runtime verification remain
-required before claiming supported behavior. Only rustfmt parsing/format and
-static catalog/placeholder/full-reference-coverage checks have run. DPI, GUI and reboot/persistence
-verification remain required before calling this a supported release.
-Catalog audit: 1309 rows contain original Traditional Chinese display text; 13 intentionally
-retain direction/space/style/system identifiers or a value-only template. Accepted keywords,
-coordinate and text syntax, shortcuts, brands and format names embedded in translated prompts
-remain unchanged. Complete coverage refers to the pinned 1322-entry catalog, not future strings
-or a verified release. Original catalog attribution credits @rg147258.
+Regression tests cover script/region selection, saved preferences, plural templates,
+unchanged automation/user data, font ordering and exact current-reference key coverage.
+The integration received static catalog checks only in the Windows editing environment:
+Rust tooling was unavailable. Compilation, cargo xtask ci, native/embedded-font rendering,
+DPI, layout and persistence still require validation before claiming release support.
+Original catalog attribution credits @rg147258.
