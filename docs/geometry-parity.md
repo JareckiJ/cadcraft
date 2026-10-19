@@ -86,6 +86,8 @@ constraints 10%.
 | CHAMFER | lines, polylines, xlines, rays | lines, Distance/Angle, whole polylines (Polyline option), polyline segments as for FILLET (`modify2/fillet_pline.rs`); refuses arcs, ellipses and splines with a message, as AutoCAD; not xlines or rays |
 | BREAK | every curve | line, arc, circle, polyline |
 | JOIN | lines, arcs, polylines, ellipses, splines, helixes | line, arc, polyline into a polyline; elliptical arcs on one ellipse into a larger arc or the full ellipse (gaps close); Close turns a single arc into its circle and a single elliptical arc into its full ellipse; splines with lines, arcs, polylines and elliptical arcs into one exact NURBS (degree elevation, rational arcs; `geom/src/nurbs.rs`); no helixes |
+| BREAK | every curve | line, arc, circle, polyline; a closed polyline loses the stretch from the first to the second point along its vertices and is left open (#1173) |
+| JOIN | lines, arcs, polylines, ellipses, splines, helixes | line, arc, polyline into a polyline; elliptical arcs on one ellipse into a larger arc or the full ellipse (gaps close); splines with lines, arcs, polylines and elliptical arcs into one exact NURBS (degree elevation, rational arcs; `geom/src/nurbs.rs`); no helixes |
 | LENGTHEN | lines, arcs, polylines, elliptical arcs, splines | line, arc, polyline; elliptical arc (arc length along the ellipse); open spline (cut along the curve, or run on along its end tangent) |
 
 Where line and arc are supported the results are exact.
