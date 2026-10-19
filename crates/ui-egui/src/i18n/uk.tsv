@@ -106,6 +106,7 @@
 	Box	Паралелепіпед
 	Break	Розірвати
 	Break At Point	Розірвати в точці
+	Break-line Symbol	Символ лінії розриву
 	Bring Above Objects	Над об'єктами
 	Bring Annotations to Front	Анотації на передній план
 	Bring to Front	На передній план
@@ -172,6 +173,7 @@
 	Contributors	Учасники
 	Control Vertices	Керувальні вершини
 	Convert	Перетворити
+	Convert Text to Mtext	Перетворити текст на багаторядковий текст
 	Copy	Копіювати
 	Copy Full File Path	Копіювати повний шлях до файлу
 	Copy History	Копіювати історію
@@ -324,9 +326,11 @@
 	Evaluate LISP	Обчислити LISP
 	Exclude from new selection set	Виключити з нового набору вибраних об'єктів
 	Explode	Розчленувати
+	Explode Attributes to Text	Розчленувати атрибути в текст
 	Export	Експортувати
 	Export Table	Експортувати таблицю
 	Export to PDF...	Експортувати в PDF...
+	Express Tools	Інструменти Express
 	Expression	Вираз
 	Extend	Подовжити
 	Extension	Продовження
@@ -1275,6 +1279,7 @@
 	Search for pattern	Пошук зразка
 	Run Script...	Виконати сценарій...
 	Query Texts	Запит текстів
+	Analyze Shapes	Аналіз фігур
 	Hatch Pick	Вибір для штрихування
 # Hatch and Gradient dialog
 	Hatch and Gradient	Штрихування та градієнт
@@ -1299,6 +1304,8 @@
 	Add: Pick points	Додати: вказати точки
 	Add: Select objects	Додати: вибрати об'єкти
 	Boundaries picked: {n}	Вибрано контурів: {n}
+	Select boundaries to remove	Виберіть контури для видалення
+	Island	Острів
 	Associative	Асоціативне
 	Create separate hatches	Створити окремі штрихування
 	Island detection	Виявлення островів

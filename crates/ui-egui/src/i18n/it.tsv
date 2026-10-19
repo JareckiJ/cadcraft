@@ -109,6 +109,7 @@ menu	Modify	Edita
 	Box	Parallelepipedo
 	Break	Spezza
 	Break At Point	Spezza in un punto
+	Break-line Symbol	Simbolo linea di interruzione
 	Bring Above Objects	Porta sopra gli oggetti
 	Bring Annotations to Front	Porta le annotazioni in primo piano
 	Bring to Front	Porta in primo piano
@@ -175,6 +176,7 @@ menu	Modify	Edita
 	Contributors	Collaboratori
 	Control Vertices	Vertici di controllo
 	Convert	Converti
+	Convert Text to Mtext	Converti testo in testo multilinea
 	Copy	Copia
 	Copy Full File Path	Copia percorso completo del file
 	Copy History	Copia cronologia
@@ -326,9 +328,11 @@ menu	Modify	Edita
 	Evaluate	Calcola
 	Exclude from new selection set	Escludi dal nuovo gruppo di selezione
 	Explode	Esplodi
+	Explode Attributes to Text	Esplodi attributi in testo
 	Export	Esporta
 	Export Table	Esporta tabella
 	Export to PDF...	Esporta in PDF...
+	Express Tools	Strumenti Express
 	Expression	Espressione
 	Extend	Estendi
 	Extension	Estensione
