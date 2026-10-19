@@ -105,8 +105,7 @@ pub fn format_angle(a: f64, aunits: i64, auprec: i64) -> String {
 
 /// `v` (in `[0, full)`), or 0 when it rounds at `prec` decimals to the same value as a full turn.
 fn wrap_full_turn(v: f64, full: f64, prec: usize) -> f64 {
-    let scale = 10f64.powi(prec as i32);
-    if (v * scale).round() >= (full * scale).round() { 0.0 } else { v }
+    if format!("{v:.prec$}") == format!("{full:.prec$}") { 0.0 } else { v }
 }
 
 /// Parse a distance typed by the user: decimal, `1'6"`, `1'-6 1/2"`, `6 1/2`, `3/4`, `1e3`.
@@ -339,6 +338,7 @@ mod tests {
         assert_eq!(format_angle(359.99_f64.to_radians(), 0, 1), "0.0");
         assert_eq!(format_angle(359.9_f64.to_radians(), 0, 1), "359.9");
         assert_eq!(format_angle(1.0, 3, 2), "1.00r");
+        assert_eq!(format_angle(6.25, 3, 1), "6.2r");
     }
 
     #[test]
