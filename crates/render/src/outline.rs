@@ -181,7 +181,7 @@ mod tests {
         for _ in 0..64 {
             assert_eq!(fill_outlines(&tris), expected, "a repaint must not move the dash origin or reverse its direction");
         }
-        let reversed: Vec<Vec2> = tris.chunks_exact(3).rev().flat_map(|tri| tri.iter().rev().copied()).collect();
+        let reversed: Vec<Vec2> = tris.as_chunks::<3>().0.iter().rev().flat_map(|tri| tri.iter().rev().copied()).collect();
         assert_eq!(fill_outlines(&reversed), expected, "triangle order and winding do not move the contour's dash origin");
         let shift = p(100.0, 100.0);
         let moved: Vec<_> = tris.iter().map(|q| *q + shift).collect();
