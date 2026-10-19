@@ -138,13 +138,9 @@ fn write_audit_log(s: &Session, report: &crate::audit::Report) {
         Ok(st) => (st.path.clone(), st.title.clone()),
         Err(_) => (None, "Drawing".to_string()),
     };
-    let adt_path = match &path_str {
-        Some(p) => std::path::PathBuf::from(p).with_extension("adt"),
-        None => {
-            let dir = crate::autosave::savefilepath();
-            if !dir.is_empty() { std::path::Path::new(&dir).join(format!("{title}.adt")) } else { std::path::PathBuf::from(format!("{title}.adt")) }
-        }
-    };
+    // An unsaved drawing has no folder of its own to hold the log.
+    let Some(path) = &path_str else { return };
+    let adt_path = std::path::PathBuf::from(path).with_extension("adt");
     let content = report.format_adt(&title, path_str.as_deref());
     if let Err(e) = std::fs::write(&adt_path, content) {
         log::warn!("AUDITCTL: could not write audit log {}: {e}", adt_path.display());
