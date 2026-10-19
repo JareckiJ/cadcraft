@@ -303,9 +303,11 @@ pub(crate) fn update_fields(s: &mut Session, handles: Option<&[Handle]>, now: Op
         }
     }
     let changed = edits.len();
-    let d = s.doc_mut()?;
-    for (h, k) in edits {
-        d.modify_entity(h, |e| e.kind = k)?;
+    if changed > 0 {
+        let d = s.doc_mut()?;
+        for (h, k) in edits {
+            d.modify_entity(h, |e| e.kind = k)?;
+        }
     }
     Ok((found, changed))
 }
@@ -361,13 +363,21 @@ fn run_field(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_dwgprops(s: &mut Session, p: &Value) -> Result<Value> {
-    let d = s.doc_mut()?;
+    let mut sets = Vec::new();
     for name in DWGPROPS {
         if let Some(v) = p.get(name.to_ascii_lowercase()) {
             let v = v.as_str().ok_or_else(|| bad("dwgprops", format!("`{}` must be text", name.to_ascii_lowercase())))?;
-            d.header.set(&prop_var(name), cadcraft_doc::HVal::Str(v.chars().take(4096).collect()));
+            sets.push((prop_var(name), v.chars().take(4096).collect::<String>()));
         }
     }
+    // Reading alone must not copy the drawing or record an undo step.
+    if !sets.is_empty() {
+        let d = s.doc_mut()?;
+        for (var, v) in sets {
+            d.header.set(&var, cadcraft_doc::HVal::Str(v));
+        }
+    }
+    let d = s.doc()?;
     let mut out = serde_json::Map::new();
     for name in DWGPROPS {
         out.insert(name.to_ascii_lowercase(), json!(d.header.str(&prop_var(name), "")));

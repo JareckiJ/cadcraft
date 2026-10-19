@@ -329,7 +329,9 @@ impl SpellM {
     fn start(&mut self, s: &mut Session, hs: &[Handle]) -> Result<Step> {
         let path =
             user_dictionary(s).ok_or_else(|| other("No word list: set the SPELLDICTIONARY option to a word list file (one word per line)."))?;
-        self.dict = read_list(&path).map_err(|e| other(e.to_string()))?;
+        // Only an implicit default list may be absent; a configured one must be readable.
+        let implicit = s.settings.spelldictionary.trim().is_empty();
+        self.dict = if implicit && !std::path::Path::new(&path).exists() { HashSet::new() } else { read_list(&path).map_err(|e| other(e.to_string()))? };
         let d = s.doc()?;
         for h in hs {
             let Some(e) = d.entity(*h) else { continue };
@@ -394,7 +396,6 @@ impl Interactive for SpellM {
             Input::Enter => "Ignore".into(),
             _ => return Ok(Step::Continue),
         };
-        self.queue.pop();
         match answer.to_ascii_lowercase().as_str() {
             "" | "ignore" | "i" => {}
             "all" => {
@@ -418,6 +419,8 @@ impl Interactive for SpellM {
                 }
             }
         }
+        // Only now: a failed `Add` write leaves the word queued.
+        self.queue.pop();
         self.next(s)
     }
 }
