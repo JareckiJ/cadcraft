@@ -1,5 +1,6 @@
 # Parity checklist
 
+> **Generated:** 2026-10-15 by `cargo xtask parity`. Do not edit by hand.
 > **Generated:** 2026-10-16 by `cargo xtask parity`. Do not edit by hand.
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
@@ -105,6 +106,7 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Tools > Export Settings
 - Tools > Express Tools > Convert Text to Mtext
 - Tools > Express Tools > Break-line Symbol
+- Tools > Express Tools > Move/Copy/Rotate
 - Tools > Express Tools > Explode Attributes to Text
 - Tools > Express Tools > Replace Block...
 - Tools > Express Tools > Super Hatch > Image...

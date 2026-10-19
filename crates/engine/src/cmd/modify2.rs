@@ -17,7 +17,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 mod curve_edits;
 mod fillet_pline;
 mod mocoro;
-pub(crate) use curve_edits::join_curves;
+pub(crate) use curve_edits::{closed_kind, join_close, join_curves};
 pub(crate) use fillet_pline::{ChamferDistances, fillet_pline};
 
 pub fn specs() -> Vec<CommandSpec> {
