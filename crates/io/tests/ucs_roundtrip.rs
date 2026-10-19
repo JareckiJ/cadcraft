@@ -188,8 +188,14 @@ fn hostile_layout_ucs_groups_are_ignored() {
     let d = Drawing::default();
     let text = cadcraft_io::write_dxf(&d);
     let name = d.layouts[0].name.clone();
-    // Rewrite the layout's UCS groups as nonsense: no length, along each other, a dangling 345.
-    for (x, y, h) in [("0.0", "0.0", "FFFF"), ("1.0", "1.0", "0"), ("nan", "1.0", "ZZ")] {
+    // Rewrite the layout's UCS axes (X: groups 16/26, Y: 17/27) as nonsense, each with a dangling
+    // 345 handle: no length, Y along X, not a number.
+    let usable = |l: &cadcraft_doc::Layout| l.ucs.as_ref().is_none_or(|u| u.name.is_empty() && u.x_axis.cross(u.y_axis).len() > 1e-9);
+    for (case, [x16, x26, y17, y27], h) in [
+        ("no length", ["0.0", "0.0", "0.0", "0.0"], "FFFF"),
+        ("Y along X", ["1.0", "0.0", "2.0", "0.0"], "0"),
+        ("not a number", ["nan", "0.0", "0.0", "1.0"], "ZZ"),
+    ] {
         let mut out = String::new();
         let mut in_layout = false;
         let mut lines = text.lines();
@@ -199,9 +205,10 @@ fn hostile_layout_ucs_groups_are_ignored() {
                 in_layout = vt == "LAYOUT";
             }
             let v = match (in_layout, ct) {
-                (true, "16") => x.to_string(),
-                (true, "27") => y.to_string(),
-                (true, "17") => y.to_string(),
+                (true, "16") => x16.to_string(),
+                (true, "26") => x26.to_string(),
+                (true, "17") => y17.to_string(),
+                (true, "27") => y27.to_string(),
                 _ => v.to_string(),
             };
             out.push_str(&format!("{c}\n{v}\n"));
@@ -209,9 +216,20 @@ fn hostile_layout_ucs_groups_are_ignored() {
                 out.push_str(&format!("345\n{h}\n"));
             }
         }
-        let back = cadcraft_io::read_dxf(out.as_bytes()).unwrap();
+        // Refusing the file is fine; reading it must leave no unusable UCS, saved and reopened too.
+        // Parallel axes are plain numbers: that file must read, so the rejection below runs.
+        let back = match cadcraft_io::read_dxf(out.as_bytes()) {
+            Ok(back) => back,
+            Err(e) if case == "Y along X" => panic!("{case}: {e}"),
+            Err(_) => continue,
+        };
         let l = back.layout(&name).unwrap();
-        assert!(l.ucs.as_ref().is_none_or(|u| u.name.is_empty() && u.x_axis.cross(u.y_axis).len() > 1e-9), "{x},{y},{h}: {:?}", l.ucs);
+        assert!(usable(l), "{case}: {:?}", l.ucs);
+        if case == "Y along X" {
+            assert!(l.ucs.is_none(), "parallel axes are rejected: {:?}", l.ucs);
+        }
+        let again = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&back).as_bytes()).unwrap();
+        assert!(usable(again.layout(&name).unwrap()), "{case} after save and reopen");
     }
 }
 

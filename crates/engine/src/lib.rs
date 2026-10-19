@@ -144,9 +144,6 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
-    /// Earlier UCSs for UCS Previous, oldest first, with the space each was current in (at most
-    /// [`ucs::MAX_PREVIOUS`] per space; not saved with the drawing).
-    pub ucs_previous: Vec<(Space, ucs::UcsFrame, String)>,
     /// The user was told that the current UCS is tilted ([`Session::note_tilted_ucs`]).
     pub ucs_tilted_noted: bool,
 }
@@ -175,7 +172,6 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
-            ucs_previous: Vec::new(),
             ucs_tilted_noted: false,
         }
     }

@@ -121,6 +121,37 @@ fn getpoint_answers_in_the_ucs_and_command_reads_ucs_points() {
     assert!(last.a.xy().dist(Vec2::new(100.0, 60.0)) < 1e-9 && last.b.xy().dist(Vec2::new(96.0, 53.0)) < 1e-9, "{last:?}");
 }
 
+/// The rubber band of `getpoint`/`getcorner` with a base point starts where that UCS point is in
+/// the world, and `getcorner`'s rectangle runs along the UCS axes.
+#[test]
+fn getpoint_and_getcorner_previews_start_at_the_ucs_base() {
+    let ends = |k: &cadcraft_doc::EntityKind| match k {
+        cadcraft_doc::EntityKind::Line(l) => (l.a.xy(), l.b.xy()),
+        other => panic!("{other:?}"),
+    };
+    let near = |a: Vec2, b: Vec2| a.dist(b) < 1e-9;
+    let mut s = session();
+    turned(&mut s);
+    // UCS (0, 0) is world (100, 50); the cursor is at world (90, 70), UCS (20, 10).
+    let cursor = Vec2::new(90.0, 70.0);
+    s.cmdline("(setq p (getpoint '(0 0)))").unwrap();
+    let band = s.lisp_preview(cursor).unwrap();
+    assert_eq!(band.len(), 1);
+    let (a, b) = ends(&band[0]);
+    assert!(near(a, Vec2::new(100.0, 50.0)) && near(b, cursor), "{a:?} {b:?}");
+    s.input(crate::Input::Point(cursor)).unwrap();
+    s.cmdline("(setq c (getcorner '(0 0)))").unwrap();
+    let rect: Vec<(Vec2, Vec2)> = s.lisp_preview(cursor).unwrap().iter().map(ends).collect();
+    // Along UCS X (world +Y) to UCS (20, 0), the cursor, UCS (0, 10) (world (90, 50)), back.
+    let want = [(100.0, 50.0), (100.0, 70.0), (90.0, 70.0), (90.0, 50.0)].map(|(x, y)| Vec2::new(x, y));
+    assert_eq!(rect.len(), 4);
+    for (i, (a, b)) in rect.iter().enumerate() {
+        assert!(near(*a, want[i]) && near(*b, want[(i + 1) % 4]), "side {i}: {a:?} {b:?}");
+    }
+    s.input(crate::Input::Point(cursor)).unwrap();
+    assert!(close(pt(&to_text(&s.lisp_var("C"), true)), [20.0, 10.0, 0.0]), "the corner it returns, in the UCS");
+}
+
 #[test]
 fn getangle_and_getdist_measure_in_the_ucs() {
     let mut s = session();
