@@ -139,6 +139,11 @@ fn dxf(d: &Drawing, v: Version) -> String {
     String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &SaveOptions { version: Some(v), binary: false }).unwrap()).unwrap()
 }
 
+/// `d` saved (2018) and opened again.
+fn reopened(d: &Drawing) -> Drawing {
+    read_dxf(dxf(d, Version::R2018).as_bytes()).unwrap()
+}
+
 /// The lines of the DIMSTYLE record `name`, from its name to the next record.
 fn style_record(lines: &[&str], name: &str) -> Option<std::ops::Range<usize>> {
     let pair = |i: usize, c: &str, v: &str| lines.get(i).is_some_and(|l| l.trim() == c) && lines.get(i + 1).is_some_and(|l| l.trim() == v);
@@ -202,6 +207,8 @@ fn jog_angle_in_radians_in_a_group_still_reads() {
     for (file, want) in [("0.7853981633974483", 45.0), ("1.0471975511965976", 60.0), ("0.08726646259971647", 5.0), ("1.5707963267948966", 90.0)] {
         let back = read_dxf(with_style_group(&text, "Detail", "50", file).as_bytes()).unwrap();
         assert_eq!(back.dim_style("Detail").unwrap().jog_angle, want, "{file}");
+        // Saved again, it's degrees: the same style comes back, its linetypes too.
+        assert_eq!(reopened(&back).dim_style("Detail").unwrap(), &DimStyle { jog_angle: want, ..styled() }, "saved again: {file}");
     }
 }
 
@@ -213,6 +220,7 @@ fn jog_angle_no_style_takes_keeps_the_default() {
         let st = back.dim_style("Detail").unwrap();
         assert_eq!(st.jog_angle, 45.0, "{file}");
         assert_eq!(DimStyle { jog_angle: 30.0, ..st.clone() }, styled(), "the rest of the style reads: {file}");
+        assert_eq!(reopened(&back).dim_style("Detail").unwrap(), &DimStyle { jog_angle: 45.0, ..styled() }, "saved again: {file}");
     }
 }
 
