@@ -62,5 +62,10 @@ real_name = "Chester Fung"
 display_name = "Chester Fung"
 sync_github_name = true
 
+[people.C00kieMonsta]
+real_name = "Antoine Boxho"
+display_name = "Antoine Boxho"
+sync_github_name = true
+
 [people.gurparvez]
 real_name = "Gurparvez"
