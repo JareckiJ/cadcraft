@@ -2480,14 +2480,20 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.p(15, Vec3::ZERO);
             // The layout's current UCS: origin, X and Y axes, orthographic type, then (after the
             // block record) the named UCS it is.
-            let u = ucs.filter(|u| [u.origin, u.x_axis, u.y_axis].iter().all(|v| v.is_finite()) && u.x_axis.cross(u.y_axis).len() > 1e-12);
+            // Usable by the rule the reader applies, so what is written reads back.
+            let u = ucs.filter(|u| u.origin.is_finite() && dxf_ext::usable_axes(u.x_axis, u.y_axis));
             w.f(146, 0.0);
             w.p(13, u.map_or(Vec3::ZERO, |u| u.origin));
             w.p(16, u.map_or(Vec3::new(1.0, 0.0, 0.0), |u| u.x_axis));
             w.p(17, u.map_or(Vec3::new(0.0, 1.0, 0.0), |u| u.y_axis));
             w.i(76, 0);
             w.s(330, brh);
-            if let Some(h) = u.filter(|u| !u.name.trim().is_empty()).and_then(|u| w.ucss.get(&u.name.trim().to_ascii_uppercase())).cloned() {
+            // The named UCS it is, only while its frame is still that record's (as for model space).
+            let named = u.filter(|u| {
+                !u.name.trim().is_empty()
+                    && d.ucss.iter().any(|r| r.name.eq_ignore_ascii_case(u.name.trim()) && dxf_ext::is_named_frame(r, u.origin, u.x_axis, u.y_axis))
+            });
+            if let Some(h) = named.and_then(|u| w.ucss.get(&u.name.trim().to_ascii_uppercase())).cloned() {
                 w.s(345, h);
             }
             // The saved paper-space view (centre, height) as CADCraft xdata.
