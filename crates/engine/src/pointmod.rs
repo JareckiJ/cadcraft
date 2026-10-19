@@ -81,8 +81,10 @@ pub enum Frame {
     /// the prompt below asks again.
     TempTrack,
     /// `TK` (tracking): a run of points, each straight across or up from the one before; Enter
-    /// ends it and hands down the last. `axis` is the axis the last segment ran along
-    /// (`Some(true)` horizontal, `Some(false)` vertical, `None` after only the first pick).
+    /// ends it and hands down the last. `axis` is the axis the *next* segment runs along — the
+    /// run alternates, so it is set to the opposite of the segment just placed (`Some(true)`
+    /// horizontal, `Some(false)` vertical); `None` until a segment has been placed, when the
+    /// cursor's nearer axis still steers it.
     Track { last: Option<Vec2>, axis: Option<bool> },
 }
 
@@ -242,9 +244,8 @@ impl Session {
             && let Some(d) = crate::units::parse_distance(t)
         {
             let (dx, dy) = (self.cursor.x - l.x, self.cursor.y - l.y);
-            let screen_dist = self.cursor.dist(l) / self.pixel_size();
-            // Near the anchor (or the first pick): follow the cursor direction.
-            // Far from the anchor: force the other axis (alternation).
+            // The run alternates: an axis set by the segment just placed wins; without one
+            // (the first segment) the cursor's nearer axis steers it.
             let horizontal = axis.unwrap_or_else(|| dx.abs() >= dy.abs());
             let dir =
                 if horizontal { Vec2::new(if dx >= 0.0 { 1.0 } else { -1.0 }, 0.0) } else { Vec2::new(0.0, if dy >= 0.0 { 1.0 } else { -1.0 }) };
@@ -340,7 +341,6 @@ impl Session {
                         None => p,
                         Some(l) => {
                             let (dx, dy) = (p.x - l.x, p.y - l.y);
-                            let screen_dist = p.dist(l) / self.pixel_size();
                             let horizontal = axis.unwrap_or_else(|| dx.abs() >= dy.abs());
                             if horizontal { Vec2::new(p.x, l.y) } else { Vec2::new(l.x, p.y) }
                         }
