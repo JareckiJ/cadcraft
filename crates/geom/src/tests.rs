@@ -54,6 +54,18 @@ fn arc_bounds_include_quadrants() {
 }
 
 #[test]
+fn bulge_noise_is_straight() {
+    // DWG dust bulges (~1e-12) on real segments: radius would explode toward chord/bulge (seen:
+    // 7e12 on a 99-unit chord), blowing up the drawing's extents. Draw them straight.
+    assert!(bulge_to_arc(Vec2::new(0.0, 0.0), Vec2::new(99.0, 0.0), 3.4e-12).is_none());
+    assert!(bulge_to_arc(Vec2::new(0.0, 0.0), Vec2::new(2.3, 0.0), -1.4e-10).is_none());
+    // A shallow but real arc (sagitta 0.005 on a 1000-unit chord) stays an arc.
+    assert!(bulge_to_arc(Vec2::new(0.0, 0.0), Vec2::new(1000.0, 0.0), 1e-5).is_some());
+    // Passes the sagitta gate but |bulge| < 1e-12: endpoint angles collapse in f64 (radius 2.5e32).
+    assert!(bulge_to_arc(Vec2::new(-1e12, 0.0), Vec2::new(1e12, 0.0), 2e-21).is_none());
+}
+
+#[test]
 fn bulge_semicircle() {
     let (arc, ccw) = bulge_to_arc(Vec2::new(0.0, 0.0), Vec2::new(2.0, 0.0), 1.0).unwrap();
     assert!(ccw);

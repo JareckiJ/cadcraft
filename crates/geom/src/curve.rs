@@ -433,14 +433,20 @@ impl PolyVertex {
 
 /// Convert a bulge segment to an arc. `None` for a straight (zero-bulge or degenerate) segment.
 pub fn bulge_to_arc(a: Vec2, b: Vec2, bulge: f64) -> Option<(Arc, bool)> {
-    if bulge.abs() < 1e-12 || !bulge.is_finite() || a.near(b, EPS) {
+    let chord = a.dist(b);
+    // Two ways a bulge is too small to be an arc:
+    // - |bulge| < 1e-12: the endpoint angles (~2·bulge rad apart) risk collapsing in f64; the
+    //   radius (~chord/bulge) blows up and the sweep can read as a full circle.
+    // - sagitta (chord·|bulge|/2) < EPS: straight at any zoom; DWG dust bulges (~1e-12) land here.
+    if !bulge.is_finite() || chord < EPS || bulge.abs() < 1e-12 || chord * bulge.abs() < 2.0 * EPS {
         return None;
     }
     let theta = 4.0 * bulge.atan(); // signed included angle
-    let chord = a.dist(b);
     let r = chord / (2.0 * (theta / 2.0).sin().abs());
     let mid = a.mid(b);
-    let sagitta_dir = (b - a).normalized().perp();
+    // Normalized by the validated chord, not Vec2::normalized (its l > EPS cutoff disagrees
+    // with the guard's chord < EPS at the boundary).
+    let sagitta_dir = ((b - a) / chord).perp();
     // distance from chord midpoint to center
     let h = r * (theta / 2.0).cos().abs();
     // For bulge > 0 (CCW), center is to the left of a→b when |θ| < π.
