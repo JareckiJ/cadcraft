@@ -1009,3 +1009,10 @@
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
 	Analyze Shapes	Анализ фигур
+	AutoSnap settings	Параметры AutoSnap
+	Marker	Маркер
+	Magnet	Магнит
+	Display AutoSnap tooltip	Показывать подсказку AutoSnap
+	Display AutoSnap aperture box	Показывать рамку прицела AutoSnap
+	Display AutoTrack tooltip	Показывать подсказку AutoTrack
+	The magnet locks the crosshair onto the snap point; the aperture box shows how near the cursor must come to find one.	Магнит притягивает перекрестие к точке привязки; рамка прицела показывает, как близко должен подойти курсор, чтобы найти её.
