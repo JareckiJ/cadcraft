@@ -10,7 +10,7 @@ pub fn format_distance(v: f64, lunits: i64, luprec: i64) -> String {
     }
     let prec = luprec.clamp(0, 8) as usize;
     match lunits {
-        1 => format!("{:.*E}", prec, v),
+        1 => scientific(v, prec),
         3 => {
             let neg = v < 0.0;
             // Round at the displayed precision before splitting, so 11.999 carries to 1'-0.00".
@@ -57,6 +57,21 @@ pub fn format_distance(v: f64, lunits: i64, luprec: i64) -> String {
     }
 }
 
+/// Scientific notation with a signed exponent of at least two digits (`1.7500E+01`, `1.00E-05`).
+fn scientific(v: f64, prec: usize) -> String {
+    let s = format!("{:.*E}", prec, v);
+    match s.split_once('E') {
+        Some((mantissa, exp)) => {
+            let (sign, digits) = match exp.strip_prefix('-') {
+                Some(d) => ('-', d),
+                None => ('+', exp),
+            };
+            format!("{mantissa}E{sign}{digits:0>2}")
+        }
+        None => s,
+    }
+}
+
 fn gcd(a: i64, b: i64) -> i64 {
     if b == 0 { a.abs().max(1) } else { gcd(b, a % b) }
 }
@@ -87,8 +102,8 @@ pub fn format_angle(a: f64, aunits: i64, auprec: i64) -> String {
                 }
             }
         }
-        2 => format!("{:.*}g", prec, deg / 0.9),
-        3 => format!("{:.*}r", prec, cadcraft_geom::norm_angle(a)),
+        2 => format!("{:.*}g", prec, wrap_full_turn(deg / 0.9, 400.0, prec)),
+        3 => format!("{:.*}r", prec, wrap_full_turn(cadcraft_geom::norm_angle(a), 2.0 * PI, prec)),
         4 => {
             // N/S <angle from N/S toward E/W> E/W
             let (ns, ew, ang) = if deg <= 90.0 {
@@ -102,8 +117,13 @@ pub fn format_angle(a: f64, aunits: i64, auprec: i64) -> String {
             };
             format!("{ns} {:.*}d {ew}", prec, ang)
         }
-        _ => format!("{:.*}", prec, deg),
+        _ => format!("{:.*}", prec, wrap_full_turn(deg, 360.0, prec)),
     }
+}
+
+/// `v` (in `[0, full)`), or 0 when it rounds at `prec` decimals to the same value as a full turn.
+fn wrap_full_turn(v: f64, full: f64, prec: usize) -> f64 {
+    if format!("{v:.prec$}") == format!("{full:.prec$}") { 0.0 } else { v }
 }
 
 /// Parse a distance typed by the user: decimal, `1'6"`, `1'-6 1/2"`, `6 1/2`, `3/4`, `1e3`.
@@ -344,6 +364,17 @@ mod tests {
     }
 
     #[test]
+    fn scientific_exponent_is_signed_and_padded() {
+        assert_eq!(format_distance(17.5, 1, 4), "1.7500E+01");
+        assert_eq!(format_distance(0.00001, 1, 2), "1.00E-05");
+        assert_eq!(format_distance(1234.5, 1, 3), "1.234E+03");
+        assert_eq!(format_distance(12345678.0, 1, 3), "1.235E+07");
+        assert_eq!(format_distance(-17.5, 1, 4), "-1.7500E+01");
+        assert_eq!(format_distance(0.0, 1, 2), "0.00E+00");
+        assert_eq!(format_distance(1e100, 1, 1), "1.0E+100");
+    }
+
+    #[test]
     fn dms_display_precision() {
         let angle = (12.0 + 34.0 / 60.0 + 56.78912 / 3600.0_f64).to_radians();
         let expected = ["13d", "12d35'", "12d35'", "12d34'57\"", "12d34'57\"", "12d34'56.8\"", "12d34'56.79\"", "12d34'56.789\"", "12d34'56.7891\""];
@@ -371,6 +402,18 @@ mod tests {
         for (angle, prec, expected) in cases {
             assert_eq!(format_angle(angle, 1, prec), expected, "AUPREC {prec}");
         }
+    }
+
+    #[test]
+    fn rounding_to_a_full_turn_wraps_to_zero() {
+        let almost_turn = 359.9999_f64.to_radians();
+        assert_eq!(format_angle(almost_turn, 0, 2), "0.00");
+        assert_eq!(format_angle(almost_turn, 2, 2), "0.00g");
+        assert_eq!(format_angle(2.0 * PI - 1e-9, 3, 2), "0.00r");
+        assert_eq!(format_angle(359.99_f64.to_radians(), 0, 1), "0.0");
+        assert_eq!(format_angle(359.9_f64.to_radians(), 0, 1), "359.9");
+        assert_eq!(format_angle(1.0, 3, 2), "1.00r");
+        assert_eq!(format_angle(6.25, 3, 1), "6.2r");
     }
 
     #[test]
