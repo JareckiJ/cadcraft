@@ -11,7 +11,7 @@
 	* Wildcard Match	* Correspondência com curinga
 	*VARIES*	*VARIADO*
 	+  |  Top  |  2D Wireframe	+  |  Superior  |  Wireframe 2D
-	+Bin	+bin.
+	+Bin	+bin
 	+LOC	+linhas
 	1 Viewport	1 viewport
 	2 Points	2 pontos
@@ -81,9 +81,9 @@
 	Batch Publish...	Publicação em lote...
 	Binary assets added	Recursos binários adicionados
 	Binary assets removed	Recursos binários removidos
-	Bind	Vincular
-	Bind...	Vincular...
-	Blend	Mesclar
+	Bind	Integrar
+	Bind...	Integrar...
+	Blend	Curva de transição
 	Block	Bloco
 	Block Attribute Manager...	Gerenciador de atributos de bloco...
 	Block Editor	Editor de blocos
@@ -107,7 +107,7 @@
 	ByLayer	PorCamada
 	CADCraft	CADCraft
 	CADCraft Help	Ajuda do CADCraft
-	CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts.	O CADCraft mantém estas preferências, modos de snap a objetos e alternâncias de desenho na sua conta de usuário e as restaura ao iniciar.
+	CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts.	O CADCraft mantém estas preferências, os modos de snap a objetos e as opções de desenho na sua conta de usuário e os restaura ao iniciar.
 	Cancel	Cancelar
 	Cartesian (x, y)	Cartesiano (x, y)
 	Center	Centro
@@ -282,7 +282,7 @@
 	End angle	Ângulo final
 	Endpoint	Extremidade
 	Enter	Enter
-	Enter Top, Zero or Bottom.	Digite Superior, Zero ou Inferior.
+	Enter Top, Zero or Bottom.	Digite Top, Zero ou Bottom.
 	Enter a fit data option	Digite uma opção de dados de ajuste
 	Enter a pattern name	Digite o nome de um padrão
 	Enter a vertex editing option	Digite uma opção de edição de vértice
@@ -374,7 +374,7 @@
 	Get from the Drawing	Obter do desenho
 	Global	Global
 	Global width	Largura global
-	Grab bag	Lista
+	Grab bag	Diversos
 	Gradient	Gradiente
 	Gradient...	Gradiente...
 	Green	Verde
@@ -459,12 +459,12 @@
 	Join us on Discord	Junte-se a nós no Discord
 	Keep the system cursor visible over the drawing area	Manter o cursor do sistema visível sobre a área de desenho
 	Language	Idioma
-	Largest array	Matriz maior
+	Largest array	Maior matriz
 	Last	Último
 	Last commit	Último commit
 	Layer	Camada
 	Layer Delete	Excluir camada
-	Layer Match	Corresponder camada
+	Layer Match	Igualar camada
 	Layer Merge	Mesclar camadas
 	Layer Off	Desligar camada
 	Layer Properties	Propriedades da camada
@@ -520,7 +520,7 @@
 	Lock Layer	Bloquear camada
 	Lock/Unlock	Bloquear/desbloquear
 	Loft	Loft
-	MIT OR Apache-2.0. Not affiliated with Autodesk, Inc.	MIT OU Apache-2.0. Sem afiliação com a Autodesk, Inc.
+	MIT OR Apache-2.0. Not affiliated with Autodesk, Inc.	MIT OR Apache-2.0. Sem afiliação com a Autodesk, Inc.
 	MODEL	MODELO
 	MText	MText
 	Magenta	Magenta
@@ -528,9 +528,9 @@
 	Make Current	Tornar atual
 	Make Object's Layer Current	Tornar atual a camada do objeto
 	Make it a block of this drawing, keeping its layer names	Torná-lo um bloco deste desenho, mantendo os nomes das camadas
-	Make it a block of this drawing; its layers become NAME$0$LAYER	Torná-lo um bloco deste desenho; suas camadas passam a NAME$0$LAYER
+	Make it a block of this drawing; its layers become NAME$0$LAYER	Torná-lo um bloco deste desenho; suas camadas passam a se chamar NAME$0$LAYER
 	Make...	Criar...
-	Match Layer	Corresponder camada
+	Match Layer	Igualar camada
 	Match Properties	Copiar propriedades
 	Measure	Medir
 	Measure Distance	Medir distância
@@ -559,7 +559,7 @@
 	Multiple	Múltiplo
 	Multiple Point	Ponto múltiplo
 	My	Minhas
-	My properties: not available yet	Minhas propriedades: ainda não disponível
+	My properties: not available yet	Minhas propriedades: ainda não disponíveis
 	N	N
 	Name	Nome
 	Name (A–Z)	Nome (A–Z)
@@ -634,7 +634,7 @@
 	PAPER	PAPEL
 	Paste to Command Line	Colar na linha de comando
 	Percent	Porcentagem
-	Pickbox size	Tamanho da caixa de seleção
+	Pickbox size	Tamanho do quadrado de seleção
 	Plotter Manager	Gerenciador de plotagem
 	Plotter Manager...	Gerenciador de plotagem...
 	Polar (distance < angle)	Polar (distância < ângulo)
@@ -677,7 +677,7 @@
 	Polyline Edit	Editar polilinha
 	Previous Change	Alteração anterior
 	Profiles	Perfis
-	QuickCalc Pick	Designar para cálculo rápido
+	QuickCalc Pick	Selecionar para a calculadora rápida
 	Recalculate Table Formulas	Recalcular fórmulas da tabela
 	Recent Commands	Comandos recentes
 	Recent Input	Entradas recentes
@@ -788,7 +788,7 @@
 	Quick Select	Seleção rápida
 	Quick Select Properties	Propriedades da seleção rápida
 	Quick Select...	Seleção rápida...
-	QuickCalc	Calculadora
+	QuickCalc	Calculadora rápida
 	Quit CADCraft	Sair do CADCraft
 	Radius	Raio
 	Raster Image	Imagem raster
@@ -863,7 +863,7 @@
 	Edit Reference In-Place	Editar referência no local
 	Save Reference Edits	Salvar alterações da referência
 	Working Set	Conjunto de trabalho
-	Xref and Block In-place Editing	Edição no local de xrefs e blocos
+	Xref and Block In-place Editing	Edição no local de referências externas e blocos
 	Select a line, arc, circle, polyline, ellipse or spline as the path.	Selecione uma linha, arco, círculo, polilinha, elipse ou spline como trajetória.
 	Select a line, circle, arc or polyline segment.	Selecione uma linha, círculo, arco ou segmento de polilinha.
 	Select a line.	Selecione uma linha.
@@ -903,7 +903,7 @@
 	Select objects to array.	Selecione os objetos para a matriz.
 	Select objects to stretch by crossing-window or crossing-polygon...	Selecione os objetos a esticar por janela de captura ou polígono de captura...
 	Select objects:	Selecione objetos:
-	Select one polyline (Multiple is available through the JSON form).	Selecione uma polilinha (Múltiplo está disponível pela forma JSON).
+	Select one polyline (Multiple is available through the JSON form).	Selecione uma polilinha (a opção Multiple está disponível pela forma JSON).
 	Select path curve	Selecione a curva da trajetória
 	Select point or object	Selecione um ponto ou objeto
 	Select polyline or	Selecione uma polilinha ou
@@ -1208,7 +1208,7 @@
 	{name}: {distance} < {angle}°	{name}: {distance} < {angle}°
 	ƒx  New User Parameter	ƒx  Novo parâmetro do usuário
 	ΔLOC	Δlinhas
-	−Bin	−bin.
+	−Bin	−bin
 	−LOC	−linhas
 	⌘↩ to finish	⌘↩ para concluir
 @plural	{n} commit	{n} commit|{n} commits
