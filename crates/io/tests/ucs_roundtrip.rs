@@ -170,6 +170,74 @@ fn a_far_named_ucs_keeps_its_name_only_where_it_is() {
     assert_eq!(read(&d), "FAR");
     d.header.set("UCSORG", HVal::Point(Vec3::new(1e8 + 0.05, 0.0, 0.0)));
     assert_eq!(read(&d), "", "moved 0.05: no longer FAR");
+    // Further out still: at 1e12 an exact save keeps the name and a 0.5 move drops it.
+    let mut d = d.clone();
+    let far = Ucs { origin: Vec3::new(1e12, 0.0, 0.0), ..far };
+    d.ucss = vec![far.clone()];
+    d.header.set("UCSORG", HVal::Point(far.origin));
+    assert_eq!(read(&d), "FAR");
+    d.header.set("UCSORG", HVal::Point(Vec3::new(1e12 + 0.5, 0.0, 0.0)));
+    assert_eq!(read(&d), "", "moved 0.5 at 1e12: no longer FAR");
+}
+
+/// DXF text with the value of group `code` in the first record `kind` holding `marker` (code,
+/// value) replaced by `value`.
+fn replace_group(text: &str, after: (&str, &str), code: &str, value: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut armed = false;
+    let mut done = false;
+    for pair in lines.chunks(2) {
+        let [c, v] = pair else { break };
+        let (ct, vt) = (c.trim(), v.trim());
+        if !done && ct == after.0 && vt == after.1 {
+            armed = true;
+        }
+        let v = if armed && !done && ct == code {
+            done = true;
+            value.to_string()
+        } else {
+            v.to_string()
+        };
+        out.push(format!("{c}\n{v}"));
+    }
+    out.join("\n") + "\n"
+}
+
+/// Read from a file, a UCS name is kept only while its frame is that record's: a $UCSNAME, or a
+/// layout's group 345, naming a UCS whose origin differs leaves the frame as it is, unnamed.
+#[test]
+fn a_stale_ucs_name_in_a_file_is_dropped_on_read() {
+    // Model space: $UCSNAME SITE, but $UCSORG moved away from SITE's origin.
+    let text = cadcraft_io::write_dxf(&drawing());
+    let moved = replace_group(&text, ("9", "$UCSORG"), "10", "101.0");
+    let back = cadcraft_io::read_dxf(moved.as_bytes()).unwrap();
+    assert_eq!(back.header.str("UCSNAME", ""), "", "SITE no longer");
+    assert!(near3(back.header.point("UCSORG").unwrap(), Vec3::new(101.0, 50.0, 0.0)), "the frame is kept");
+    assert_eq!(cadcraft_io::read_dxf(text.as_bytes()).unwrap().header.str("UCSNAME", ""), "SITE", "unmoved, still SITE");
+    // A layout: its UCS is SITE (345 written), then its origin (group 13) moved in the file.
+    let mut d = drawing();
+    d.layouts[0].ucs = Some(d.ucss[0].clone());
+    let name = d.layouts[0].name.clone();
+    let text = cadcraft_io::write_dxf(&d);
+    assert!(group(&layout_record(&text, &name), "345").is_some());
+    let moved = replace_group(&text, ("1", &name), "13", "7.0");
+    let u = cadcraft_io::read_dxf(moved.as_bytes()).unwrap().layout(&name).unwrap().ucs.clone().unwrap();
+    assert!(u.name.is_empty() && (u.origin.x - 7.0).abs() < 1e-9, "{u:?}");
+    assert_eq!(cadcraft_io::read_dxf(text.as_bytes()).unwrap().layout(&name).unwrap().ucs.as_ref().unwrap().name, "SITE");
+}
+
+/// The active VPORT names model space's UCS too: group 345 is the UCS record's handle while the
+/// UCS is that named one, and absent while it is unnamed.
+#[test]
+fn the_active_vport_points_at_the_named_ucs() {
+    let active = |text: &str| records(text, "VPORT").into_iter().find(|r| group(r, "2") == Some("*Active")).unwrap();
+    let text = cadcraft_io::write_dxf(&drawing());
+    let site = records(&text, "UCS").into_iter().find(|r| group(r, "2") == Some("SITE")).and_then(|r| group(&r, "5").map(str::to_string)).unwrap();
+    assert_eq!(group(&active(&text), "345"), Some(site.as_str()));
+    let mut unnamed = drawing();
+    unnamed.header.set_str("UCSNAME", "");
+    assert!(group(&active(&cadcraft_io::write_dxf(&unnamed)), "345").is_none());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

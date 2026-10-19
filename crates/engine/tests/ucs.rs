@@ -290,8 +290,11 @@ fn undo_restores_the_ucs_previous_history() {
     assert!(previous(&mut s) && s.ucs().is_world());
     s.undo().unwrap();
     assert!(ang_eq(s.ucs().rotation(), 30f64.to_radians()), "undo of UCS Previous");
+    // Redo (before any new command clears the redo stack) does UCS Previous again.
+    assert!(s.redo().unwrap().is_some(), "UCS Previous is on the redo stack");
+    assert!(s.ucs().is_world(), "redo of UCS Previous");
+    s.undo().unwrap();
     assert!(previous(&mut s) && s.ucs().is_world(), "its history entry came back too");
-    s.redo().unwrap();
     let mut s = session();
     typed(&mut s, &["ucs z 30", "ucs z 30"]);
     assert!(ang_eq(s.ucs().rotation(), 60f64.to_radians()));
