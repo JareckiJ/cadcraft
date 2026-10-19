@@ -59,7 +59,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(UcsM::starting(Stage::ZAngle)))),
         CommandSpec::new("ucsicon", "UCS Icon", run_ucsicon)
             .params("{on?: bool, origin?: bool} (UCSICON: the icon shown, and at the UCS origin when that is on screen) → {on, origin}")
-            .noundo()
+            // Undoable like SETVAR: UCSICON lives in the drawing, so without a step of its own an
+            // undo of the edit before it would put the old value back.
             .interactive(|_| Ok(Box::new(UcsIconM))),
     ]
 }

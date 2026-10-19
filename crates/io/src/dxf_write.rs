@@ -304,11 +304,15 @@ fn model_ucs(d: &Drawing) -> Ucs {
     let h = &d.header;
     let p = |name: &str| h.point(name).filter(|v| v.is_finite());
     let axis = |name: &str| p(name).filter(|v| v.len() > 1e-12);
-    let (x, y) = match (axis("UCSXDIR"), axis("UCSYDIR")) {
-        (Some(x), Some(y)) if x.cross(y).len() > 1e-9 * x.len() * y.len() => (x, y),
-        _ => (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+    let (x, y, usable) = match (axis("UCSXDIR"), axis("UCSYDIR")) {
+        (Some(x), Some(y)) if x.cross(y).len() > 1e-9 * x.len() * y.len() => (x, y, true),
+        _ => (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), false),
     };
-    Ucs { name: h.str("UCSNAME", ""), origin: p("UCSORG").unwrap_or(Vec3::ZERO), x_axis: x, y_axis: y }
+    // The name only of a UCS table record, and only with the axes it came with: a name read from a
+    // file without its record, or beside axes replaced by the World UCS's, is dropped.
+    let raw = h.str("UCSNAME", "");
+    let name = d.ucss.iter().find(|u| usable && u.name.eq_ignore_ascii_case(raw.trim())).map(|u| u.name.clone()).unwrap_or_default();
+    Ucs { name, origin: p("UCSORG").unwrap_or(Vec3::ZERO), x_axis: x, y_axis: y }
 }
 
 fn header_vars(w: &mut W, d: &Drawing) {
@@ -343,6 +347,11 @@ fn header_vars(w: &mut W, d: &Drawing) {
                     w.s(9, format!("${name}"));
                     w.i(c, i);
                 }
+            }
+            // Only the name of a UCS the drawing has, with the axes written above.
+            (c, _) if *name == "UCSNAME" => {
+                w.s(9, "$UCSNAME");
+                w.s(c, model_ucs(d).name);
             }
             (c, v) => {
                 if let Some(t) = v.as_str() {
@@ -1783,8 +1792,9 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     if let Some(name) = d.header.get("CMLEADERSTYLE").and_then(HVal::as_str) {
         xrecords.push((dxf_ext::MLEADER_STYLE_KEY, w.h(), vec![name.to_string()]));
     }
-    if let Some(name) = d.header.get("UCSNAME").and_then(HVal::as_str).map(str::trim).filter(|n| !n.is_empty()) {
-        xrecords.push((dxf_ext::UCS_NAME_KEY, w.h(), vec![name.to_string()]));
+    let ucs_name = model_ucs(d).name;
+    if !ucs_name.is_empty() {
+        xrecords.push((dxf_ext::UCS_NAME_KEY, w.h(), vec![ucs_name]));
     }
     if let Some(chunks) = dxf_ext::constraint_chunks(&d.constraints, &d.parametric) {
         xrecords.push((dxf_ext::CONSTRAINTS_KEY, w.h(), chunks));
