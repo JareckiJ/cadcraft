@@ -78,6 +78,7 @@ pub(crate) enum Form {
 pub(crate) struct Built {
     pub id: u32,
     pub kind: ConstraintKind,
+    pub axis_angle: f64,
     pub refs: Vec<GeomRef>,
     pub form: Form,
     /// Target value (lengths in drawing units, angles in radians).
@@ -120,6 +121,9 @@ impl Built {
     /// dimensional constraints (degrees for angular). Errors explain what references are needed.
     pub fn new(c: &Constraint, m: &Model, x: &[f64], target: f64) -> Result<Built, String> {
         use ConstraintKind as K;
+        if !c.axis_angle.is_finite() {
+            return Err("constraint axis angle must be finite".into());
+        }
         let refs = c.refs.clone();
         let pt = |i: usize| r_at(c, i).and_then(|r| m.point(x, r));
         let ln = |i: usize| r_at(c, i).and_then(|r| m.line(x, r));
@@ -127,7 +131,18 @@ impl Built {
         let n = c.refs.len();
         let el = |i: usize| r_at(c, i).and_then(|r| m.ellipse(x, r));
         let lnx = |i: usize| ln(i).or_else(|| el(i).map(|e| (e.c - e.mj, e.c + e.mj)));
-        let mut b = Built { id: c.id, kind: c.kind, refs, form: Form::PP, target, sign: 1.0, rows: 0, aux_init: Vec::new(), aux: 0 };
+        let mut b = Built {
+            id: c.id,
+            kind: c.kind,
+            axis_angle: c.axis_angle,
+            refs,
+            form: Form::PP,
+            target,
+            sign: 1.0,
+            rows: 0,
+            aux_init: Vec::new(),
+            aux: 0,
+        };
         let need = |what: &str| Err(format!("{} needs {what}", c.kind.name()));
         match c.kind {
             K::Coincident => {
@@ -402,7 +417,8 @@ impl Built {
             }
             (K::Horizontal | K::Vertical, f) => {
                 let (a, b) = if f == Form::L1 { ln(0).or_else(|| el(0).map(|e| (e.c - e.mj, e.c + e.mj)))? } else { (pt(0)?, pt(1)?) };
-                out.push(if self.kind == K::Horizontal { a.y - b.y } else { a.x - b.x });
+                let delta = (a - b).rotate(-self.axis_angle);
+                out.push(if self.kind == K::Horizontal { delta.y } else { delta.x });
             }
             (K::Parallel | K::Smooth, Form::LL) => {
                 let ((a1, b1), (a2, b2)) = (ln(0)?, ln(1)?);
@@ -465,8 +481,8 @@ impl Built {
                         let (a, b) = if f == Form::L1 { ln(0)? } else { (pt(0)?, pt(1)?) };
                         match axis {
                             DistAxis::Aligned => a.dist(b),
-                            DistAxis::Horizontal => b.x - a.x,
-                            DistAxis::Vertical => b.y - a.y,
+                            DistAxis::Horizontal => (b - a).rotate(-self.axis_angle).x,
+                            DistAxis::Vertical => (b - a).rotate(-self.axis_angle).y,
                         }
                     }
                 };

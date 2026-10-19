@@ -597,12 +597,12 @@ impl Interactive for PasteM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) if self.mode == PasteMode::Block => {
-                clipboard::paste_block(s, p)?;
+                clipboard::paste_block_aligned(s, p)?;
                 Ok(Step::Done)
             }
             Input::Point(p) => {
-                let base = s.clipboard_base;
-                paste(s, p - base)?;
+                let matrix = clipboard::insertion_matrix(s, p);
+                clipboard::paste(s, &matrix)?;
                 Ok(Step::Done)
             }
             Input::Enter => Ok(Step::Done),
@@ -613,10 +613,10 @@ impl Interactive for PasteM {
         if self.mode == PasteMode::Orig || s.clipboard.is_empty() {
             return None;
         }
-        Some(crate::prompt::Drag { handles: Vec::new(), matrix: Mat3::translate(c - s.clipboard_base), extra: Vec::new(), clipboard: true })
+        Some(crate::prompt::Drag { handles: Vec::new(), matrix: clipboard::insertion_matrix(s, c), extra: Vec::new(), clipboard: true })
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<cadcraft_doc::EntityKind> {
-        let m = Mat3::translate(c - s.clipboard_base);
+        let m = clipboard::insertion_matrix(s, c);
         s.clipboard
             .iter()
             .take(500)

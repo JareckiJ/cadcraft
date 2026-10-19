@@ -243,6 +243,72 @@ fn mirror_text(t: &mut Text, align: Option<Vec3>, insert: Vec3) {
     }
 }
 
+/// VIEWPORT groups that are not kept raw in [`Viewport::extra`]: those read into the model, and
+/// the view twist, direction and target (51, 16, 17), which say where the view centre is measured
+/// from: carried along while the centre is written in drawing coordinates, they would move the
+/// view on the next read.
+const VIEWPORT_NOT_EXTRA: &[i32] = &[
+    10, 20, 30, 40, 41, 68, 69, 12, 22, 45, 90, 340, 341, 331, 71, 110, 120, 130, 111, 121, 131, 112, 122, 132, 79, 146, 345, 346, 51, 16, 26, 36,
+    17, 27, 37,
+];
+
+/// Most groups kept raw on one viewport (a VIEWPORT record has about forty).
+const MAX_VIEWPORT_EXTRA: usize = 512;
+
+/// The groups of a VIEWPORT's own subclass (after `100 AcDbViewport`, before any xdata).
+fn viewport_groups(tags: &[Tag]) -> &[Tag] {
+    let Some(start) = tags.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbViewport") else { return &[] };
+    let rest = tags.get(start + 1..).unwrap_or(&[]);
+    rest.get(..rest.iter().position(|t| t.code == 100 || t.code >= 1000).unwrap_or(rest.len())).unwrap_or(&[])
+}
+
+/// A VIEWPORT's own UCS (groups 110–112, 79, 146), if it has one. The named and base UCS (345,
+/// 346) are table handles, resolved once the UCS table is known ([`entity_extras`]).
+fn viewport_ucs(tags: &[Tag]) -> Option<ViewportUcs> {
+    let g = viewport_groups(tags);
+    if !g.iter().any(|t| matches!(t.code, 110 | 111 | 112 | 345)) {
+        return None;
+    }
+    let t = T(g);
+    let has = |c: i32| g.iter().any(|t| t.code == c);
+    let (origin, x_axis, y_axis) =
+        (t.p(110), if has(111) { t.p(111) } else { Vec3::new(1.0, 0.0, 0.0) }, if has(112) { t.p(112) } else { Vec3::new(0.0, 1.0, 0.0) });
+    // Unreadable numbers come through as 0, so a broken axis is one with no length.
+    let finite = [origin, x_axis, y_axis].iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+    if !finite || x_axis.len() <= 1e-12 || y_axis.len() <= 1e-12 {
+        return None;
+    }
+    Some(ViewportUcs {
+        origin,
+        x_axis,
+        y_axis,
+        elevation: t.f(146).filter(|e| e.is_finite()).unwrap_or(0.0),
+        ortho: t.i(79).and_then(|o| u8::try_from(o).ok()).filter(|o| *o <= 6).unwrap_or(0),
+        named: None,
+        base: None,
+    })
+}
+
+/// A VIEWPORT's groups CADCraft doesn't model, as read ([`VIEWPORT_NOT_EXTRA`]), plus those of
+/// CADCraft's xdata copy that the record lacks (a DWG drops some).
+fn viewport_extra(tags: &[Tag]) -> Vec<RawTag> {
+    let mut out: Vec<RawTag> = viewport_groups(tags)
+        .iter()
+        .filter(|t| !VIEWPORT_NOT_EXTRA.contains(&t.code))
+        .take(MAX_VIEWPORT_EXTRA)
+        .map(|t| RawTag { code: t.code, value: t.str() })
+        .collect();
+    for (code, value) in crate::dxf_ext::read_extra(tags) {
+        if out.len() >= MAX_VIEWPORT_EXTRA {
+            break;
+        }
+        if !VIEWPORT_NOT_EXTRA.contains(&code) && !crate::dxf_raw::is_pointer(code) && !out.iter().any(|t| t.code == code) {
+            out.push(RawTag { code, value });
+        }
+    }
+    out
+}
+
 /// Parse one entity record. POLYLINE/INSERT followers are handled by the caller.
 fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
     // The paper-space viewport our writer adds (dxf_write::paper_view) stays implicit.
@@ -443,6 +509,7 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
                 text: t.s(1).unwrap_or_default(),
                 style: t.s(3).unwrap_or_else(|| "Standard".into()),
                 measurement: t.fd(42, 0.0),
+                horizontal_direction: -t.fd(51, 0.0).to_radians(),
                 text_rotation: t.fd(53, 0.0).to_radians(),
                 user_text_pos: t.i(70).unwrap_or(0) & 128 != 0,
                 block: t.s(2).filter(|s| !s.is_empty()),
@@ -481,20 +548,28 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
             k
         }
         "ACAD_TABLE" => EntityKind::Table(acad_table(tags)),
-        "VIEWPORT" => EntityKind::Viewport(Viewport {
-            center: t.p(10),
-            width: t.fd(40, 1.0),
-            height: t.fd(41, 1.0),
-            view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
-            view_height: t.fd(45, 1.0),
-            id: t.i(69).unwrap_or(0) as u32,
-            locked: t.i(90).unwrap_or(0) & 16384 != 0,
-            frozen_layers: crate::dxf_ext::read_frozen(tags),
-            layer_colors: crate::dxf_ext::read_layer_colors(tags),
-            // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
-            clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
-            on: t.i(90).unwrap_or(0) & 131072 == 0,
-        }),
+        "VIEWPORT" => {
+            let (view_center, view3d) = view(&t);
+            EntityKind::Viewport(Viewport {
+                center: t.p(10),
+                width: t.fd(40, 1.0),
+                height: t.fd(41, 1.0),
+                view_center,
+                view_height: t.fd(45, 1.0),
+                id: t.i(69).unwrap_or(0) as u32,
+                locked: t.i(90).unwrap_or(0) & 16384 != 0,
+                frozen_layers: crate::dxf_ext::read_frozen(tags),
+                layer_colors: crate::dxf_ext::read_layer_colors(tags),
+                // Status flags: 65536 = non-rectangular clipping (by the 340 entity), 131072 = off.
+                clip: t.s(340).and_then(|h| Handle::parse_hex(&h)).filter(|h| h.0 != 0 && t.i(90).unwrap_or(0) & 65536 != 0),
+                on: t.i(90).unwrap_or(0) & 131072 == 0,
+                ucs: viewport_ucs(tags),
+                ucs_per_viewport: t.i(71) == Some(1),
+                extra: viewport_extra(tags),
+                view3d,
+                twist: t.f(51).filter(|a| a.is_finite()).map_or(0.0, |a| a.rem_euclid(360.0).to_radians()),
+            })
+        }
         "WIPEOUT" => {
             let o = t.p(10);
             let u = t.p(11);
@@ -600,7 +675,18 @@ fn acad_table(tags: &[Tag]) -> Table {
         // Their text height is resolved to the table style's once the styles are read (`apply`).
         None => (cols > 1 && cells.first().and_then(|r| r.first()).and_then(|c| c.merged) == Some((1, cols as u32)), false, 0.0, "Standard".into()),
     };
-    let mut t = Table { insert: T(tags).p(10), col_widths, row_heights, cells, style, text_height, title, header, ..Table::default() };
+    let mut t = Table {
+        insert: T(tags).p(10),
+        rotation: T(tags).p(11).xy().angle(),
+        col_widths,
+        row_heights,
+        cells,
+        style,
+        text_height,
+        title,
+        header,
+        ..Table::default()
+    };
     crate::dxf_table::read_table_xdata(tags, &mut t);
     t
 }
@@ -985,6 +1071,8 @@ struct Rx {
     block_arrays: HashMap<String, cadcraft_doc::ArrayParams>,
     /// LAYER record handle (upper case) → layer name (VIEWPORT group 341 frozen layers).
     layers: HashMap<String, String>,
+    /// UCS record handle (upper case) → UCS name (a layout's named UCS, group 345).
+    ucss: HashMap<String, String>,
 }
 
 /// The plot style names of a file: the entries of the `ACAD_PLOTSTYLENAME` dictionary of the
@@ -1083,14 +1171,26 @@ fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &m
             }
             rx.mleader_fix.push((h, pending));
         }
-        // CADCraft's VPFROZEN xdata wins; otherwise AutoCAD's group 341 layer handles.
-        ("VIEWPORT", EntityKind::Viewport(v)) if v.frozen_layers.is_empty() => {
-            v.frozen_layers = tags
-                .iter()
-                .take_while(|t| t.code < 1000)
-                .filter(|t| t.code == 341)
-                .filter_map(|t| rx.layers.get(&t.str().trim().to_ascii_uppercase()).cloned())
-                .collect();
+        ("VIEWPORT", EntityKind::Viewport(v)) => {
+            // CADCraft's VPFROZEN xdata wins; otherwise AutoCAD's group 341 layer handles.
+            if v.frozen_layers.is_empty() {
+                v.frozen_layers = tags
+                    .iter()
+                    .take_while(|t| t.code < 1000)
+                    .filter(|t| t.code == 341)
+                    .filter_map(|t| rx.layers.get(&t.str().trim().to_ascii_uppercase()).cloned())
+                    .collect();
+            }
+            // The named and base UCS, by name: groups 345 and 346, else CADCraft's xdata (which a
+            // DWG keeps when they are dropped). A name that isn't in the UCS table: none.
+            if let Some(u) = &mut v.ucs {
+                let t = T(viewport_groups(tags));
+                let by_handle = |code: i32| t.s(code).and_then(|h| rx.ucss.get(&h.trim().to_ascii_uppercase()).cloned());
+                let (xn, xb) = crate::dxf_ext::read_ucs_names(tags);
+                let known = |n: Option<String>| n.and_then(|n| rx.ucss.values().find(|u| u.eq_ignore_ascii_case(&n)).cloned());
+                u.named = by_handle(345).or_else(|| known(xn));
+                u.base = by_handle(346).or_else(|| known(xb));
+            }
         }
         _ => {}
     }
@@ -1139,13 +1239,19 @@ fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, ski
                     }
                 }
                 let c = common(&t);
-                let k = if flags & (16 | 64) != 0 {
-                    // Polyface (64) and polygon (16) meshes become 3D faces; the first takes the
-                    // polyline's place.
+                let k = if flags & 64 != 0 {
+                    // Face indices outside 16 bits name no vertex: the face is skipped when drawn.
+                    let faces = faces.iter().map(|f| f.map(|ix| i32::try_from(ix).unwrap_or(i32::MAX))).collect();
+                    let mesh = PolyfaceMesh { vertices: pts.iter().map(|p| p.0).collect(), faces };
+                    if mesh.faces3d().is_empty() {
+                        *skipped = skipped.saturating_add(1);
+                        continue;
+                    }
+                    EntityKind::PolyfaceMesh(mesh)
+                } else if flags & 16 != 0 {
+                    // Polygon meshes become 3D faces; the first takes the polyline's place.
                     let verts: Vec<Vec3> = pts.iter().map(|p| p.0).collect();
-                    let mut fs = if flags & 64 != 0 { polyface_faces(&verts, &faces) } else { mesh_faces(&verts, &t, flags) }
-                        .into_iter()
-                        .map(EntityKind::Face3d);
+                    let mut fs = mesh_faces(&verts, &t, flags).into_iter().map(EntityKind::Face3d);
                     let Some(first) = fs.next() else {
                         *skipped = skipped.saturating_add(1);
                         continue;
@@ -1246,36 +1352,6 @@ fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, ski
     out
 }
 
-/// Faces of a polyface mesh: each face record names three or four vertices by 1-based index;
-/// a negative index hides the edge that starts at that vertex. Faces with fewer vertices or
-/// an index outside the vertex list are skipped.
-fn polyface_faces(verts: &[Vec3], faces: &[[i64; 4]]) -> Vec<Face3d> {
-    let mut out = Vec::new();
-    for f in faces {
-        let mut corners: Vec<Vec3> = Vec::with_capacity(4);
-        let mut hidden = 0u8;
-        let mut ok = true;
-        for &ix in f.iter().filter(|&&ix| ix != 0) {
-            let at = usize::try_from(ix.unsigned_abs()).ok().and_then(|n| n.checked_sub(1));
-            let Some(p) = at.and_then(|n| verts.get(n)) else {
-                ok = false;
-                break;
-            };
-            if ix < 0 {
-                hidden |= 1 << corners.len();
-            }
-            corners.push(*p);
-        }
-        match (ok, corners.as_slice()) {
-            // A triangle's closing edge is the 3DFACE's fourth (the third is degenerate).
-            (true, [a, b, c]) => out.push(Face3d { corners: [*a, *b, *c, *c], hidden_edges: hidden | if hidden & 4 != 0 { 8 } else { 0 } }),
-            (true, [a, b, c, d]) => out.push(Face3d { corners: [*a, *b, *c, *d], hidden_edges: hidden }),
-            _ => {}
-        }
-    }
-    out
-}
-
 /// Quads of an M×N polygon mesh (71/72, or the smoothed 73/74 when the vertex count matches
 /// those), closed in M by bit 1 and in N by bit 32. Vertices run row by row.
 fn mesh_faces(verts: &[Vec3], t: &T, flags: i64) -> Vec<Face3d> {
@@ -1359,6 +1435,23 @@ fn annotative(tags: &[Tag]) -> bool {
     list.iter().filter(|t| t.code == 1070).nth(1).is_some_and(|t| t.i64() != 0)
 }
 
+/// The view centre (12/22) and 3D view (16/26/36 direction, 17/27/37 target) of a VIEWPORT or
+/// VPORT record. The centre is relative to the target: a plan view gets it added
+/// (DWG files often keep the view in the target with the centre at 0,0), a 3D view keeps both.
+fn view(t: &T) -> (Vec2, Option<ViewDir>) {
+    let center = Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0));
+    let dir = if t.f(16).is_some() { t.p(16) } else { Vec3::Z };
+    let v = ViewDir { dir, target: t.p(17) };
+    if !(dir.is_finite() && dir.len() > 1e-12 && v.target.is_finite()) {
+        return (center, None);
+    }
+    if v.matrix().is_plan() {
+        let sum = center + v.target.xy();
+        return (if sum.is_finite() { sum } else { center }, None);
+    }
+    (center, Some(v))
+}
+
 /// A text style's font: CADCraft's own font name from `CADCRAFT` xdata (`1000 FONT`, name)
 /// while the font file is still the `txt` written for other readers; the TrueType family of the
 /// style's `ACAD` xdata (`1000` typeface) when it has no font file (how AutoCAD stores TrueType
@@ -1415,6 +1508,9 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "LAYER" => {
                 rx.layers.insert(h.trim().to_ascii_uppercase(), n);
+            }
+            "UCS" => {
+                rx.ucss.insert(h.trim().to_ascii_uppercase(), n);
             }
             _ => {}
         }
@@ -1576,8 +1672,9 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             _ => {}
         }
     }
-    // One *Active viewport is no tiling: the view is the editor's (it zooms to the extents).
-    d.vports.retain(|c| c.tiles.len() > usize::from(c.is_active()));
+    // One *Active viewport is no tiling: the view is the editor's (it zooms to the extents), kept
+    // only when it is a 3D view for the editor to open in.
+    d.vports.retain(|c| c.tiles.len() > usize::from(c.is_active()) || c.tiles.iter().any(|t| t.view3d.is_some() || t.twist != 0.0));
 }
 
 /// Most tiles a viewport configuration keeps.
@@ -1587,7 +1684,8 @@ const MAX_VPORT_TILES: usize = 64;
 /// are fractions of the drawing area; unusable tiles are skipped.
 fn vport_record(d: &mut Drawing, t: &T) {
     let name = t.s(2).map(|n| n.trim().to_string()).unwrap_or_default();
-    let (min, max, center) = (t.p(10).xy(), t.p(11).xy(), t.p(12).xy());
+    let (min, max) = (t.p(10).xy(), t.p(11).xy());
+    let (center, view3d) = view(t);
     let height = t.fd(40, 0.0);
     let unit = |v: f64| v.is_finite() && (-1e-9..=1.0 + 1e-9).contains(&v);
     let ok = [min.x, min.y, max.x, max.y].into_iter().all(unit)
@@ -1601,7 +1699,9 @@ fn vport_record(d: &mut Drawing, t: &T) {
     }
     let aspect = t.f(41).filter(|a| a.is_finite() && *a > 0.0).unwrap_or(0.0);
     let clamp = |p: Vec2| Vec2::new(p.x.clamp(0.0, 1.0), p.y.clamp(0.0, 1.0));
-    let tile = VportTile { min: clamp(min), max: clamp(max), center, height, aspect };
+    // View twist (group 51, degrees).
+    let twist = t.f(51).filter(|a| a.is_finite()).map_or(0.0, |a| a.rem_euclid(360.0).to_radians());
+    let tile = VportTile { min: clamp(min), max: clamp(max), center, height, aspect, twist, view3d };
     let name = if name.eq_ignore_ascii_case(VportConfig::ACTIVE) { VportConfig::ACTIVE.to_string() } else { name };
     let room = d.vports.len() < MAX_OBJECTS;
     match d.vports.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
@@ -1933,6 +2033,8 @@ struct Objects {
     groups: Vec<(String, Vec<Tag>)>,
     /// Saved paper-space views of layouts: (layout name, view).
     layout_views: Vec<(String, (Vec2, f64))>,
+    /// Layouts' current UCSs: (layout name, origin, X axis, Y axis, named UCS record handle).
+    layout_ucss: Vec<(String, Vec3, Vec3, Vec3, Option<String>)>,
     /// SORTENTSTABLE objects: (owning block record handle, entity handle → sort handle).
     sortents: Vec<(String, HashMap<Handle, u64>)>,
 }
@@ -1978,10 +2080,17 @@ impl Objects {
                     self.sortents.push(t);
                 }
             }
-            "LAYOUT" if self.layout_views.len() < MAX_OBJECTS => {
+            "LAYOUT" if self.layout_views.len() < MAX_OBJECTS && self.layout_ucss.len() < MAX_OBJECTS => {
                 let start = tags.iter().position(|x| x.code == 100 && x.str() == "AcDbLayout").unwrap_or(0);
-                if let (Some(name), Some(view)) = (T(tags.get(start..).unwrap_or(&[])).s(1), layout_view(tags)) {
+                let own = T(tags.get(start..).unwrap_or(&[]));
+                if let (Some(name), Some(view)) = (own.s(1), layout_view(tags)) {
                     self.layout_views.push((name, view));
+                }
+                // Its current UCS (groups 13, 16, 17; 345 when it is a named UCS).
+                if let Some(name) = own.s(1)
+                    && [13, 16, 17].iter().all(|c| own.f(*c).is_some())
+                {
+                    self.layout_ucss.push((name, own.p(13), own.p(16), own.p(17), own.s(345)));
                 }
             }
             _ => {}
@@ -2005,6 +2114,17 @@ impl Objects {
     fn apply(self, d: &mut Drawing, rx: &Rx) {
         if let Some(style) = self.xrecord_text(crate::dxf_ext::MLEADER_STYLE_KEY).filter(|s| !s.trim().is_empty()) {
             d.header.set_str("CMLEADERSTYLE", &style);
+        }
+        // Model space's UCS name when the file lost it ($UCSNAME empty, as through DWG): only
+        // while the current UCS is still exactly that named UCS.
+        if d.header.str("UCSNAME", "").trim().is_empty()
+            && let Some(name) = self.xrecord_text(crate::dxf_ext::UCS_NAME_KEY).map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+            && let Some(u) = d.ucss.iter().find(|u| u.name.eq_ignore_ascii_case(&name))
+            && let (Some(o), Some(x), Some(y)) = (d.header.point("UCSORG"), d.header.point("UCSXDIR"), d.header.point("UCSYDIR"))
+            && crate::dxf_ext::is_named_frame(u, o, x, y)
+        {
+            let n = u.name.clone();
+            d.header.set_str("UCSNAME", &n);
         }
         // Table styles (named by their ACAD_TABLESTYLE dictionary entries).
         for (h, tags) in &self.table_styles {
@@ -2083,6 +2203,18 @@ impl Objects {
         for (name, view) in &self.layout_views {
             if let Some(l) = d.layouts.iter_mut().find(|l| l.name == *name) {
                 l.view = Some(*view);
+            }
+        }
+        // Layouts' UCSs: the World UCS, unusable axes or no such layout leave it unset.
+        for (name, origin, x, y, named) in &self.layout_ucss {
+            let usable = origin.is_finite() && crate::dxf_ext::usable_axes(*x, *y);
+            let ucs_name = named.as_ref().and_then(|h| rx.ucss.get(&h.trim().to_ascii_uppercase())).cloned().unwrap_or_default();
+            let world = origin.len() <= 1e-12 && (*x - Vec3::new(1.0, 0.0, 0.0)).len() <= 1e-12 && (*y - Vec3::new(0.0, 1.0, 0.0)).len() <= 1e-12;
+            if !usable || (world && ucs_name.is_empty()) {
+                continue;
+            }
+            if let Some(l) = d.layouts.iter_mut().find(|l| l.name == *name) {
+                l.ucs = Some(Ucs { name: ucs_name, origin: *origin, x_axis: *x, y_axis: *y });
             }
         }
         // Groups (named by their ACAD_GROUP dictionary entries); members that exist.

@@ -75,6 +75,18 @@ fn size(v: f64) -> f64 {
 }
 
 impl Table {
+    /// Place an unrotated layout point in the table's drawing orientation.
+    pub fn rotate_point(&self, p: Vec2) -> Vec2 {
+        let angle = if self.rotation.is_finite() { self.rotation } else { 0.0 };
+        self.insert.xy() + (p - self.insert.xy()).rotate(angle)
+    }
+
+    /// Read a drawing point in the table's unrotated layout frame.
+    pub fn unrotate_point(&self, p: Vec2) -> Vec2 {
+        let angle = if self.rotation.is_finite() { self.rotation } else { 0.0 };
+        self.insert.xy() + (p - self.insert.xy()).rotate(-angle)
+    }
+
     /// Number of label rows at the top (title and header).
     pub fn top_label_rows(&self) -> usize {
         (usize::from(self.title) + usize::from(self.header)).min(self.row_heights.len())
@@ -156,14 +168,16 @@ impl Table {
         let mut b = Bounds2::EMPTY;
         for p in self.parts() {
             let h: f64 = p.rows.iter().map(|r| size(self.row_heights.get(*r).copied().unwrap_or(0.0))).sum();
-            b.add(p.origin);
-            b.add(p.origin + Vec2::new(w, -h));
+            for q in Bounds2::new(p.origin, p.origin + Vec2::new(w, -h)).corners() {
+                b.add(self.rotate_point(q));
+            }
         }
         b
     }
 
     /// The cell (row, col) under `p`, in any part.
     pub fn cell_at_point(&self, p: Vec2) -> Option<(usize, usize)> {
+        let p = self.unrotate_point(p);
         for part in self.parts() {
             let (x, y) = (p.x - part.origin.x, part.origin.y - p.y);
             if !(x.is_finite() && y.is_finite()) || x < 0.0 || y < 0.0 {
@@ -194,7 +208,7 @@ impl Table {
     pub fn grip_points(&self) -> Vec<Vec2> {
         let mut g = vec![self.insert.xy()];
         if self.is_broken() {
-            g.extend(self.parts().into_iter().skip(1).map(|p| p.origin));
+            g.extend(self.parts().into_iter().skip(1).map(|p| self.rotate_point(p.origin)));
         }
         g
     }

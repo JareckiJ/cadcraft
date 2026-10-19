@@ -185,11 +185,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
             }
             b
         }
-        EntityKind::Table(t) => {
-            let w: f64 = t.col_widths.iter().sum();
-            let h: f64 = t.row_heights.iter().sum();
-            Bounds2::new(t.insert.xy(), t.insert.xy() + Vec2::new(w, -h))
-        }
+        EntityKind::Table(t) => t.bounds(),
         // Text widths estimated like `text_box`; the renderer measures the font.
         EntityKind::Tolerance(t) => t.layout(d, &|s, h| h * 0.9 * s.chars().count() as f64).bounds,
         EntityKind::Image(i) => {

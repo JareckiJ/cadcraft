@@ -39,7 +39,8 @@ pub struct ClipSource {
 /// Put copies of `ents` from the active drawing on the clipboard, with `base` as base point.
 pub(crate) fn copy(s: &mut Session, ents: Vec<Entity>, base: Vec2) -> Result<()> {
     let uid = s.state()?.uid;
-    let defs = defs_for(s.doc()?, &ents);
+    let mut defs = defs_for(s.doc()?, &ents);
+    crate::ucs::set_current(&mut defs, &cadcraft_doc::Space::Model, &s.input_ucs(), "");
     set(s, ents, base, defs, Some(uid));
     Ok(())
 }
@@ -92,6 +93,23 @@ pub(crate) fn paste(s: &mut Session, m: &Mat3) -> Result<Vec<Handle>> {
     }
     s.set_selection(out.clone());
     Ok(out)
+}
+
+/// Place copied coordinates relative to their source UCS and the destination working UCS.
+pub(crate) fn insertion_matrix(s: &Session, at: Vec2) -> Mat3 {
+    let source = s.clipboard_source.as_ref().map(|c| crate::ucs::input_frame(&c.defs, &cadcraft_doc::Space::Model)).unwrap_or_default();
+    let target = s.input_ucs();
+    let local = Mat3 { a: source.x.x, b: source.y.x, c: source.x.y, d: source.y.y, e: 0.0, f: 0.0 };
+    let world = Mat3 { a: target.x.x, b: target.x.y, c: target.y.x, d: target.y.y, e: 0.0, f: 0.0 };
+    Mat3::translate(at).then_before(world).then_before(local).then_before(Mat3::translate(-s.clipboard_base))
+}
+
+pub(crate) fn paste_block_aligned(s: &mut Session, at: Vec2) -> Result<Handle> {
+    let m = insertion_matrix(s, at);
+    let about = Mat3 { e: at.x - m.a * at.x - m.c * at.y, f: at.y - m.b * at.x - m.d * at.y, ..m };
+    let handle = paste_block(s, at)?;
+    s.doc_mut()?.modify_entity(handle, |e| e.kind.transform(&about))?;
+    Ok(handle)
 }
 
 /// PASTEBLOCK: the clipboard becomes a new block (named `A$C…`, base point = the clipboard's), and

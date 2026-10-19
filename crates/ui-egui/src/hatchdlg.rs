@@ -68,6 +68,7 @@ pub struct HatchDlgState {
     /// The space its picks were made in (`DocState::edit_space`, where HATCH adds the hatch): a
     /// switch to another layout drops the dialog.
     pub space: Space,
+    pub frame: cadcraft_engine::ucs::UcsFrame,
 }
 
 /// Create mode, from the drawing's HATCH settings (HPNAME, HPSCALE, HPANG, HPASSOC, HPSEPARATE,
@@ -108,6 +109,7 @@ pub fn create_state(d: &Drawing, uid: u64, gradient: bool) -> HatchDlgState {
         error: None,
         uid,
         space: Space::Model,
+        frame: cadcraft_engine::ucs::input_frame(d, &Space::Model),
     }
 }
 
@@ -192,7 +194,13 @@ pub fn ok_call(st: &HatchDlgState) -> Option<(&'static str, Value)> {
             p.insert("pattern".into(), json!(f.pattern));
             p.insert("scale".into(), json!(f.scale));
         }
-        p.insert("angle".into(), json!(f.angle));
+        let angle = if st.frame.rotation() == 0.0 && !st.frame.reversed() {
+            f.angle
+        } else {
+            st.frame.vec_to_wcs(cadcraft_geom::Vec2::from_angle(f.angle.to_radians())).angle().to_degrees()
+        };
+        p.insert("angle".into(), json!(angle));
+        p.insert("originUcs".into(), json!(true));
         p.insert("associative".into(), json!(f.associative));
         p.insert("separate".into(), json!(st.separate));
         p.insert("style".into(), json!(style_name(f.style)));
@@ -289,6 +297,7 @@ pub fn open_create(app: &mut CadApp, gradient: bool) {
     let Ok(st) = app.session.state() else { return };
     let mut dlg = create_state(&st.doc, st.uid, gradient);
     dlg.space = st.edit_space();
+    dlg.frame = app.session.input_ucs();
     app.hatch_dlg = Some(dlg);
     app.ui.dialog = Some("hatch".into());
 }
@@ -299,6 +308,7 @@ pub fn open_edit(app: &mut CadApp) {
     let Ok(st) = app.session.state() else { return };
     let (mut edit, mut create) = (edit_state(&st.doc, st.uid, st.selection.clone()), create_state(&st.doc, st.uid, false));
     create.space = st.edit_space();
+    create.frame = app.session.input_ucs();
     if let Some(e) = edit.as_mut() {
         e.space = st.edit_space();
     }

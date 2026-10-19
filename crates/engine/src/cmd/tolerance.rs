@@ -254,7 +254,7 @@ impl Interactive for ToleranceM {
             }
             _ => match i {
                 Input::Point(p) => {
-                    let t = make(self.style.clone(), p, 0.0, self.text());
+                    let t = make(self.style.clone(), p, s.input_ucs().rotation(), self.text());
                     s.add_entity(EntityKind::Tolerance(t))?;
                     return Ok(Step::Done);
                 }
@@ -264,8 +264,8 @@ impl Interactive for ToleranceM {
         }
         Ok(Step::Continue)
     }
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        if self.step == 6 { vec![EntityKind::Tolerance(make(self.style.clone(), c, 0.0, self.text()))] } else { Vec::new() }
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+        if self.step == 6 { vec![EntityKind::Tolerance(make(self.style.clone(), c, s.input_ucs().rotation(), self.text()))] } else { Vec::new() }
     }
 }
 

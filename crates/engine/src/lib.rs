@@ -28,13 +28,14 @@ pub mod select;
 pub mod snap;
 pub mod spatial;
 pub mod sysvars;
+pub mod ucs;
 pub mod undoctl;
 pub mod units;
 
 use std::sync::Arc;
 
 use cadcraft_doc::{Common, Drawing, Entity, EntityKind, Handle, Space};
-use cadcraft_geom::{Bounds2, Vec2};
+use cadcraft_geom::{Bounds2, Mat4, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -43,7 +44,7 @@ pub use cadcraft_geom as geom;
 pub use cadcraft_render as render;
 pub use cmd::hatch::{HatchPicks, PatternChoice, PickMode, pattern_choices};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
-pub use prompt::{Accept, Drag, Input, Interactive, Picker, Prompt, Step};
+pub use prompt::{Accept, DisplayOnly, Drag, Input, Interactive, Picker, Prompt, Step};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -70,21 +71,61 @@ impl From<cadcraft_doc::DocError> for EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
-/// A 2D view of a space: world centre and visible height in drawing units.
+/// A 2D view of a space: world centre and visible height in drawing units, and the view twist
+/// (VIEWTWIST, DVIEW TWist): how far the view is turned on screen, in radians counterclockwise
+/// (the drawing appears turned by `twist`; 0 is the plain plan view).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct View {
     pub center: Vec2,
     pub height: f64,
+    #[serde(default)]
+    pub twist: f64,
 }
 
 impl Default for View {
     fn default() -> Self {
-        View { center: Vec2::new(6.0, 4.5), height: 10.0 }
+        View { center: Vec2::new(6.0, 4.5), height: 10.0, twist: 0.0 }
+    }
+}
+
+impl View {
+    /// Box `b` (world) as a view turned by `twist` shows it: the world centre of the box it
+    /// makes on screen, and that box's width and height (`b`'s own when there is no twist).
+    pub fn twisted_box(b: Bounds2, twist: f64) -> (Vec2, f64, f64) {
+        if twist == 0.0 || !twist.is_finite() {
+            return (b.center(), b.width(), b.height());
+        }
+        let r = Bounds2::from_points(b.corners().map(|p| p.rotate(twist)));
+        (r.center().rotate(-twist), r.width(), r.height())
     }
 }
 
 fn usable_view(v: &View) -> bool {
-    v.center.is_finite() && v.height.is_finite() && v.height > 1e-12
+    v.center.is_finite() && v.height.is_finite() && v.height > 1e-12 && v.twist.is_finite()
+}
+
+/// How model space is drawn (VSCURRENT): edges only, or 3D faces and meshes filled and lit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VisualStyle {
+    #[default]
+    Wireframe2d,
+    Shaded,
+    ShadedWithEdges,
+}
+
+impl VisualStyle {
+    /// The name shown in the view label and the View ▸ Visual Styles menu.
+    pub fn label(self) -> &'static str {
+        match self {
+            VisualStyle::Wireframe2d => "2D Wireframe",
+            VisualStyle::Shaded => "Shaded",
+            VisualStyle::ShadedWithEdges => "Shaded with Edges",
+        }
+    }
+    /// The display list's `shaded` and `shaded_edges` options.
+    pub fn shading(self) -> (bool, bool) {
+        (self != VisualStyle::Wireframe2d, self == VisualStyle::ShadedWithEdges)
+    }
 }
 
 /// Tiled model viewports (VPORTS): the session side of the drawing's `*Active` configuration.
@@ -137,12 +178,19 @@ pub struct DocState {
     pub mspace: Option<Handle>,
     pub views: Vec<(Space, View)>,
     pub view_history: Vec<View>,
+    /// Model space's viewing direction from the target towards the viewer (VPOINT, the ViewCube,
+    /// 3DORBIT; +Z = plan view): the view's centre and height are then in view coordinates
+    /// ([`DocState::projection`]).
+    pub view_dir: Vec3,
+    pub visual_style: VisualStyle,
     pub uid: u64,
     /// The drawing is saved as binary DXF (it was opened from one, or last saved as one).
     pub binary_dxf: bool,
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// The user was told that the current UCS is tilted ([`Session::note_tilted_ucs`]).
+    pub ucs_tilted_noted: bool,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -166,9 +214,12 @@ impl DocState {
             mspace: None,
             views: Vec::new(),
             view_history: Vec::new(),
+            view_dir: Vec3::Z,
+            visual_style: VisualStyle::default(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            ucs_tilted_noted: false,
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -218,6 +269,15 @@ impl DocState {
             _ => None,
         }
     }
+    /// The 3D view of model space shown on the Model tab (WCS → view coordinates), or `None` in
+    /// plan view and on layouts.
+    pub fn projection(&self) -> Option<Mat4> {
+        if self.space != Space::Model {
+            return None;
+        }
+        let m = Mat4::view(self.view_dir, Vec3::ZERO, 0.0);
+        (!m.is_plan()).then_some(m)
+    }
     pub fn paper_view(&self) -> View {
         self.views.iter().find(|(s, _)| *s == self.space).map(|(_, v)| *v).unwrap_or_default()
     }
@@ -228,7 +288,8 @@ impl DocState {
         match self.active_viewport() {
             Some((_, vp)) => {
                 let k = vp.view_height / vp.height;
-                View { center: vp.view_center + (pv.center - vp.center.xy()) * k, height: pv.height * k }
+                // The viewport's twist turns the model view inside it.
+                View { center: vp.paper_to_model(pv.center), height: pv.height * k, twist: vp.view_twist() }
             }
             None => pv,
         }
@@ -243,16 +304,17 @@ impl DocState {
             if vp.locked {
                 // A locked viewport keeps its scale: pan/zoom the sheet instead.
                 let k0 = vp.view_height / vp.height;
-                let pc = vp.center.xy() + (v.center - vp.view_center) / k0;
-                let paper = View { center: pc, height: v.height / k0 };
+                let pc = vp.model_to_paper(v.center);
+                let paper = View { center: pc, height: v.height / k0, twist: pv.twist };
                 if !usable_view(&paper) {
                     return false;
                 }
                 self.put_paper_view(paper);
             } else {
-                let center = v.center - (pv.center - vp.center.xy()) * k;
+                // The viewport keeps its own twist: `v`'s is the one it shows.
+                let center = v.center - ((pv.center - vp.center.xy()) * k).rotate(-vp.view_twist());
                 let height = vp.height * k;
-                if !usable_view(&View { center, height }) {
+                if !usable_view(&View { center, height, twist: 0.0 }) {
                     return false;
                 }
                 let doc = Arc::make_mut(&mut self.doc);
@@ -275,7 +337,34 @@ impl DocState {
             Some((_, slot)) => *slot = v,
             None => self.views.push((self.space.clone(), v)),
         }
+        if self.space == Space::Model {
+            self.keep_untiled_twist(v);
+        }
     }
+    /// An untiled Model tab keeps its view twist in the drawing as a lone `*Active` VPORT tile
+    /// (written as that record's group 51 and read back), so it survives save and reopen. Only a
+    /// change of twist touches the drawing; an untwisted view keeps no record.
+    fn keep_untiled_twist(&mut self, view: View) {
+        use cadcraft_doc::{VportConfig, VportTile};
+        let twist = view.twist.rem_euclid(std::f64::consts::TAU);
+        let view3d = (self.view_dir != Vec3::Z).then_some(cadcraft_doc::ViewDir { dir: self.view_dir, target: Vec3::ZERO });
+        let active = self.doc.vports.iter().find(|config| config.is_active());
+        if active.is_some_and(|config| config.tiles.len() > 1)
+            || active
+                .and_then(|config| config.tiles.first())
+                .is_some_and(|tile| tile.twist == twist && tile.view3d == view3d && tile.center == view.center && tile.height == view.height)
+            || (active.is_none() && twist == 0.0 && view3d.is_none())
+        {
+            return;
+        }
+        let doc = Arc::make_mut(&mut self.doc);
+        doc.vports.retain(|config| !config.is_active());
+        if twist != 0.0 || view3d.is_some() {
+            let tile = VportTile { min: Vec2::ZERO, max: Vec2::new(1.0, 1.0), center: view.center, height: view.height, aspect: 1.0, twist, view3d };
+            doc.vports.insert(0, VportConfig { name: VportConfig::ACTIVE.into(), tiles: vec![tile] });
+        }
+    }
+
     /// Set the view, recording view history. Returns false, changing nothing, when the view (or,
     /// in MSPACE, the viewport view it maps to) isn't finite with a positive height.
     pub fn set_view(&mut self, v: View) -> bool {
@@ -303,7 +392,7 @@ impl DocState {
     /// The view ZOOM starts from: the model view of the active unlocked viewport, else [`Self::view`].
     pub fn zoom_frame(&self) -> View {
         match self.zoom_viewport() {
-            Some(v) => View { center: v.view_center, height: v.view_height },
+            Some(v) => View { center: v.view_center, height: v.view_height, twist: v.view_twist() },
             None => self.view(),
         }
     }
@@ -318,7 +407,8 @@ impl DocState {
             Some(vp) => {
                 let pv = self.paper_view();
                 let k = f.height / vp.height;
-                View { center: f.center + (pv.center - vp.center.xy()) * k, height: pv.height * k }
+                let twist = vp.view_twist();
+                View { center: f.center + ((pv.center - vp.center.xy()) * k).rotate(-twist), height: pv.height * k, twist }
             }
             None => f,
         };
@@ -326,7 +416,7 @@ impl DocState {
     }
     /// Set without recording view history (realtime pan/zoom frames).
     pub fn set_view_quiet(&mut self, v: View) {
-        if !(v.center.is_finite() && v.height.is_finite() && v.height > 1e-12) {
+        if !usable_view(&v) {
             return;
         }
         self.store_view(v);
@@ -453,6 +543,13 @@ pub struct Settings {
     pub polardist: f64,
     /// AUDITCTL: 1 creates an audit report (.adt) file when AUDIT is run (default: 0).
     pub auditctl: bool,
+    /// The current UCS's X axis, radians from world +X: ortho, polar and object snap tracking
+    /// work along the UCS axes. Filled in by [`Session::drafting_settings`]; not a setting.
+    #[serde(skip)]
+    pub ucs_angle: f64,
+    /// Handedness of the current planar UCS; transient drafting state.
+    #[serde(skip)]
+    pub ucs_reversed: bool,
 }
 
 impl Default for Settings {
@@ -514,6 +611,8 @@ impl Default for Settings {
             polarsnap: false,
             polardist: 0.0,
             auditctl: false,
+            ucs_angle: 0.0,
+            ucs_reversed: false,
         }
     }
 }
@@ -644,6 +743,9 @@ pub struct Session {
     pub last_command: Option<String>,
     /// LASTPOINT.
     pub last_point: Vec2,
+    last_point_z: (Vec2, f64),
+    point_z: f64,
+    point_z_explicit: bool,
     /// The last segment given at a point prompt (its base point and the point): polar angles
     /// relative to the last segment (POLARMODE bit 1) are measured from it.
     pub last_segment: Option<(Vec2, Vec2)>,
@@ -720,6 +822,9 @@ impl Session {
             log: Vec::new(),
             last_command: None,
             last_point: Vec2::ZERO,
+            last_point_z: (Vec2::ZERO, 0.0),
+            point_z: 0.0,
+            point_z_explicit: false,
             last_segment: None,
             last_polar: None,
             point_mods: Vec::new(),
@@ -749,24 +854,49 @@ impl Session {
         self.untitled_counter += 1;
         let d = if metric { Drawing::new_metric() } else { Drawing::new_imperial() };
         let mut st = DocState::new(d, &format!("Drawing{}", self.untitled_counter), None);
-        st.set_view_quiet(if metric { View { center: Vec2::new(210.0, 148.5), height: 297.0 } } else { View::default() });
+        st.set_view_quiet(if metric { View { center: Vec2::new(210.0, 148.5), height: 297.0, twist: 0.0 } } else { View::default() });
         self.end_running();
         self.docs.push(st);
         self.active = self.docs.len() - 1;
         self.active
     }
-    pub fn open_drawing(&mut self, d: Drawing, title: &str, path: Option<String>) -> usize {
+    pub fn open_drawing(&mut self, mut d: Drawing, title: &str, path: Option<String>) -> usize {
+        // A drawing saved in a 3D view of model space opens in it: the view is the editor's, the
+        // single *Active viewport that carries it isn't kept.
+        let single = d.vports.iter().position(|c| c.is_active() && c.tiles.len() == 1);
+        let single_view = single.and_then(|i| d.vports.get(i)).and_then(|c| c.tiles.first()).cloned();
+        let saved = single_view.as_ref().and_then(|view| view.view3d);
+        let saved_twist = single_view.as_ref().map(|view| view.twist);
+        if let Some(index) = single {
+            d.vports.remove(index);
+        }
         let mut st = DocState::new(d, title, path);
         let ext = st.doc.extents(&Space::Model);
-        if !ext.is_empty() {
-            st.set_view_quiet(View {
-                center: ext.center(),
-                height: (ext.height().max(ext.width() * self.viewport_px.1 / self.viewport_px.0.max(1.0)) * 1.1).max(1e-6),
-            });
+        // The current tile (the first), or the lone untiled view, keeps its saved twist.
+        let twist = saved_twist
+            .or_else(|| st.doc.vports.iter().find(|c| c.is_active()).and_then(|c| c.tiles.first()).map(|view| view.twist))
+            .unwrap_or(0.0)
+            .rem_euclid(std::f64::consts::TAU);
+        let twist = if twist.is_finite() { twist } else { 0.0 };
+        if ext.is_empty() {
+            st.set_view_quiet(View { twist, ..st.view() });
+        } else {
+            let (center, w, h) = View::twisted_box(ext, twist);
+            st.set_view_quiet(View { center, height: (h.max(w * self.viewport_px.1 / self.viewport_px.0.max(1.0)) * 1.1).max(1e-6), twist });
+        }
+        if let Some(v) = saved {
+            st.view_dir = v.dir * (1.0 / v.dir.len());
         }
         self.end_running();
         self.docs.push(st);
         self.active = self.docs.len() - 1;
+        if saved.is_some() {
+            let _ = self.zoom_extents();
+        }
+        // Initial camera normalization belongs to loading the file, not to a user edit.
+        if let Some(state) = self.docs.get_mut(self.active) {
+            state.saved = state.doc.clone();
+        }
         self.active
     }
     /// A command still waiting for input belongs to the drawing it started in: end it there
@@ -811,6 +941,9 @@ impl Session {
             settings.snapunit = d.header.snap_unit();
             settings.gridunit = d.header.grid_unit();
         }
+        let a = self.input_ucs().rotation();
+        settings.ucs_angle = if a.is_finite() { a } else { 0.0 };
+        settings.ucs_reversed = self.input_ucs().reversed();
         settings
     }
     /// The space commands act on (model space while working inside a layout viewport).
@@ -1052,6 +1185,15 @@ impl Session {
     /// Give an input to the running command. With no command running, `Enter` repeats the last
     /// command (as in AutoCAD) and points do nothing. A LISP routine waiting in a `get…`
     /// function takes the input instead; one paused in `command` carries on after it.
+    pub fn last_point3(&self) -> Vec3 {
+        let (p, z) = self.last_point_z;
+        self.last_point.to3(if p == self.last_point { z } else { 0.0 })
+    }
+
+    pub fn point_z(&self) -> f64 {
+        self.point_z
+    }
+
     pub fn input(&mut self, input: Input) -> Result<()> {
         if self.lisp_input(input.clone()) {
             return Ok(());
@@ -1138,8 +1280,8 @@ impl Session {
             Input::Point(p) => {
                 let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
                 if let Some(pw) = self.pending_window.take() {
-                    let crossing = p.x < pw.corner.x;
-                    let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+                    let crossing = self.input_ucs().crossing(pw.corner, p);
+                    let hs = select::select_ucs_window(self.doc()?, &space, pw.corner, p, crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
                 match select::pick(self.doc()?, &space, p, ap) {
@@ -1222,6 +1364,7 @@ impl Session {
             Some(i) => {
                 if let Input::Point(p) = &i {
                     self.last_point = *p;
+                    self.last_point_z = (*p, self.point_z);
                     if let Some(b) = base.filter(|b| b.is_finite() && p.is_finite() && b.dist(*p) > 1e-12) {
                         self.last_segment = Some((b, *p));
                     }
@@ -1428,6 +1571,13 @@ impl Session {
     /// Preview entities for the cursor: objects drawn with their own properties
     /// ([`Interactive::preview_objects`]), then the rubber band with the current properties, in
     /// the grip blue over such objects (so it shows over their fills, whatever their colour).
+    pub fn ucs_preview(&self, cursor: Vec2) -> Option<ucs::UcsPreview> {
+        if !cursor.is_finite() {
+            return None;
+        }
+        self.running.as_ref()?.machine.ucs_preview(self, cursor)
+    }
+
     pub fn preview(&self, cursor: Vec2) -> Vec<Entity> {
         let mut common = self.current_common();
         let (kinds, mut out) = match (self.lisp_preview(cursor), &self.running) {
@@ -1440,6 +1590,13 @@ impl Session {
         }
         out.extend(kinds.into_iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k }));
         out
+    }
+
+    /// What the drawing area shows in place of the drawing while a command runs (DVIEW's preview
+    /// set, see [`Interactive::display_only`]), also while a transparent command interrupts it.
+    /// `None`: the drawing.
+    pub fn display_only(&self) -> Option<DisplayOnly> {
+        [&self.running, &self.suspended].into_iter().flatten().find_map(|r| r.machine.display_only(self))
     }
 
     /// The active command's preview as a transform of existing objects (see
@@ -1551,7 +1708,8 @@ impl Session {
                 lisp::value::Value::Real(r) => self.typed(&format!("{r}")),
                 lisp::value::Value::Str(s) => self.typed(&s),
                 other => match other.as_point() {
-                    Some(p) => self.input(Input::Point(Vec2::new(p[0], p[1]))),
+                    // A point from LISP is in the current UCS, as typed coordinates are.
+                    Some(p) => self.input(Input::Point(self.input_ucs().to_wcs(Vec2::new(p[0], p[1])))),
                     None => {
                         self.echo(format!("Invalid input: {}", lisp::value::to_text(&other, true)));
                         Ok(())
@@ -1573,9 +1731,18 @@ impl Session {
             return self.input(Input::Keyword(k));
         }
         if prompt.accept.point {
-            if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
+            self.note_tilted_ucs();
+            if let Some(p) = self.parse_typed_point3(tt, self.last_point3()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
-                return self.input(Input::Point(p));
+                self.point_z = p.z;
+                let without_world = tt.trim_start_matches('*').trim_start();
+                let relative = without_world.starts_with('@');
+                let world = tt.starts_with('*') || tt.strip_prefix('@').is_some_and(|rest| rest.trim_start().starts_with('*'));
+                self.point_z_explicit = tt.matches(',').count() >= 2 || relative || (!world && self.input_ucs().origin.z != 0.0);
+                let r = self.input(Input::Point(p.xy()));
+                self.point_z = 0.0;
+                self.point_z_explicit = false;
+                return r;
             }
             // Direct distance entry along the tracking path the cursor is on, from the point it
             // comes from (an acquired or temporary tracking point needs no base point).
@@ -1676,8 +1843,8 @@ impl Session {
         let space = self.space();
         let pickadd = self.settings.pickadd;
         if let Some(pw) = self.pending_window.take() {
-            let crossing = p.x < pw.corner.x;
-            let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+            let crossing = self.input_ucs().crossing(pw.corner, p);
+            let hs = select::select_ucs_window(self.doc()?, &space, pw.corner, p, crossing);
             let hs = cmd::groups::expand(self, hs);
             let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
             if shift && pickadd {
@@ -1793,15 +1960,45 @@ impl Session {
         Ok(Bounds2::new(lo, hi))
     }
 
-    pub fn zoom_extents(&mut self) -> Result<()> {
+    /// Drawing limits projected into the current view.
+    pub fn view_limits(&self) -> Result<Bounds2> {
+        let lim = self.zoom_limits()?;
+        Ok(match self.state()?.projection() {
+            Some(m) => {
+                let p = m.plane(0.0);
+                let corners = [lim.min, Vec2::new(lim.max.x, lim.min.y), lim.max, Vec2::new(lim.min.x, lim.max.y)];
+                Bounds2::from_points(corners.map(|c| p.apply(c)))
+            }
+            None => lim,
+        })
+    }
+
+    /// The current space's extents as the view shows them: the drawing's extents in plan view,
+    /// the bounds of what is drawn in a 3D view (in view coordinates).
+    pub fn view_extents(&self) -> Result<Bounds2> {
         let space = self.space();
-        let ext = self.doc()?.extents(&space);
+        let d = self.doc()?;
+        let ext = d.extents(&space);
+        match self.state()?.projection() {
+            Some(projection) if !ext.is_empty() => {
+                let tolerance = (ext.width().max(ext.height()) / 1000.0).max(1e-9);
+                let opts = render::Options { projection: Some(projection), tolerance, ..render::Options::default() };
+                Ok(render::build(d, &space, &opts).bounds)
+            }
+            _ => Ok(ext),
+        }
+    }
+
+    pub fn zoom_extents(&mut self) -> Result<()> {
+        let ext = self.view_extents()?;
         let (w, h) = self.viewport_px;
-        let ext = if ext.is_empty() { self.zoom_limits()? } else { ext };
+        let ext = if ext.is_empty() { self.view_limits()? } else { ext };
         let st = self.state_mut()?;
         let aspect = st.zoom_aspect(w / h.max(1.0));
-        let height = ext.height().max(ext.width() / aspect.max(1e-6)).max(1e-6) * 1.05;
-        st.set_zoom_frame(View { center: ext.center(), height });
+        let twist = st.zoom_frame().twist;
+        let (center, bw, bh) = View::twisted_box(ext, twist);
+        let height = bh.max(bw / aspect.max(1e-6)).max(1e-6) * 1.05;
+        st.set_zoom_frame(View { center, height, twist });
         Ok(())
     }
 
@@ -1815,7 +2012,7 @@ impl Session {
         let h = (v.height / factor).clamp(1e-9, 1e12);
         let k = h / v.height;
         let c = about + (v.center - about) * k;
-        st.set_view_quiet(View { center: c, height: h });
+        st.set_view_quiet(View { center: c, height: h, twist: v.twist });
         Ok(())
     }
 

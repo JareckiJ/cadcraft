@@ -346,7 +346,11 @@ pub(super) fn run_counttable(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let cells: Vec<Vec<String>> = t.blocks.iter().map(|(name, n)| vec![name.clone(), n.to_string()]).collect();
     let header = Some(vec!["Name".to_string(), "Count".to_string()]);
-    let table = super::super::table::make_table(&table_style(s), at, cells.len(), 2, None, None, Some("Block Count"), header, &cells);
+    let mut table = super::super::table::make_table(&table_style(s), at, cells.len(), 2, None, None, Some("Block Count"), header, &cells);
+    table.rotation = match p.get("rotation") {
+        None => 0.0,
+        Some(_) => super::super::f64_req(CMD, p, "rotation")?.to_radians(),
+    };
     let h = s.add_entity(EntityKind::Table(table))?;
     Ok(json!({ "handle": h.hex(), "rows": cells.len(), "message": format!("Table of {} block(s) inserted.", cells.len()) }))
 }
@@ -399,7 +403,7 @@ impl Interactive for CountTableM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(at) => {
-                let r = run_counttable(s, &json!({ "at": [at.x, at.y] }))?;
+                let r = run_counttable(s, &json!({ "at": [at.x, at.y], "rotation":s.input_ucs().rotation().to_degrees() }))?;
                 echo_lines(s, &r);
                 Ok(Step::Done)
             }

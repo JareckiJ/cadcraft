@@ -168,12 +168,37 @@ fn plan(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn plan_in_frame(
+    s: &Session,
+    pts: &[Vec2],
+    circles: &[(Vec2, f64)],
+    mode: Mode,
+    at: Vec2,
+    vertical: Option<bool>,
+    datum: Option<Vec2>,
+    frame: crate::ucs::UcsFrame,
+) -> Result<Vec<EntityKind>> {
+    let points: Vec<_> = pts.iter().map(|p| frame.to_ucs(*p)).collect();
+    let circles: Vec<_> = circles.iter().map(|(p, r)| (frame.to_ucs(*p), *r)).collect();
+    let mut kinds = plan(s, &points, &circles, mode, frame.to_ucs(at), vertical, datum.map(|p| frame.to_ucs(p)))?;
+    let matrix = frame.placement();
+    for kind in &mut kinds {
+        kind.transform(&matrix);
+    }
+    Ok(kinds)
+}
+
 /// The nearest point of `pts` to `q` within `tol`, by index.
 fn nearest(pts: &[Vec2], q: Vec2, tol: f64) -> Option<usize> {
     pts.iter().enumerate().filter(|(_, p)| p.dist(q) <= tol).min_by(|a, b| a.1.dist(q).total_cmp(&b.1.dist(q))).map(|(i, _)| i)
 }
 
 pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
+    run_in_frame(s, p, crate::ucs::UcsFrame::WORLD)
+}
+
+fn run_in_frame(s: &mut Session, p: &Value, frame: crate::ucs::UcsFrame) -> Result<Value> {
     let hs = targets(s, p)?;
     if hs.len() > MAX_CHAIN {
         return Err(bad("qdim", format!("at most {MAX_CHAIN} objects per call")));
@@ -198,7 +223,7 @@ pub(super) fn run(s: &mut Session, p: &Value) -> Result<Value> {
             pts.swap_remove(i);
         }
     }
-    let kinds = plan(s, &pts, &circles, mode, at, vertical, datum)?;
+    let kinds = plan_in_frame(s, &pts, &circles, mode, at, vertical, datum, frame)?;
     // One snap index for all the dimensions, as DIMCONTINUE does: looking up each dimension's
     // objects by scanning the drawing made QDIM quadratic (the added dimensions are no snap targets).
     let snaps = if assoc_enabled(s) { Some(crate::assoc::SnapIndex::new(s.doc()?, &s.space())) } else { None };
@@ -311,7 +336,7 @@ impl Interactive for QDimM {
         }
         match (self.ask, i) {
             (Ask::Position, Input::Point(at)) => {
-                let r = run(s, &self.params(at))?;
+                let r = run_in_frame(s, &self.params(at), s.input_ucs())?;
                 let n = r.get("handles").and_then(Value::as_array).map_or(0, Vec::len);
                 s.echo(format!("{n} dimension(s) created."));
                 s.set_selection(Vec::new());
@@ -359,6 +384,6 @@ impl Interactive for QDimM {
                 pts.swap_remove(i);
             }
         }
-        plan(s, &pts, &circles, self.mode, c, None, self.datum).unwrap_or_default()
+        plan_in_frame(s, &pts, &circles, self.mode, c, None, self.datum, s.input_ucs()).unwrap_or_default()
     }
 }

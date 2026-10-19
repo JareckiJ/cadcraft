@@ -114,6 +114,21 @@ struct Anchor {
 
 /// Lay out table `t` of drawing `d`, every part of a broken table.
 pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
+    let mut g = unrotated_geometry(d, t);
+    for fill in &mut g.fills {
+        fill.corners = fill.corners.map(|p| t.rotate_point(p));
+    }
+    for line in &mut g.lines {
+        line.a = t.rotate_point(line.a);
+        line.b = t.rotate_point(line.b);
+    }
+    for text in &mut g.texts {
+        text.at = t.rotate_point(text.at);
+    }
+    g
+}
+
+fn unrotated_geometry(d: &Drawing, t: &Table) -> TableGeom {
     let parts = t.parts();
     if parts.len() <= 1 {
         return layout(d, t);
@@ -152,6 +167,7 @@ fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
     }
     Table {
         insert: origin.to3(t.insert.z),
+        rotation: 0.0,
         col_widths: t.col_widths.clone(),
         row_heights: rows.iter().map(|r| t.row_heights.get(*r).copied().unwrap_or(0.0)).collect(),
         row_styles: rows.iter().map(|r| t.row_style(*r).to_string()).collect(),
@@ -358,6 +374,7 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
         // alignment point (its numbering is MTEXT's attachment).
         let mp = cadcraft_fonts::MTextParams {
             attach: tx.attach,
+            rotation: if t.rotation.is_finite() { t.rotation } else { 0.0 },
             font,
             width_factor: ts.width_factor,
             oblique: ts.oblique,

@@ -1,7 +1,7 @@
 //! Interactive commands: prompts, inputs and the command-line coordinate grammar.
 
 use cadcraft_doc::{EntityKind, Handle};
-use cadcraft_geom::{Mat3, Vec2};
+use cadcraft_geom::{Mat3, Vec2, Vec3};
 use serde::Serialize;
 
 use crate::{Result, Session};
@@ -62,6 +62,10 @@ pub struct Prompt {
     /// pointer boxes.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub distance: bool,
+    /// The message asks for one of the keywords, so they follow it without "or" (DVIEW's
+    /// "Enter option [CAmera/TArget/…]:").
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub options_only: bool,
 }
 
 /// Parse `@distance<angle` (relative polar), returning `(distance, angle in radians)`.
@@ -124,6 +128,22 @@ impl Prompt {
         self.deferred = true;
         self
     }
+    /// The keywords follow the message without "or" (the `options_only` field).
+    pub fn options_only(mut self) -> Self {
+        self.options_only = true;
+        self
+    }
+    /// The separator written between the message and the keywords: " or [", or " [" for a
+    /// question ("Fix any errors detected? [Yes/No]") or an option prompt ([`Prompt::options_only`]).
+    pub fn keyword_opening(&self) -> &'static str {
+        if self.message.is_empty() {
+            "["
+        } else if self.message.ends_with('?') || self.options_only {
+            " ["
+        } else {
+            " or ["
+        }
+    }
     pub fn default(mut self, d: impl Into<String>) -> Self {
         self.default = Some(d.into());
         self
@@ -143,13 +163,7 @@ impl Prompt {
         if !self.keywords.is_empty() {
             // A question offers its answers ("Fix any errors detected? [Yes/No]"); anything else
             // offers options besides what it asks for ("Specify next point or [Undo]").
-            s.push_str(if self.message.is_empty() {
-                "["
-            } else if self.message.ends_with('?') {
-                " ["
-            } else {
-                " or ["
-            });
+            s.push_str(self.keyword_opening());
             s.push_str(&self.keywords.join("/"));
             s.push(']');
         }
@@ -219,6 +233,11 @@ pub trait Interactive: Send {
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+    /// Transient UCS axes and displacement guide; independent of drawing properties.
+    fn ucs_preview(&self, _s: &Session, _cursor: Vec2) -> Option<crate::ucs::UcsPreview> {
+        None
+    }
+
     /// Preview objects drawn with their own properties (colour, layer, linetype) rather than
     /// the current layer's, as [`Interactive::preview`]'s are: a block reference re-evaluated
     /// under the cursor, drawn as it will look. Drawn under the rubber band.
@@ -236,6 +255,22 @@ pub trait Interactive: Send {
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         None
     }
+    /// What the drawing area shows in place of the drawing while the command runs (DVIEW draws
+    /// only its preview set); `None` shows the drawing.
+    fn display_only(&self, _s: &Session) -> Option<DisplayOnly> {
+        None
+    }
+}
+
+/// See [`Interactive::display_only`]: the only things drawn in the current view while a command
+/// runs. The whole drawing is drawn again when it ends.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DisplayOnly {
+    /// Objects of the drawing, drawn as they are.
+    pub handles: Vec<Handle>,
+    /// Geometry that is not in the drawing (DVIEW's sample house, or an insert of the drawing's
+    /// DVIEWBLOCK block), with its own properties.
+    pub extra: Vec<cadcraft_doc::Entity>,
 }
 
 /// See [`Interactive::drag`].
@@ -251,52 +286,74 @@ pub struct Drag {
 }
 
 /// Parse a typed point: `x,y[,z]`, `@dx,dy`, `@dist<angle`, `dist<angle`, `#x,y` (absolute),
-/// `*x,y` and `*@dx,dy`/`@*dx,dy` (world coordinates: the same as the plain forms, as there is no
-/// UCS yet).
+/// `*x,y` and `*@dx,dy`/`@*dx,dy` (world coordinates).
 /// Relative forms use `last`. Polar angles read the default angle settings (degrees from +X,
-/// counterclockwise); `parse_point_with` reads a drawing's.
+/// counterclockwise); `parse_point_with` reads a drawing's, `parse_point_in` a UCS too.
 pub fn parse_point(text: &str, last: Vec2) -> Option<Vec2> {
     parse_point_with(text, last, &crate::units::AngleSettings::default())
 }
 
 /// `parse_point` with polar angles read per `angles` (AUNITS, ANGBASE, ANGDIR); `d<<a` and
-/// `d<<<a` measure from +X counterclockwise (in degrees and in AUNITS).
+/// `d<<<a` measure from +X counterclockwise (in degrees and in AUNITS). A third number is
+/// accepted and dropped; [`parse_point3_with`] keeps it.
 pub fn parse_point_with(text: &str, last: Vec2, angles: &crate::units::AngleSettings) -> Option<Vec2> {
-    let t = text.trim();
-    if t.is_empty() {
+    parse_point3_with(text, last.to3(0.0), angles).map(Vec3::xy)
+}
+
+/// Parse planar UCS coordinates, retaining the third coordinate and relative elevation.
+pub fn parse_point3_with(text: &str, last: Vec3, angles: &crate::units::AngleSettings) -> Option<Vec3> {
+    parse_point3_in(text, last, angles, &crate::ucs::UcsFrame::WORLD)
+}
+
+pub fn parse_point_in(text: &str, last: Vec2, angles: &crate::units::AngleSettings, ucs: &crate::ucs::UcsFrame) -> Option<Vec2> {
+    parse_point3_in(text, last.to3(0.0), angles, ucs).map(Vec3::xy)
+}
+
+pub fn parse_point3_in(text: &str, last: Vec3, angles: &crate::units::AngleSettings, ucs: &crate::ucs::UcsFrame) -> Option<Vec3> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 4096 {
         return None;
     }
-    let t = t.strip_prefix('*').map_or(t, str::trim_start);
-    let (rel, body) = if let Some(b) = t.strip_prefix('@') {
-        let b = b.trim();
-        (true, b.strip_prefix('*').map_or(b, str::trim_start))
-    } else if let Some(b) = t.strip_prefix('#') {
-        (false, b.trim())
+    let (mut world, text) = text.strip_prefix('*').map_or((false, text), |rest| (true, rest.trim_start()));
+    let (relative, body) = if let Some(rest) = text.strip_prefix('@') {
+        let rest = rest.trim();
+        match rest.strip_prefix('*') {
+            Some(rest) => {
+                world = true;
+                (true, rest.trim_start())
+            }
+            None => (true, rest),
+        }
     } else {
-        (false, t)
+        (false, text.strip_prefix('#').map_or(text, str::trim))
     };
-    if rel && body.is_empty() {
-        return Some(last);
+    if relative && body.is_empty() {
+        return last.is_finite().then_some(last);
     }
-    let p = if let Some((d, a)) = body.split_once('<') {
-        let dist = crate::units::parse_distance(d)?;
-        // `d<<a` / `d<<<a`: the override prefixes keep their `<<` / `<<<`.
-        let ang = if a.starts_with('<') { angles.direction(&format!("<{a}"))? } else { angles.direction(a)? };
-        Vec2::from_angle(ang) * dist
+    let (frame, angles) = if world { (crate::ucs::UcsFrame::WORLD, angles.world()) } else { (*ucs, *angles) };
+    if !frame.is_planar() {
+        return None;
+    }
+    let result = if let Some((distance, angle)) = body.split_once('<') {
+        let distance = crate::units::parse_distance(distance)?;
+        let angle = if angle.starts_with('<') { angles.direction(&format!("<{angle}"))? } else { angles.direction(angle)? };
+        let delta = (Vec2::from_angle(angle) * distance).to3(0.0);
+        if relative { last + delta } else { frame.origin + delta }
     } else {
-        let parts: Vec<&str> = body.split(',').collect();
-        if parts.len() < 2 || parts.len() > 3 {
+        let mut parts = body.split(',');
+        let x = crate::units::parse_distance(parts.next()?)?;
+        let y = crate::units::parse_distance(parts.next()?)?;
+        let z = match parts.next() {
+            Some(value) => crate::units::parse_distance(value)?,
+            None => 0.0,
+        };
+        if parts.next().is_some() {
             return None;
         }
-        let x = crate::units::parse_distance(parts.first()?)?;
-        let y = crate::units::parse_distance(parts.get(1)?)?;
-        if let Some(z) = parts.get(2) {
-            crate::units::parse_distance(z)?;
-        }
-        Vec2::new(x, y)
+        let delta = frame.x * x + frame.y * y + frame.z() * z;
+        if relative { last + delta } else { frame.origin + delta }
     };
-    let r = if rel { last + p } else { p };
-    r.is_finite().then_some(r)
+    result.is_finite().then_some(result)
 }
 
 #[cfg(test)]

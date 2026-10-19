@@ -164,7 +164,6 @@ impl Vec3 {
         Vec3::new(self.y * o.z - self.z * o.y, self.z * o.x - self.x * o.z, self.x * o.y - self.y * o.x)
     }
     pub fn len(self) -> f64 {
-        // Avoid overflowing the squared components of large finite vectors.
         self.x.hypot(self.y).hypot(self.z)
     }
     pub fn normalized(self) -> Vec3 {

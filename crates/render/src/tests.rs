@@ -137,6 +137,11 @@ fn vp(center: Vec2, w: f64, h: f64, view_center: Vec2, view_height: f64, id: u32
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        view3d: None,
+        twist: 0.0,
+        ucs: None,
+        ucs_per_viewport: false,
+        extra: Vec::new(),
     }
 }
 
@@ -364,6 +369,7 @@ fn lin_dim() -> cadcraft_doc::Dimension {
         text: String::new(),
         style: "Standard".into(),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
@@ -402,6 +408,7 @@ fn table_title_is_centred_and_merged() {
     title[0].merged = Some((1, 3));
     let t = cadcraft_doc::Table {
         insert: Vec3::new(0.0, 0.0, 0.0),
+        rotation: 0.0,
         col_widths: vec![2.0, 2.0, 2.0],
         row_heights: vec![1.0, 1.0],
         cells: vec![title, vec![cell("a"), cell("b"), cell("c")]],

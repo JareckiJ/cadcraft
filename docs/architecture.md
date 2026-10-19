@@ -1,6 +1,6 @@
 # CADCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first committed architecture doc, written from the code on main at bd2412f) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** major (first committed architecture doc, written from the code on main at bd2412f) · **Target:** Autodesk AutoCAD 2027
 
 How CADCraft is built today. This describes the code on `main`, not plans; plans live in
 [roadmap.md](roadmap.md). Agents: the rules that keep this shape (layering, never-crash,
@@ -39,11 +39,11 @@ wgpu or rfd.
   `EntityKind`: Line, Point, Circle, Arc, Ellipse, LwPolyline, Polyline3d, Spline, Ray, XLine,
   Text, MText, AttDef, Insert (with attributes), Dimension (linear, aligned, angular, diameter,
   radius, ordinate, arc length), Leader, MLeader, Hatch (pattern, solid, gradient), Solid,
-  Trace, Face3d, Viewport, Image, Wipeout, Table and Unknown (raw DXF tags).
-- There are no 3D solids, surfaces, meshes, regions (ACIS), multilines, tolerance frames or
+  Trace, Face3d, PolyfaceMesh, Viewport, Image, Wipeout, Table and Unknown (raw DXF tags).
+- There are no 3D solids, surfaces, editable meshes or regions (ACIS), or
   underlays in the model yet ([gaps.md](gaps.md)).
 - Entity collections are copy-on-write, so undo is a whole-drawing snapshot that costs little.
-- Coordinates are f64 world units. 2D work happens in the WCS; there is no UCS yet.
+- Coordinates are f64 world units. Interactive drafting converts through a per-space UCS; explicit JSON geometry stays WCS. Camera direction and twist drive a shared projection. See [UCS/navigation](ucs-navigation.md).
 
 ## Commands
 
@@ -56,7 +56,7 @@ channel and MCP all reach the same commands. JSON calls never open dialogs.
 
 ## Rendering
 
-`render::build` turns a space into a display list once per change; the UI uploads it to wgpu in
+`render::build` applies the shared orthographic camera projection and turns a space into a display list once per change; the UI uploads it to wgpu in
 batches (`gpu.rs`). Tessellation tolerance follows the view. The R-tree (`spatial.rs`) is patched
 per changed store chunk after an edit, so picking stays near 0.001 ms at 200k entities. PNG, PDF,
 SVG and plot preview reuse the same display list through the CPU rasteriser or vector writers.
@@ -92,3 +92,4 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |
+| 2026-10-19 | minor | Per-space UCS, orthographic camera/twist, oriented selection and navigation overlays |

@@ -552,6 +552,9 @@ pub struct Dimension {
     pub measurement: f64,
     #[serde(default)]
     pub text_rotation: f64,
+    /// UCS X direction when drawn, in world XY radians (negative DXF group 51).
+    #[serde(default)]
+    pub horizontal_direction: f64,
     /// User moved the text (text_mid is authoritative).
     #[serde(default)]
     pub user_text_pos: bool,
@@ -720,6 +723,19 @@ pub struct MLeader {
 }
 
 impl MLeader {
+    /// The landing line in the same frame as its text or block content.
+    pub fn landing_segment(&self) -> Option<[Vec2; 2]> {
+        let (point, rotation) =
+            self.text.as_ref().map(|t| (t.insert.xy(), t.rotation)).or_else(|| self.block.as_ref().map(|b| (b.insert.xy(), b.rotation)))?;
+        if !self.dogleg.is_finite() || self.dogleg <= 0.0 || !rotation.is_finite() {
+            return None;
+        }
+        let axis = Vec2::from_angle(rotation);
+        let land = self.landing.xy();
+        let sign = if (point - land).dot(axis) < 0.0 { -1.0 } else { 1.0 };
+        Some([land, land + axis * (self.dogleg * sign)])
+    }
+
     /// Each leader line as drawn: through its points to the landing, smoothed for spline leaders.
     pub fn leader_paths(&self) -> Vec<Vec<Vec2>> {
         self.leaders
@@ -793,6 +809,52 @@ pub struct Face3d {
     #[serde(default)]
     pub hidden_edges: u8,
 }
+impl Face3d {
+    /// The edges drawn: side i (corner i to the next) unless bit i of `hidden_edges` hides it,
+    /// without the zero-length side of a triangle.
+    pub fn visible_edges(&self) -> Vec<(Vec3, Vec3)> {
+        let c = self.corners;
+        (0..4).filter(|i| self.hidden_edges & (1 << i) == 0).map(|i| (c[i], c[(i + 1) % 4])).filter(|(a, b)| a != b).collect()
+    }
+}
+/// POLYLINE polyface mesh (DXF flag 64): its vertices, and faces naming three or four of them
+/// by 1-based index as DXF stores them (0: no fourth vertex; a negative index hides the edge
+/// that starts at that vertex).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PolyfaceMesh {
+    pub vertices: Vec<Vec3>,
+    pub faces: Vec<[i32; 4]>,
+}
+impl PolyfaceMesh {
+    /// The faces as 3D faces (what EXPLODE makes). Faces with fewer than three vertices or an
+    /// index outside the vertex list are skipped.
+    pub fn faces3d(&self) -> Vec<Face3d> {
+        let mut out = Vec::new();
+        for f in &self.faces {
+            let mut corners: Vec<Vec3> = Vec::with_capacity(4);
+            let mut hidden = 0u8;
+            let mut ok = true;
+            for &ix in f.iter().filter(|&&ix| ix != 0) {
+                let at = usize::try_from(ix.unsigned_abs()).ok().and_then(|n| n.checked_sub(1));
+                let Some(p) = at.and_then(|n| self.vertices.get(n)) else {
+                    ok = false;
+                    break;
+                };
+                if ix < 0 {
+                    hidden |= 1 << corners.len();
+                }
+                corners.push(*p);
+            }
+            match (ok, corners.as_slice()) {
+                // A triangle's closing edge is the 3DFACE's fourth (the third is degenerate).
+                (true, [a, b, c]) => out.push(Face3d { corners: [*a, *b, *c, *c], hidden_edges: hidden | if hidden & 4 != 0 { 8 } else { 0 } }),
+                (true, [a, b, c, d]) => out.push(Face3d { corners: [*a, *b, *c, *d], hidden_edges: hidden }),
+                _ => {}
+            }
+        }
+        out
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RayLine {
     pub base: Vec3,
@@ -822,7 +884,96 @@ pub struct Viewport {
     /// Display on (MVIEW ON/OFF). An off viewport shows its border but no model space.
     #[serde(default = "yes")]
     pub on: bool,
+    /// A 3D view of model space (`view_center` is then in its view coordinates); `None`: plan view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view3d: Option<ViewDir>,
+    /// The view twist (DVIEW TWist inside the viewport; DXF group 51): radians counterclockwise,
+    /// the model view seen through the viewport is turned on the sheet by it. 0 is untwisted.
+    #[serde(default, skip_serializing_if = "is_zero_twist")]
+    pub twist: f64,
+    /// The viewport's own UCS (DXF groups 110–112, 79, 146, 345, 346), the one it keeps while
+    /// `ucs_per_viewport` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ucs: Option<ViewportUcs>,
+    /// UCS per viewport (UCSVP, DXF group 71): the viewport keeps its own UCS instead of
+    /// following the current one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ucs_per_viewport: bool,
+    /// The viewport's groups CADCraft doesn't model (snap, grid, lens and clipping, render mode,
+    /// plot style sheet, shade plot, visual style, background, lighting…), as read: written back
+    /// on save and carried by copies, their references pointed at what they named.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<RawTag>,
 }
+/// A 3D view of model space as DXF stores it (VIEWPORT and VPORT groups 16/26/36 direction from
+/// the target towards the viewer, 17/27/37 target).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViewDir {
+    pub dir: Vec3,
+    #[serde(default)]
+    pub target: Vec3,
+}
+impl ViewDir {
+    /// WCS → its view coordinates.
+    pub fn matrix(&self) -> cadcraft_geom::Mat4 {
+        cadcraft_geom::Mat4::view(self.dir, self.target, 0.0)
+    }
+    /// Whether it differs from the plan view of the WCS, which `None` stands for.
+    pub fn is_3d(&self) -> bool {
+        !(self.target == Vec3::ZERO && self.matrix().is_plan())
+    }
+}
+fn is_zero_twist(v: &f64) -> bool {
+    *v == 0.0
+}
+impl Viewport {
+    /// The view twist, usable: 0 when it isn't finite.
+    pub fn view_twist(&self) -> f64 {
+        if self.twist.is_finite() { self.twist } else { 0.0 }
+    }
+    /// Paper units per model unit.
+    pub fn scale(&self) -> f64 {
+        self.height / self.view_height
+    }
+    /// Where model point `m` is on the sheet: `center + scale · R(twist)(m − view_center)`.
+    pub fn model_to_paper(&self, m: Vec2) -> Vec2 {
+        self.center.xy() + (m - self.view_center).rotate(self.view_twist()) * self.scale()
+    }
+    /// The model point at sheet point `p` (the inverse of [`Viewport::model_to_paper`]).
+    pub fn paper_to_model(&self, p: Vec2) -> Vec2 {
+        self.view_center + ((p - self.center.xy()) / self.scale()).rotate(-self.view_twist())
+    }
+    /// [`Viewport::model_to_paper`] as a matrix.
+    pub fn model_to_paper_matrix(&self) -> Mat3 {
+        let s = self.scale();
+        Mat3::translate(self.center.xy())
+            .then_before(Mat3::scale(s, s))
+            .then_before(Mat3::rotate(self.view_twist()))
+            .then_before(Mat3::translate(-self.view_center))
+    }
+}
+
+/// A layout viewport's own UCS.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewportUcs {
+    pub origin: Vec3,
+    pub x_axis: Vec3,
+    pub y_axis: Vec3,
+    /// Elevation (DXF group 146).
+    #[serde(default)]
+    pub elevation: f64,
+    /// Orthographic type (DXF group 79): 0 none, 1 top, 2 bottom, 3 front, 4 back, 5 left, 6 right.
+    #[serde(default)]
+    pub ortho: u8,
+    /// The named UCS it is, by UCS table name (DXF group 345).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named: Option<String>,
+    /// The UCS an orthographic one is based on, by UCS table name (DXF group 346); none: the WCS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+}
+
 impl Default for Viewport {
     fn default() -> Self {
         Viewport {
@@ -837,6 +988,11 @@ impl Default for Viewport {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            view3d: None,
+            twist: 0.0,
+            ucs: None,
+            ucs_per_viewport: false,
+            extra: Vec::new(),
         }
     }
 }
@@ -932,6 +1088,9 @@ pub struct TableCell {
 #[serde(rename_all = "camelCase")]
 pub struct Table {
     pub insert: Vec3,
+    /// Column direction in the drawing plane, counterclockwise radians from world X.
+    #[serde(default)]
+    pub rotation: f64,
     pub col_widths: Vec<f64>,
     pub row_heights: Vec<f64>,
     pub cells: Vec<Vec<TableCell>>,
@@ -999,6 +1158,7 @@ pub enum EntityKind {
     Solid(Solid),
     Trace(Solid),
     Face3d(Face3d),
+    PolyfaceMesh(PolyfaceMesh),
     Region(Region),
     Viewport(Viewport),
     Image(Image),
@@ -1053,6 +1213,7 @@ impl EntityKind {
             EntityKind::Solid(_) => "2D Solid",
             EntityKind::Trace(_) => "Trace",
             EntityKind::Face3d(_) => "3D Face",
+            EntityKind::PolyfaceMesh(_) => "Polyface Mesh",
             EntityKind::Region(_) => "Region",
             EntityKind::Viewport(_) => "Viewport",
             EntityKind::Image(_) => "Raster Image",
@@ -1088,6 +1249,7 @@ impl EntityKind {
             EntityKind::Solid(_) => "SOLID",
             EntityKind::Trace(_) => "TRACE",
             EntityKind::Face3d(_) => "3DFACE",
+            EntityKind::PolyfaceMesh(_) => "POLYLINE",
             EntityKind::Region(_) => "REGION",
             EntityKind::Viewport(_) => "VIEWPORT",
             EntityKind::Image(_) => "IMAGE",
@@ -1131,10 +1293,10 @@ impl EntityKind {
                 let c = &s.corners;
                 vec![Prim::Fill(vec![c[0].xy(), c[1].xy(), c[3].xy(), c[2].xy()])]
             }
-            EntityKind::Face3d(f) => {
-                let c = &f.corners;
-                let pts = [c[0].xy(), c[1].xy(), c[2].xy(), c[3].xy(), c[0].xy()];
-                pts.windows(2).filter_map(|w| Some(Prim::Seg(Segment::Line(GLine::new(*w.first()?, *w.get(1)?))))).collect()
+            EntityKind::Face3d(f) => f.visible_edges().into_iter().map(|(a, b)| Prim::Seg(Segment::Line(GLine::new(a.xy(), b.xy())))).collect(),
+            // A mesh hides the edges inside its surface.
+            EntityKind::PolyfaceMesh(m) => {
+                m.faces3d().iter().flat_map(Face3d::visible_edges).map(|(a, b)| Prim::Seg(Segment::Line(GLine::new(a.xy(), b.xy())))).collect()
             }
             EntityKind::Region(r) => r.segments().into_iter().map(Prim::Seg).collect(),
             EntityKind::Hatch(h) => {
@@ -1294,6 +1456,7 @@ impl EntityKind {
                 if let DimKind::Linear { rotation } = &mut d.kind {
                     *rotation = cadcraft_geom::norm_angle(*rotation + rot);
                 }
+                d.horizontal_direction = cadcraft_geom::norm_angle(if mirror { rot - d.horizontal_direction } else { rot + d.horizontal_direction });
                 d.marks.transform(&t3, rot, s, mirror);
                 d.block = None;
             }
@@ -1310,11 +1473,10 @@ impl EntityKind {
                 }
                 t3(&mut ml.landing);
                 if let Some(t) = &mut ml.text {
-                    t3(&mut t.insert);
-                    t.height *= s;
-                    t.width *= s;
-                    if let Some(c) = &mut t.columns {
-                        c.scale(s);
+                    let mut content = EntityKind::MText(t.clone());
+                    content.transform(m);
+                    if let EntityKind::MText(transformed) = content {
+                        *t = transformed;
                     }
                 }
                 if let Some(b) = &mut ml.block {
@@ -1341,6 +1503,7 @@ impl EntityKind {
             }
             EntityKind::Solid(so) | EntityKind::Trace(so) => so.corners.iter_mut().for_each(t3),
             EntityKind::Face3d(f) => f.corners.iter_mut().for_each(t3),
+            EntityKind::PolyfaceMesh(pm) => pm.vertices.iter_mut().for_each(t3),
             EntityKind::Region(r) => {
                 for v in r.loops.iter_mut().flat_map(|l| l.vertices.iter_mut()) {
                     v.p = m.apply(v.p);
@@ -1361,11 +1524,12 @@ impl EntityKind {
             }
             EntityKind::Wipeout(w) => w.boundary.iter_mut().for_each(|p| *p = m.apply(*p)),
             EntityKind::Table(t) => {
+                t.rotation = cadcraft_geom::norm_angle(if mirror { rot - t.rotation } else { rot + t.rotation });
                 if let Some(b) = &mut t.breaks {
                     b.height *= s;
                     b.spacing *= s;
                     b.heights.iter_mut().for_each(|h| *h *= s);
-                    b.offsets.iter_mut().for_each(|o| *o = m.apply_vec(*o));
+                    b.offsets.iter_mut().for_each(|o| *o = *o * s);
                 }
                 t3(&mut t.insert);
                 t.col_widths.iter_mut().for_each(|w| *w *= s);
@@ -1440,6 +1604,7 @@ impl EntityKind {
             }
             EntityKind::Solid(s) | EntityKind::Trace(s) => s.corners.iter().map(|c| c.xy()).collect(),
             EntityKind::Face3d(f) => f.corners.iter().map(|c| c.xy()).collect(),
+            EntityKind::PolyfaceMesh(m) => m.vertices.iter().map(|v| v.xy()).collect(),
             EntityKind::Region(r) => vec![r.bounds().center()],
             EntityKind::Viewport(v) => {
                 let c = v.center.xy();

@@ -145,6 +145,18 @@ fn keep_param(cmd: &str, p: &Value, default: Keep) -> Result<Keep> {
 
 /// Create a block from entities. Returns the insert handle when converting.
 pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle], keep: Keep, description: &str) -> Result<Option<Handle>> {
+    make_block_in(s, name, base, hs, keep, description, crate::ucs::UcsFrame::WORLD)
+}
+
+fn make_block_in(
+    s: &mut Session,
+    name: &str,
+    base: Vec2,
+    hs: &[Handle],
+    keep: Keep,
+    description: &str,
+    frame: crate::ucs::UcsFrame,
+) -> Result<Option<Handle>> {
     if !valid_block_name(name) {
         return Err(bad("block", "invalid block name"));
     }
@@ -165,8 +177,13 @@ pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle],
     let mut b = Block::new(name);
     b.base = v3(base);
     b.description = description.to_string();
+    let local = Mat3 { a: frame.x.x, b: frame.y.x, c: frame.x.y, d: frame.y.y, e: 0.0, f: 0.0 };
+    let local = Mat3::translate(base).then_before(local).then_before(Mat3::translate(-base));
     let doc = s.doc_mut()?;
     for mut e in ents {
+        if local != Mat3::IDENTITY {
+            e.kind.transform(&local);
+        }
         e.handle = doc.new_handle();
         b.entities.push(e);
     }
@@ -178,7 +195,8 @@ pub(crate) fn make_block(s: &mut Session, name: &str, base: Vec2, hs: &[Handle],
     }
     s.set_selection(Vec::new());
     if keep == Keep::Convert {
-        let h = insert(s, name, base, 1.0, 0.0, &serde_json::Map::new())?;
+        let scale = Vec2::new(1.0, if frame.reversed() { -1.0 } else { 1.0 });
+        let h = insert_with(s, name, base, scale, frame.rotation(), None, &serde_json::Map::new())?;
         return Ok(Some(h));
     }
     Ok(None)
@@ -531,7 +549,7 @@ impl BlockM {
         let (Some(name), Some(base)) = (self.name.clone(), self.base) else { return Ok(Step::Cancel) };
         // A definition that can't be made (e.g. one that would reference itself) ends the command.
         let keep = if self.dash { Keep::Delete } else { Keep::Convert };
-        if let Err(e) = make_block(s, &name, base, hs, keep, "") {
+        if let Err(e) = make_block_in(s, &name, base, hs, keep, "", s.input_ucs()) {
             s.echo(e.to_string());
             return Ok(Step::Done);
         }
@@ -642,8 +660,8 @@ impl InsertM {
     }
 
     /// Scale factors from an opposite corner: the X and Y distances from the insertion point.
-    fn corner(a: Vec2, p: Vec2) -> Result<Vec2> {
-        let d = p - a;
+    fn corner(a: Vec2, p: Vec2, rotation: f64) -> Result<Vec2> {
+        let d = (p - a).rotate(-rotation);
         if d.x.abs() < 1e-12 || d.y.abs() < 1e-12 {
             return Err(EngineError::Other("The corner must not be level with the insertion point.".into()));
         }
@@ -754,7 +772,7 @@ impl Interactive for InsertM {
             InsStage::PresetRotation => {
                 self.rotation = Some(match i {
                     Input::Text(t) => s.angle_settings().direction(&t).ok_or_else(|| EngineError::Other("Requires an angle.".into()))?,
-                    Input::Enter => 0.0,
+                    Input::Enter => s.input_ucs().rotation(),
                     _ => return Ok(Step::Continue),
                 });
                 self.stage = InsStage::Point;
@@ -762,7 +780,7 @@ impl Interactive for InsertM {
             InsStage::XScale => match i {
                 Input::Keyword(k) if k == "Corner" => self.stage = InsStage::Corner,
                 Input::Point(p) => {
-                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p)?);
+                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p, self.rotation.unwrap_or_else(|| s.input_ucs().rotation()))?);
                     return self.advance(s);
                 }
                 Input::Text(t) => {
@@ -777,7 +795,7 @@ impl Interactive for InsertM {
             },
             InsStage::Corner => {
                 if let Input::Point(p) = i {
-                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p)?);
+                    self.scale = Some(Self::corner(self.at.unwrap_or_default(), p, self.rotation.unwrap_or_else(|| s.input_ucs().rotation()))?);
                     return self.advance(s);
                 }
             }
@@ -796,7 +814,8 @@ impl Interactive for InsertM {
                 self.rotation = Some(match i {
                     Input::Point(p) => a.angle_to(p),
                     Input::Text(t) => s.angle_settings().direction(&t).ok_or_else(|| EngineError::Other("Requires an angle.".into()))?,
-                    _ => 0.0,
+                    Input::Enter => s.input_ucs().rotation(),
+                    _ => return Ok(Step::Continue),
                 });
                 return self.advance(s);
             }
@@ -821,11 +840,13 @@ impl Interactive for InsertM {
         }
         let at = self.at.unwrap_or(c);
         let scale = self.scale.unwrap_or_else(|| match (self.stage, self.x_scale) {
-            (InsStage::XScale | InsStage::Corner, _) => Self::corner(at, c).unwrap_or(Vec2::new(1.0, 1.0)),
+            (InsStage::XScale | InsStage::Corner, _) => {
+                Self::corner(at, c, self.rotation.unwrap_or_else(|| s.input_ucs().rotation())).unwrap_or(Vec2::new(1.0, 1.0))
+            }
             (_, Some(x)) => Vec2::new(x, x),
             _ => Vec2::new(1.0, 1.0),
         });
-        let rot = self.rotation.unwrap_or(if self.stage == InsStage::Rotation { at.angle_to(c) } else { 0.0 });
+        let rot = self.rotation.unwrap_or(if self.stage == InsStage::Rotation { at.angle_to(c) } else { s.input_ucs().rotation() });
         vec![EntityKind::Insert(insert_entity(b, at, scale, rot, self.base))]
     }
 }
@@ -866,7 +887,10 @@ impl Interactive for AttdefM {
             (Some(tag), Some(pr), Some(def)) => {
                 if let Input::Point(p) = i {
                     let h = s.doc()?.header.f64("TEXTSIZE", 0.2);
-                    let k = attdef_kind(s, tag, pr, def, p, h, false);
+                    let mut k = attdef_kind(s, tag, pr, def, p, h, false);
+                    if let EntityKind::AttDef(attribute) = &mut k {
+                        attribute.text.rotation = s.input_ucs().rotation();
+                    }
                     s.add_entity(k)?;
                     return Ok(Step::Done);
                 }

@@ -75,6 +75,16 @@ impl Interactive for Guarded {
             Vec::new()
         })
     }
+    fn ucs_preview(&self, s: &Session, cursor: Vec2) -> Option<crate::ucs::UcsPreview> {
+        if self.broken.get().is_some() {
+            return None;
+        }
+        catch_unwind(AssertUnwindSafe(|| self.inner.ucs_preview(s, cursor))).unwrap_or_else(|_| {
+            self.broken.set(Some("panic in preview"));
+            None
+        })
+    }
+
     fn preview_objects(&self, s: &Session, cursor: Vec2) -> Vec<cadcraft_doc::Entity> {
         if self.broken.get().is_some() {
             return Vec::new();
@@ -99,6 +109,15 @@ impl Interactive for Guarded {
         }
         catch_unwind(AssertUnwindSafe(|| self.inner.editing_mtext())).unwrap_or_else(|_| {
             self.broken.set(Some("panic in prompt"));
+            None
+        })
+    }
+    fn display_only(&self, s: &Session) -> Option<crate::prompt::DisplayOnly> {
+        if self.broken.get().is_some() {
+            return None;
+        }
+        catch_unwind(AssertUnwindSafe(|| self.inner.display_only(s))).unwrap_or_else(|_| {
+            self.broken.set(Some("panic in preview"));
             None
         })
     }
@@ -134,6 +153,10 @@ mod tests {
             assert_ne!(self.0, "begin", "begin panicked");
             Ok(Step::Continue)
         }
+        fn ucs_preview(&self, _s: &Session, cursor: Vec2) -> Option<crate::ucs::UcsPreview> {
+            assert_ne!(self.0, "ucs_preview", "UCS preview panicked");
+            Some(crate::ucs::UcsPreview { frame: crate::ucs::UcsFrame::WORLD.with_origin(cursor.to3(0.0)), base: Vec2::ZERO })
+        }
         fn preview(&self, _s: &Session, cursor: Vec2) -> Vec<EntityKind> {
             assert_ne!(self.0, "preview", "preview panicked");
             vec![dot(cursor)]
@@ -150,6 +173,7 @@ mod tests {
             "begin" => |_| Ok(Box::new(PanicM("begin"))),
             "prompt" => |_| Ok(Box::new(PanicM("prompt"))),
             "preview" => |_| Ok(Box::new(PanicM("preview"))),
+            "ucs_preview" => |_| Ok(Box::new(PanicM("ucs_preview"))),
             _ => |_| Ok(Box::new(PanicM("input"))),
         };
         let machine = Guarded::create("panictest", factory, s)?;
@@ -205,5 +229,16 @@ mod tests {
         assert!(matches!(s.input(Input::Point(Vec2::ZERO)), Err(EngineError::Internal(..))));
         assert!(s.running.is_none());
         assert_eq!(points(&s), 0);
+    }
+    #[test]
+    fn ucs_preview_panic_is_guarded_and_restores_the_drawing() {
+        let mut session = Session::new();
+        start(&mut session, "ucs_preview").unwrap();
+        assert_eq!(points(&session), 1);
+        assert!(session.ucs_preview(Vec2::ZERO).is_none());
+        assert!(session.current_prompt().unwrap().message.contains("Internal error"));
+        assert!(matches!(session.input(Input::Enter), Err(EngineError::Internal(..))));
+        assert!(session.running.is_none());
+        assert_eq!(points(&session), 0);
     }
 }

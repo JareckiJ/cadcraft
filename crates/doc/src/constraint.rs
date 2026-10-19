@@ -157,6 +157,9 @@ pub struct Constraint {
     /// Unique per drawing.
     pub id: u32,
     pub kind: ConstraintKind,
+    /// Saved UCS orientation for horizontal/vertical relations, radians in drawing XY.
+    #[serde(default)]
+    pub axis_angle: f64,
     pub refs: Vec<GeomRef>,
     /// Dimensional constraints: the parameter name (`d1`, `rad1`, …).
     #[serde(default)]

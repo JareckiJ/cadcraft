@@ -31,6 +31,7 @@ fn sample() -> (Drawing, Table) {
     cells[2][1].style = "Totals".into();
     let t = Table {
         insert: Vec3::new(1.0, 10.0, 0.0),
+        rotation: 0.0,
         col_widths: vec![3.0, 2.0],
         row_heights: vec![0.6, 0.4, 0.4, 0.4],
         cells,

@@ -6,6 +6,37 @@ use cadcraft_geom::{Bounds2, Line, Vec2, point_in_polygon};
 use crate::spatial::{self, SpatialIndex};
 use crate::{Accept, Prompt};
 
+/// Bounds for selection, measured with the renderer's text layout. The document's approximate
+/// boxes cannot account for wrapping, inline formatting or the actual font's glyph overhangs.
+/// The spatial index and the final hit test must use the same box or the index can discard a
+/// visible letter before the hit test sees it.
+pub(crate) fn selection_bounds(d: &Drawing, e: &Entity) -> Bounds2 {
+    if !matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
+        return entity_bounds(d, e, 0);
+    }
+    let scaled;
+    let e = match d.anno_draw(e) {
+        cadcraft_doc::AnnoDraw::Plain => e,
+        cadcraft_doc::AnnoDraw::Hidden => return Bounds2::EMPTY,
+        cadcraft_doc::AnnoDraw::Scaled(f) => {
+            scaled = cadcraft_doc::anno_scaled(e, f);
+            &scaled
+        }
+    };
+    let (sh, bounds) = match &e.kind {
+        EntityKind::Text(t) => cadcraft_render::place_text_entity(d, t, &t.value),
+        EntityKind::AttDef(a) => cadcraft_render::place_text_entity(d, &a.text, &a.tag),
+        EntityKind::MText(t) => {
+            let layout = cadcraft_render::layout_mtext_entity(d, t);
+            let ink = Bounds2::from_points(layout.strokes.iter().flatten().copied().filter(|p| p.is_finite()));
+            return if ink.is_empty() { Bounds2::EMPTY } else { layout.bounds.union(&ink) };
+        }
+        _ => return entity_bounds(d, e, 0),
+    };
+    let ink = Bounds2::from_points(sh.strokes.iter().flatten().chain(sh.glyphs.iter().flatten().flatten()).copied().filter(|p| p.is_finite()));
+    if ink.is_empty() { Bounds2::EMPTY } else { bounds.union(&ink) }
+}
+
 /// Polylines approximating an entity for hit testing, tessellated at `tol`.
 pub fn hit_polylines(d: &Drawing, e: &Entity, tol: f64) -> Vec<Vec<Vec2>> {
     match &e.kind {
@@ -19,7 +50,7 @@ pub fn hit_polylines(d: &Drawing, e: &Entity, tol: f64) -> Vec<Vec<Vec2>> {
         | EntityKind::MLeader(_)
         | EntityKind::Image(_) => {
             // Text-like objects are hit inside their box.
-            let b = entity_bounds(d, e, 0);
+            let b = selection_bounds(d, e);
             if b.is_empty() {
                 return Vec::new();
             }
@@ -90,7 +121,7 @@ pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
     let mut best = polys.iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
     let filled = matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Table(_))
         || matches!(e.kind, EntityKind::Tolerance(_));
-    if (filled && entity_bounds(d, e, 0).contains(p)) || in_text(d, e, p) {
+    if (filled && selection_bounds(d, e).contains(p)) || in_text(d, e, p) {
         best = 0.0;
     }
     // A solid hatch fills its loops with odd parity under its island style, as it is drawn, not
@@ -119,7 +150,7 @@ fn in_text(d: &Drawing, e: &Entity, p: Vec2) -> bool {
         EntityKind::Dimension(dm) => match dm.block.as_ref().and_then(|n| d.block(n)) {
             Some(blk) => blk.entities.iter().any(|be| match &be.kind {
                 EntityKind::MText(t) => in_box(cadcraft_render::layout_mtext_entity(d, t).strokes.into_iter().flatten(), t.rotation, p),
-                EntityKind::Text(_) => entity_bounds(d, be, 0).contains(p),
+                EntityKind::Text(_) => selection_bounds(d, be).contains(p),
                 _ => false,
             }),
             None => {
@@ -149,7 +180,7 @@ fn selectable(d: &Drawing, e: &Entity) -> bool {
 pub(crate) type Cands<'a> = Box<dyn Iterator<Item = (&'a Entity, Option<Bounds2>)> + 'a>;
 
 pub(crate) fn bounds_of(d: &Drawing, e: &Entity, known: Option<Bounds2>) -> Bounds2 {
-    known.unwrap_or_else(|| entity_bounds(d, e, 0))
+    known.unwrap_or_else(|| selection_bounds(d, e))
 }
 
 pub(crate) fn is_infinite(e: &Entity) -> bool {
@@ -244,10 +275,73 @@ fn seg_hits_box(a: Vec2, b: Vec2, bx: &Bounds2) -> bool {
     (0..4).any(|i| cadcraft_geom::line_line(&Line::new(a, b), &Line::new(c[i], c[(i + 1) % 4])).is_some())
 }
 
+/// A block's bounds are only a candidate filter: the empty space between its children and
+/// inside closed outlines is not geometry. Use the renderer's bounded expansion so nested
+/// transforms, array copies, visible attributes and hidden child layers match what is drawn.
+fn block_crosses_box(d: &Drawing, e: &Entity, bx: &Bounds2, tol: f64) -> bool {
+    let list = cadcraft_render::build_entities(d, std::iter::once(e), &cadcraft_render::Options { tolerance: tol, ..Default::default() });
+    list.prims.iter().any(|prim| {
+        let pts = list.points(prim);
+        match prim.kind {
+            cadcraft_render::Kind::Point => pts.first().is_some_and(|p| bx.contains(*p)),
+            cadcraft_render::Kind::Polyline => pts.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| seg_hits_box(*a, *b, bx))),
+            cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => pts.chunks_exact(3).any(|tri| {
+                // Test each filled triangle separately; connecting different triangles would
+                // invent edges through the empty space between disjoint objects or across holes.
+                tri.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| seg_hits_box(*a, *b, bx)))
+                    || tri.last().zip(tri.first()).is_some_and(|(a, b)| seg_hits_box(*a, *b, bx))
+                    || bx.corners().iter().any(|p| point_in_polygon(tri, *p))
+            }),
+            cadcraft_render::Kind::Infinite { ray } => {
+                pts.first().zip(pts.get(1)).is_some_and(|(base, dir)| cadcraft_render::clip::clip_infinite(*base, *dir, ray, bx).is_some())
+            }
+        }
+    })
+}
+
 /// Window selection (entirely inside) or crossing selection (inside or touching).
 pub fn select_window(d: &Drawing, space: &Space, bx: Bounds2, crossing: bool) -> Vec<Handle> {
     let ix = spatial::index(d, space);
     select_window_with(d, space, &ix, bx, crossing)
+}
+
+pub fn select_ucs_window(d: &Drawing, space: &Space, a: Vec2, b: Vec2, crossing: bool) -> Vec<Handle> {
+    if !a.is_finite() || !b.is_finite() {
+        return Vec::new();
+    }
+    let frame = crate::ucs::input_frame(d, space);
+    let corners = frame.rectangle(a, b);
+    let world = Bounds2::from_points(corners);
+    if !world.min.is_finite() || !world.max.is_finite() {
+        return Vec::new();
+    }
+    // Preserve the indexed fast path whenever the UCS axes are world-axis parallel.
+    if frame.x.x.abs() < 1e-12 || frame.x.y.abs() < 1e-12 {
+        return select_window(d, space, world, crossing);
+    }
+    let local = Bounds2::new(frame.to_ucs(a), frame.to_ucs(b));
+    let matrix = cadcraft_geom::Mat3 {
+        a: frame.x.x,
+        b: frame.y.x,
+        c: frame.x.y,
+        d: frame.y.y,
+        e: -frame.origin.xy().dot(frame.x.xy()),
+        f: -frame.origin.xy().dot(frame.y.xy()),
+    };
+    let ix = spatial::index(d, space);
+    let Some(cands) = candidates(d, space, &ix, &world, true, false) else { return Vec::new() };
+    let tol = window_tol(&local);
+    cands
+        .filter_map(|(entity, _)| {
+            if !selectable(d, entity) {
+                return None;
+            }
+            let mut placed = entity.clone();
+            placed.kind.transform(&matrix);
+            let hit = in_window(d, &placed, None, &local, crossing, tol);
+            hit.then_some(entity.handle)
+        })
+        .collect()
 }
 
 pub(crate) fn select_window_with(d: &Drawing, space: &Space, ix: &Option<std::sync::Arc<SpatialIndex>>, bx: Bounds2, crossing: bool) -> Vec<Handle> {
@@ -266,11 +360,14 @@ pub(crate) fn window_tol(bx: &Bounds2) -> f64 {
 pub(crate) fn in_window(d: &Drawing, e: &Entity, known: Option<Bounds2>, bx: &Bounds2, crossing: bool, tol: f64) -> bool {
     let infinite = is_infinite(e);
     let eb = bounds_of(d, e, known);
-    if !infinite && bx.contains_box(&eb) {
+    if !infinite && bx.contains_box(&eb) && !(crossing && matches!(e.kind, EntityKind::Insert(_))) {
         return true;
     }
     if !crossing || (!infinite && !eb.intersects(bx)) {
         return false;
+    }
+    if matches!(e.kind, EntityKind::Insert(_)) {
+        return block_crosses_box(d, e, bx, tol);
     }
     let polys = hit_polylines(d, e, tol);
     let hit = polys.iter().any(|pl| {
@@ -280,8 +377,8 @@ pub(crate) fn in_window(d: &Drawing, e: &Entity, known: Option<Bounds2>, bx: &Bo
             pl.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| seg_hits_box(*a, *b, bx)))
         }
     });
-    // A crossing box entirely inside a text/block bounding rectangle also selects it.
-    if hit || (eb.contains_box(bx) && matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::Insert(_))) {
+    // A crossing box entirely inside a text bounding rectangle also selects it.
+    if hit || (eb.contains_box(bx) && matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_))) {
         return true;
     }
     // SOLID/TRACE are filled polygons. A crossing window wholly within the
@@ -448,10 +545,8 @@ impl SelectMode {
     /// The objects the mode selects, or `None` while it has too few points.
     pub fn select(&self, d: &Drawing, space: &Space) -> Option<Vec<Handle>> {
         match (self.kind, self.pts.as_slice()) {
-            (SelectKind::Window | SelectKind::Crossing, [a, b, ..]) => {
-                Some(select_window(d, space, Bounds2::new(*a, *b), self.kind == SelectKind::Crossing))
-            }
-            (SelectKind::Box, [a, b, ..]) => Some(select_window(d, space, Bounds2::new(*a, *b), b.x < a.x)),
+            (SelectKind::Window | SelectKind::Crossing, [a, b, ..]) => Some(select_ucs_window(d, space, *a, *b, self.kind == SelectKind::Crossing)),
+            (SelectKind::Box, [a, b, ..]) => Some(select_ucs_window(d, space, *a, *b, crate::ucs::input_frame(d, space).crossing(*a, *b))),
             (SelectKind::Fence, pts) if pts.len() >= 2 => Some(select_fence(d, space, pts)),
             (SelectKind::WPolygon | SelectKind::CPolygon, pts) if pts.len() >= 3 => {
                 Some(select_polygon(d, space, pts, self.kind == SelectKind::CPolygon))

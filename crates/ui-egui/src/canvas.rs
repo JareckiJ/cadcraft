@@ -5,33 +5,80 @@ use cadcraft_color::Rgb;
 use cadcraft_doc::Handle;
 use cadcraft_engine::Input;
 use cadcraft_engine::snap::{self, SnapHit};
-use cadcraft_geom::{Bounds2, Vec2};
+use cadcraft_geom::{Bounds2, Mat3, Mat4, Vec2};
 use cadcraft_render::{DisplayList, Kind};
 use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 
 use crate::CadApp;
 use crate::theme::Tokens;
 
+mod input;
+
 /// World ↔ screen transform for the canvas rect.
 #[derive(Clone, Copy, Debug)]
 pub struct Xf {
     pub rect: Rect,
+    /// The view centre, in view coordinates (WCS in plan view).
     pub center: Vec2,
     /// Pixels (points) per drawing unit.
     pub scale: f64,
+    /// The view twist (radians counterclockwise, `cadcraft_engine::View::twist`): the drawing
+    /// appears turned by it about `center`. 0 for paper space.
+    pub twist: f64,
+    pub projection: Option<Mat4>,
 }
 
 impl Xf {
+    pub fn new(rect: Rect, center: Vec2, scale: f64) -> Self {
+        Self { rect, center, scale, twist: 0.0, projection: None }
+    }
+    /// A world offset from `center` in the screen's frame (y up): turned by the twist.
+    fn turn(&self, v: Vec2) -> Vec2 {
+        if self.twist == 0.0 { v } else { v.rotate(self.twist) }
+    }
     pub fn to_screen(&self, p: Vec2) -> Pos2 {
-        let c = self.rect.center();
-        pos2(c.x + ((p.x - self.center.x) * self.scale) as f32, c.y - ((p.y - self.center.y) * self.scale) as f32)
+        self.view_to_screen(self.projection.map_or(p, |m| m.plane(0.0).apply(p)))
     }
+    /// The WCS point under a screen position: on the XY plane in a 3D view (in view coordinates
+    /// when the plane is seen edge-on).
     pub fn to_world(&self, p: Pos2) -> Vec2 {
-        let c = self.rect.center();
-        Vec2::new(self.center.x + f64::from(p.x - c.x) / self.scale, self.center.y - f64::from(p.y - c.y) / self.scale)
+        let v = self.screen_to_view(p);
+        self.projection.and_then(|m| m.plane(0.0).inverse()).map_or(v, |inv| inv.apply(v))
     }
+    /// A point in view coordinates (a display list's) on screen.
+    pub fn view_to_screen(&self, p: Vec2) -> Pos2 {
+        let c = self.rect.center();
+        let q = self.turn(p - self.center);
+        pos2(c.x + (q.x * self.scale) as f32, c.y - (q.y * self.scale) as f32)
+    }
+    fn screen_to_view(&self, p: Pos2) -> Vec2 {
+        let c = self.rect.center();
+        self.center + self.screen_delta_to_world(p - c)
+    }
+    /// The world offset a screen offset `d` (points, y down) covers: a pan moves the view by it.
+    pub fn screen_delta_to_world(&self, d: egui::Vec2) -> Vec2 {
+        let q = Vec2::new(f64::from(d.x) / self.scale, -f64::from(d.y) / self.scale);
+        if self.twist == 0.0 { q } else { q.rotate(-self.twist) }
+    }
+    /// The world box holding everything on screen (in a twisted view, the box of the rect's
+    /// four corners).
     pub fn world_bounds(&self) -> Bounds2 {
-        Bounds2::new(self.to_world(self.rect.left_bottom()), self.to_world(self.rect.right_top()))
+        let r = self.rect;
+        Bounds2::from_points([r.left_bottom(), r.right_top(), r.left_top(), r.right_bottom()].map(|p| self.to_world(p)))
+    }
+    /// The GPU transform ([`crate::gpu::CanvasCallback::xform`]) that draws vertex data built at
+    /// `origin`, moved by `m` (a drag; [`Mat3::IDENTITY`] for the drawing), in this view: the
+    /// shader takes `L·p + e + (origin − center)` to the screen frame, which must be
+    /// `R(m(origin + p) − center)` with `R` the twist, so `L = R·m` and
+    /// `e = R(m(origin) − center) − (origin − center)`.
+    pub(crate) fn gpu_xform(&self, origin: Vec2, m: Mat3) -> [f32; 6] {
+        let (a, b) = (self.turn(Vec2::new(m.a, m.b)), self.turn(Vec2::new(m.c, m.d)));
+        let e = self.turn(m.apply(origin) - self.center) - (origin - self.center);
+        [a.x as f32, a.y as f32, b.x as f32, b.y as f32, e.x as f32, e.y as f32]
+    }
+    pub fn view_bounds(&self) -> Bounds2 {
+        let r = self.rect;
+        Bounds2::from_points([r.left_bottom(), r.right_top(), r.left_top(), r.right_bottom()].map(|p| self.screen_to_view(p)))
     }
 }
 
@@ -81,6 +128,8 @@ pub struct CanvasState {
     vp_hover: VpHighlight,
     /// Model space seen through the active MSPACE viewport (see [`VpContent`]).
     vp: VpContent,
+    /// What a running command shows in place of the drawing (see [`OnlyList`]).
+    only: OnlyList,
     /// Indices of infinite-line primitives in `list` (drawn on the CPU in GPU mode).
     infinite: Vec<usize>,
     /// Milliseconds spent converting the display list to vertex data (last rebuild).
@@ -93,7 +142,7 @@ pub struct CanvasState {
     pub cursor: Option<Vec2>,
     /// The polar or object snap tracking path(s) the cursor is on.
     pub track: Option<snap::tracking::Track>,
-    pan_last: Option<Pos2>,
+    middle: input::Middle,
     /// True when the latest scroll came from a trackpad (or other precise-scrolling device):
     /// scrolling then pans and pinch zooms. A notched mouse wheel clears it so the wheel zooms.
     scroll_pans: bool,
@@ -247,9 +296,10 @@ fn prims_of(list: &DisplayList, handles: &[Handle]) -> Vec<usize> {
     list.prims.iter().enumerate().filter(|(_, pr)| set.contains(&pr.handle)).map(|(i, _)| i).collect()
 }
 
-/// Build options for previews at `scale` pixels per drawing unit (opaque).
-fn preview_options(scale: f64) -> cadcraft_render::Options {
-    cadcraft_render::Options { tolerance: 0.5 / scale, min_dash: 2.0 / scale, ..Default::default() }
+/// Build options for previews at `scale` pixels per drawing unit (opaque), in the view's
+/// projection.
+fn preview_options(scale: f64, projection: Option<Mat4>) -> cadcraft_render::Options {
+    cadcraft_render::Options { tolerance: 0.5 / scale, min_dash: 2.0 / scale, projection, ..Default::default() }
 }
 
 /// The display list of preview entities the session builds with the current properties
@@ -257,8 +307,13 @@ fn preview_options(scale: f64) -> cadcraft_render::Options {
 /// command's rubber band and rebuilt copies of existing objects. They carry CLAYER's properties,
 /// not the objects', so they are drawn opaque (the GPU drag of the objects themselves keeps their
 /// transparency, see [`draw_drag_gpu`]).
-fn rebuilt_preview<'a>(doc: &cadcraft_doc::Drawing, ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>, scale: f64) -> DisplayList {
-    cadcraft_render::build_entities(doc, ents, &preview_options(scale))
+fn rebuilt_preview<'a>(
+    doc: &cadcraft_doc::Drawing,
+    ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>,
+    scale: f64,
+    projection: Option<Mat4>,
+) -> DisplayList {
+    cadcraft_render::build_entities(doc, ents, &preview_options(scale, projection))
 }
 
 fn color32(c: Rgb) -> Color32 {
@@ -294,6 +349,9 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         use std::hash::{Hash, Hasher};
         let mut s = std::collections::hash_map::DefaultHasher::new();
         split.hash(&mut s);
+        // A 3D view of model space, or another visual style, draws another list.
+        xf.projection.map(|m| m.m.map(|r| r.map(f64::to_bits))).hash(&mut s);
+        st.visual_style.hash(&mut s);
         if split.is_none()
             && let Some((h, vp)) = st.active_viewport()
         {
@@ -350,6 +408,10 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         transparency: app.session.settings.transparency_display,
         skip_viewport: split,
         cancel: None,
+        // Shaded in plan view too: the faces seen from above.
+        projection: xf.projection.or_else(|| st.visual_style.shading().0.then_some(Mat4::IDENTITY)),
+        shaded: st.visual_style.shading().0,
+        shaded_edges: st.visual_style.shading().1,
     };
     if view_only {
         let t = Tokens::get();
@@ -436,12 +498,12 @@ impl VpContent {
 }
 
 /// How a list built for view `built` (centre, height) of viewport `vp` maps to its current
-/// view, as `p = k·p0 + b` on paper. A model point m is at p0 = c + s0 (m − c0) in the list and
-/// belongs at p = c + s (m − vc), with c the viewport's centre and s, s0 paper units per model
-/// unit, so k = s / s0 and b = c (1 − k) + s (c0 − vc).
+/// view, as `p = k·p0 + b` on paper. A model point m is at p0 = c + s0 R(m − c0) in the list and
+/// belongs at p = c + s R(m − vc), with c the viewport's centre, R its view twist and s, s0 paper
+/// units per model unit, so k = s / s0 and b = c (1 − k) + s R(c0 − vc).
 fn vp_motion(vp: &cadcraft_doc::Viewport, built: (Vec2, f64)) -> Option<(f64, Vec2)> {
     let (s, k) = (vp.height / vp.view_height, built.1 / vp.view_height);
-    let b = vp.center.xy() * (1.0 - k) + (built.0 - vp.view_center) * s;
+    let b = vp.center.xy() * (1.0 - k) + (built.0 - vp.view_center).rotate(vp.view_twist()) * s;
     (k.is_finite() && k > 0.0 && b.is_finite()).then_some((k, b))
 }
 
@@ -511,6 +573,9 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             skip_viewport: None,
             transparency,
             cancel: None,
+            projection: None,
+            shaded: false,
+            shaded_edges: false,
         };
         c.list = cadcraft_render::viewport_content(&st.doc, &st.space, h, area, &opts);
         c.key = Some(key);
@@ -523,7 +588,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
     let (k, b) = vp_motion(&vp, c.view)?;
     c.motion = Some((k, b));
     // Paper p = k·p0 + b, so the list is drawn by the paper transform scaled by k about b.
-    let xf = Xf { rect: xf_paper.rect, center: (xf_paper.center - b) / k, scale: xf_paper.scale * k };
+    let xf = Xf::new(xf_paper.rect, (xf_paper.center - b) / k, xf_paper.scale * k);
     let on_screen = Rect::from_two_pos(xf_paper.to_screen(Vec2::new(rect.min.x, rect.max.y)), xf_paper.to_screen(Vec2::new(rect.max.x, rect.min.y)));
     Some(VpFrame { xf, on_screen, outline: clip.map(|p| p.polygon().to_vec()) })
 }
@@ -567,7 +632,7 @@ fn draw_vp_content(c: &mut VpContent, gpu: bool, p: &egui::Painter, f: &VpFrame,
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_VIEWPORT,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform: xf.gpu_xform(c.mesh_origin, Mat3::IDENTITY),
             dash: 0.0,
             stencil,
         },
@@ -622,7 +687,7 @@ fn draw_vp_mask(c: &mut VpContent, p: &egui::Painter, outline: &[Vec2], xf_paper
             scale: xf_paper.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_MASK,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform: xf_paper.gpu_xform(c.mask_origin, Mat3::IDENTITY),
             dash: 0.0,
             stencil: crate::gpu::Stencil::Mask,
         },
@@ -666,6 +731,32 @@ impl VpHighlight {
     }
 }
 
+/// The display list of what a running command shows in place of the drawing
+/// ([`cadcraft_engine::Session::display_only`]: DVIEW's preview set), rebuilt when the drawing,
+/// the set or the 2x zoom band changes.
+#[derive(Default)]
+struct OnlyList {
+    key: Option<u64>,
+    list: DisplayList,
+}
+
+impl OnlyList {
+    fn update(&mut self, st: &cadcraft_engine::DocState, only: &cadcraft_engine::DisplayOnly, scale: f64) {
+        let band = (1.0 / scale.max(1e-300)).log2().floor() as i32;
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, band, &only.handles, format!("{:?}", only.extra)).hash(&mut h);
+            h.finish()
+        };
+        if self.key != Some(key) {
+            let ents = only.handles.iter().filter_map(|h| st.doc.entity(*h)).map(|e| e.as_ref()).chain(only.extra.iter());
+            self.list = rebuilt_preview(&st.doc, ents, 2f64.powi(-band), st.projection());
+            self.key = Some(key);
+        }
+    }
+}
+
 /// The area a display list is built for: each view with half its larger side of margin all
 /// round (panning by up to that much doesn't rebuild), joined. `None` (everything) when a view
 /// isn't usable.
@@ -693,6 +784,9 @@ fn adaptive(unit: f64, scale: f64, min_px: f64) -> f64 {
 }
 
 fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
+    if xf.projection.is_some_and(|m| m.plane(0.0).inverse().is_none()) {
+        return;
+    }
     let t = Tokens::get();
     let s = app.session.drafting_settings();
     let wb = xf.world_bounds();
@@ -703,40 +797,39 @@ fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
         let unit = if s.gridunit.x == 0.0 { s.snapunit.x } else { s.gridunit.x };
         let minor = adaptive(unit, xf.scale, 8.0);
         let major = minor * major_n;
+        // The grid lies in the snap frame: SNAPBASE and SNAPANG in the current UCS.
+        let space = app.session.space();
+        let (origin, angle) = app.session.doc().map(|d| cadcraft_engine::snap::grid_frame_in(d, &space)).unwrap_or((Vec2::ZERO, 0.0));
+        let to_world = |q: Vec2| origin + q.rotate(angle);
+        // The view's corners in grid coordinates bound the lines needed.
+        let corners = [wb.min, Vec2::new(wb.max.x, wb.min.y), wb.max, Vec2::new(wb.min.x, wb.max.y)].map(|c| (c - origin).rotate(-angle));
+        let lo = Vec2::new(corners.iter().map(|c| c.x).fold(f64::INFINITY, f64::min), corners.iter().map(|c| c.y).fold(f64::INFINITY, f64::min));
+        let hi =
+            Vec2::new(corners.iter().map(|c| c.x).fold(f64::NEG_INFINITY, f64::max), corners.iter().map(|c| c.y).fold(f64::NEG_INFINITY, f64::max));
         let mut lines = Vec::new();
-        let x0 = (wb.min.x / minor).floor() as i64;
-        let x1 = (wb.max.x / minor).ceil() as i64;
-        let y0 = (wb.min.y / minor).floor() as i64;
-        let y1 = (wb.max.y / minor).ceil() as i64;
-        if (x1 - x0) < 2000 && (y1 - y0) < 2000 {
+        if let Some(((x0, x1), (y0, y1))) = grid_index_ranges(&Bounds2::new(lo, hi), minor) {
+            let is_major = |v: f64| ((v / major) - (v / major).round()).abs() < 1e-6;
+            let stroke = |m: bool| Stroke::new(1.0, if m { t.grid_major } else { t.grid_minor });
             for i in x0..=x1 {
                 let x = i as f64 * minor;
-                let is_major = (x / major).round() * major - x == 0.0 || ((x / major) - (x / major).round()).abs() < 1e-6;
-                let sx = xf.to_screen(Vec2::new(x, 0.0)).x;
-                lines.push(Shape::line_segment(
-                    [pos2(sx, xf.rect.top()), pos2(sx, xf.rect.bottom())],
-                    Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
-                ));
+                let (a, b) = (to_world(Vec2::new(x, lo.y)), to_world(Vec2::new(x, hi.y)));
+                lines.push(Shape::line_segment([xf.to_screen(a), xf.to_screen(b)], stroke(is_major(x))));
             }
             for j in y0..=y1 {
                 let y = j as f64 * minor;
-                let is_major = ((y / major) - (y / major).round()).abs() < 1e-6;
-                let sy = xf.to_screen(Vec2::new(0.0, y)).y;
-                lines.push(Shape::line_segment(
-                    [pos2(xf.rect.left(), sy), pos2(xf.rect.right(), sy)],
-                    Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
-                ));
+                let (a, b) = (to_world(Vec2::new(lo.x, y)), to_world(Vec2::new(hi.x, y)));
+                lines.push(Shape::line_segment([xf.to_screen(a), xf.to_screen(b)], stroke(is_major(y))));
             }
         }
         p.extend(lines);
     }
-    // Axes through the origin.
-    let o = xf.to_screen(Vec2::ZERO);
-    if xf.rect.y_range().contains(o.y) {
-        p.line_segment([pos2(xf.rect.left(), o.y), pos2(xf.rect.right(), o.y)], Stroke::new(1.0, t.axis_x));
-    }
-    if xf.rect.x_range().contains(o.x) {
-        p.line_segment([pos2(o.x, xf.rect.top()), pos2(o.x, xf.rect.bottom())], Stroke::new(1.0, t.axis_y));
+    // The current UCS's X and Y axes through its origin.
+    let u = app.session.input_ucs();
+    let o = u.origin.xy();
+    for (dir, color) in [(u.x.xy(), t.axis_x), (u.y.xy(), t.axis_y)] {
+        if let Some(seg) = clip_infinite(xf, o, dir, false) {
+            p.line_segment(seg, Stroke::new(1.0, color));
+        }
     }
 }
 
@@ -753,7 +846,9 @@ fn draw_iso_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
         }
         d *= 5.0;
     }
-    let (origin, angle) = app.session.doc().map(cadcraft_engine::snap::grid_frame).unwrap_or((Vec2::ZERO, 0.0));
+    // In the current UCS (SNAPBASE from its origin, SNAPANG from its X axis).
+    let space = app.session.space();
+    let (origin, angle) = app.session.doc().map(|d| cadcraft_engine::snap::grid_frame_in(d, &space)).unwrap_or((Vec2::ZERO, 0.0));
     let lines = iso::grid_lines(xf.world_bounds(), d, origin, angle, s.gridmajor);
     p.extend(
         lines.into_iter().map(|l| {
@@ -772,6 +867,8 @@ fn clip_infinite(xf: &Xf, base: Vec2, dir: Vec2, ray: bool) -> Option<[Pos2; 2]>
 
 /// Draw a display list.
 pub(crate) fn draw_list(p: &egui::Painter, xf: &Xf, list: &DisplayList, bg: Rgb, lwdisplay: bool) {
+    // The list is in view coordinates.
+    let xf = &Xf { projection: None, ..*xf };
     let vis = xf.world_bounds();
     let mut shapes: Vec<Shape> = Vec::with_capacity(list.prims.len());
     let px = 1.0 / xf.scale;
@@ -881,7 +978,7 @@ fn draw_highlight_gpu(
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_HIGHLIGHT,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform: xf.gpu_xform(*hl_origin, Mat3::IDENTITY),
             dash: if look.dashed { 10.0 } else { 0.0 },
             stencil,
         },
@@ -919,7 +1016,7 @@ fn draw_drag_gpu(
     };
     if c.drag_key != Some(key) {
         let band_scale = 2f64.powi(band);
-        let opts = cadcraft_render::Options { transparency, ..preview_options(band_scale) };
+        let opts = cadcraft_render::Options { transparency, ..preview_options(band_scale, xf.projection) };
         let list = if drag.clipboard {
             cadcraft_render::build_entities(doc, clipboard.0.iter(), &opts)
         } else {
@@ -933,10 +1030,8 @@ fn draw_drag_gpu(
         c.drag_key = Some(key);
         c.drag_origin = origin;
     }
-    // Positions are relative to the origin o: M(o + p) = L·p + (M(o) − o).
-    let m = drag.matrix;
+    // Positions are relative to the origin o: M(o + p) = L·p + (M(o) − o), turned with the view.
     let o = c.drag_origin;
-    let t = m.apply(o) - o;
     let center = xf.rect.center();
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
@@ -947,7 +1042,7 @@ fn draw_drag_gpu(
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_DRAG,
-            xform: [m.a as f32, m.b as f32, m.c as f32, m.d as f32, t.x as f32, t.y as f32],
+            xform: xf.gpu_xform(o, drag.matrix),
             dash: 0.0,
             stencil: crate::gpu::Stencil::Off,
         },
@@ -965,6 +1060,8 @@ fn list_mesh_key(key: &ListKey, list_gen: u64, origin: Vec2, bg: Rgb, lwdisplay:
 /// Draw the display list through the GPU paint callback (uploading it when it changed), plus
 /// the infinite lines, which are clipped to the view on the CPU every frame.
 fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg: Rgb, lwdisplay: bool) {
+    // Retained display-list points are already in view coordinates.
+    let xf = &Xf { projection: None, ..*xf };
     let Some(list) = &c.list else { return };
     let origin = crate::gpu::choose_origin(&list.bounds, xf.center, f64::from(xf.rect.height()) / xf.scale.max(1e-300));
     let key = list_mesh_key(&c.key, c.list_gen, origin, bg, lwdisplay);
@@ -989,7 +1086,7 @@ fn draw_list_gpu(c: &mut CanvasState, p: &egui::Painter, xf: &Xf, bg: Rgb, lwdis
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_DRAWING,
-            xform: crate::gpu::IDENTITY_XFORM,
+            xform: xf.gpu_xform(c.mesh_origin, Mat3::IDENTITY),
             dash: 0.0,
             stencil: crate::gpu::Stencil::Off,
         },
@@ -1029,6 +1126,8 @@ impl Look {
 /// [`PrimIndex::prims`], [`prims_of`], or all of a [`VpHighlight`] list), redrawn in `color` as `look` says. A wipeout is always
 /// outlined, since filling it would hide the drawing under it.
 pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, prims: &[usize], color: Color32, look: Look) {
+    // Retained display-list points are already in view coordinates.
+    let xf = &Xf { projection: None, ..*xf };
     let stroke = Stroke::new(look.width, color);
     let line = |pts: Vec<Pos2>, out: &mut Vec<Shape>| {
         if look.dashed {
@@ -1081,11 +1180,22 @@ mod highlight_stability_tests {
     use super::*;
 
     fn frame(list: &DisplayList, look: Look, pointer: Pos2) -> Vec<egui::epaint::ClippedShape> {
+        frame_in(list, look, pointer, None, &[0])
+    }
+
+    fn frame_in(list: &DisplayList, look: Look, pointer: Pos2, projection: Option<Mat4>, prims: &[usize]) -> Vec<egui::epaint::ClippedShape> {
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0));
         let input = egui::RawInput { screen_rect: Some(rect), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
-            draw_highlight(ui.painter(), &Xf { rect, center: Vec2::ZERO, scale: 11.0 }, list, &[0], Color32::LIGHT_BLUE, look);
+            draw_highlight(
+                ui.painter(),
+                &Xf { rect, center: Vec2::ZERO, scale: 11.0, projection, twist: 0.0 },
+                list,
+                prims,
+                Color32::LIGHT_BLUE,
+                look,
+            );
         });
         let shapes = std::mem::take(&mut output.shapes);
         output.textures_delta.clear();
@@ -1106,6 +1216,30 @@ mod highlight_stability_tests {
             .collect();
         segments.sort_unstable();
         segments
+    }
+
+    #[test]
+    fn highlights_in_a_3d_view_are_drawn_where_the_list_is() {
+        // A display list in view coordinates: a polyline and an infinite line.
+        let p = |x, y| Vec2::new(x, y);
+        let mut list = DisplayList { verts: vec![p(-5.0, -3.0), p(4.0, 2.0), p(0.0, 1.0), p(1.0, 0.0)], ..Default::default() };
+        let prim = |kind, start, len| cadcraft_render::DPrim {
+            handle: Handle(256),
+            color: Rgb(255, 255, 255),
+            aci7: true,
+            lw: 0.0,
+            transparency: 0,
+            kind,
+            start,
+            len,
+        };
+        list.prims.extend([prim(Kind::Polyline, 0, 2), prim(Kind::Infinite { ray: false }, 2, 2)]);
+        let iso = Mat4::view(cadcraft_geom::Vec3::new(-1.0, -1.0, 1.0), cadcraft_geom::Vec3::ZERO, 0.0);
+        let look = Look { width: 2.0, dashed: true };
+        let plan = dash_positions(&frame_in(&list, look, pos2(0.0, 0.0), None, &[0, 1]));
+        assert!(!plan.is_empty());
+        // The 3D view's projection is already in the list: it must not be applied again.
+        assert_eq!(dash_positions(&frame_in(&list, look, pos2(0.0, 0.0), Some(iso), &[0, 1])), plan);
     }
 
     #[test]
@@ -1142,7 +1276,7 @@ mod highlight_stability_tests {
             let dir = std::path::PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
             let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 400.0)).build_ui(|ui| {
-                let xf = Xf { rect: ui.max_rect(), center: Vec2::new(3.5, 1.5), scale: 31.0 };
+                let xf = Xf { rect: ui.max_rect(), center: Vec2::new(3.5, 1.5), scale: 31.0, twist: 0.0, projection: None };
                 draw_highlight(ui.painter(), &xf, &list, &[0], Color32::LIGHT_BLUE, Look { width: 2.0, dashed: true });
             });
             h.run_steps(3);
@@ -1236,9 +1370,16 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
     p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
 }
 
+/// The whole degrees (0–359) a tracking tooltip shows for the path `from` → `to`, measured from
+/// the current UCS's X axis at `ucs` radians.
+fn tooltip_angle(from: Vec2, to: Vec2, ucs: f64) -> i64 {
+    ((from.angle_to(to) - ucs).to_degrees().round() as i64).rem_euclid(360)
+}
+
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
 /// is on and the tooltip naming them ("Endpoint: 5.0000 < 90°").
-fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquired], track: Option<&snap::tracking::Track>, far: f64) {
+/// `ucs`: the current UCS's X axis (radians), which the tooltips measure angles from.
+fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquired], track: Option<&snap::tracking::Track>, far: f64, ucs: f64) {
     use snap::tracking::{Acquired, PathShape};
     let t = Tokens::get();
     let st = Stroke::new(1.0, t.snap);
@@ -1273,10 +1414,7 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
             }
         };
         p.extend(Shape::dotted_line(&pts, t.snap, 6.0, 1.0));
-        let (distance, angle) = (
-            cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4),
-            (path.from.angle_to(tr.point).to_degrees().round() as i64).rem_euclid(360),
-        );
+        let (distance, angle) = (cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4), tooltip_angle(path.from, tr.point, ucs));
         tips.push(if path.name == "Polar" {
             crate::tf!("Polar: {distance} < {angle}°", distance = distance, angle = angle)
         } else {
@@ -1365,7 +1503,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let Ok(st) = app.session.state() else { return };
     let view = st.view();
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = Xf { projection: st.projection(), twist: view.twist, ..Xf::new(rect, view.center, scale) };
     app.canvas.xf = Some(xf);
 
     // ---------- input ----------
@@ -1403,10 +1541,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         // Pinch (and Cmd+scroll) still zoom via `zoom_delta` below.
         if let Ok(st) = app.session.state_mut() {
             let v = st.view();
-            st.set_view_quiet(cadcraft_engine::View {
-                center: v.center - Vec2::new(f64::from(scroll.x) / scale, -f64::from(scroll.y) / scale),
-                height: v.height,
-            });
+            st.set_view_quiet(cadcraft_engine::View { center: v.center - xf.screen_delta_to_world(scroll), height: v.height, twist: v.twist });
         }
     }
     let opts = ui.ctx().options(|o| o.input_options);
@@ -1418,7 +1553,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     {
         // Zoom with the mouse wheel about the cursor, each notch at once.
         let f = app.session.wheel_zoom_factor(f64::from(wheel));
-        let about = xf.to_world(hp);
+        let about = xf.screen_to_view(hp);
         let _ = app.session.zoom_about(f, about);
     }
     let zoom_pinch = ui.input(|i| crate::animation::zoom_delta(i, &opts, app.shows_animations()));
@@ -1426,36 +1561,34 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && (zoom_pinch - 1.0).abs() > 1e-4
         && let Some(hp) = hover_pos
     {
-        let _ = app.session.zoom_about(f64::from(zoom_pinch), xf.to_world(hp));
+        let _ = app.session.zoom_about(f64::from(zoom_pinch), xf.screen_to_view(hp));
     }
-    // Pan with the middle button (or Shift+right-drag / two-finger drag on trackpads is scroll).
-    let middle_pressed = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Middle));
-    let focused = ui.input(|i| i.focused);
-    if middle_down
-        && focused
-        && (app.canvas.pan_last.is_some() || (middle_pressed && inside))
-        && let Some(hp) = hover_pos
-    {
-        if let Some(last) = app.canvas.pan_last {
-            let d = hp - last;
-            if let Ok(st) = app.session.state_mut() {
-                let v = st.view();
-                st.set_view_quiet(cadcraft_engine::View {
-                    center: v.center - Vec2::new(f64::from(d.x) / scale, -f64::from(d.y) / scale),
-                    height: v.height,
-                });
-            }
+    // Consume every middle-button move, including a complete drag in one slow frame.
+    let delta = app.canvas.middle.delta(ui.ctx(), &resp, rect);
+    let orbit_gesture =
+        mods.shift && (app.canvas.middle.active() || delta != egui::Vec2::ZERO) && app.session.layout_space() == cadcraft_doc::Space::Model;
+    if orbit_gesture && delta != egui::Vec2::ZERO {
+        if let Err(error) = app.session.drag_view(f64::from(delta.x), f64::from(delta.y)) {
+            app.session.echo(error.to_string());
         }
-        app.canvas.pan_last = Some(hp);
-    } else {
-        app.canvas.pan_last = None;
+    } else if delta != egui::Vec2::ZERO
+        && let Ok(st) = app.session.state_mut()
+    {
+        let view = st.view();
+        st.set_view_quiet(cadcraft_engine::View { center: view.center - xf.screen_delta_to_world(delta), ..view });
     }
+    let navigating = middle_down || input::navigating(ui.ctx()) || app.session.orbit_active();
     if dbl_middle && inside {
         let _ = app.session.zoom_extents();
     }
     // ZOOM Realtime: dragging up zooms in, down zooms out.
     if resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
+    }
+    // 3DORBIT: dragging turns the view.
+    if resp.dragged_by(egui::PointerButton::Primary) && app.session.orbit_active() {
+        let d = resp.drag_delta();
+        let _ = app.session.orbit(f64::from(d.x), f64::from(d.y));
     }
     // A click in another tile makes it current (or answers -VPORTS Join's prompts).
     if pressed_primary
@@ -1472,13 +1605,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Re-read the view after navigation.
     let view = app.session.state().map(|s| s.view()).unwrap_or(view);
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = Xf { projection: app.session.state().ok().and_then(|s| s.projection()), twist: view.twist, ..Xf::new(rect, view.center, scale) };
     app.canvas.xf = Some(xf);
     // The paper (display) transform; equal to `xf` except inside an MSPACE viewport.
     let (xf_paper, active_vp) = match app.session.state() {
         Ok(st) => {
             let pv = st.paper_view();
-            let xp = Xf { rect, center: pv.center, scale: f64::from(rect.height()) / pv.height.max(1e-12) };
+            let xp = Xf::new(rect, pv.center, f64::from(rect.height()) / pv.height.max(1e-12));
             (if st.mspace.is_some() { xp } else { xf }, st.active_viewport().map(|(_, v)| v))
         }
         Err(_) => (xf, None),
@@ -1537,9 +1670,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // and eframe hands a slow frame's clicks over together, which egui reports as one.
     let point_prompt = app.session.current_prompt().is_some_and(|p| cadcraft_engine::pointmod::accepts(&p))
         && app.session.pending_window.is_none()
-        && !app.session.realtime_zoom_active();
+        && !app.session.realtime_zoom_active()
+        && !app.session.orbit_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
-    if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
+    if point_prompt && inside && pressed_primary && !navigating && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
                 .iter()
@@ -1636,11 +1770,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.hover_cycle = None;
         app.canvas.cycle_key = Some(key);
     }
-    let cycled = pressed_primary && !middle_down && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
+    let cycled = pressed_primary && !navigating && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
     // Clicks.
     if inside
         && pressed_primary
-        && !middle_down
+        && !navigating
         && !cycled
         && let Some(p) = app.canvas.cursor
     {
@@ -1679,7 +1813,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     if app.session.settings.pickdrag
         && resp.drag_started_by(egui::PointerButton::Primary)
-        && !middle_down
+        && !navigating
         && app.canvas.cycle.is_none()
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1759,10 +1893,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // ---------- paint ----------
     painter.rect_filled(rect, 0.0, t.canvas);
     let t0 = crate::now_ms();
-    let mut views = vec![(xf_paper.world_bounds(), 1.0 / xf_paper.scale)];
+    let mut views = vec![(xf_paper.view_bounds(), 1.0 / xf_paper.scale)];
     views.extend(tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0).map(|(r, tile)| {
         let xf = tile_xf(*r, tile);
-        (xf.world_bounds(), 1.0 / xf.scale)
+        (xf.view_bounds(), 1.0 / xf.scale)
     }));
     ensure_list(app, &xf_paper, &views, ui.ctx());
     let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
@@ -1796,16 +1930,32 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // The active viewport's contents, drawn apart from the layout's list, under its own objects.
     // `masked`: its outline is in the stencil buffer this frame.
     let mut masked = false;
-    if let Some(f) = ensure_vp_content(app, &xf_paper, ui.ctx()) {
-        let gpu = app.canvas.gpu.is_some();
-        let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
-        draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
-        masked = gpu && f.outline.is_some();
-    }
-    if app.canvas.gpu.is_some() {
-        draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
-    } else if let Some(list) = &app.canvas.list {
-        draw_list(&painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
+    if let Some(only) = app.session.display_only() {
+        // A command that shows only some objects while it runs (DVIEW's preview set): those,
+        // in the view being changed (inside the active viewport, clipped to it).
+        let clip = active_vp.as_ref().map_or(rect, |vp| {
+            Rect::from_two_pos(
+                xf_paper.to_screen(Vec2::new(vp.center.x - vp.width / 2.0, vp.center.y + vp.height / 2.0)),
+                xf_paper.to_screen(Vec2::new(vp.center.x + vp.width / 2.0, vp.center.y - vp.height / 2.0)),
+            )
+            .intersect(rect)
+        });
+        if let Ok(st) = app.session.state() {
+            app.canvas.only.update(st, &only, scale);
+        }
+        draw_list(&painter.with_clip_rect(clip), &xf, &app.canvas.only.list, bg, app.session.settings.lwdisplay);
+    } else {
+        if let Some(f) = ensure_vp_content(app, &xf_paper, ui.ctx()) {
+            let gpu = app.canvas.gpu.is_some();
+            let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
+            draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
+            masked = gpu && f.outline.is_some();
+        }
+        if app.canvas.gpu.is_some() {
+            draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
+        } else if let Some(list) = &app.canvas.list {
+            draw_list(&painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
+        }
     }
     if let Some(vp) = &active_vp {
         // The active viewport: a heavy border, highlights in model units clipped to it.
@@ -1859,6 +2009,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
     } else if let CanvasState { list: Some(list), list_gen, prim_index, hover, gpu, hl_key, hl_slot, hl_origin, hl_infinite, .. } = &mut app.canvas {
+        // The retained display list already contains projected points.
+        let xf = Xf { projection: None, ..xf };
         if let Some(h) = *hover
             && !sel.contains(&h)
         {
@@ -1953,7 +2105,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             let serial = app.session.clipboard_source.as_ref().map_or(0, |c| c.serial);
             let transparency = app.session.settings.transparency_display;
             draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
-            let list = rebuilt_preview(&st.doc, extra.iter(), scale);
+            let list = rebuilt_preview(&st.doc, extra.iter(), scale, xf.projection);
             draw_list(&painter, &xf, &list, bg, false);
         }
     } else if let (Some(c), true) = (app.canvas.cursor, app.session.prompting()) {
@@ -1961,52 +2113,75 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if !ents.is_empty()
             && let Ok(st) = app.session.state()
         {
-            let list = rebuilt_preview(&st.doc, ents.iter(), scale);
+            let list = rebuilt_preview(&st.doc, ents.iter(), scale, xf.projection);
             draw_list(&painter, &xf, &list, bg, false);
         }
     }
     // Pending selection window.
     if let (Some(pw), Some(c)) = (app.session.pending_window, raw_world) {
-        let a = xf.to_screen(pw.corner);
-        let b = xf.to_screen(c);
-        let r = Rect::from_two_pos(a, b);
-        let crossing = c.x < pw.corner.x;
+        // Paint exactly the UCS-aligned region tested by the engine.
+        let frame = app.session.input_ucs();
+        let corners = frame.rectangle(pw.corner, c).map(|q| xf.to_screen(q));
+        let crossing = frame.crossing(pw.corner, c);
         if let Some(fill) = selection_area_fill(&app.session.settings, crossing) {
-            painter.rect_filled(r, 0.0, fill);
+            painter.add(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
         }
         let st = Stroke::new(1.0, if crossing { t.crossing_stroke } else { t.window_stroke });
+        let mut pts = corners.to_vec();
+        pts.push(corners[0]);
         if crossing {
-            let pts = vec![r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
             painter.extend(Shape::dashed_line(&pts, st, 5.0, 3.0));
         } else {
-            painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
+            painter.add(Shape::line(pts, st));
         }
+    }
+    if let Some(cursor) = app.canvas.cursor
+        && let Some(preview) = app.session.ucs_preview(cursor)
+    {
+        draw_ucs_preview(&painter, &xf, preview, cursor);
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {
-        draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
+        draw_tracking(
+            &painter,
+            &xf,
+            &app.session.tracking.acquired,
+            app.canvas.track.as_ref(),
+            view.height * 4.0,
+            app.session.input_ucs().rotation(),
+        );
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
         draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
-    if app.ui.show_ucs_icon {
-        draw_ucs_icon(&painter, rect);
-        crate::viewcube::ucs_icon(app, ui, rect);
+    if app.session.ucsicon_bits() & 1 != 0 {
+        let place = crate::viewcube::IconPlace::in_drawing(app, rect, &xf);
+        draw_ucs_icon(&painter, &place);
+        // Clickable only at the Command prompt: while a command runs, a pick or a snap at the UCS
+        // origin (where the icon may sit) reaches the drawing.
+        if app.session.running.is_none() && app.session.pending_window.is_none() {
+            crate::viewcube::ucs_icon(app, ui, rect, &place);
+        }
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(&painter, rect);
+    viewport_label(&painter, rect, app.session.view_name(), app.session.state().map_or("2D Wireframe", |st| st.visual_style.label()));
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
     if app.ui.show_command_line {
         crate::cmdline::show(app, ui, full);
     }
-    // Crosshair cursor.
-    if inside {
+    // Orbit feedback replaces the drafting crosshair during navigation.
+    if inside && (app.session.orbit_active() || orbit_gesture) {
+        if let Some(hp) = hover_pos {
+            let dragging = middle_down || ui.input(|i| i.pointer.primary_down());
+            draw_orbit_cursor(&painter, hp, app.ui.system_cursor, dragging);
+        }
+    } else if inside {
         // Hide the OS cursor under the drawn crosshair, unless assistive tech needs it (#39).
         ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
         if let Some(hp) = hover_pos {
@@ -2063,7 +2238,7 @@ fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile
 
 /// The world ↔ screen transform of a model tile drawn in `r`.
 fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
-    Xf { rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12) }
+    Xf { twist: tile.view.twist, ..Xf::new(r, tile.view.center, f64::from(r.height()) / tile.view.height.max(1e-12)) }
 }
 
 /// The tiles other than the current one (each with its own view, clipped to it), then the
@@ -2079,7 +2254,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r);
+        viewport_label(&p, *r, app.session.view_name(), app.session.state().map_or("2D Wireframe", |st| st.visual_style.label()));
     }
     let p = ui.painter();
     for (r, tile) in tiles {
@@ -2283,18 +2458,20 @@ fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox
     let len = (rect.height() * app.session.settings.cursorsize as f32 / 100.0).max(12.0);
     let pb = if pickbox { pickbox_half(app.session.settings.pickbox) } else { None };
     let gap = pb.unwrap_or(0.0);
-    // Along the isometric plane's axes in isometric drafting.
-    if app.session.settings.isodraft {
-        for a in cadcraft_engine::snap::iso::cursor_axes(&app.session.settings) {
-            let dir = vec2(a.cos() as f32, -(a.sin() as f32));
+    let frame = app.session.input_ucs();
+    let axes = if app.session.settings.isodraft {
+        cadcraft_engine::snap::iso::cursor_axes(&app.session.settings).map(|a| frame.vec_to_wcs(Vec2::from_angle(a)))
+    } else {
+        [frame.x.xy(), frame.y.xy()]
+    };
+    if let Some(xf) = app.canvas.xf {
+        for axis in axes {
+            let projected = xf.projection.map_or(axis, |m| (m.apply(axis.to3(0.0)) - m.apply(cadcraft_geom::Vec3::ZERO)).xy());
+            let q = projected.rotate(xf.twist);
+            let dir = vec2(q.x as f32, -q.y as f32).normalized();
             p.line_segment([at - dir * len, at - dir * gap], st);
             p.line_segment([at + dir * gap, at + dir * len], st);
         }
-    } else {
-        p.line_segment([pos2(at.x - len, at.y), pos2(at.x - gap, at.y)], st);
-        p.line_segment([pos2(at.x + gap, at.y), pos2(at.x + len, at.y)], st);
-        p.line_segment([pos2(at.x, at.y - len), pos2(at.x, at.y - gap)], st);
-        p.line_segment([pos2(at.x, at.y + gap), pos2(at.x, at.y + len)], st);
     }
     if let Some(pb) = pb {
         p.rect_stroke(Rect::from_center_size(at, vec2(pb * 2.0, pb * 2.0)), 0.0, st, egui::StrokeKind::Middle);
@@ -2532,41 +2709,27 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
-fn draw_ucs_icon(p: &egui::Painter, rect: Rect) {
-    let t = Tokens::get();
-    let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
-    let st = Stroke::new(1.0, t.canvas_ink);
-    p.line_segment([o, o + vec2(60.0, 0.0)], st);
-    p.line_segment([o, o + vec2(0.0, -60.0)], st);
-    p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
-    let f = egui::FontId::proportional(13.0);
-    p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
-    p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+/// The UCS icon: its X and Y arms along the current UCS's axes, with a square at the corner for
+/// the World UCS.
+fn draw_ucs_icon(p: &egui::Painter, at: &crate::viewcube::IconPlace) {
+    crate::viewcube::paint_ucs_icon(p, at);
 }
 
-fn viewport_label(p: &egui::Painter, rect: Rect) {
+/// The view label: the model view's name ([`cadcraft_engine::Session::view_name`]) and the visual
+/// style.
+fn viewport_label(p: &egui::Painter, rect: Rect, view: &str, style: &str) {
     let t = Tokens::get();
     let at = pos2(rect.left() + 10.0, rect.top() + 8.0);
-    p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    let label = match (view, style) {
+        ("Top", "2D Wireframe") => crate::tl!("+  |  Top  |  2D Wireframe").to_string(),
+        (v, s) => format!("+  |  {}  |  {}", crate::i18n::t(v), crate::i18n::t(s)),
+    };
+    p.text(at, egui::Align2::LEFT_TOP, label, crate::theme::small(), t.canvas_ink);
 }
 
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
     let l = crate::viewcube::Layout::new(rect);
-    let (c, ring) = (l.center, l.ring);
-    let p = ui.painter_at(rect);
     crate::viewcube::show(app, ui, &l);
-    // WCS pill: the label and a down chevron, drawn as lines rather than a "⌄" glyph that a UI
-    // font may lack (it showed as a box, #1541).
-    let pill = Rect::from_center_size(c + vec2(0.0, ring + 26.0), vec2(56.0, 16.0));
-    p.rect_filled(pill, 8.0, Color32::from_rgb(0x48, 0x50, 0x5c));
-    let ink = Tokens::DARK.canvas_ink;
-    let label = p.layout_no_wrap(crate::tl!("WCS").to_string(), crate::theme::small(), ink);
-    let (gap, chevron) = (4.0, 6.0);
-    let left = pill.center().x - (label.size().x + gap + chevron) / 2.0;
-    let mid = pill.center().y;
-    p.galley(pos2(left, mid - label.size().y / 2.0), label.clone(), ink);
-    let x = left + label.size().x + gap;
-    p.line(vec![pos2(x, mid - 1.5), pos2(x + chevron / 2.0, mid + 1.5), pos2(x + chevron, mid - 1.5)], Stroke::new(1.2, ink));
 }
 
 /// A click on grip `g` (idle): Shift+click makes it hot or cold again; a plain click starts
@@ -2646,11 +2809,11 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
         return None;
     }
     for h in sel.iter().take(200) {
-        let e = st.doc.entity(*h)?;
+        let Some(e) = st.doc.entity(*h) else { continue };
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        for (i, g) in e.kind.grips().into_iter().enumerate() {
+        for (i, g) in app.session.grips_of(e.handle).unwrap_or_default().into_iter().enumerate() {
             let sp = xf.to_screen(g);
             if (sp.x - hp.x).abs() <= gs && (sp.y - hp.y).abs() <= gs {
                 return Some((*h, i));
@@ -2665,6 +2828,22 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
 pub(crate) mod tests {
     use super::*;
     use cadcraft_render::DPrim;
+
+    /// Tracking tooltips give angles in the current UCS: a path along a UCS turned 30° reads 0°,
+    /// one along World X reads 330°, and the World UCS reads world angles.
+    #[test]
+    fn tooltip_angles_are_measured_from_the_ucs_x_axis() {
+        let o = Vec2::new(2.0, 1.0);
+        let at = |deg: f64| o + Vec2::from_angle(deg.to_radians()) * 5.0;
+        assert_eq!(tooltip_angle(o, at(90.0), 0.0), 90);
+        assert_eq!(tooltip_angle(o, at(-45.0), 0.0), 315);
+        let ucs = 30f64.to_radians();
+        assert_eq!(tooltip_angle(o, at(30.0), ucs), 0);
+        assert_eq!(tooltip_angle(o, at(0.0), ucs), 330);
+        assert_eq!(tooltip_angle(o, at(120.0), ucs), 90);
+        // A non-finite angle shows a number, not a panic.
+        assert!((0..360).contains(&tooltip_angle(o, o, f64::NAN)));
+    }
 
     fn list(handles: &[u64]) -> DisplayList {
         let prim =
@@ -2686,7 +2865,7 @@ pub(crate) mod tests {
         let h = d.add(&cadcraft_doc::Space::Model, common, cadcraft_doc::EntityKind::Line(line)).unwrap();
         let drag = cadcraft_engine::Drag { handles: vec![h], matrix: cadcraft_geom::Mat3::IDENTITY, extra: Vec::new(), clipboard: false };
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 100.0));
-        let xf = Xf { rect, center: Vec2::new(5.0, 0.0), scale: 10.0 };
+        let xf = Xf::new(rect, Vec2::new(5.0, 0.0), 10.0);
         let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), rect);
         // One canvas across the toggle: the cached drag mesh must be rebuilt.
         let mut c = CanvasState::default();
@@ -2719,9 +2898,9 @@ pub(crate) mod tests {
         assert_eq!(ents[0].common.layer, "Glass");
         let doc = s.doc().unwrap();
         // Built with transparency, the preview would take CLAYER's 40 %.
-        let with = cadcraft_render::build_entities(doc, ents.iter(), &cadcraft_render::Options { transparency: true, ..preview_options(1.0) });
+        let with = cadcraft_render::build_entities(doc, ents.iter(), &cadcraft_render::Options { transparency: true, ..preview_options(1.0, None) });
         assert!(with.prims.iter().all(|p| p.transparency == 40));
-        let list = rebuilt_preview(doc, ents.iter(), 1.0);
+        let list = rebuilt_preview(doc, ents.iter(), 1.0, None);
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
         s.cancel();
         // MOVE's base-to-cursor rubber band (a drag extra).
@@ -2732,8 +2911,103 @@ pub(crate) mod tests {
         s.cmdline("0,0").unwrap();
         let (_, extra) = s.drag(Vec2::new(4.0, 4.0)).unwrap();
         assert!(!extra.is_empty());
-        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0);
+        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0, None);
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
+    }
+
+    fn twisted() -> Xf {
+        let rect = Rect::from_min_size(pos2(10.0, 20.0), vec2(300.0, 200.0));
+        Xf { rect, center: Vec2::new(5.0, -3.0), scale: 4.0, projection: None, twist: 30f64.to_radians() }
+    }
+
+    /// A twisted view turns the drawing counterclockwise on screen, and `to_world` undoes
+    /// `to_screen` exactly.
+    #[test]
+    fn a_twisted_view_turns_the_drawing_and_round_trips() {
+        let xf = twisted();
+        let p = Vec2::new(17.0, 4.0);
+        let back = xf.to_world(xf.to_screen(p));
+        assert!((back - p).len() < 1e-4, "{back:?}");
+        // World +X points 30° above the horizontal (screen y grows down).
+        let (a, b) = (xf.to_screen(xf.center), xf.to_screen(xf.center + Vec2::new(10.0, 0.0)));
+        let ang = f64::from(-(b.y - a.y)).atan2(f64::from(b.x - a.x)).to_degrees();
+        assert!((ang - 30.0).abs() < 1e-3, "{ang}");
+        // A screen drag maps back to the world move that pans by it.
+        let d = xf.screen_delta_to_world(b - a);
+        assert!((d - Vec2::new(10.0, 0.0)).len() < 1e-4, "{d:?}");
+        // The visible box holds every corner of the rect.
+        let wb = xf.world_bounds();
+        for c in [xf.rect.left_top(), xf.rect.right_top(), xf.rect.left_bottom(), xf.rect.right_bottom()] {
+            assert!(wb.expand(1e-6).contains(xf.to_world(c)));
+        }
+        // Untwisted it is the plain transform.
+        let plain = Xf { twist: 0.0, ..xf };
+        let s = plain.to_screen(p);
+        assert_eq!(s, pos2(160.0 + 12.0 * 4.0, 120.0 - 7.0 * 4.0));
+    }
+
+    /// What the shader does with a callback's xform (see `to_px` in `gpu.rs`), in points.
+    fn shader(xf: &Xf, origin: Vec2, x: [f32; 6], p: Vec2) -> Pos2 {
+        let q = p - origin;
+        let [a, b, c, d, tx, ty] = x.map(f64::from);
+        let r = Vec2::new(a * q.x + c * q.y + tx, b * q.x + d * q.y + ty) + (origin - xf.center);
+        let k = xf.rect.center();
+        pos2(k.x + (r.x * xf.scale) as f32, k.y - (r.y * xf.scale) as f32)
+    }
+
+    /// The GPU transform draws each point where `to_screen` puts it, for the drawing and for a
+    /// dragged copy.
+    #[test]
+    fn gpu_xform_agrees_with_to_screen() {
+        let xf = twisted();
+        let origin = Vec2::new(40.0, -12.0);
+        let x = xf.gpu_xform(origin, Mat3::IDENTITY);
+        for p in [Vec2::new(0.0, 0.0), Vec2::new(17.0, 4.0), Vec2::new(-30.0, 55.0)] {
+            let (g, c) = (shader(&xf, origin, x, p), xf.to_screen(p));
+            assert!((g - c).length() < 1e-2, "{p:?}: {g:?} vs {c:?}");
+        }
+        let m = Mat3::rotate_about(Vec2::new(3.0, 1.0), 0.7);
+        let x = xf.gpu_xform(origin, m);
+        for p in [Vec2::new(1.0, 2.0), Vec2::new(-8.0, 9.0), Vec2::new(25.0, -4.0)] {
+            let (g, c) = (shader(&xf, origin, x, p), xf.to_screen(m.apply(p)));
+            assert!((g - c).length() < 1e-2, "{p:?}: {g:?} vs {c:?}");
+        }
+        // No twist: the identity for the drawing, as before.
+        assert_eq!(Xf { twist: 0.0, ..xf }.gpu_xform(origin, Mat3::IDENTITY), crate::gpu::IDENTITY_XFORM);
+    }
+
+    /// A model tile is drawn with its own twist.
+    #[test]
+    fn tile_xf_carries_the_tiles_twist() {
+        let tile = cadcraft_engine::ModelTile {
+            min: Vec2::ZERO,
+            max: Vec2::new(0.5, 1.0),
+            view: cadcraft_engine::View { center: Vec2::new(1.0, 2.0), height: 50.0, twist: 0.5 },
+            active: false,
+        };
+        let xf = tile_xf(Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), &tile);
+        assert_eq!((xf.twist, xf.center, xf.scale), (0.5, Vec2::new(1.0, 2.0), 2.0));
+    }
+
+    /// The active viewport's list, built at one view of a twisted viewport, lands where the
+    /// viewport now shows each model point after a pan and a zoom.
+    #[test]
+    fn vp_motion_follows_a_twisted_viewport() {
+        let built = cadcraft_doc::Viewport {
+            center: cadcraft_geom::Vec3::new(5.0, 4.0, 0.0),
+            width: 8.0,
+            height: 6.0,
+            view_center: Vec2::new(1.0, 2.0),
+            view_height: 12.0,
+            twist: 0.7,
+            ..Default::default()
+        };
+        let now = cadcraft_doc::Viewport { view_center: Vec2::new(-3.0, 0.5), view_height: 7.0, ..built.clone() };
+        let (k, b) = vp_motion(&now, (built.view_center, built.view_height)).unwrap();
+        for m in [Vec2::new(0.0, 0.0), Vec2::new(4.0, -2.5), Vec2::new(-7.0, 3.0)] {
+            let moved = built.model_to_paper(m) * k + b;
+            assert!((moved - now.model_to_paper(m)).len() < 1e-9, "{m:?}");
+        }
     }
 
     #[test]
@@ -2927,6 +3201,7 @@ mod hatch_pick_tests {
     #[test]
     fn double_clicking_a_hatch_opens_the_hatch_edit_dialog() {
         let mut app = CadApp::new(Session::new(), Services::default());
+        app.ui.in_window_menu = true;
         app.session.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
         let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
         let _ = app.session.zoom_extents();
@@ -2950,5 +3225,90 @@ mod hatch_pick_tests {
         assert_eq!(app.hatch_dlg.as_ref().map(|s| s.edit.iter().map(|h| h.hex()).collect::<Vec<_>>()), Some(vec![hx]));
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
+    }
+}
+
+/// The ViewCube pill's text: WCS, or the current UCS's name (cut short), and the menu arrow.
+pub(crate) fn ucs_pill_text(app: &CadApp) -> String {
+    let (u, name) = app.session.ucs_named();
+    if u.is_world() && name.is_empty() {
+        return crate::tl!("WCS").to_string();
+    }
+    let n = if name.is_empty() { crate::tl!("Unnamed").to_string() } else { name };
+    let short: String = if n.chars().count() > 8 { n.chars().take(7).chain(std::iter::once('…')).collect() } else { n };
+    short.to_string()
+}
+
+fn grid_index_ranges(wb: &Bounds2, minor: f64) -> Option<((i64, i64), (i64, i64))> {
+    if wb.is_empty() || !wb.min.is_finite() || !wb.max.is_finite() || !minor.is_finite() || minor <= 0.0 {
+        return None;
+    }
+    let range = |lo: f64, hi: f64| {
+        let a = (lo / minor).floor() as i64;
+        let b = (hi / minor).ceil() as i64;
+        b.checked_sub(a).filter(|n| (0..2000).contains(n)).map(|_| (a, b))
+    };
+    Some((range(wb.min.x, wb.max.x)?, range(wb.min.y, wb.max.y)?))
+}
+
+fn draw_ucs_preview(p: &egui::Painter, xf: &Xf, preview: cadcraft_engine::ucs::UcsPreview, cursor: Vec2) {
+    let to_view = |point| xf.projection.map_or(point, |m| m.plane(0.0).apply(point));
+    // Clip before tessellating dashes: an offscreen origin must not allocate a huge line.
+    if let Some((a, b)) = cadcraft_render::clip::clip_segment(to_view(preview.base), to_view(cursor), &xf.view_bounds()) {
+        let line = [xf.view_to_screen(a), xf.view_to_screen(b)];
+        if line.iter().all(|point| point.is_finite()) {
+            let color = if crate::theme::luminance(Tokens::get().canvas) > 0.5 {
+                Color32::from_rgb(0xa0, 0x68, 0x00)
+            } else {
+                Color32::from_rgb(0xff, 0xc4, 0x38)
+            };
+            p.extend(Shape::dashed_line(&line, Stroke::new(1.0, color), 14.0, 8.0));
+        }
+    }
+    let frame = preview.frame;
+    let direction = |axis: cadcraft_geom::Vec3| {
+        let projected = xf.projection.map_or(axis.xy(), |m| m.plane(0.0).apply_vec(axis.xy()));
+        let turned = projected.rotate(xf.twist);
+        let screen = vec2(turned.x as f32, -turned.y as f32);
+        let length = screen.length();
+        (length.is_finite() && length > 1e-6).then(|| screen / length)
+    };
+    let origin = xf.to_screen(frame.origin.xy());
+    if origin.is_finite()
+        && let (Some(x), Some(y)) = (direction(frame.x), direction(frame.y))
+    {
+        draw_ucs_icon(p, &crate::viewcube::IconPlace { origin, x, y, world: false, z: None });
+    }
+}
+
+pub(crate) fn draw_orbit_cursor(p: &egui::Painter, at: Pos2, system_cursor: bool, dragging: bool) {
+    p.ctx().set_cursor_icon(if system_cursor {
+        if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab }
+    } else {
+        egui::CursorIcon::None
+    });
+    let paths: Vec<Vec<Pos2>> = [0.2, std::f32::consts::PI + 0.2]
+        .into_iter()
+        .map(|start| {
+            let end = start + std::f32::consts::PI * 0.8;
+            let mut points: Vec<_> = (0..=16)
+                .map(|i| {
+                    let angle = start + (end - start) * i as f32 / 16.0;
+                    at + vec2(angle.cos(), angle.sin()) * 11.0
+                })
+                .collect();
+            let radial = vec2(end.cos(), end.sin());
+            let tip = at + radial * 11.0;
+            let back = tip - vec2(-end.sin(), end.cos()) * 4.0;
+            points.extend([back + radial * 3.0, tip, back - radial * 3.0]);
+            points
+        })
+        .collect();
+    // The dark halo keeps the symbol legible over both wirework and shaded faces.
+    for stroke in [Stroke::new(4.0, Color32::BLACK), Stroke::new(1.5, Color32::WHITE)] {
+        p.circle_stroke(at, 4.0, stroke);
+        for path in &paths {
+            p.add(Shape::line(path.clone(), stroke));
+        }
     }
 }

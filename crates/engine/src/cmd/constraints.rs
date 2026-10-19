@@ -55,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
         gc!("gcfix", "Fix", K::Fix, "Fix"),
         CommandSpec::new("autoconstrain", "AutoConstrain", run_autoconstrain)
             .menu(&["Tools", "Parametric", "AutoConstrain"])
-            .params("{handles?, tolerance?, angleTolerance? (degrees), types?: [names]}")
+            .params("{handles?, tolerance?, angleTolerance? (degrees), types?: [names], axisAngle?: degrees from world X (default 0)}")
             .interactive(|_| Ok(Box::new(SelM::new(SelOp::Auto)))),
         CommandSpec::new("constraintbar", "Constraint Bars", run_constraintbar)
             .menu(&["Tools", "Parametric", "Constraint Bars", "Select Objects"])
@@ -393,7 +393,7 @@ fn run_gc(s: &mut Session, p: &Value, kind: K) -> Result<Value> {
         return Err(bad(cmd, "`h1` is required"));
     }
     let refs = build_refs(s, kind, &picks).map_err(|m| bad(cmd, m))?;
-    let id = add_constraint(s, Constraint { id: 0, kind, refs, name: String::new(), expr: String::new() })?;
+    let id = add_constraint(s, Constraint { id: 0, axis_angle: 0.0, kind, refs, name: String::new(), expr: String::new() })?;
     Ok(constraint_json(s.doc()?, id))
 }
 
@@ -423,9 +423,12 @@ impl GcM {
     }
     fn finish(&mut self, s: &mut Session) -> Result<Step> {
         let picks: Vec<(Handle, Hint)> = self.picks.iter().map(|(h, p)| (*h, Hint::Pick(*p))).collect();
-        let r = build_refs(s, self.kind, &picks)
-            .map_err(EngineError::Other)
-            .and_then(|refs| add_constraint(s, Constraint { id: 0, kind: self.kind, refs, name: String::new(), expr: String::new() }));
+        let r = build_refs(s, self.kind, &picks).map_err(EngineError::Other).and_then(|refs| {
+            add_constraint(
+                s,
+                Constraint { id: 0, axis_angle: s.input_ucs().rotation(), kind: self.kind, refs, name: String::new(), expr: String::new() },
+            )
+        });
         s.set_selection(Vec::new());
         match r {
             Ok(id) => s.echo(format!("{} constraint #{id} applied.", self.kind.name())),
@@ -547,7 +550,7 @@ fn dc_from_name(t: &str) -> Option<Dc> {
 }
 
 /// The constraint kind for a DC type; LINEAR picks horizontal or vertical from the geometry.
-fn dc_kind(d: &Drawing, dc: Dc, refs: &[GeomRef]) -> K {
+fn dc_kind(d: &Drawing, dc: Dc, refs: &[GeomRef], axis_angle: f64) -> K {
     match dc {
         Dc::Aligned => K::Distance(DistAxis::Aligned),
         Dc::Horizontal => K::Distance(DistAxis::Horizontal),
@@ -556,8 +559,8 @@ fn dc_kind(d: &Drawing, dc: Dc, refs: &[GeomRef]) -> K {
         Dc::Radius => K::Radius,
         Dc::Diameter => K::Diameter,
         Dc::Linear => {
-            let h = cs::measure(d, K::Distance(DistAxis::Horizontal), refs).unwrap_or(0.0);
-            let v = cs::measure(d, K::Distance(DistAxis::Vertical), refs).unwrap_or(0.0);
+            let h = cs::measure_in(d, K::Distance(DistAxis::Horizontal), refs, axis_angle).unwrap_or(0.0);
+            let v = cs::measure_in(d, K::Distance(DistAxis::Vertical), refs, axis_angle).unwrap_or(0.0);
             K::Distance(if h >= v { DistAxis::Horizontal } else { DistAxis::Vertical })
         }
     }
@@ -596,14 +599,14 @@ fn run_dc(s: &mut Session, p: &Value, dc: Dc) -> Result<Value> {
         },
         Dc::Radius | Dc::Diameter => vec![r(h1, p1, Want::Curve)?],
     };
-    let kind = dc_kind(d, dc, &refs);
+    let kind = dc_kind(d, dc, &refs, 0.0);
     let expr = match (str_param(p, "expr"), p.get("value").and_then(Value::as_f64)) {
         (Some(e), _) => e.trim().to_string(),
         (None, Some(v)) if v.is_finite() => cs::format_value(v),
         _ => String::new(),
     };
     let name = str_param(p, "name").unwrap_or("").trim().to_string();
-    let id = add_constraint(s, Constraint { id: 0, kind, refs, name, expr })?;
+    let id = add_constraint(s, Constraint { id: 0, axis_angle: 0.0, kind, refs, name, expr })?;
     Ok(constraint_json(s.doc()?, id))
 }
 
@@ -613,17 +616,19 @@ struct DcM {
     points: bool,
     /// Picking done: waiting for the value.
     value: Option<(K, f64)>,
+    axis_angle: f64,
 }
 
 impl DcM {
     fn new(dc: Option<Dc>) -> Self {
-        DcM { dc, refs: Vec::new(), points: false, value: None }
+        DcM { dc, refs: Vec::new(), points: false, value: None, axis_angle: 0.0 }
     }
     fn picked(&mut self, s: &mut Session) -> Result<Step> {
         let d = s.doc()?;
         let Some(dc) = self.dc else { return Ok(Step::Continue) };
-        let kind = dc_kind(d, dc, &self.refs);
-        match cs::measure(d, kind, &self.refs) {
+        self.axis_angle = s.input_ucs().rotation();
+        let kind = dc_kind(d, dc, &self.refs, self.axis_angle);
+        match cs::measure_in(d, kind, &self.refs, self.axis_angle) {
             Ok(v) => {
                 self.value = Some((kind, v));
                 Ok(Step::Continue)
@@ -643,7 +648,7 @@ impl DcM {
             },
             None => (String::new(), cs::format_value(v)),
         };
-        let c = Constraint { id: 0, kind, refs: std::mem::take(&mut self.refs), name, expr };
+        let c = Constraint { id: 0, axis_angle: self.axis_angle, kind, refs: std::mem::take(&mut self.refs), name, expr };
         match add_constraint(s, c) {
             Ok(id) => {
                 let d = s.doc()?;
@@ -760,7 +765,7 @@ impl SelM {
     fn apply(&self, s: &mut Session, hs: Vec<Handle>) -> Result<Step> {
         let handles = json!(hs.iter().map(|h| h.hex()).collect::<Vec<_>>());
         let r = match self.op {
-            SelOp::Auto => run_autoconstrain(s, &json!({ "handles": handles })),
+            SelOp::Auto => run_autoconstrain(s, &json!({ "handles": handles, "axisAngle":s.input_ucs().rotation().to_degrees() })),
             SelOp::Delete => run_delconstraint(s, &json!({ "handles": handles })),
             SelOp::Bars => set_bars(s, false, "show", &hs),
             SelOp::Dims => set_bars(s, true, "show", &hs),
@@ -813,7 +818,15 @@ fn run_autoconstrain(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("autoconstrain", "select objects (or pass `handles`)"));
     }
     let set = &s.doc()?.parametric.settings;
-    let mut o = cs::InferOptions { distance_tolerance: set.distance_tolerance, angle_tolerance: set.angle_tolerance, types: set.auto_types.clone() };
+    let mut o = cs::InferOptions {
+        axis_angle: match p.get("axisAngle") {
+            None => 0.0,
+            Some(_) => super::f64_req("autoconstrain", p, "axisAngle")?.to_radians(),
+        },
+        distance_tolerance: set.distance_tolerance,
+        angle_tolerance: set.angle_tolerance,
+        types: set.auto_types.clone(),
+    };
     o.distance_tolerance = f64_or(p, "tolerance", o.distance_tolerance);
     o.angle_tolerance = f64_or(p, "angleTolerance", o.angle_tolerance);
     if let Some(t) = p.get("types").and_then(Value::as_array) {
@@ -1113,7 +1126,7 @@ fn infer_after(s: &mut Session, before: &Drawing) {
         }
     }
     others.extend(parallel.map(|p| p.1));
-    let o = cs::InferOptions { distance_tolerance: tol, angle_tolerance: 1e-7, types };
+    let o = cs::InferOptions { axis_angle: s.input_ucs().rotation(), distance_tolerance: tol, angle_tolerance: 1e-7, types };
     let cands = cs::infer_placed(d, &placed, &others, &o);
     if cands.is_empty() {
         return;

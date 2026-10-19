@@ -89,6 +89,7 @@ fn sample() -> Drawing {
             text: String::new(),
             style: "Standard".into(),
             measurement: 10.0,
+            horizontal_direction: 0.0,
             text_rotation: 0.0,
             user_text_pos: false,
             block: None,
@@ -394,6 +395,75 @@ fn image_export_frames_window() {
 }
 
 #[test]
+fn image_export_draws_a_3d_view_as_the_screen() {
+    use cadcraft_geom::Mat4;
+    let d = sample();
+    let projection = Mat4::view(Vec3::new(-1.0, -1.0, 1.0).normalized(), Vec3::ZERO, 0.0);
+    let view = View3d { projection, shaded: true, shaded_edges: false };
+    let opts = cadcraft_render::Options { projection: Some(projection), shaded: true, transparency: true, ..cadcraft_render::Options::default() };
+    let list = cadcraft_render::build(&d, &Space::Model, &opts);
+    // The current view's window, in view coordinates.
+    let win = list.bounds;
+    // SVG and PNG: exactly what the screen draws through the window, not the plan.
+    let svg = String::from_utf8(write_view(&d, "a.svg", Some(win), Some(&view)).unwrap()).unwrap();
+    assert_eq!(svg, svg::export_list(&list, Some(win)));
+    assert_ne!(svg, String::from_utf8(write_framed(&d, "a.svg", Some(win)).unwrap()).unwrap());
+    let png = write_view(&d, "a.png", Some(win), Some(&view)).unwrap();
+    let raster = cadcraft_render::raster::render_png(
+        &list,
+        &png_view(&list.bounds, 2400, 1600, Some(win)),
+        &cadcraft_render::raster::RasterOptions::default(),
+    );
+    assert_eq!(Some(png), raster);
+    let pdf = write_view(&d, "a.pdf", Some(win), Some(&view)).unwrap();
+    check_pdf(&pdf);
+    assert_ne!(pdf, write_framed(&d, "a.pdf", Some(win)).unwrap());
+    // No view is the plan.
+    for name in ["a.svg", "a.png", "a.pdf"] {
+        assert_eq!(write_view(&d, name, Some(win), None).unwrap(), write_framed(&d, name, Some(win)).unwrap(), "{name}");
+    }
+}
+
+#[test]
+fn plot_3d_view_options() {
+    use cadcraft_geom::Mat4;
+    use serde_json::json;
+    let v = |j: serde_json::Value| PdfOptions::from_json(&j).view;
+    let iso = v(json!({"viewDir": [-1, -1, 1], "visualStyle": "ShadedWithEdges"})).unwrap();
+    assert!(iso.shaded && iso.shaded_edges && !iso.projection.is_plan());
+    let front = v(json!({"viewDir": [0, -2, 0]})).unwrap();
+    assert!(!front.shaded && !front.shaded_edges);
+    assert_eq!(front.projection, Mat4::view(Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO, 0.0));
+    // A huge but finite direction is still a direction.
+    assert!(v(json!({"viewDir": [1e308, 1e308, 0]})).is_some());
+    // Missing, plan, zero, non-finite or malformed directions plot in plan.
+    let bad = [
+        json!({}),
+        json!({"viewDir": [0, 0, 1]}),
+        json!({"viewDir": [0, 0, 7]}),
+        json!({"viewDir": [0, 0, 0]}),
+        json!({"viewDir": [f64::NAN, 0, 1]}),
+        json!({"viewDir": [1, "x", 0]}),
+        json!({"viewDir": [1, 0]}),
+        json!({"viewDir": [1, 0, 0, 0]}),
+        json!({"viewDir": "swiso"}),
+    ];
+    for j in bad {
+        assert_eq!(v(j.clone()), None, "{j}");
+    }
+    // The plotter draws model space in the view: a window in its view coordinates shows it.
+    let d = sample();
+    let opts = cadcraft_render::Options { projection: Some(iso.projection), ..cadcraft_render::Options::default() };
+    let w = cadcraft_render::build(&d, &Space::Model, &opts).bounds;
+    let window = json!([[w.min.x, w.min.y], [w.max.x, w.max.y]]);
+    for output in ["pdf", "png", "svg"] {
+        let in_view = plot(&d, &Space::Model, &json!({"output": output, "window": window, "viewDir": [-1, -1, 1]})).unwrap();
+        let plan = plot(&d, &Space::Model, &json!({"output": output, "window": window})).unwrap();
+        assert_ne!(in_view, plan, "{output}");
+    }
+}
+
+#[test]
 fn hostile_export_window_is_an_error() {
     use cadcraft_geom::Bounds2;
     let d = sample();
@@ -505,6 +575,11 @@ fn pdf_layout_one_to_one_with_viewport() {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            view3d: None,
+            twist: 0.0,
+            ucs: None,
+            ucs_per_viewport: false,
+            extra: Vec::new(),
         }),
     )
     .unwrap();
@@ -575,6 +650,7 @@ fn dim(kind: DimKind, p13: Vec3, p14: Vec3) -> Dimension {
         text: String::new(),
         style: "Standard".into(),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
@@ -609,6 +685,11 @@ fn viewport_frozen_layers_roundtrip() {
             layer_colors: Vec::new(),
             clip: None,
             on: true,
+            view3d: None,
+            twist: 0.0,
+            ucs: None,
+            ucs_per_viewport: false,
+            extra: Vec::new(),
         })
     };
     d.add(&paper, Common::default(), vp(2, vec!["Walls".into(), "A B".into()])).unwrap();
@@ -645,6 +726,11 @@ fn frozen_vp_dxf() -> (Drawing, Vec<(String, String)>) {
         layer_colors: Vec::new(),
         clip: None,
         on: true,
+        view3d: None,
+        twist: 0.0,
+        ucs: None,
+        ucs_per_viewport: false,
+        extra: Vec::new(),
     });
     d.add(&paper, Common::default(), vp).unwrap();
     let text = write_dxf(&d);
@@ -768,6 +854,11 @@ fn viewport_layer_colors_roundtrip() {
             layer_colors: colors,
             clip: None,
             on: true,
+            view3d: None,
+            twist: 0.0,
+            ucs: None,
+            ucs_per_viewport: false,
+            extra: Vec::new(),
         })
     };
     let colors = vec![("Walls".to_string(), Color::Index(5)), ("A B".to_string(), Color::True(cadcraft_color::Rgb(255, 128, 0)))];
@@ -1201,9 +1292,17 @@ fn parametric_sample(d: &mut Drawing) -> (Vec<Constraint>, Parametric) {
     let l1 = d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(4.0, 0.0, 0.0) })).unwrap();
     let l2 = d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::new(4.0, 0.0, 0.0), b: Vec3::new(4.0, 3.0, 0.0) })).unwrap();
     let constraints = vec![
-        Constraint { id: 1, kind: ConstraintKind::Horizontal, refs: vec![GeomRef::whole(l1)], name: String::new(), expr: String::new() },
+        Constraint {
+            id: 1,
+            axis_angle: 0.0,
+            kind: ConstraintKind::Horizontal,
+            refs: vec![GeomRef::whole(l1)],
+            name: String::new(),
+            expr: String::new(),
+        },
         Constraint {
             id: 2,
+            axis_angle: 0.0,
             kind: ConstraintKind::Coincident,
             refs: vec![GeomRef::new(l1, Sub::End), GeomRef::new(l2, Sub::Start)],
             name: String::new(),
@@ -1211,6 +1310,7 @@ fn parametric_sample(d: &mut Drawing) -> (Vec<Constraint>, Parametric) {
         },
         Constraint {
             id: 3,
+            axis_angle: 0.0,
             kind: ConstraintKind::Distance(DistAxis::Vertical),
             refs: vec![GeomRef::new(l2, Sub::Start), GeomRef::new(l2, Sub::End)],
             name: "d1".into(),
@@ -1218,6 +1318,7 @@ fn parametric_sample(d: &mut Drawing) -> (Vec<Constraint>, Parametric) {
         },
         Constraint {
             id: 4,
+            axis_angle: 0.0,
             kind: ConstraintKind::Angular,
             refs: vec![GeomRef::whole(l1), GeomRef::whole(l2)],
             name: "ang1".into(),
@@ -1225,6 +1326,7 @@ fn parametric_sample(d: &mut Drawing) -> (Vec<Constraint>, Parametric) {
         },
         Constraint {
             id: 5,
+            axis_angle: 0.0,
             kind: ConstraintKind::Fix,
             refs: vec![GeomRef::new(l2, Sub::Vertex(7)), GeomRef::new(l2, Sub::Segment(3))],
             name: String::new(),
@@ -1314,6 +1416,7 @@ fn table_sample() -> Table {
     rows[2][0].merged = Some((2, 1));
     Table {
         insert: Vec3::new(5.0, 20.0, 0.0),
+        rotation: 0.0,
         col_widths: vec![1.5, 2.5, 4.0],
         row_heights: vec![0.5, 0.4, 0.4, 0.4],
         cells: rows,

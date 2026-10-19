@@ -12,6 +12,8 @@ pub const MAX_CANDIDATES: usize = 2000;
 /// Inference options.
 #[derive(Clone, Debug)]
 pub struct InferOptions {
+    /// Working XY orientation, radians from world X.
+    pub axis_angle: f64,
     pub distance_tolerance: f64,
     /// Degrees.
     pub angle_tolerance: f64,
@@ -21,7 +23,7 @@ pub struct InferOptions {
 
 impl Default for InferOptions {
     fn default() -> Self {
-        InferOptions { distance_tolerance: 0.05, angle_tolerance: 1.0, types: Vec::new() }
+        InferOptions { axis_angle: 0.0, distance_tolerance: 0.05, angle_tolerance: 1.0, types: Vec::new() }
     }
 }
 
@@ -107,7 +109,14 @@ pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Vec<Constrain
     let mut out: Vec<Constraint> = Vec::new();
     let mut push = |kind: ConstraintKind, refs: Vec<GeomRef>| {
         if out.len() < MAX_CANDIDATES && allow(kind) {
-            out.push(Constraint { id: 0, kind, refs, name: String::new(), expr: String::new() });
+            out.push(Constraint {
+                id: 0,
+                axis_angle: if o.axis_angle.is_finite() { o.axis_angle } else { 0.0 },
+                kind,
+                refs,
+                name: String::new(),
+                expr: String::new(),
+            });
         }
     };
     let pairs = |n: usize| (0..n).flat_map(move |i| (i + 1..n).map(move |j| (i, j)));
@@ -146,9 +155,9 @@ pub fn infer(d: &Drawing, handles: &[Handle], o: &InferOptions) -> Vec<Constrain
         if dvec.len() <= tol {
             continue;
         }
-        if ang_between(dvec, Vec2::X) <= atol {
+        if ang_between(dvec, Vec2::from_angle(o.axis_angle)) <= atol {
             push(ConstraintKind::Horizontal, vec![*r]);
-        } else if ang_between(dvec, Vec2::Y) <= atol {
+        } else if ang_between(dvec, Vec2::from_angle(o.axis_angle).perp()) <= atol {
             push(ConstraintKind::Vertical, vec![*r]);
         }
     }
@@ -260,7 +269,8 @@ pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &Infer
         if let Some(t) = target
             && extra.len() + on.len() + out.len() < MAX_CANDIDATES
         {
-            let c = Constraint { id: 0, kind: ConstraintKind::Coincident, refs: vec![*rp, t], name: String::new(), expr: String::new() };
+            let c =
+                Constraint { id: 0, axis_angle: 0.0, kind: ConstraintKind::Coincident, refs: vec![*rp, t], name: String::new(), expr: String::new() };
             if t.sub == Sub::Whole { on.push(c) } else { extra.push(c) }
         }
     }
@@ -282,7 +292,14 @@ pub fn infer_placed(d: &Drawing, placed: &[Handle], others: &[Handle], o: &Infer
                 && l2.len() > tol
                 && out.len() < MAX_CANDIDATES
             {
-                out.push(Constraint { id: 0, kind: ConstraintKind::Perpendicular, refs: vec![*r1, *r2], name: String::new(), expr: String::new() });
+                out.push(Constraint {
+                    id: 0,
+                    axis_angle: 0.0,
+                    kind: ConstraintKind::Perpendicular,
+                    refs: vec![*r1, *r2],
+                    name: String::new(),
+                    expr: String::new(),
+                });
             }
         }
     }

@@ -32,10 +32,10 @@ fn spline(d: &mut Drawing, pts: &[(f64, f64)]) -> Handle {
     put(d, EntityKind::Spline(s))
 }
 fn con(kind: K, refs: &[GeomRef]) -> Constraint {
-    Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() }
+    Constraint { id: 0, axis_angle: 0.0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() }
 }
 fn dim(kind: K, refs: &[GeomRef], expr: &str) -> Constraint {
-    Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: expr.into() }
+    Constraint { id: 0, axis_angle: 0.0, kind, refs: refs.to_vec(), name: String::new(), expr: expr.into() }
 }
 fn w(h: Handle) -> GeomRef {
     GeomRef::whole(h)

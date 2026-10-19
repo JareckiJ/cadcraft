@@ -19,10 +19,10 @@ fn arc(d: &mut Drawing, c: (f64, f64), r: f64, s: f64, e: f64) -> Handle {
     add_e(d, EntityKind::Arc(DArc { center: v(c.0, c.1), radius: r, start: s, end: e }))
 }
 fn con(kind: ConstraintKind, refs: &[GeomRef]) -> Constraint {
-    Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() }
+    Constraint { id: 0, axis_angle: 0.0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() }
 }
 fn dim(kind: ConstraintKind, refs: &[GeomRef], name: &str, expr: &str) -> Constraint {
-    Constraint { id: 0, kind, refs: refs.to_vec(), name: name.into(), expr: expr.into() }
+    Constraint { id: 0, axis_angle: 0.0, kind, refs: refs.to_vec(), name: name.into(), expr: expr.into() }
 }
 fn w(h: Handle) -> GeomRef {
     GeomRef::whole(h)
@@ -293,7 +293,14 @@ fn conflicts_are_reported_and_nothing_moves() {
     assert!(matches!(add(&mut d2, con(ConstraintKind::Vertical, &[w(b)]), &SolveOptions::default()), Err(SolveError::Conflict { .. })));
     // A direct solve of an inconsistent stored system fails without writing.
     let mut d3 = before.clone();
-    d3.constraints.push(Constraint { id: 9, kind: ConstraintKind::Vertical, refs: vec![w(a)], name: String::new(), expr: String::new() });
+    d3.constraints.push(Constraint {
+        id: 9,
+        axis_angle: 0.0,
+        kind: ConstraintKind::Vertical,
+        refs: vec![w(a)],
+        name: String::new(),
+        expr: String::new(),
+    });
     d3.constraints.push(dim(ConstraintKind::Distance(DistAxis::Aligned), &[w(a)], "d9", "10"));
     let snapshot = d3.clone();
     assert!(matches!(solve(&mut d3, &SolveOptions::default()), Err(SolveError::Conflict { .. })));

@@ -58,7 +58,7 @@ impl MTextOpts {
     pub(super) fn new(s: &Session) -> Self {
         let (height, style) =
             s.doc().map(|d| (d.header.f64("TEXTSIZE", 0.2), d.header.str("TEXTSTYLE", "Standard"))).unwrap_or((0.2, "Standard".into()));
-        MTextOpts { height, style, ..MTextOpts::default() }
+        MTextOpts { height, style, rotation: s.input_ucs().rotation(), ..MTextOpts::default() }
     }
 
     /// The text box from the first corner and either the opposite corner or the Width answer:

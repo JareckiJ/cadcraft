@@ -148,17 +148,29 @@ fn cmd_wasm() -> Result<(), String> {
     if failed == 0 { Ok(()) } else { Err(format!("{failed} crate(s) failed the wasm check")) }
 }
 
+/// Keep rustfmt's argument list below Windows' command-line limit in large workspaces.
+fn cmd_fmt() -> Result<(), String> {
+    if cfg!(windows) {
+        let meta = metadata()?;
+        let packages = meta.get("packages").and_then(serde_json::Value::as_array).ok_or("cargo metadata did not return packages")?;
+        for package in packages {
+            let name = package.get("name").and_then(serde_json::Value::as_str).ok_or("cargo metadata returned an unnamed package")?;
+            let mut c = cargo();
+            c.args(["fmt", "--package", name, "--", "--check"]);
+            run(c, &format!("cargo fmt --package {name} -- --check"))?;
+        }
+        Ok(())
+    } else {
+        let mut c = cargo();
+        c.args(["fmt", "--all", "--", "--check"]);
+        run(c, "cargo fmt --all -- --check")
+    }
+}
+
 fn cmd_ci() -> Result<(), String> {
     type Step = (&'static str, Box<dyn Fn() -> Result<(), String>>);
     let steps: Vec<Step> = vec![
-        (
-            "fmt",
-            Box::new(|| {
-                let mut c = cargo();
-                c.args(["fmt", "--all", "--", "--check"]);
-                run(c, "cargo fmt --all -- --check")
-            }),
-        ),
+        ("fmt", Box::new(cmd_fmt)),
         (
             "clippy",
             Box::new(|| {

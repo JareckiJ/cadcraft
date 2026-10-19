@@ -357,7 +357,7 @@ impl StretchM {
         let area = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
             (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::Polygon(m.pts)),
             (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, Some((a, b))) => {
-                Some(StretchArea::Box(cadcraft_geom::Bounds2::new(*a, *b)))
+                Some(StretchArea::Polygon(s.input_ucs().rectangle(*a, *b).to_vec()))
             }
             // A fence marks no area: what it crosses moves whole.
             _ => None,
@@ -398,11 +398,11 @@ impl StretchM {
         match i {
             Input::Point(p) => match self.corner.take() {
                 Some(c) => {
-                    let bx = cadcraft_geom::Bounds2::new(c, p);
+                    let frame = s.input_ucs();
                     let space = s.space();
-                    let hs = crate::select::select_window(s.doc()?, &space, bx, p.x < c.x);
+                    let hs = crate::select::select_ucs_window(s.doc()?, &space, c, p, frame.crossing(c, p));
                     if !self.removing {
-                        self.windows.push(StretchArea::Box(bx));
+                        self.windows.push(StretchArea::Polygon(frame.rectangle(c, p).to_vec()));
                     }
                     self.add(s, hs, false);
                 }
@@ -511,16 +511,16 @@ impl Interactive for StretchM {
                 self.phase = StretchPhase::Displacement;
                 Ok(Step::Continue)
             }
-            (StretchPhase::Displacement, Input::Point(p)) => self.apply(s, p),
+            (StretchPhase::Displacement, Input::Point(p)) => self.apply(s, p - s.input_ucs().origin.xy()),
             (StretchPhase::Displacement, Input::Enter) => Ok(Step::Done),
             (StretchPhase::Second, Input::Point(p)) => self.apply(s, p - self.base.unwrap_or(p)),
-            (StretchPhase::Second, Input::Enter) => self.apply(s, self.base.unwrap_or(Vec2::ZERO)),
+            (StretchPhase::Second, Input::Enter) => self.apply(s, self.base.unwrap_or(s.input_ucs().origin.xy()) - s.input_ucs().origin.xy()),
             _ => Ok(Step::Continue),
         }
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         let rect = |a: Vec2| {
-            let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
+            let [a, b, c, d] = s.input_ucs().rectangle(a, c);
             vec![line(a, b), line(b, c), line(c, d), line(d, a)]
         };
         if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
@@ -1310,6 +1310,10 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                 })
                 .collect(),
         ),
+        // A polyface mesh explodes into its 3D faces, as in AutoCAD.
+        EntityKind::PolyfaceMesh(m) => {
+            Some(m.faces3d().into_iter().map(|f| Entity { handle: Handle(0), common: e.common.clone(), kind: EntityKind::Face3d(f) }).collect())
+        }
         EntityKind::MLine(m) => Some(super::draw2::mline::explode(e, m)),
         EntityKind::MText(m) => Some(
             cadcraft_fonts::plain_mtext(&m.contents)
@@ -1836,7 +1840,7 @@ impl SelectThen {
             match (self.ref_from, i) {
                 (None, Input::Point(p)) => self.ref_from = Some(p),
                 (None, Input::Text(t)) => self.ref_angle = Some(angle(&t)?),
-                (None, Input::Enter) => self.ref_angle = Some(0.0),
+                (None, Input::Enter) => self.ref_angle = Some(s.input_ucs().rotation()),
                 (Some(a), Input::Point(p)) => {
                     self.ref_angle = Some(two_points(a, p)?);
                     self.ref_from = None;
@@ -1852,7 +1856,7 @@ impl SelectThen {
             }
             (false, _, Input::Point(p)) => base.angle_to(p),
             (false, _, Input::Text(t)) => angle(&t)?,
-            (false, _, Input::Enter) => 0.0,
+            (false, _, Input::Enter) => s.input_ucs().rotation(),
             (true, None, Input::Point(p)) => {
                 self.ref_from = Some(p);
                 return Ok(Step::Continue);
@@ -2065,7 +2069,7 @@ impl Interactive for SelectThen {
                 Ok(Step::Done)
             }
             (Op::Move, 1, Input::Enter) => {
-                let d = self.pts[0];
+                let d = self.pts[0] - s.input_ucs().origin.xy();
                 transform_entities(s, &self.objs, &Mat3::translate(d), false)?;
                 s.set_selection(Vec::new());
                 Ok(Step::Done)
@@ -2081,7 +2085,7 @@ impl Interactive for SelectThen {
             }
             (Op::Rotate, 1, inp @ (Input::Point(_) | Input::Text(_) | Input::Enter)) => {
                 let a = match inp {
-                    Input::Point(p) => self.pts[0].angle_to(p),
+                    Input::Point(p) => self.pts[0].angle_to(p) - s.input_ucs().rotation(),
                     Input::Text(t) => s
                         .angle_settings()
                         .rotation(&t)
@@ -2131,7 +2135,7 @@ impl Interactive for SelectThen {
         let Some(base) = self.pts.first().copied() else { return Vec::new() };
         let m = match self.op {
             Op::Move | Op::Copy => Mat3::translate(c - base),
-            Op::Rotate => Mat3::rotate_about(base, base.angle_to(c)),
+            Op::Rotate => Mat3::rotate_about(base, base.angle_to(c) - s.input_ucs().rotation()),
             Op::Scale if !self.reference => Mat3::scale_about(base, base.dist(c).max(1e-9)),
             Op::Scale => match self.ref_len.and_then(|r| positive_length(Some(base.dist(c) / r))) {
                 Some(f) => Mat3::scale_about(base, f),
@@ -2163,7 +2167,7 @@ impl Interactive for SelectThen {
         let base = self.pts.first().copied()?;
         let matrix = match self.op {
             Op::Move | Op::Copy => Mat3::translate(c - base),
-            Op::Rotate => Mat3::rotate_about(base, base.angle_to(c)),
+            Op::Rotate => Mat3::rotate_about(base, base.angle_to(c) - s.input_ucs().rotation()),
             Op::Scale if !self.reference => Mat3::scale_about(base, base.dist(c).max(1e-9)),
             Op::Scale => Mat3::scale_about(base, self.ref_len.and_then(|r| positive_length(Some(base.dist(c) / r)))?),
             Op::Mirror if !self.ask_erase => Mat3::mirror(base, c),
@@ -2972,7 +2976,7 @@ impl Interactive for DisplaceM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if self.displacement {
             let d = match i {
-                Input::Point(p) => p,
+                Input::Point(p) => p - s.input_ucs().origin.xy(),
                 Input::Enter => Vec2::ZERO,
                 _ => return Ok(Step::Continue),
             };
