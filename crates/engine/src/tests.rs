@@ -649,6 +649,57 @@ fn script_report_keeps_the_lines_that_are_fine() {
 }
 
 #[test]
+fn script_report_ends_a_command_that_rejected_its_input() {
+    // `abc` is no radius: line 1 fails and CIRCLE ends with it, so line 2 starts a fresh LINE
+    // instead of being read as CIRCLE's radius (#1528 review).
+    let mut s = Session::new();
+    let f = s.script_report("CIRCLE 5,5 abc\nLINE 0,0 10,0\n\n");
+    assert_eq!(kinds(&s), vec!["Line"], "the line, and no circle");
+    assert_eq!(f.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![1], "{f:?}");
+    assert!(s.running.is_none(), "nothing is left running");
+}
+
+#[test]
+fn script_report_takes_the_blank_line_after_a_failed_line_as_its_end() {
+    // The blank line that would have ended the failed command does not repeat it.
+    let mut s = Session::new();
+    let f = s.script_report("CIRCLE 5,5 abc\n\nLINE 0,0 10,0\n\n");
+    assert_eq!(kinds(&s), vec!["Line"], "the line, and no circle");
+    assert_eq!(f.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![1], "{f:?}");
+    assert!(s.running.is_none());
+}
+
+#[test]
+fn script_report_reports_an_unfinished_last_command() {
+    let mut s = Session::new();
+    let f = s.script_report("LINE 0,0 10,0\n\nCIRCLE 5,5\n");
+    assert_eq!(kinds(&s), vec!["Line"], "everything else is kept");
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert_eq!(f[0].0, 3, "the line the unfinished command started on");
+    assert!(f[0].1.to_string().contains("CIRCLE"), "{}", f[0].1);
+    assert!(s.running.is_none(), "the unfinished command is cancelled");
+}
+
+#[test]
+fn script_report_ends_an_open_line_at_the_end_of_the_script() {
+    // LINE without a closing blank line has drawn its segments: the end of the script ends it.
+    let mut s = Session::new();
+    assert!(s.script_report("LINE 0,0 10,0 10,10").is_empty());
+    assert_eq!(kinds(&s), vec!["Line", "Line"]);
+    assert!(s.running.is_none());
+}
+
+#[test]
+fn command_line_still_reprompts_after_bad_input() {
+    // Typed at the command line, a bad radius asks again (AutoCAD); only scripts end the command.
+    let mut s = Session::new();
+    s.cmdline("CIRCLE 5,5 abc").unwrap();
+    assert!(s.running.is_some(), "still asking for the radius");
+    s.cmdline("2").unwrap();
+    assert_eq!(kinds(&s), vec!["Circle"]);
+}
+
+#[test]
 fn script_report_is_empty_when_everything_runs() {
     let mut s = Session::new();
     assert!(s.script_report("LINE 0,0 10,0\n\nCIRCLE 5,5 2\n").is_empty());

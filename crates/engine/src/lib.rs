@@ -619,6 +619,9 @@ pub struct Session {
     pub running: Option<Running>,
     /// A script is running ([`Session::script`]); a SCRIPT command inside it is refused.
     in_script: bool,
+    /// Input a running command rejects is an error, not a re-prompt ([`Session::script_report`]):
+    /// the script line fails instead of the next line being read as the answer.
+    reject_bad_input: bool,
     /// The command suspended while a transparent command (`'ZOOM`, `'PAN`…) prompts inside it;
     /// it resumes when that command ends. One level, as in AutoCAD.
     pub suspended: Option<Running>,
@@ -694,6 +697,7 @@ impl Session {
             settings: Settings::default(),
             running: None,
             in_script: false,
+            reject_bad_input: false,
             suspended: None,
             log: Vec::new(),
             last_command: None,
@@ -1244,10 +1248,11 @@ impl Session {
                 Err(EngineError::Internal(id, m))
             }
             Err(e) => {
-                // Invalid input: report and keep prompting (AutoCAD re-prompts).
+                // Invalid input: report and keep prompting (AutoCAD re-prompts). A reporting
+                // script fails the line instead; it then ends the command.
                 self.echo(e.to_string());
                 self.running = Some(run);
-                Ok(())
+                if self.reject_bad_input { Err(e) } else { Ok(()) }
             }
         }
     }
@@ -1585,6 +1590,13 @@ impl Session {
     /// 1-based position in the script, and an empty result means the whole script ran. One bad
     /// line costs that line, not the drawing — `cadcraft-cli run` uses this so a 40-block script
     /// with one open hatch still yields the 39 blocks that are fine.
+    ///
+    /// A failed line leaves no command running: input the running command rejects (`CIRCLE 5,5
+    /// abc`) fails the line instead of re-prompting, and the command is cancelled, so the next
+    /// line starts afresh. A blank line right after a failed line is taken as that line's end
+    /// and does not repeat a command. A command still waiting for input when the script ends is
+    /// cancelled; it is reported (at the line it started on) unless it had already drawn its
+    /// part, as LINE has after its points.
     pub fn script_report(&mut self, text: &str) -> Vec<(usize, EngineError)> {
         if self.in_script {
             return vec![(
@@ -1593,19 +1605,55 @@ impl Session {
             )];
         }
         self.in_script = true;
+        self.reject_bad_input = true;
         let mut failures = Vec::new();
+        let mut after_failure = false;
+        // The line the running command started on.
+        let mut started = 0;
+        let mut last = 0;
         for (i, line) in text.lines().enumerate() {
             // Trailing spaces are inputs (Enter); other trailing whitespace (`\r`) is not.
             let line = line.trim_end_matches(|c: char| c.is_whitespace() && c != ' ');
             if line.trim_start().starts_with(';') {
                 continue;
             }
+            last = i + 1;
+            if std::mem::take(&mut after_failure) && line.trim().is_empty() {
+                continue;
+            }
+            let idle = self.running.is_none();
             if let Err(e) = self.input_line(line, true) {
                 failures.push((i + 1, e));
+                after_failure = true;
+                self.end_running_command();
+            }
+            if idle && self.running.is_some() {
+                started = i + 1;
             }
         }
+        if let Some(run) = &self.running {
+            let drew = self.state().is_ok_and(|st| !Arc::ptr_eq(&run.before, &st.doc));
+            if !drew {
+                let prompt = self.current_prompt().map(|p| p.message).unwrap_or_default();
+                let msg = format!("the script ended while {} was waiting for input ({prompt}); it was cancelled", run.id.to_ascii_uppercase());
+                failures.push((if started > 0 { started } else { last.max(1) }, EngineError::Other(msg)));
+            }
+            self.end_running_command();
+        }
+        self.reject_bad_input = false;
         self.in_script = false;
         failures
+    }
+
+    /// Cancel whatever command is running, including one a transparent command interrupted.
+    fn end_running_command(&mut self) {
+        // Bounded: each cancel ends the running command and at most resumes the one it suspended.
+        for _ in 0..4 {
+            if self.running.is_none() && !self.lisp_waiting() {
+                return;
+            }
+            self.cancel();
+        }
     }
 
     fn script_lines(&mut self, text: &str) -> Result<()> {
