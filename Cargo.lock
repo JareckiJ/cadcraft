@@ -570,6 +570,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "sys-locale",
+ "ureq",
  "windows",
  "winit",
  "winresource",

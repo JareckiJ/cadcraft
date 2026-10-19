@@ -194,7 +194,8 @@ impl CloudApp for CadApp {
         let snapshot = Arc::clone(&doc.doc);
         let dest = Destination { name: &intent.name, mime: intent.mime.as_deref() };
         let name = output_name(&intent.name, &dest.extension(), self.ui.save_format.as_str());
-        self.cloud_sent.insert(intent.uid, snapshot.clone());
+        let uid = intent.uid;
+        self.cloud_sent.insert(uid, snapshot.clone());
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -212,7 +213,7 @@ impl CloudApp for CadApp {
                 let _ = tx.send(Event::Encoded { intent, bytes });
             }).map_err(|e| {
                 self.cloud_encode = false;
-                self.cloud_sent.remove(&intent.uid);
+                self.cloud_sent.remove(&uid);
                 format!("could not start cloud encode: {e}")
             })?;
             Ok(())
@@ -256,8 +257,7 @@ impl CloudApp for CadApp {
         // CadCraft's icon set uses a typed enum with a `dim` flag rather than
         // a per-call colour. Use Open (a folder with an arrow) for folders and
         // files alike; there is no dedicated document icon.
-        let icon = if kind == EntryKind::Folder { crate::icons::Icon::Open } else { crate::icons::Icon::Open };
-        crate::icons::paint(painter, rect, icon, false);
+        crate::icons::paint(painter, rect, crate::icons::Icon::Open, false);
     }
 
     fn open_url(&self, url: &str) {

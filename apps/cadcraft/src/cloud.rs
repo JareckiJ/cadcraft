@@ -114,6 +114,9 @@ impl Worker {
                 self.post(Event::Conversation(answer));
             }
             Job::SignOut => {
+                if let Some(token) = self.client.token() {
+                    revoke_server_session(&self.base, token);
+                }
                 // The token on disk goes with the session. Leaving it would
                 // sign the user back in on the next run.
                 forget_token();
@@ -303,6 +306,23 @@ fn write_session(value: serde_json::Value) {
 fn forget_token() {
     if let Some(path) = token_path() {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+/// End the bearer session on CollabCraft before clearing the local token file.
+fn revoke_server_session(base: &str, token: &str) {
+    let url = format!("{}/auth/logout", base.trim_end_matches('/'));
+    let agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(Duration::from_secs(30)))
+        .tls_config(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build())
+        .http_status_as_error(false)
+        .build()
+        .into();
+    match agent.post(&url).header("Authorization", &format!("Bearer {token}")).send(&[]) {
+        Ok(response) if (200..300).contains(&response.status().as_u16()) => {}
+        Ok(response) => log::warn!("server sign-out returned HTTP {}", response.status()),
+        Err(e) => log::warn!("server sign-out did not complete: {e}"),
     }
 }
 

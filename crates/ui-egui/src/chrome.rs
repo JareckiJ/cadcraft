@@ -138,7 +138,9 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let available = (cloud_right - 12.0 - x).max(0.0);
             let Some(fit) = craft_ui::layout::fit_toolbar(&widths, available, 24.0, 30.0) else {
                 // Very small windows still expose the complete command row by scrolling.
-                ui.scope_builder(egui::UiBuilder::new().max_rect(row.shrink2(vec2(4.0, 0.0))), |ui| {
+                let mut scroll = row.shrink2(vec2(4.0, 0.0));
+                scroll.max.x = scroll.max.x.min((cloud_right - 12.0).max(scroll.min.x));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(scroll), |ui| {
                     egui::ScrollArea::horizontal().id_salt("toolbar_small").show(ui, |ui| {
                         ui.horizontal(|ui| {
                             for group in TOOLBAR {

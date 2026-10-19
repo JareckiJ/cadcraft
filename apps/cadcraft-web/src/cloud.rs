@@ -4,6 +4,9 @@
 //! client is async and the session rides the cookie the service set at
 //! sign-in. There is no device flow and no token file.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use cadcraft_ui_egui::cloud::{Account, CloudBackend, Event, Fault, Job, Post};
 use craft_cloud_client::{Client, Error};
 use wasm_bindgen::JsCast as _;
@@ -14,14 +17,16 @@ use wasm_bindgen_futures::spawn_local;
 pub struct Service {
     client: Client,
     ctx: egui::Context,
+    /// Updated on the UI thread each frame; read when an expired session is detected.
+    session_dirty: Rc<Cell<bool>>,
 }
 
 impl Service {
     /// Always available when the app is served by CollabCraft on the same
     /// origin. The page names the service; nothing is compiled in.
-    pub fn new(ctx: egui::Context) -> Service {
+    pub fn new(ctx: egui::Context, session_dirty: Rc<Cell<bool>>) -> Service {
         log::info!("cloud storage through {}", Client::from_page().base());
-        Service { client: Client::from_page(), ctx }
+        Service { client: Client::from_page(), ctx, session_dirty }
     }
 }
 
@@ -88,8 +93,8 @@ impl Service {
             Job::Account => {
                 let answer =
                     self.me().await.map(|me| Account { display: me.display, capabilities: me.capabilities, provider_linked: me.provider_linked });
-                if matches!(&answer, Err(Fault::Unauthenticated)) {
-                    offer_login();
+                if matches!(&answer, Err(Fault::Unauthenticated)) && !self.session_dirty.get() {
+                    offer_login(self.client.base());
                 }
                 post(Event::Account(answer));
             }
@@ -104,7 +109,7 @@ impl Service {
             Job::SignOut => {
                 // Only reload after the service confirmed logout. Reloading on a
                 // failed request would leave the cookie alive while the UI looks signed out.
-                match fetch_logout().await {
+                match fetch_logout(self.client.base()).await {
                     Ok(()) => {
                         let _ = web_sys::window().and_then(|w| w.location().reload().ok());
                     }
@@ -161,21 +166,31 @@ fn fault(e: Error) -> Fault {
     }
 }
 
+/// Auth paths against the configured CollabCraft origin.
+///
+/// Same-origin CollabCraft pages use relative `/auth/…`. A page that points at
+/// another host via `<meta name="craft-cloud-url">` must sign in and out there,
+/// not on the page host (which may have no auth routes).
+fn auth_url(base: &str, path: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.is_empty() { path.to_owned() } else { format!("{base}{path}") }
+}
+
 /// Redirect to the sign-in page when the session cookie has expired or was
 /// never set. Guard: avoids a redirect loop inside `/auth/`.
-fn offer_login() {
+fn offer_login(base: &str) {
     let Some(window) = web_sys::window() else { return };
     let Ok(path) = window.location().pathname() else { return };
     if path.starts_with("/auth/") {
         return;
     }
-    let _ = window.location().set_href("/auth/login");
+    let _ = window.location().set_href(&auth_url(base, "/auth/login"));
 }
 
 /// CollabCraft's sign-out route. Must stay in sync with the service router.
 const LOGOUT_PATH: &str = "/auth/logout";
 
-async fn fetch_logout() -> Result<(), String> {
+async fn fetch_logout(base: &str) -> Result<(), String> {
     let global = js_sys::global();
     let fetch = js_sys::Reflect::get(&global, &wasm_bindgen::JsValue::from_str("fetch"))
         .ok()
@@ -184,7 +199,8 @@ async fn fetch_logout() -> Result<(), String> {
     let init = web_sys::RequestInit::new();
     init.set_method("POST");
     init.set_credentials(web_sys::RequestCredentials::Include);
-    let req = web_sys::Request::new_with_str_and_init(LOGOUT_PATH, &init).map_err(|e| format!("{e:?}"))?;
+    let logout = auth_url(base, LOGOUT_PATH);
+    let req = web_sys::Request::new_with_str_and_init(&logout, &init).map_err(|e| format!("{e:?}"))?;
     let promised = fetch.call1(global.as_ref(), req.as_ref()).map_err(|e| format!("{e:?}"))?;
     let promised: js_sys::Promise = promised.dyn_into().map_err(|_| "not a promise".to_owned())?;
     let value = wasm_bindgen_futures::JsFuture::from(promised).await.map_err(|e| format!("{e:?}"))?;
@@ -197,13 +213,12 @@ async fn fetch_logout() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::LOGOUT_PATH;
+
     /// The logout path must match the CollabCraft route. A plain `/logout`
     /// stub was removed; the correct endpoint is `/auth/logout`.
     #[test]
     fn logout_path_is_auth_logout() {
-        let src = include_str!("cloud.rs");
-        assert!(src.contains("/auth/logout"), "fetch_logout must POST to /auth/logout");
-        assert!(!src.contains("\"/logout\""), "fetch_logout must not use the old /logout stub");
-        assert!(src.contains("cadcraft"), "web gate must recognize /cadcraft/… paths");
+        assert_eq!(LOGOUT_PATH, "/auth/logout");
     }
 }
