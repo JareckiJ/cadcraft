@@ -338,6 +338,11 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
         e.handle = d.new_handle();
         d.model.push(e);
     }
+    if let Some(name) = str_param(p, "name")
+        && crate::blockedit::has_dynamic_data(src, name)
+    {
+        cadcraft_doc::dynblock::export_dynamic_block_to_model_space(&mut d, src, name);
+    }
     let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;
     let bytes = (hooks.write)(&d, &path).map_err(|e| bad("wblock", e))?;
     #[cfg(not(target_arch = "wasm32"))]

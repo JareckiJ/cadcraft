@@ -129,6 +129,18 @@ fn define_from(s: &mut Session, src: &Drawing, name: &str) -> Result<String> {
         b.entities.push(e);
     }
     d.blocks.insert(name.clone(), Arc::new(b));
+
+    if crate::blockedit::has_authoring_elements(src) {
+        cadcraft_doc::dynblock::import_dynamic_block(&mut d, src, "*Model_Space", &name);
+    } else if crate::blockedit::has_dynamic_data(src, &name) {
+        cadcraft_doc::dynblock::import_dynamic_block(&mut d, src, &name, &name);
+    }
+    for (from, to) in &renames {
+        if crate::blockedit::has_dynamic_data(src, from) {
+            cadcraft_doc::dynblock::import_dynamic_block(&mut d, src, from, to);
+        }
+    }
+
     *s.doc_mut()? = d;
     Ok(name)
 }
