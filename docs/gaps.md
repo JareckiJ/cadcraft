@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (saved two-click selection preference) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (stable outlined fill highlights) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -27,7 +27,7 @@ do them first.
 | F1 | **[alpha blocker]** Prompt options that still print "not available yet": -ATTEDIT one-at-a-time Position, Height, Angle and Style, colour books in -ATTEDIT Color, -RENAME of materials, plot styles and viewport configurations. SPLINEDIT Join, Edit vertex Add and Elevate order (#559), PEDIT Edit vertex and the other SPLINEDIT options (#558) done: Edit vertex Tangent directions last for the PEDIT session only (LWPOLYLINE stores none). MTEXT Dynamic/Static columns done (#547). SPLINE, MTEXT and MLEADER options done (#408): SPLINE Object fits the polyline's vertices (no spline frame is kept) (STRETCH polygon, CP and WP, and fence selection done; TRIM/EXTEND, PLINE arc mode and Length, XLINE done (#397); OFFSET, ROTATE and FILLET options done earlier) | `cmd/blocks/attedit.rs`, `cmd/props/rename.rs` | Low: the most-used commands are done | 1–3 |
 | F2 | XREF editing in place and clipping: XCLIP is missing. REFEDIT, REFSET and REFCLOSE edit a block reference in place (working set, faded rest of the block, everything else locked, save or discard; #813); left: editing an xref in place (its source drawing is not written back; XOPEN opens it), picking nested references, a dimmed look for the locked drawing and a banner with Save and Discard, attribute sync of other references (ATTSYNC). XATTACH, the External References palette, -XREF (Bind/Detach/Path/Unload/Reload/Overlay), XBIND, XOPEN, overlays, relative paths and loading at open are done (#525). Unloaded state and xref-layer overrides last only for the session | `cmd/blocks/xref.rs` | Medium: xrefs can't be edited in place or clipped | 15–25 |
 | F3 | **[alpha blocker]** (dynamic-block authoring is beta) No dynamic-block authoring: parameters and actions can't be added in the Block Editor. Dynamic blocks from other files are read and their references edited (visibility, distances, stretch and move, lookups, grips). BEDIT (with the Edit Block Definition dialog, which also starts new blocks), BSAVE, BSAVEAS and BCLOSE edit a static block definition, and every reference updates; REFEDIT edits a reference in place; no authoring palettes yet | issue #185 offers help | High: standard libraries are dynamic | 40–65 |
-| F4 | Autosave leftovers: no autosave in the web build (browser storage); autosave files are DXF, not DWG; no AUDITCTL `.adt` log and no separate RECOVER mode in the file readers (SAVETIME, Drawing Recovery, AUDIT and RECOVER landed with #406) | `engine/src/autosave.rs`, `engine/src/audit.rs` | Low-medium (web users) | 3–5 |
+| F4 | Autosave leftovers: no autosave in the web build (browser storage); autosave files are DXF, not DWG; no separate RECOVER mode in the file readers (SAVETIME, Drawing Recovery, AUDIT and RECOVER landed with #406; AUDITCTL `.adt` log landed) | `engine/src/autosave.rs`, `engine/src/audit.rs` | Low-medium (web users) | 2–4 |
 | F5 | Associative arrays (ASsociative, Levels, polar ROWs, ARRAYEDIT, ARRAYCLOSE) landed (#448); left: grip editing of arrays (count/spacing grips), ARRAYPATH is not associative, ARRAYEDIT has no item deletion (CTRL+click) and no Key point base points, levels only shift Z (no 3D view) | `cmd/array.rs`, `cmd/array/edit.rs` | Medium | 4–6 |
 | F7 | Dimensions: no DIMSTYLE manager dialog; no smart DIM; DIMTFILL/DIMTFILLCLR, DIMALTTD/DIMALTTZ, DIMUPT and DIMTXTDIRECTION not modelled; jog height and break size not style settings; DIMBREAK breaks don't follow moved objects (style variables, DIMJOGGED, DIMJOGLINE, DIMBREAK, DIMEDIT, DIMINSPECT and QDIM modes done, #507) | `doc/src/tables.rs`, `cmd/annotate_dimedit.rs`, `cmd/annotate_qdim.rs` | Medium | 10–15 |
 | F8 | TOLERANCE leftovers (feature control frames landed, #420: model, our own symbol drawing, DXF, command-line prompts, explode, grips): no Geometric Tolerance dialog, no LEADER/QLEADER tolerance annotation, no in-place editing of a frame's contents | `cmd/tolerance.rs` | Low-medium (mechanical) | 2–4 |
@@ -51,9 +51,11 @@ do them first.
 
 Detail and evidence: [ui-parity.md](ui-parity.md).
 
+Outlined fill highlights now keep deterministic contour starts and directions across pointer
+repaints and GPU rebuilds, preventing the dashed preview from appearing to flicker (U6).
+
 Options ▸ Selection can now require two separate clicks for a selection window (PICKDRAG 0)
 or allow clicks and drag (2, default), saved in the user profile. Drag-only mode (1) remains unavailable.
-
 | # | Gap | User impact | Est. |
 |---|---|---|---|
 | U4 | Tab snap cycling offers the closest snap of each mode, not every candidate. Typed snap overrides (`END`, `MID` … `NON`), the Shift/Ctrl+right-click snap menu and Tab cycling landed (#393), the menu's Temporary track point in #441 | Low | 1 |
@@ -148,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Stabilized filled-object highlight dash anchors by canonicalizing boundary traversal order; renderer, CPU pointer-frame and GPU rebuild tests cover the fix (U6) |
 | 2026-10-13 | minor | Selection window gesture preference (PICKDRAG 0/2) added to Options ▸ Selection and saved in the profile (U6), with Portuguese and Ukrainian labels |
 | 2026-10-12 | minor | Object transparency (entity, ByLayer, ByBlock) is drawn: on screen (TRANSPARENCYDISPLAY, on by default), in PNG/SVG exports, and in plots when the page setup's "Plot transparency" is on (PDF alpha, PNG blending, SVG opacity; PLOTTRANSPARENCYOVERRIDE): F14 narrowed |
 | 2026-10-12 | minor | Hatch and Gradient dialog (HATCH, GRADIENT; HPDLGMODE) and Hatch Edit dialog (HATCHEDIT, right-click, double-click a hatch): F13 narrowed to Preview, Inherit Properties and boundary add/remove in edit mode |
@@ -156,6 +159,7 @@ Detail: [localization-parity.md](localization-parity.md).
 | 2026-10-12 | minor | Property-based and hostile-input tests for geometry numerics landed (deterministic xorshift generator, no new dependency; known answers at 1e6–1e7 coordinates): S6 removed |
 | 2026-10-12 | trivial | F13: HATCHEDIT refuses a bad scale or angle before editing (#724) |
 | 2026-10-12 | minor | F3: dynamic block references show their grips (distance arrows, position squares, visibility/lookup lists, per visibility state) and drag them (`blocks.reference.grips`, `blocks.reference.grip`) |
+| 2026-10-17 | minor | AUDITCTL system variable and .adt log generation in AUDIT/RECOVER landed: F4 narrowed (no .adt log removed) |
 | 2026-10-12 | minor | Multiline attributes read, drawn and saved (they lost their text before): F17 narrowed to creating them |
 | 2026-10-13 | minor | F3: opening a dynamic block's own drawing (authoring elements in model space) offers the Block Editor on `<Current Drawing>`, as AutoCAD does |
 | 2026-10-12 | minor | Edit Block Definition dialog (block list, preview, description; a new name starts a new block): F3 text updated, hours unchanged |
