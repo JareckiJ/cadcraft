@@ -476,6 +476,20 @@ fn a_waiting_routine_is_a_prompt_with_a_rubber_band() {
 }
 
 #[test]
+fn entsel_and_nentsel_show_the_pick_box_with_their_own_message() {
+    let mut s = session();
+    for call in ["(entsel)", "(nentsel)", "(nentsel \"\\nSelect second line or polyline: \")", "(entsel \"\\nPick a line: \")"] {
+        s.cmdline(call).unwrap();
+        assert!(s.picking_objects(), "{call}: {}", s.prompt_text());
+        s.cancel();
+    }
+    // A point prompt keeps the crosshair.
+    s.cmdline("(getpoint \"\\nSpecify point: \")").unwrap();
+    assert!(!s.picking_objects());
+    s.cancel();
+}
+
+#[test]
 fn a_leading_newline_ends_the_command_line_instead_of_adding_an_empty_one() {
     let mut s = session();
     let from = s.log.len();

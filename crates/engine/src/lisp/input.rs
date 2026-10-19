@@ -67,6 +67,7 @@ impl GetRequest {
         let mut p = Prompt::new(message, accept).base_opt(base);
         p.keywords = self.initget.keywords.clone();
         p.raw = true;
+        p.pick = self.kind == GetKind::EntSel && self.first.is_none();
         p
     }
 

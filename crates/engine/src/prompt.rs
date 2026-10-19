@@ -62,6 +62,10 @@ pub struct Prompt {
     /// pointer boxes.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub distance: bool,
+    /// A click answers by picking one object whatever the message says (AutoLISP `entsel`,
+    /// `nentsel`, whose message is the routine's own): the UI shows the pick box.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pick: bool,
 }
 
 /// Parse `@distance<angle` (relative polar), returning `(distance, angle in radians)`.
@@ -130,9 +134,10 @@ impl Prompt {
     }
     /// The prompt picks objects: a "Select objects" prompt, or a point prompt whose click selects
     /// one object ("Select object to offset", "Select first line"…, the commands that pick a
-    /// single object themselves). The UI shows the pick box there.
+    /// single object themselves; a leading newline is ignored), or an AutoLISP `entsel`/`nentsel`
+    /// prompt ([`Self::pick`]). The UI shows the pick box there.
     pub fn picks_objects(&self) -> bool {
-        self.accept.select || (self.accept.point && self.message.starts_with("Select"))
+        self.accept.select || self.pick || (self.accept.point && self.message.trim_start().starts_with("Select"))
     }
     /// "Specify next point or [Undo/Close] <default>:".
     pub fn display(&self) -> String {
@@ -320,6 +325,16 @@ mod tests {
         assert_eq!(parse_point("1", last), None);
         assert_eq!(parse_point("a,b", last), None);
         assert_eq!(parse_point("1,2,3,4", last), None);
+    }
+
+    #[test]
+    fn pick_box_shows_for_prompts_that_start_with_a_newline_or_are_entsel() {
+        assert!(Prompt::new("Select first line: ", Accept::POINT).picks_objects());
+        assert!(Prompt::new("\nSelect second line: ", Accept::POINT).picks_objects());
+        assert!(!Prompt::new("\nSpecify point: ", Accept::POINT).picks_objects());
+        let mut p = Prompt::new("\nPick a line: ", Accept::POINT);
+        p.pick = true;
+        assert!(p.picks_objects());
     }
 
     #[test]
