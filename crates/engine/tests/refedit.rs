@@ -293,3 +293,32 @@ fn xrefs_are_refused_with_a_message() {
     let e = s.execute("refedit", &json!({ "handle": x })).unwrap_err();
     assert!(e.to_string().contains("external reference"), "{e}");
 }
+
+#[test]
+fn refclose_synchronizes_attributes_across_references() {
+    let mut s = Session::new();
+    s.execute("attdef", &json!({"tag": "TAG1", "default": "val1", "at": [0, 1], "height": 1.0})).unwrap();
+    s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    let hs: Vec<String> = s.doc().unwrap().model.iter().map(|e| e.handle.hex()).collect();
+    s.execute("block", &json!({"name": "ATTD", "base": [0, 0], "handles": hs, "keep": "delete"})).unwrap();
+    let r1 = s.execute("insert", &json!({"name": "ATTD", "at": [10, 0], "attribs": {"TAG1": "first"}})).unwrap();
+    let r2 = s.execute("insert", &json!({"name": "ATTD", "at": [50, 0], "attribs": {"TAG1": "second"}})).unwrap();
+    let h1 = r1["handle"].as_str().unwrap();
+    let h2 = Handle::parse_hex(r2["handle"].as_str().unwrap()).unwrap();
+
+    // Start REFEDIT on r1
+    s.execute("refedit", &json!({"handle": h1})).unwrap();
+    // Add a second attribute definition TAG2
+    s.execute("attdef", &json!({"tag": "TAG2", "default": "val2", "at": [10, 5], "height": 1.0})).unwrap();
+    // Close with save: true
+    let out = s.execute("refclose", &json!({"save": true})).unwrap();
+    assert_eq!(out["saved"], true);
+    assert_eq!(out["synced"], 2);
+
+    // Both references now have TAG1 and TAG2
+    let d = s.doc().unwrap();
+    let cadcraft_engine::doc::EntityKind::Insert(ins2) = &d.entity(h2).unwrap().kind else { panic!("not an insert") };
+    assert_eq!(ins2.attribs.len(), 2);
+    assert!(ins2.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("TAG1") && a.text.value == "second"));
+    assert!(ins2.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("TAG2") && a.text.value == "val2"));
+}

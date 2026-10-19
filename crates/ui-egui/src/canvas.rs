@@ -1730,6 +1730,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     app.canvas.draw_ms = crate::now_ms() - t0;
     compare::paint(app, ui.ctx(), &painter, &xf_paper, rect);
     blockedit::paint(app, ui.ctx(), &painter, &xf_paper, rect);
+    refedit::paint(app, ui.ctx(), &painter, &xf_paper, rect);
     // Constraint bars and dynamic dimensional constraints (model space, or inside a viewport).
     if sheet.is_none() || active_vp.is_some() {
         let clip = match &active_vp {
@@ -2617,6 +2618,8 @@ pub(crate) mod tests {
 mod blockedit;
 /// The COMPARE overlay.
 mod compare;
+/// The Reference Edit banner and controls.
+mod refedit;
 
 /// Background rebuilds of the display list for a new view.
 mod rebuild;

@@ -12,7 +12,7 @@
 //! are written from [`Drawing::committed`]) and ends with the drawing it belongs to.
 //!
 //! Not yet: external references (their source drawing would have to be written back), nested
-//! references picked at a depth, annotative scale contexts and attribute synchronisation.
+//! references picked at a depth, and annotative scale contexts.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -44,7 +44,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(RefsetM::default()))),
         CommandSpec::new("refclose", "Save Reference Edits", run_refclose)
             .menu(&["Tools", "Xref and Block In-place Editing", "Save Reference Edits"])
-            .params("{option?: \"save\"|\"discard\" | save?: bool (default true)} → {block, saved, objects}")
+            .params("{option?: \"save\"|\"discard\" | save?: bool (default true)} → {block, saved, objects, synced}")
             .enabled(editing)
             .interactive(|_| Ok(Box::new(RefcloseM))),
     ]
@@ -282,7 +282,13 @@ fn close(s: &mut Session, save: bool) -> Result<Value> {
     nd.end_refedit_discard(&r);
     *s.doc_mut()? = nd;
     s.set_selection(Vec::new());
-    Ok(json!({ "block": r.block, "saved": save, "objects": objects }))
+    let had_attdefs = r.released.iter().any(|e| matches!(&e.kind, cadcraft_doc::EntityKind::AttDef(_)));
+    let synced = if save && (super::attribs::has_attdefs(s, &r.block) || had_attdefs) {
+        super::attribs::sync(s, &r.block).map(|(_, n)| n).unwrap_or(0)
+    } else {
+        0
+    };
+    Ok(json!({ "block": r.block, "saved": save, "objects": objects, "synced": synced }))
 }
 
 /// Replace the block's objects by the working set (and move the drawing objects added to it
@@ -462,8 +468,16 @@ impl Interactive for RefcloseM {
             _ => return Ok(Step::Cancel),
         };
         let r = close(s, save)?;
-        s.echo(if save { "Reference changes saved." } else { "Reference changes discarded." });
-        let _ = r;
+        if save {
+            let synced = r.get("synced").and_then(Value::as_u64).unwrap_or(0);
+            if synced > 0 {
+                s.echo(format!("Reference changes saved. {synced} reference{} synchronized.", if synced == 1 { "" } else { "s" }));
+            } else {
+                s.echo("Reference changes saved.");
+            }
+        } else {
+            s.echo("Reference changes discarded.");
+        }
         Ok(Step::Done)
     }
 }

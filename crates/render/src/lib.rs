@@ -1100,6 +1100,14 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     if b.opts.transparency {
         b.transparency = transparency(e.common.transparency, layer_transparency, ctx.block_transparency);
     }
+    if !b.plotting
+        && let Some(r) = &ctx.d.refedit
+    {
+        let is_working = if ctx.depth == 0 { r.is_working(e.handle) } else { r.is_working(ctx.top) };
+        if !is_working {
+            b.transparency = b.transparency.max(70);
+        }
+    }
     // A plot style's linetype replaces the object's.
     let lt = match b.styles.and_then(|s| s.linetype(rgb, b.named)) {
         Some(over) => over,

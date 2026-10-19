@@ -984,3 +984,42 @@ fn insert_clipping_clips_block_geometry() {
         nested_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(120.0, 200.0), 1e-4) && pts[1].near(Vec2::new(150.0, 200.0), 1e-4));
     assert!(nested_piece.is_some(), "found transformed nested piece from 120 to 150: {nested_pts:?}");
 }
+
+#[test]
+fn refedit_dims_locked_drawing_and_faded_block_copies() {
+    let mut d = Drawing::new_metric();
+    let h_work = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(10.0, 0.0, 0.0) }))
+        .unwrap();
+    let h_lock = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 5.0, 0.0), b: Vec3::new(10.0, 5.0, 0.0) }))
+        .unwrap();
+    let h_ghost = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 10.0, 0.0), b: Vec3::new(10.0, 10.0, 0.0) }))
+        .unwrap();
+
+    d.refedit = Some(cadcraft_doc::RefEdit {
+        block: "BLK".into(),
+        insert: cadcraft_doc::Handle(999),
+        insert_was_visible: true,
+        space: Space::Model,
+        to_world: cadcraft_geom::Mat3::IDENTITY,
+        items: vec![cadcraft_doc::WorkItem { copy: h_work, source: None }],
+        ghosts: vec![(h_ghost, cadcraft_doc::Handle(888))],
+        released: Vec::new(),
+    });
+
+    let list = build(&d, &Space::Model, &Options::default());
+    let p_work = list.prims.iter().find(|p| p.handle == h_work).unwrap();
+    let p_lock = list.prims.iter().find(|p| p.handle == h_lock).unwrap();
+    let p_ghost = list.prims.iter().find(|p| p.handle == h_ghost).unwrap();
+
+    assert_eq!(p_work.transparency, 0, "working set entity is not dimmed");
+    assert_eq!(p_lock.transparency, 70, "locked drawing entity outside working set is dimmed");
+    assert_eq!(p_ghost.transparency, 70, "ghost entity of block is dimmed");
+
+    // Plotting does not apply in-place edit dimming
+    let plot_list = build_plot(&d, &Space::Model, &Options::default());
+    let plot_lock = plot_list.prims.iter().find(|p| p.handle == h_lock).unwrap();
+    assert_eq!(plot_lock.transparency, 0, "plotting does not dim locked drawing entities");
+}
