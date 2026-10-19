@@ -86,7 +86,7 @@ each language, which needs humans. Translations parallelise fully once the catal
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | Brazilian Portuguese: row brought up to date (it still read 0%); native-speaker terminology pass on 42 rows (Thaw Layer, Snap type, Revolve fixed; snap, viewport, grip and multiline wording made consistent) |
+| 2026-10-19 | minor | Brazilian Portuguese: row brought up to date (it still read 0%); native-speaker terminology pass on 50 rows (Thaw Layer, Snap type, Revolve fixed; snap, viewport, grip, offset, layer on/off and multiline wording made consistent with Brazilian usage) |
 | 2026-10-15 | minor | Greek (`el`) catalog: 1,330 rows, context/plural/locale/font tests; review pending |
 | 2026-10-14 | minor | Swedish completed: 95 rows for strings added since (Hatch and Gradient dialog, Block Editor, REFEDIT, multileader editing, Options selection settings, MTEXT editor, recent files); 1,330 rows, every key of the Ukrainian reference catalog |
 | 2026-10-18 | minor | Turkish added: 1,330 rows (the existing catalog union), single count form, four menu headings, prompt keywords kept in English; locale/preferences/menu/live-switch/dialog/font tests; no gaps in the marked UI literals; AI-assisted, the running app reviewed by a native speaker |

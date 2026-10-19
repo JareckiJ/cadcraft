@@ -466,7 +466,7 @@
 	Layer Delete	Excluir camada
 	Layer Match	Corresponder camada
 	Layer Merge	Mesclar camadas
-	Layer Off	Desativar camada
+	Layer Off	Desligar camada
 	Layer Properties	Propriedades da camada
 	Layer Properties Manager	Gerenciador de propriedades de camadas
 	Layer Properties Manager — current viewport	Gerenciador de propriedades de camadas — viewport atual
@@ -605,7 +605,7 @@
 	Object type:	Tipo de objeto:
 	Oblique	Oblíqua
 	Off	Desativado
-	Offset	Deslocar
+	Offset	Offset
 	On	Ativado
 	On/Off	Ativar/desativar
 	One of the Crafting Apps by the ArtCraft team and community.	Um dos Crafting Apps da equipe e da comunidade ArtCraft.
@@ -729,7 +729,7 @@
 	Tolerance...	Tolerância...
 	Track orthogonally only	Rastrear somente ortogonalmente
 	Track using all polar angle settings	Rastrear usando todas as configurações de ângulo polar
-	Turn On Layer	Ativar camada
+	Turn On Layer	Ligar camada
 	Turned off, a right-click while a command runs always opens the shortcut menu.	Se desativado, um clique direito enquanto um comando está em execução sempre abre o menu de atalho.
 	Units Conversion	Conversão de unidades
 	Unload	Descarregar
@@ -896,7 +896,7 @@
 	Select object to divide	Selecione o objeto a dividir
 	Select object to extend or shift-select to trim	Selecione o objeto a estender ou use Shift para aparar
 	Select object to measure	Selecione o objeto a medir
-	Select object to offset	Selecione o objeto a deslocar
+	Select object to offset	Selecione o objeto para o offset
 	Select object to trim or shift-select to extend	Selecione o objeto a aparar ou use Shift para estender
 	Select objects	Selecione objetos
 	Select objects (crossing window first corner)	Selecione objetos (primeiro canto da janela de captura)
@@ -1021,8 +1021,8 @@
 	Specify new location for marked vertex	Especifique a nova posição do vértice marcado
 	Specify new width for all segments	Especifique a nova largura para todos os segmentos
 	Specify next point	Especifique o próximo ponto
-	Specify offset distance	Especifique a distância de deslocamento
-	Specify offset distance or	Especifique a distância de deslocamento ou
+	Specify offset distance	Especifique a distância de offset
+	Specify offset distance or	Especifique a distância de offset ou
 	Specify opposite corner	Especifique o canto oposto
 	Specify other corner point	Especifique o outro ponto de canto
 	Specify other endpoint of axis	Especifique a outra extremidade do eixo
@@ -1030,7 +1030,7 @@
 	Specify point	Especifique o ponto
 	Specify point on object for first tangent of circle	Especifique o ponto no objeto para a primeira tangente do círculo
 	Specify point on object for second tangent of circle	Especifique o ponto no objeto para a segunda tangente do círculo
-	Specify point on side to offset	Especifique um ponto no lado do deslocamento
+	Specify point on side to offset	Especifique um ponto no lado do offset
 	Specify radius of arc	Especifique o raio do arco
 	Specify radius of circle	Especifique o raio do círculo
 	Specify rotation angle	Especifique o ângulo de rotação
@@ -1052,7 +1052,7 @@
 	Specify second point on circle: _tan to	Especifique o segundo ponto no círculo: _tan para
 	Specify second point or <use first point as displacement>	Especifique o segundo ponto ou <usar o primeiro ponto como deslocamento>
 	Specify second source point	Especifique o segundo ponto de origem
-	Specify side to offset	Especifique o lado do deslocamento
+	Specify side to offset	Especifique o lado do offset
 	Specify start angle	Especifique o ângulo inicial
 	Specify start point	Especifique o ponto inicial
 	Specify start point of arc	Especifique o ponto inicial do arco
@@ -1128,8 +1128,8 @@
 	Transparency	Transparência
 	Trim	Aparar
 	True Color	Cor verdadeira
-	Turn All Layers On	Ativar todas as camadas
-	Turn Off Layer	Desativar camada
+	Turn All Layers On	Ligar todas as camadas
+	Turn Off Layer	Desligar camada
 	Turn Quick Properties off (QPMODE)	Desativar propriedades rápidas (QPMODE)
 	Type	Tipo
 	Type a command	Digite um comando

@@ -53,7 +53,8 @@ for `pt`, and the catalog's accented letters (`Á Â Í Ó Ú à á â ã ç é 
 bundled fonts. The original catalog was contributed by @WladmirJunior; the remaining rows were completed
 by @RicSchonfelder with AI assistance. A native-speaker terminology pass by @ffishman (2026-10-19) fixed
 mistranslations (Thaw Layer, Snap type, Revolve) and made the CAD vocabulary consistent with Brazilian
-usage: *snap* for every snap mode, *viewport* and *grip* kept as loanwords, *Explodir*, *Multilinha*.
+usage: *snap* for every snap mode, *viewport*, *grip* and *offset* kept as loanwords (Brazilian university
+AutoCAD handouts keep these names in English), *Ligar/Desligar camada*, *Explodir*, *Multilinha*.
 
 Hungarian has **1,326 rows**: 1,320 ordinary labels, four contextual menu headings, and two
 single-form count templates. It covers the reference catalog and every marked UI literal,
