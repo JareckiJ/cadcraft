@@ -836,7 +836,6 @@ fn run_dimstyle_delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(dimstyles_json(d))
 }
 
-/// Per-dimension style overrides (DIMOVERRIDE): merge fields, or `clear` them.
 /// A dimension's text height, arrow size, overall scale (DIMSCALE) and precision as Properties
 /// sets them: per-dimension overrides, as in AutoCAD's Properties palette.
 fn dim_overrides(p: &Value) -> Result<serde_json::Map<String, Value>> {
@@ -857,6 +856,7 @@ fn dim_overrides(p: &Value) -> Result<serde_json::Map<String, Value>> {
     Ok(o)
 }
 
+/// Per-dimension style overrides (DIMOVERRIDE): merge fields, or `clear` them.
 pub(super) fn dim_override(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     let clear = bool_or(p, "clear", false);
