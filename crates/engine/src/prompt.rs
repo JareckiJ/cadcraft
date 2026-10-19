@@ -236,9 +236,10 @@ impl PointInput {
 }
 
 impl From<Vec2> for PointInput {
-    /// Wrap a bare coordinate as a pick: the form the UI gives when it hands over a click.
+    /// Wrap a bare coordinate as an absolute point: scripts, the API and tests hand over coordinates,
+    /// not picks. The UI uses [`PointInput::Picked`] explicitly when the user clicks the canvas.
     fn from(p: Vec2) -> Self {
-        PointInput::Picked(p)
+        PointInput::Absolute(p)
     }
 }
 
