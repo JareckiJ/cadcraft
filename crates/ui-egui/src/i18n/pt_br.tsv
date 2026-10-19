@@ -99,15 +99,15 @@
 	Break	Quebrar
 	Break At Point	Quebrar no ponto
 	Bring Above Objects	Trazer acima dos objetos
-	Bring Annotations to Front	Trazer anotações para frente
+	Bring Annotations to Front	Trazer anotações para a frente
 	Bring to Front	Trazer para a frente
-	Bulleted list	Lista com marcas
+	Bulleted list	Lista com marcadores
 	ByBlock	PorBloco
 	ByColor	PorCor
 	ByLayer	PorCamada
 	CADCraft	CADCraft
 	CADCraft Help	Ajuda do CADCraft
-	CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts.	O CADCraft mantém estas preferências, modos de referência a objetos e alternâncias de desenho na sua conta de usuário e as restaura ao iniciar.
+	CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts.	O CADCraft mantém estas preferências, modos de snap a objetos e alternâncias de desenho na sua conta de usuário e as restaura ao iniciar.
 	Cancel	Cancelar
 	Cartesian (x, y)	Cartesiano (x, y)
 	Center	Centro
@@ -132,7 +132,7 @@
 	Clear Command History	Limpar histórico de comandos
 	Clear History	Limpar histórico
 	Clip	Recortar
-	Clip Viewport	Recortar janela gráfica
+	Clip Viewport	Recortar viewport
 	Clipboard	Área de transferência
 	Close	Fechar
 	Close All	Fechar tudo
@@ -149,7 +149,7 @@
 	Color 9	Cor 9
 	Color Index	Índice de cor
 	Color...	Cor...
-	Command Aliases	Sinônimos de comandos
+	Command Aliases	Aliases de comandos
 	Command History	Histórico de comandos
 	Command Line	Linha de comando
 	Command Line History Lines	Linhas do histórico da linha de comando
@@ -330,7 +330,7 @@
 	Erase	Apagar
 	Evaluate	Avaliar
 	Exclude from new selection set	Excluir do novo conjunto de seleção
-	Explode	Decompor
+	Explode	Explodir
 	Export	Exportar
 	Export Table	Exportar tabela
 	Export to PDF...	Exportar para PDF...
@@ -381,15 +381,15 @@
 	Grid (F7)	Grade (F7)
 	Grid Display	Exibição da grade
 	Grid On (F7)	Grade ativada (F7)
-	Grid snap	Forçar cursor à grade
+	Grid snap	Snap à grade
 	Grid spacing	Espaçamento da grade
-	Grip Edit	Editar com pinça
-	Grip Mirror	Espelhar por pegador
-	Grip Option	Opção de pinça
-	Grip Rotate	Girar por pegador
-	Grip Scale	Escalar por pegador
-	Grip Stretch	Esticar por pegador
-	Grip size	Tamanho da pinça
+	Grip Edit	Editar por grip
+	Grip Mirror	Espelhar por grip
+	Grip Option	Opção de grip
+	Grip Rotate	Girar por grip
+	Grip Scale	Escalar por grip
+	Grip Stretch	Esticar por grip
+	Grip size	Tamanho do grip
 	Group	Grupo
 	Group Edit	Editar grupo
 	Group Options	Opções de grupo
@@ -413,7 +413,7 @@
 	Hold Shift to add to the selection	Mantenha Shift pressionado para adicionar à seleção
 	Home	Vista inicial
 	Horizontal	Horizontal
-	HorizontalDistance	DistânciaHorizontal
+	HorizontalDistance	Distância horizontal
 	How to apply:	Como aplicar:
 	ID Point	Coordenadas do ponto
 	Import	Importar
@@ -451,7 +451,7 @@
 	Isolate Objects	Isolar objetos
 	Isometric Drafting	Desenho isométrico
 	Isometric Plane	Plano isométrico
-	Isometric snap	Forçar cursor isométrico
+	Isometric snap	Snap isométrico
 	Jogged	Com desvio
 	Jogged Linear	Linear com desvio
 	Join	Unir
@@ -480,7 +480,7 @@
 	Layers displayed: {shown} of {total}.   Current layer: {layer}	Camadas exibidas: {shown} de {total}.   Camada atual: {layer}
 	Layout	Layout
 	Layout list	Lista de layouts
-	Layout paper	Papel da apresentação
+	Layout paper	Papel do layout
 	Leader	Linha de chamada
 	Leaders Only	Somente linhas de chamada
 	Left	Esquerda
@@ -500,7 +500,7 @@
 	Linetype Scale	Escala do tipo de linha
 	Linetype scale	Escala do tipo de linha
 	Loaded	Carregada
-	Lock viewport	Bloquear janela gráfica
+	Lock viewport	Bloquear viewport
 	Ltscale	Escala do tipo de linha
 	Linetype...	Tipo de linha...
 	Lineweight	Espessura de linha
@@ -552,10 +552,10 @@
 	Multileader Style...	Estilo de linha de chamada múltipla...
 	Multileader style	Estilo de linha de chamada múltipla
 	Multiline	Multilinha
-	Multiline Style...	Estilo de linha múltipla...
+	Multiline Style...	Estilo de multilinha...
 	Multiline Text	Texto multilinha
 	Multiline Text...	Texto multilinha...
-	Multiline...	Linha múltipla...
+	Multiline...	Multilinha...
 	Multiple	Múltiplo
 	Multiple Point	Ponto múltiplo
 	My	Minhas
@@ -599,9 +599,9 @@
 	Object Snap On (F3)	Snap a objetos ativado (F3)
 	Object Snap Tracking	Rastreamento de snap a objetos
 	Object Snap Tracking (F11)	Rastreamento de snap a objetos (F11)
-	Object Snap Tracking Settings	Configurações de rastreamento de referência a objetos
-	Object snap aperture	Abertura de referência a objetos
-	Object snap marker size	Tamanho do marcador de referência a objetos
+	Object Snap Tracking Settings	Configurações de rastreamento de snap a objetos
+	Object snap aperture	Abertura do snap a objetos
+	Object snap marker size	Tamanho do marcador de snap a objetos
 	Object type:	Tipo de objeto:
 	Oblique	Oblíqua
 	Off	Desativado
@@ -628,7 +628,7 @@
 	Ortho Mode (F8)	Modo orto (F8)
 	Osnap Settings...	Configurações de snap a objetos...
 	Out	Afastar
-	Over-constrained	Sobre-restrito
+	Over-constrained	Sobrerrestrito
 	Overlay	Sobreposição
 	Override	Substituir
 	PAPER	PAPEL
@@ -672,8 +672,8 @@
 	New style	Novo estilo
 	Polar angle measurement	Medição de ângulo polar
 	Polar distance	Distância polar
-	PolarSnap	Forçar cursor polar
-	Polygonal Viewport	Janela gráfica poligonal
+	PolarSnap	Snap polar
+	Polygonal Viewport	Viewport poligonal
 	Polyline Edit	Editar polilinha
 	Previous Change	Alteração anterior
 	Profiles	Perfis
@@ -681,7 +681,7 @@
 	Recalculate Table Formulas	Recalcular fórmulas da tabela
 	Recent Commands	Comandos recentes
 	Recent Input	Entradas recentes
-	Rectangular snap	Forçar cursor retangular
+	Rectangular snap	Snap retangular
 	Reference Manager	Gerenciador de referências
 	Reference Name	Nome da referência
 	References: {n}	Referências: {n}
@@ -703,7 +703,7 @@
 	Selection	Seleção
 	Send Hatches to Back	Enviar hachuras para trás
 	Send Under Objects	Enviar sob os objetos
-	Set Current Viewport	Definir janela gráfica atual
+	Set Current Viewport	Definir viewport atual
 	Set Table Cell Style	Definir estilo da célula da tabela
 	Settings...	Configurações...
 	Show Annotative Objects	Mostrar objetos anotativos
@@ -711,9 +711,9 @@
 	Show and hide the tools of this category	Mostrar e ocultar as ferramentas desta categoria
 	Show command prompting near the crosshairs	Mostrar o prompt de comando perto da mira
 	Show in Tool Sets	Mostrar em conjuntos de ferramentas
-	Snap Overrides	Substituições de referência a objetos
-	Snap type	Tipo de referência a objetos
-	Snap, grid, polar tracking and Dynamic Input:	Referência a objetos, grade, rastreamento polar e entrada dinâmica:
+	Snap Overrides	Substituições de snap a objetos
+	Snap type	Tipo de snap
+	Snap, grid, polar tracking and Dynamic Input:	Snap, grade, rastreamento polar e entrada dinâmica:
 	Solid Editing	Edição de sólidos
 	Spline Edit	Editar spline
 	Stretch Vertex	Esticar vértice
@@ -722,19 +722,19 @@
 	Table Cell Style	Estilo da célula da tabela
 	Temporary track point	Ponto de rastreamento temporário
 	Text Objects Only	Somente objetos de texto
-	Thaw Layer	Ativar camada
-	The aperture is how near the cursor must come to a point for an object snap to find it.	A abertura é a distância a que o cursor deve chegar de um ponto para que uma referência a objetos o encontre.
+	Thaw Layer	Descongelar camada
+	The aperture is how near the cursor must come to a point for an object snap to find it.	A abertura é o quanto o cursor precisa se aproximar de um ponto para que o snap a objetos o encontre.
 	Time-sensitive right-click: a quick click is Enter, holding opens the menu	Clique direito sensível ao tempo: um clique rápido é Enter; mantê-lo pressionado abre o menu
 	To	A
 	Tolerance...	Tolerância...
 	Track orthogonally only	Rastrear somente ortogonalmente
 	Track using all polar angle settings	Rastrear usando todas as configurações de ângulo polar
-	Turn On Layer	Ligar camada
+	Turn On Layer	Ativar camada
 	Turned off, a right-click while a command runs always opens the shortcut menu.	Se desativado, um clique direito enquanto um comando está em execução sempre abre o menu de atalho.
 	Units Conversion	Conversão de unidades
 	Unload	Descarregar
 	Unloaded	Descarregada
-	Unlock viewport	Desbloquear janela gráfica
+	Unlock viewport	Desbloquear viewport
 	Unreferenced	Sem referência
 	Unresolved	Não resolvida
 	Update Data Links	Atualizar vínculos de dados
@@ -827,7 +827,7 @@
 	Reverse	Inverter
 	Reverse the order	Inverter a ordem
 	Revision Cloud	Nuvem de revisão
-	Revolve	Revolucionar
+	Revolve	Revolver
 	Right	Direita
 	Rotate	Girar
 	Rotation	Rotação
@@ -1165,14 +1165,14 @@
 	Version 2018	Versão 2018
 	Version {version}	Versão {version}
 	Vertical	Vertical
-	VerticalDistance	DistânciaVertical
+	VerticalDistance	Distância vertical
 	View	Exibir
 	ViewCube	ViewCube
 	Viewport	Viewport
 	Viewport Layer Freeze	Congelamento de camada no viewport
 	Viewport Properties	Propriedades do viewport
-	Viewport is locked	A janela gráfica está bloqueada
-	Viewport scale	Escala da janela gráfica
+	Viewport is locked	O viewport está bloqueado
+	Viewport scale	Escala do viewport
 	Viewport {id}	Viewport {id}
 	Viewports	Viewports
 	Volume	Volume
@@ -1233,12 +1233,12 @@
 	3D mouse disconnected	Mouse 3D desconectado
 	3D mouse input could not be started	Não foi possível iniciar a entrada do mouse 3D
 	Enable 3D mouse navigation	Ativar navegação com mouse 3D
-	Pan sensitivity	Sensibilidade de deslocamento
+	Pan sensitivity	Sensibilidade do pan
 	Zoom sensitivity	Sensibilidade do zoom
 	Reverse zoom direction	Inverter a direção do zoom
 	Calibrate	Calibrar
-	Move sideways to pan; push/pull or twist to zoom.	Mova lateralmente para deslocar; empurre/puxe ou gire para ampliar.
-	Left device button: zoom extents. Right device button: calibrate.	Botão esquerdo do dispositivo: zoom à extensão. Botão direito do dispositivo: calibrar.
+	Move sideways to pan; push/pull or twist to zoom.	Mova lateralmente para fazer pan; empurre/puxe ou gire para aplicar zoom.
+	Left device button: zoom extents. Right device button: calibrate.	Botão esquerdo do dispositivo: zoom extensão. Botão direito do dispositivo: calibrar.
 	Hatch Pattern	Padrão de hachura
 	Search for pattern	Pesquisar padrão
 	Query Texts	Consultar textos
