@@ -298,3 +298,35 @@ fn tk_axis_switches_near_the_anchor_and_locks_beyond_the_aperture() {
     assert_eq!(tk_axis(&s), Some(Some(true)), "locked: far cursors do not switch it");
 }
 
+#[test]
+fn tk_axis_flips_from_the_axis_used_even_on_a_zero_length_segment() {
+    // A pick that lands on the anchor has no displacement to read an axis from. The flip must
+    // come from the axis the segment actually used, or a zero-length leg misaligns the run.
+    let mut s = Session::new();
+    setvar(&mut s, "OSMODE", json!(0));
+    s.cmdline("line 0,0 tk").unwrap();
+    s.cmdline("10,10").unwrap();
+    assert_eq!(tk_axis(&s), Some(None));
+    // A horizontal leg: the next one is vertical.
+    s.cmdline("20,10").unwrap();
+    assert_eq!(tk_axis(&s), Some(Some(false)), "horizontal used, next is vertical");
+    // A pick back on the anchor: zero length, but the leg still used the vertical axis,
+    // so the run must flip to horizontal rather than hold on the displacement (0, 0).
+    s.cmdline("20,10").unwrap();
+    assert_eq!(tk_axis(&s), Some(Some(true)), "zero-length vertical leg must still flip");
+}
+
+#[test]
+fn tk_axis_survives_a_non_finite_cursor() {
+    // A non-finite cursor has no axis to read; the pending run must be left untouched.
+    let mut s = Session::new();
+    setvar(&mut s, "OSMODE", json!(0));
+    s.cmdline("line 0,0 tk").unwrap();
+    s.cmdline("10,10").unwrap();
+    assert_eq!(tk_axis(&s), Some(None), "no axis after the first pick");
+    let q = query(v(10.0, 10.0));
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        s.snap_cursor(v(bad, bad), &q);
+        assert_eq!(tk_axis(&s), Some(None), "a non-finite cursor must not set the axis ({bad})");
+    }
+}

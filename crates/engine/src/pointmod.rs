@@ -336,20 +336,21 @@ impl Session {
                 }
                 Frame::Track { last, axis } => {
                     // The first pick sits where it was taken. Every later point lies on the axis
-                    // the run alternates to, on the cursor's side.
+                    // the run alternates to, on the cursor's side. The flip is taken from the axis
+                    // the segment actually used, not from the placed displacement: a zero-length
+                    // segment (a typed distance of 0, or a pick on the anchor) has no displacement
+                    // to read an axis from.
+                    let mut used_h = None;
                     let q = match last {
                         None => p,
                         Some(l) => {
                             let (dx, dy) = (p.x - l.x, p.y - l.y);
                             let horizontal = axis.unwrap_or_else(|| dx.abs() >= dy.abs());
+                            used_h = Some(horizontal);
                             if horizontal { Vec2::new(p.x, l.y) } else { Vec2::new(l.x, p.y) }
                         }
                     };
-                    let new_axis = last.map(|l| {
-                        let (dx, dy) = (q.x - l.x, q.y - l.y);
-                        let current_h = dx.abs() >= dy.abs();
-                        !current_h
-                    });
+                    let new_axis = used_h.map(|h| !h);
                     // TK never carries a `+` marker (unlike TT).
                     self.tracking.clear();
                     self.point_mods.push(Frame::Track { last: Some(q), axis: new_axis });

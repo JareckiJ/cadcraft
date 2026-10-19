@@ -783,7 +783,10 @@ impl crate::Session {
         // TK axis switching requires the cursor to be near the anchor.
         // Once dragged away, the axis is locked.
         let pixel_size = self.pixel_size();
-        if let Some(crate::pointmod::Frame::Track { last: Some(l), axis }) = self.point_mods.last_mut() {
+        // A non-finite cursor has no axis to read; leave the pending run untouched.
+        if raw.is_finite()
+            && let Some(crate::pointmod::Frame::Track { last: Some(l), axis }) = self.point_mods.last_mut()
+        {
             let dist = raw.dist(*l) / pixel_size;
             let dx = (raw.x - l.x).abs() / pixel_size;
             let dy = (raw.y - l.y).abs() / pixel_size;
