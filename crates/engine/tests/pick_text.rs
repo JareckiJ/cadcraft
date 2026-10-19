@@ -3,7 +3,7 @@
 
 use cadcraft_engine::Session;
 use cadcraft_engine::doc::{EntityKind, Handle, Space};
-use cadcraft_engine::geom::{Bounds2, Vec2};
+use cadcraft_engine::geom::{Bounds2, Vec2, Vec3};
 use cadcraft_engine::render;
 use cadcraft_engine::select::pick;
 use serde_json::json;
@@ -109,6 +109,9 @@ fn a_dimension_drawn_from_its_block_is_picked_on_the_block_text() {
     d.model.modify(dim, |e| {
         if let EntityKind::Dimension(dm) = &mut e.kind {
             dm.block = Some("*D1".into());
+            // Moved text saves with text_mid at the moved position.
+            dm.text_mid = Vec3::new(400.0, 400.0, 0.0);
+            dm.user_text_pos = true;
         }
     });
     let d = s.doc().unwrap();

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use cadcraft_geom::{Arc, Bounds2, EPS, Polyline, Vec2, bulge_to_arc};
+use cadcraft_geom::{Arc, Bounds2, EPS, Polyline, Vec2, Vec3, bulge_to_arc};
 
 use crate::{Drawing, Entity, EntityKind, LwPolyline, Prim};
 
@@ -41,6 +41,49 @@ fn in_block_visible(d: &Drawing, e: &Entity) -> bool {
     !matches!(e.kind, EntityKind::AttDef(_))
         && e.common.visible
         && (e.common.layer == "0" || d.layer(&e.common.layer).is_none_or(crate::Layer::visible))
+}
+
+/// A *D block caches the dimension's picture. When the picture contains none of the dimension's
+/// anchor points it is stale (the measured geometry moved): regenerate from the defpoints
+/// instead. Anchor points are per kind — some authors leave the defpoint of an ordinate
+/// dimension at the UCS origin, and the centre point of a radius dimension can sit outside
+/// the picture; any anchor inside counts as fresh.
+pub fn dim_block_fresh(d: &Drawing, blk: &crate::Block, dm: &crate::Dimension) -> bool {
+    dim_block_fresh_at(d, blk, dm, 0)
+}
+
+/// [`dim_block_fresh`] at a block-nesting depth: the picture measures one level deeper, so a
+/// dimension whose cached block references itself runs into [`MAX_BLOCK_DEPTH`] instead of
+/// recursing without end.
+fn dim_block_fresh_at(d: &Drawing, blk: &crate::Block, dm: &crate::Dimension, depth: usize) -> bool {
+    let mut bb = Bounds2::EMPTY;
+    for be in blk.entities.iter() {
+        // As drawn: invisible entities are skipped; block content measures one level down (no
+        // top-level annotation scaling).
+        if d.is_visible(be) {
+            bb = bb.union(&entity_bounds(d, be, depth + 1));
+        }
+    }
+    // Rays and xlines carry no bounds: a picture of only those can't be proven stale, keep it.
+    if bb.is_empty() {
+        return true;
+    }
+    let tol = 1e-3 * (bb.max.x - bb.min.x).max(bb.max.y - bb.min.y).max(1.0);
+    let inside = |p: Vec3| p.x >= bb.min.x - tol && p.x <= bb.max.x + tol && p.y >= bb.min.y - tol && p.y <= bb.max.y + tol;
+    // Only the points a kind really measures with (the Dimension arm below): unused slots read
+    // as (0,0,0) and must not vouch, and an ordinate defpt is the UCS origin by convention, so
+    // it says nothing about movement either.
+    use crate::DimKind as K;
+    let anchors: &[Vec3] = match dm.kind {
+        K::Linear { .. } | K::Aligned | K::ArcLength => &[dm.defpt, dm.p13, dm.p14],
+        K::Radius | K::Diameter => &[dm.defpt, dm.p15],
+        K::Angular3P => &[dm.defpt, dm.p13, dm.p14, dm.p15],
+        K::Angular => &[dm.defpt, dm.p13, dm.p14, dm.p15, dm.p16],
+        K::Ordinate { .. } => &[dm.p13, dm.p14],
+    };
+    // text_mid counts only when the user placed the text; otherwise it derives from the
+    // defpoints and a stale saved value would vouch for a picture they have left.
+    anchors.iter().any(|p| inside(*p)) || (dm.user_text_pos && inside(dm.text_mid))
 }
 
 /// A text that draws no glyph (empty, or only blanks and non-breaking spaces) takes no room.
@@ -162,8 +205,11 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
                 })
                 .unwrap_or(0.18 * d.header.f64("DIMSCALE", 1.0).max(1e-9));
             b = b.expand(th * 2.5);
+            // A stale cached picture is regenerated from the defpoints, not drawn: its bounds
+            // don't count either.
             if let Some(blk) = dm.block.as_ref().and_then(|n| d.block(n))
                 && depth < MAX_BLOCK_DEPTH
+                && dim_block_fresh_at(d, blk, dm, depth)
             {
                 for be in blk.entities.iter().filter(|be| in_block_visible(d, be)) {
                     b = b.union(&bounds_in(d, be, depth + 1, blocks));
@@ -295,6 +341,111 @@ mod tests {
 
     fn bounds(kind: EntityKind) -> Bounds2 {
         entity_bounds(&Drawing::default(), &Entity::new(crate::Handle(1), kind), 0)
+    }
+
+    #[test]
+    fn stale_dimension_block_stays_out_of_extents() {
+        // A *D block whose picture sits 1000 units from every anchor is stale: the dimension is
+        // regenerated from its defpoints and the cached picture's bounds don't count.
+        let mut d = Drawing::default();
+        let mut blk = crate::Block::new("*D1");
+        blk.entities
+            .push(Entity::new(crate::Handle(2), EntityKind::Line(crate::Line { a: Vec3::new(1000.0, 0.0, 0.0), b: Vec3::new(1010.0, 0.0, 0.0) })));
+        d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+        let dm = crate::Dimension {
+            kind: crate::DimKind::Linear { rotation: 0.0 },
+            defpt: Vec3::new(0.0, 2.0, 0.0),
+            text_mid: Vec3::ZERO,
+            p13: Vec3::ZERO,
+            p14: Vec3::new(10.0, 0.0, 0.0),
+            p15: Vec3::ZERO,
+            p16: Vec3::ZERO,
+            text: String::new(),
+            style: "Standard".into(),
+            measurement: 0.0,
+            text_rotation: 0.0,
+            user_text_pos: false,
+            block: Some("*D1".into()),
+            overrides: Default::default(),
+            assoc: Vec::new(),
+            marks: Default::default(),
+        };
+        let b = entity_bounds(&d, &Entity::new(crate::Handle(1), EntityKind::Dimension(dm)), 0);
+        assert!(b.max.x < 100.0, "stale block counted in extents: {b:?}");
+    }
+
+    fn dim(kind: crate::DimKind, defpt: Vec3, p13: Vec3, p14: Vec3) -> crate::Dimension {
+        crate::Dimension {
+            kind,
+            defpt,
+            text_mid: Vec3::ZERO,
+            p13,
+            p14,
+            p15: Vec3::ZERO,
+            p16: Vec3::ZERO,
+            text: String::new(),
+            style: "Standard".into(),
+            measurement: 0.0,
+            text_rotation: 0.0,
+            user_text_pos: false,
+            block: Some("*D1".into()),
+            overrides: Default::default(),
+            assoc: Vec::new(),
+            marks: Default::default(),
+        }
+    }
+
+    fn with_block(d: &mut Drawing, entities: Vec<Entity>) {
+        let mut blk = crate::Block::new("*D1");
+        for e in entities {
+            blk.entities.push(e);
+        }
+        d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    }
+
+    fn line(x0: f64, y0: f64, x1: f64) -> Entity {
+        Entity::new(crate::Handle(2), EntityKind::Line(crate::Line { a: Vec3::new(x0, y0, 0.0), b: Vec3::new(x1, y0, 0.0) }))
+    }
+
+    #[test]
+    fn self_referencing_dimension_block_terminates() {
+        // Hostile file: a *D block holding a dimension that caches its picture in the same block.
+        // The freshness check must run into MAX_BLOCK_DEPTH, not recurse without end.
+        let mut d = Drawing::default();
+        let nested = Entity::new(
+            crate::Handle(3),
+            EntityKind::Dimension(dim(crate::DimKind::Linear { rotation: 0.0 }, Vec3::new(0.0, 2.0, 0.0), Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0))),
+        );
+        with_block(&mut d, vec![line(0.0, 2.0, 10.0), nested]);
+        let dm = dim(crate::DimKind::Linear { rotation: 0.0 }, Vec3::new(0.0, 2.0, 0.0), Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+        let b = entity_bounds(&d, &Entity::new(crate::Handle(1), EntityKind::Dimension(dm)), 0);
+        assert!(!b.is_empty());
+    }
+
+    #[test]
+    fn ordinate_origin_defpt_does_not_vouch_for_a_stranded_picture() {
+        // An ordinate defpt is the UCS origin by convention: a picture left near the origin while
+        // the measured points (p13/p14) moved away is stale, origin or not.
+        let mut d = Drawing::default();
+        with_block(&mut d, vec![line(0.0, 0.0, 10.0)]);
+        let dm = dim(crate::DimKind::Ordinate { x_type: true }, Vec3::ZERO, Vec3::new(500.0, 500.0, 0.0), Vec3::new(500.0, 510.0, 0.0));
+        let b = entity_bounds(&d, &Entity::new(crate::Handle(1), EntityKind::Dimension(dm)), 0);
+        assert!(b.min.x > 100.0, "origin-stranded block counted in extents: {b:?}");
+    }
+
+    #[test]
+    fn text_mid_vouches_only_when_user_placed() {
+        // user_text_pos false: text_mid derives from the defpoints, so a stale value inside the
+        // old picture must not keep it; true: the text was placed there, the picture is fresh.
+        for (user_text_pos, want_fresh) in [(false, false), (true, true)] {
+            let mut d = Drawing::default();
+            with_block(&mut d, vec![line(1000.0, 0.0, 1010.0)]);
+            let mut dm = dim(crate::DimKind::Linear { rotation: 0.0 }, Vec3::new(0.0, 2.0, 0.0), Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+            dm.text_mid = Vec3::new(1000.0, 0.0, 0.0);
+            dm.user_text_pos = user_text_pos;
+            let b = entity_bounds(&d, &Entity::new(crate::Handle(1), EntityKind::Dimension(dm)), 0);
+            assert_eq!(b.max.x >= 1000.0, want_fresh, "user_text_pos {user_text_pos}: {b:?}");
+        }
     }
 
     #[test]

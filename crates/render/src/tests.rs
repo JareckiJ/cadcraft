@@ -395,6 +395,110 @@ fn dimension_colours_by_role() {
 }
 
 #[test]
+fn stale_dimension_block_is_regenerated_from_defpoints() {
+    // A *D block caches the dimension's picture; a block whose picture no longer contains the
+    // defpoint is stale: not drawn, the dimension regenerates from its defpoints.
+    let red_line = |x0: f64, y0: f64| {
+        let mut e = cadcraft_doc::Entity::new(
+            cadcraft_doc::Handle(1),
+            EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(x0, y0, 0.0), b: Vec3::new(x0 + 10.0, y0, 0.0) }),
+        );
+        e.common = Common { color: Color::Index(1), ..Default::default() };
+        e
+    };
+    // Stale: the block's picture sits 1000 units from the defpoints — not drawn.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    blk.entities.push(red_line(1000.0, 0.0));
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(cadcraft_doc::Dimension { block: Some("*D1".into()), ..lin_dim() })).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().all(|p| p.color != Rgb(255, 0, 0)), "stale block picture drawn");
+    assert!(!l.prims.is_empty(), "dimension regenerated from defpoints");
+    // Fresh: the block's picture contains the defpoint (the dimension line) — drawn as cached.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    blk.entities.push(red_line(0.0, 2.0));
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(cadcraft_doc::Dimension { block: Some("*D1".into()), ..lin_dim() })).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().any(|p| p.color == Rgb(255, 0, 0)), "fresh block picture not drawn");
+    // A picture of only unbounded entities (xlines carry no bounds) can't be proven stale: kept.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    let mut e = cadcraft_doc::Entity::new(
+        cadcraft_doc::Handle(1),
+        EntityKind::XLine(cadcraft_doc::RayLine { base: Vec3::new(1000.0, 0.0, 0.0), dir: Vec3::new(0.0, 1.0, 0.0) }),
+    );
+    e.common = Common { color: Color::Index(1), ..Default::default() };
+    blk.entities.push(e);
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(cadcraft_doc::Dimension { block: Some("*D1".into()), ..lin_dim() })).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().any(|p| p.color == Rgb(255, 0, 0)), "unbounded picture wrongly discarded");
+    // An invisible entity at the defpoint must not vouch for a visible picture 1000 units away.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    let mut hidden = red_line(0.0, 2.0);
+    hidden.common.visible = false;
+    blk.entities.push(hidden);
+    blk.entities.push(red_line(1000.0, 0.0));
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(cadcraft_doc::Dimension { block: Some("*D1".into()), ..lin_dim() })).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().all(|p| p.color != Rgb(255, 0, 0)), "hidden entity vouched for a stale picture");
+    // Ordinate dims from some authors leave the defpoint at the UCS origin: any anchor inside
+    // the picture counts as fresh, so the valid block is drawn, not regenerated.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    blk.entities.push(red_line(0.0, 2.0));
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    let dm = cadcraft_doc::Dimension {
+        kind: cadcraft_doc::DimKind::Ordinate { x_type: true },
+        defpt: Vec3::ZERO,
+        p13: Vec3::new(0.0, 2.0, 0.0),
+        p14: Vec3::new(0.0, 2.0, 0.0),
+        block: Some("*D1".into()),
+        ..lin_dim()
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(dm)).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().any(|p| p.color == Rgb(255, 0, 0)), "origin-defpoint ordinate block wrongly regenerated");
+}
+
+#[test]
+fn cached_text_disagreeing_with_the_measurement_is_drawn_as_issued() {
+    // A picture on its defpoints whose stored text disagrees with the measured distance (the
+    // scale changed and the block was never regenerated) stays as cached: the printed number is
+    // what was issued, the mismatch is the drawing error and must stay visible.
+    let mut d = Drawing::new_imperial();
+    let mut blk = cadcraft_doc::Block::new("*D1");
+    let mut e = cadcraft_doc::Entity::new(
+        cadcraft_doc::Handle(1),
+        EntityKind::Text(cadcraft_doc::Text {
+            insert: Vec3::new(0.0, 2.0, 0.0),
+            align_pt: None,
+            height: 1.0,
+            value: "114.4".into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".into(),
+            halign: cadcraft_doc::HAlign::Left,
+            valign: cadcraft_doc::VAlign::Baseline,
+        }),
+    );
+    e.common = Common { color: Color::Index(1), ..Default::default() };
+    blk.entities.push(e);
+    d.blocks.insert("*D1".into(), std::sync::Arc::new(blk));
+    // The defpoints are 228.8 apart; the cached text says 114.4.
+    let dm = cadcraft_doc::Dimension { p14: Vec3::new(228.8, 0.0, 0.0), measurement: 228.8, block: Some("*D1".into()), ..lin_dim() };
+    d.add(&Space::Model, Common::default(), EntityKind::Dimension(dm)).unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    assert!(l.prims.iter().any(|p| p.color == Rgb(255, 0, 0)), "mismatched cached text not drawn as issued");
+}
+
+#[test]
 fn table_title_is_centred_and_merged() {
     let mut d = Drawing::new_imperial();
     let cell = |t: &str| cadcraft_doc::TableCell { text: t.into(), ..Default::default() };
