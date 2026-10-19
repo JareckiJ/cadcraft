@@ -34,6 +34,13 @@ fn area_object_add_and_subtract_keep_a_running_total() {
 }
 
 #[test]
+fn area_object_on_an_open_polyline_closes_the_area_but_not_the_perimeter() {
+    // Open, 160 long; the closing side back to 0,0 would add 116.619.
+    let (_, log) = run(&["pline", "0,0", "100,0", "100,60", "", "area", "o", "50,0"]);
+    assert!(has(&log, "Area = 3000.0000, Perimeter = 160.0000"), "{log:?}");
+}
+
+#[test]
 fn area_unsupported_keywords_say_so_and_length_extends_the_last_segment() {
     let (s, log) = run(&["area", "0,0", "a"]);
     assert!(has(&log, "not available yet"), "{log:?}");
@@ -65,4 +72,18 @@ fn area_of_an_open_elliptical_arc_is_refused_and_a_full_ellipse_is_measured() {
     let (_, log) = run(&["ellipse a c 0,0 4,0 2 0 90", "area", "o", "4,0"]);
     assert!(has(&log, "no area"), "{log:?}");
     assert!(!has(&log, "Area = "), "{log:?}");
+}
+
+#[test]
+fn measuregeom_typed_asks_for_the_option_then_the_points() {
+    // Distance is the default option (#1103: typed, it used to fail asking for `p1`).
+    let (s, log) = run(&["measuregeom", "", "0,0", "3,4"]);
+    assert!(has(&log, "Distance = 5.0000"), "{log:?}");
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+
+    let (_, log) = run(&["circle 0,0 2", "measuregeom", "r", "2,0"]);
+    assert!(has(&log, "Radius = 2.0000"), "{log:?}");
+
+    let (_, log) = run(&["measuregeom", "ar", "0,0", "4,0", "4,3", ""]);
+    assert!(has(&log, "Area = 6.0000"), "{log:?}");
 }

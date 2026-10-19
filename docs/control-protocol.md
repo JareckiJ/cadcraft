@@ -12,6 +12,15 @@ Start the desktop app with `--control PORT` (or `CADCRAFT_CONTROL_PORT=PORT`). I
 Errors come back as `{"id": …, "ok": false, "error": "message"}`. An unknown method's error points
 to `control.methods`, which lists the methods the server answers.
 
+A line that is not a JSON object with a string `method` (an HTTP request, text that isn't JSON,
+bytes that aren't UTF-8) gets one error reply and the server closes the connection; nothing sent
+after it runs. Blank lines are skipped.
+
+The server bounds what a client can hold: 16 connections at once (more get an error line and are
+closed), 256 MiB per request line (longer closes the connection), 64 queued requests (more are
+answered `{"ok": false, "error": "busy: …", "state": "not-run"}`), and 10 minutes idle or 30 seconds
+per blocked reply write before the socket is closed.
+
 The server waits up to 60 s for the app to answer a request. After that it replies with a timeout, and
 `state` tells whether sending the request again is safe:
 
@@ -165,7 +174,7 @@ Select a language with `engine.execute` and the UI command `ui.language`:
 {"id":1,"method":"engine.execute","params":{"command":"ui.language","params":{"lang":"uk"}}}
 ```
 
-Supported values are `auto`, `en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv` and `ar`.
+Supported values are `auto`, `en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv`, `ar` and `hu`.
 Chinese needs an installed CJK font, Arabic an installed Arabic font; Korean needs a font covering the Korean interface from the
 optional craft-fonts input or the operating system. Without a suitable font, the saved choice is
 retained and the result's `shown` is `en`. `ui.set` also accepts
