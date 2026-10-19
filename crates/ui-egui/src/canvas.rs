@@ -147,13 +147,13 @@ impl CanvasState {
     /// The active MSPACE viewport's contents when they are drawn apart from the layout's list
     /// (see [`VpContent`]): where they are on paper at the viewport's current view, and how many
     /// times they have been built.
+    pub fn viewport_content(&self) -> Option<(Bounds2, u64)> {
+        self.vp.key.and(self.vp.paper_bounds()).map(|b| (b, self.vp.builds))
+    }
+
     /// The rows of the open selection cycling list (screen rectangle, object), top to bottom.
     pub fn cycle_rows(&self) -> Vec<(Rect, Handle)> {
         self.cycle.as_ref().map(|c| c.rows.iter().copied().zip(c.items.iter().map(|(h, _, _)| *h)).collect()).unwrap_or_default()
-    }
-
-    pub fn viewport_content(&self) -> Option<(Bounds2, u64)> {
-        self.vp.key.and(self.vp.paper_bounds()).map(|b| (b, self.vp.builds))
     }
 
     /// Whether a rebuild for the current view is still running in the background (the canvas
