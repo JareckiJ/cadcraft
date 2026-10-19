@@ -66,6 +66,10 @@ fn arithmetic_follows_autolisp() {
     assert_eq!(ok(&mut s, "(< 1 2 3)"), "T");
     assert_eq!(ok(&mut s, "(= 1 1.0)"), "T");
     assert_eq!(ok(&mut s, "(= \"a\" \"a\")"), "T");
+    assert_eq!(ok(&mut s, "(= (type 1) 'INT)"), "T");
+    assert_eq!(ok(&mut s, "(= (type 1.5) 'INT)"), "nil");
+    assert_eq!(ok(&mut s, "(/= (type '(1)) 'LIST)"), "nil");
+    assert_eq!(ok(&mut s, "(/= 'a 'b)"), "T");
     assert_eq!(eval(&mut s, "(/ 1 0)"), Err("divide by zero".into()));
     assert_eq!(eval(&mut s, "(+ 1 nil)"), Err("bad argument type: numberp: nil".into()));
 }

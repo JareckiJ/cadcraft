@@ -307,11 +307,30 @@ fn chain(a: &[Value], ok: fn(std::cmp::Ordering) -> bool) -> R {
     }
     Ok(Value::t())
 }
+/// `=` and `/=` also accept symbols and other non-numbers, like AutoLISP: `(= (type x) 'INT)`.
+/// Two non-numbers compare as `eq` does (strings by text); a number against a non-number stays an error.
+fn same(x: &Value, y: &Value) -> Result<bool, LispError> {
+    if x.as_number().is_none() && y.as_number().is_none() {
+        return Ok(eq(x, y));
+    }
+    Ok(compare(x, y)?.is_eq())
+}
+fn eq_chain(a: &[Value], want: bool) -> R {
+    arity(a, 1, usize::MAX)?;
+    for w in a.windows(2) {
+        if let [x, y] = w
+            && same(x, y)? != want
+        {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::t())
+}
 fn num_eq(a: &[Value]) -> R {
-    chain(a, |o| o.is_eq())
+    eq_chain(a, true)
 }
 fn num_ne(a: &[Value]) -> R {
-    chain(a, |o| o.is_ne())
+    eq_chain(a, false)
 }
 fn lt(a: &[Value]) -> R {
     chain(a, |o| o.is_lt())
