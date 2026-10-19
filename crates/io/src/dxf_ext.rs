@@ -40,9 +40,17 @@ pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
 pub(crate) const UCS_NAME_KEY: &str = "CADCRAFT_UCSNAME";
 
 /// Whether the UCS at `origin` with axes `x`, `y` is exactly the named UCS `u` (to rounding):
-/// only then is the current UCS still that named one, read or written.
+/// only then is the current UCS still that named one, read or written. The origin may differ by
+/// printing round-off only (we write the shortest exact form; other programs 15–16 digits), so
+/// even far from the World origin a real move is a different UCS.
 pub(crate) fn is_named_frame(u: &cadcraft_doc::Ucs, origin: cadcraft_geom::Vec3, x: cadcraft_geom::Vec3, y: cadcraft_geom::Vec3) -> bool {
-    (origin - u.origin).len() <= 1e-9 * (1.0 + origin.len()) && (x - u.x_axis).len() <= 1e-9 && (y - u.y_axis).len() <= 1e-9
+    (origin - u.origin).len() <= 1e-12 * (1.0 + origin.len()) && (x - u.x_axis).len() <= 1e-9 && (y - u.y_axis).len() <= 1e-9
+}
+
+/// Whether `x` and `y` can be a UCS's axes: finite, not zero and not along each other (relative
+/// to their lengths, so short but square axes are fine). Read and written by the same rule.
+pub(crate) fn usable_axes(x: cadcraft_geom::Vec3, y: cadcraft_geom::Vec3) -> bool {
+    x.is_finite() && y.is_finite() && x.len() > 1e-12 && y.len() > 1e-12 && x.cross(y).len() > 1e-9 * x.len() * y.len()
 }
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;

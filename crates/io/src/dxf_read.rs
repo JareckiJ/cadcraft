@@ -2107,8 +2107,7 @@ impl Objects {
         }
         // Layouts' UCSs: the World UCS, unusable axes or no such layout leave it unset.
         for (name, origin, x, y, named) in &self.layout_ucss {
-            let usable =
-                [*origin, *x, *y].iter().all(|v| v.is_finite()) && x.len() > 1e-12 && y.len() > 1e-12 && x.cross(*y).len() > 1e-9 * x.len() * y.len();
+            let usable = origin.is_finite() && crate::dxf_ext::usable_axes(*x, *y);
             let ucs_name = named.as_ref().and_then(|h| rx.ucss.get(&h.trim().to_ascii_uppercase())).cloned().unwrap_or_default();
             let world = origin.len() <= 1e-12 && (*x - Vec3::new(1.0, 0.0, 0.0)).len() <= 1e-12 && (*y - Vec3::new(0.0, 1.0, 0.0)).len() <= 1e-12;
             if !usable || (world && ucs_name.is_empty()) {

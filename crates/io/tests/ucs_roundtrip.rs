@@ -115,13 +115,23 @@ fn model_and_layout_ucs_survive_a_dxf_save() {
 #[test]
 fn a_layouts_named_ucs_points_at_its_record() {
     let mut d = drawing();
-    d.layouts[0].ucs.as_mut().unwrap().name = "SITE".into();
+    // The layout's UCS is SITE (its frame, by name).
+    let site_rec = d.ucss[0].clone();
+    d.layouts[0].ucs = Some(site_rec.clone());
     let text = cadcraft_io::write_dxf(&d);
     let site = records(&text, "UCS").into_iter().find(|r| group(r, "2") == Some("SITE")).and_then(|r| group(&r, "5").map(str::to_string)).unwrap();
     let lay = layout_record(&text, &d.layouts[0].name);
     assert_eq!(group(&lay, "345"), Some(site.as_str()));
     let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
     assert_eq!(back.layouts[0].ucs.as_ref().unwrap().name, "SITE");
+    // Named SITE but moved since: not pointed at SITE (reopened, the name would bring SITE's frame
+    // with the moved one); the layout keeps its own frame unnamed.
+    let mut moved = d.clone();
+    moved.layouts[0].ucs = Some(Ucs { origin: site_rec.origin + Vec3::new(1.0, 0.0, 0.0), ..site_rec.clone() });
+    let text = cadcraft_io::write_dxf(&moved);
+    assert!(group(&layout_record(&text, &d.layouts[0].name), "345").is_none());
+    let u = cadcraft_io::read_dxf(text.as_bytes()).unwrap().layouts[0].ucs.clone().unwrap();
+    assert!(u.name.is_empty() && near3(u.origin, site_rec.origin + Vec3::new(1.0, 0.0, 0.0)), "{u:?}");
     // A deleted named UCS isn't pointed at, and the layout keeps the axes unnamed.
     let mut gone = back.clone();
     gone.ucss.clear();
@@ -130,7 +140,36 @@ fn a_layouts_named_ucs_points_at_its_record() {
     assert!(group(&lay, "345").is_none());
     let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
     let u = back.layouts[0].ucs.clone().unwrap();
-    assert!(u.name.is_empty() && near3(u.x_axis, Vec3::new(0.0, 1.0, 0.0)));
+    assert!(u.name.is_empty() && near3(u.x_axis, site_rec.x_axis));
+}
+
+/// Short but square layout axes are a usable UCS when read, so they are written as they are and
+/// not replaced by the World UCS's (the writer and the reader share one rule).
+#[test]
+fn short_layout_axes_survive_a_save() {
+    let mut d = drawing();
+    let tiny = Ucs { name: String::new(), origin: Vec3::new(2.0, 3.0, 0.0), x_axis: Vec3::new(1e-7, 0.0, 0.0), y_axis: Vec3::new(0.0, 1e-7, 0.0) };
+    d.layouts[0].ucs = Some(tiny.clone());
+    let back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
+    let u = back.layouts[0].ucs.clone().expect("kept");
+    assert!(near3(u.x_axis, tiny.x_axis) && near3(u.y_axis, tiny.y_axis) && near3(u.origin, tiny.origin), "{u:?}");
+}
+
+/// Far from the World origin a named UCS's origin is still compared to round-off only: a move of
+/// 0.05 at 100,000,000 is a different UCS, an exact save keeps the name.
+#[test]
+fn a_far_named_ucs_keeps_its_name_only_where_it_is() {
+    let far = Ucs { name: "FAR".into(), origin: Vec3::new(1e8, 0.0, 0.0), x_axis: Vec3::new(1.0, 0.0, 0.0), y_axis: Vec3::new(0.0, 1.0, 0.0) };
+    let mut d = Drawing::default();
+    d.ucss.push(far.clone());
+    d.header.set("UCSORG", HVal::Point(far.origin));
+    d.header.set("UCSXDIR", HVal::Point(far.x_axis));
+    d.header.set("UCSYDIR", HVal::Point(far.y_axis));
+    d.header.set_str("UCSNAME", "FAR");
+    let read = |d: &Drawing| cadcraft_io::read_dxf(cadcraft_io::write_dxf(d).as_bytes()).unwrap().header.str("UCSNAME", "");
+    assert_eq!(read(&d), "FAR");
+    d.header.set("UCSORG", HVal::Point(Vec3::new(1e8 + 0.05, 0.0, 0.0)));
+    assert_eq!(read(&d), "", "moved 0.05: no longer FAR");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
