@@ -13,6 +13,7 @@ pub mod audit;
 pub mod autosave;
 pub mod blockedit;
 pub mod cmd;
+pub mod doc_path;
 mod finite;
 pub mod grip_dims;
 pub mod grips;
@@ -395,6 +396,9 @@ pub struct Settings {
     /// ACADLSPASDOC: acad.lsp loads into every drawing, not once per session.
     pub acadlspasdoc: bool,
     pub pickadd: bool,
+    /// PICKDRAG: false = two-click windows (0), true = clicks or dragging (2).
+    /// Drag-only mode (1) is not supported yet.
+    pub pickdrag: bool,
     /// PICKSTYLE: bit 1 picks whole selectable groups ([`cmd::groups`]), bit 2 associative hatches
     /// with their boundaries (stored, not used yet).
     pub pickstyle: u8,
@@ -481,6 +485,7 @@ impl Default for Settings {
             pickfirst: true,
             acadlspasdoc: false,
             pickadd: true,
+            pickdrag: true,
             pickstyle: 1,
             gripsize: 5.0,
             cursorsize: 5.0,
@@ -650,6 +655,10 @@ pub struct Session {
     /// The deferred tangent/perpendicular snap under the cursor, if any (from the UI; lets the
     /// rubber band show the line it resolves to).
     pub cursor_deferred: Option<snap::Deferred>,
+    /// Whether Ctrl is held right now (from the UI, overwritten every frame). Commands that
+    /// change behavior on Ctrl — currently only ARC's "hold Ctrl to switch direction" — read
+    /// this instead of receiving modifiers through `Input`, which stays free of UI state.
+    pub ctrl_down: bool,
     /// Origin of the point currently being fed by `input_snapped`; never reused by typed points.
     picked_viewport: Option<snap::ViewportPoint>,
     /// The last drawing comparison (COMPARE), drawn over the drawing it was made for.
@@ -714,6 +723,7 @@ impl Session {
             point_mods: Vec::new(),
             cursor: Vec2::ZERO,
             cursor_deferred: None,
+            ctrl_down: false,
             picked_viewport: None,
             compare: None,
             tracking: snap::tracking::Tracker::default(),
@@ -1121,6 +1131,11 @@ impl Session {
         if self.select_mode.is_some() {
             return self.select_mode_input(input);
         }
+        // `_L`, `_ALL`, `_W`: the English name of a selection keyword, as scripts write it.
+        let input = match input {
+            Input::Text(t) => Input::Text(t.trim().strip_prefix('_').map(str::to_string).unwrap_or(t)),
+            other => other,
+        };
         if let Input::Text(t) | Input::Keyword(t) = &input
             && let Some(m) = select::SelectMode::from_keyword(t)
         {
@@ -1565,7 +1580,8 @@ impl Session {
         }
         // At "Select objects" prompts the selection modes (Previous, Last, ALL) win over a command
         // keyword sharing the letter (HATCH's "picK internal point" against `P`).
-        let selection_mode = prompt.accept.select && matches!(tt.to_ascii_lowercase().as_str(), "all" | "l" | "last" | "p" | "previous");
+        let selection_mode = prompt.accept.select
+            && matches!(tt.strip_prefix('_').unwrap_or(tt).to_ascii_lowercase().as_str(), "all" | "l" | "last" | "p" | "previous");
         // A leading underscore asks for a keyword by its English name, whatever the interface
         // language (`_M`, `_Yes`): scripts and LISP routines write them that way. (Snap
         // overrides such as `_cen` were taken above.)
@@ -1667,7 +1683,7 @@ impl Session {
     /// command running, or a command asking for objects. Returns whether a window was opened.
     pub fn begin_window(&mut self, corner: Vec2) -> bool {
         let during_command = self.running.is_some();
-        if !corner.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
+        if !self.settings.pickdrag || !corner.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
             return false;
         }
         self.pending_window = Some(PendingWindow { corner, during_command });
