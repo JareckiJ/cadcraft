@@ -125,6 +125,10 @@ fn ucs_z_turns_about_z_and_defaults_to_ucsaxisang() {
     assert!(cadcraft_engine::sysvars::set(&mut s, "UCSAXISANG", &json!(33)).is_err(), "only the listed angles");
     typed(&mut s, &["ucs z -165"]);
     assert!(ang_eq(s.ucs().rotation(), 0.0));
+    // 30 is one of the listed angles too.
+    cadcraft_engine::sysvars::set(&mut s, "UCSAXISANG", &json!(30)).unwrap();
+    typed(&mut s, &["ucs z "]);
+    assert!(ang_eq(s.ucs().rotation(), 30f64.to_radians()));
 }
 
 #[test]
@@ -274,6 +278,54 @@ fn a_ucs_change_is_undone_like_an_edit() {
     assert!(s.ucs().is_world());
     s.redo().unwrap();
     assert!(near3(s.ucs().origin, Vec3::new(100.0, 50.0, 0.0)));
+}
+
+/// Undo restores UCS Previous's history with the UCS: undoing UCS Previous gives back the entry
+/// it used, and undoing a UCS change takes away the entry it added.
+#[test]
+fn undo_restores_the_ucs_previous_history() {
+    let previous = |s: &mut Session| s.execute("ucs", &json!({"option": "previous"})).is_ok();
+    let mut s = session();
+    typed(&mut s, &["ucs z 30"]);
+    assert!(previous(&mut s) && s.ucs().is_world());
+    s.undo().unwrap();
+    assert!(ang_eq(s.ucs().rotation(), 30f64.to_radians()), "undo of UCS Previous");
+    assert!(previous(&mut s) && s.ucs().is_world(), "its history entry came back too");
+    s.redo().unwrap();
+    let mut s = session();
+    typed(&mut s, &["ucs z 30", "ucs z 30"]);
+    assert!(ang_eq(s.ucs().rotation(), 60f64.to_radians()));
+    s.undo().unwrap();
+    assert!(ang_eq(s.ucs().rotation(), 30f64.to_radians()));
+    // The 30° the undone step remembered is gone: Previous goes straight to the World UCS.
+    assert!(previous(&mut s) && s.ucs().is_world());
+    assert!(!previous(&mut s), "nothing before the World UCS");
+}
+
+/// A layout's UCS Previous history goes with the layout: it follows a rename, and a layout
+/// deleted and made again under the same name starts without one.
+#[test]
+fn a_layouts_ucs_history_follows_it_and_goes_with_it() {
+    let previous = |s: &mut Session| s.execute("ucs", &json!({"option": "previous"})).is_ok();
+    let set = |s: &mut Session, name: &str| s.execute("layout.set", &json!({"name": name})).unwrap();
+    let mut s = session();
+    s.execute("layout", &json!({"option": "new", "name": "A"})).unwrap();
+    set(&mut s, "A");
+    typed(&mut s, &["ucs z 30"]);
+    set(&mut s, "Model");
+    s.execute("layout", &json!({"option": "rename", "name": "A", "to": "B"})).unwrap();
+    set(&mut s, "B");
+    assert!(ang_eq(s.ucs().rotation(), 30f64.to_radians()));
+    assert!(previous(&mut s) && s.ucs().is_world(), "the history followed the rename");
+    typed(&mut s, &["ucs z 45"]);
+    set(&mut s, "Model");
+    s.execute("layout", &json!({"option": "delete", "name": "B"})).unwrap();
+    s.execute("layout", &json!({"option": "new", "name": "B"})).unwrap();
+    set(&mut s, "B");
+    assert!(s.ucs().is_world() && !previous(&mut s), "a new layout B has none of the old B's history");
+    // Model space's history is its own throughout.
+    set(&mut s, "Model");
+    assert!(!previous(&mut s));
 }
 
 #[test]

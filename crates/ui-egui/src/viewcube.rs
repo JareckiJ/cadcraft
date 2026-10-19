@@ -156,6 +156,10 @@ fn paint_home(p: &egui::Painter, r: Rect, hot: bool) {
 
 /// How long the UCS icon's arms are, in points.
 pub const ARM: f32 = 60.0;
+/// How far past an arm's end its X or Y label reaches, in points.
+const LABEL: f32 = 16.0;
+/// How close to an arm a pointer counts as on the icon, in points.
+const HIT: f32 = 8.0;
 
 /// Where the UCS icon is drawn: the point its arms start from, the screen directions of its X
 /// and Y arms (unit vectors: the current UCS's axes seen in the plan view) and whether the UCS is
@@ -183,13 +187,13 @@ impl IconPlace {
             let l = d.length();
             if l.is_finite() && l > 1e-6 { d / l } else { or }
         };
-        let mut place = IconPlace { x: dir(u.x, vec2(1.0, 0.0)), y: dir(u.y, vec2(0.0, -1.0)), world: u.is_world(), ..IconPlace::corner(canvas) };
+        let mut place = IconPlace::corner_turned(canvas, dir(u.x, vec2(1.0, 0.0)), dir(u.y, vec2(0.0, -1.0)), u.is_world());
         // At the origin only where the screen shows the space the UCS belongs to (not from paper
         // space into an active viewport).
         let same_space = app.session.space() == app.session.layout_space();
         if app.session.ucsicon_bits() & 2 != 0 && same_space {
             let at = to_screen(u.origin.xy());
-            let reach = ARM + 16.0;
+            let reach = ARM + LABEL;
             let inner = canvas.shrink(12.0);
             if [at, at + place.x * reach, at + place.y * reach].iter().all(|p| p.x.is_finite() && p.y.is_finite() && inner.contains(*p)) {
                 place.origin = at;
@@ -198,10 +202,34 @@ impl IconPlace {
         place
     }
 
-    /// The icon's arms with room around them: the X arm and the Y arm.
-    pub fn arms(&self) -> [Rect; 2] {
+    /// The icon with arms along `x` and `y` at the lower-left corner: placed so the arms and their
+    /// labels take the corner the World UCS's icon does, whichever way they point.
+    pub fn corner_turned(canvas: Rect, x: egui::Vec2, y: egui::Vec2, world: bool) -> IconPlace {
+        let home = IconPlace::corner(canvas).origin;
+        let reach = ARM + LABEL;
+        let (ends_x, ends_y) = ([0.0, x.x * reach, y.x * reach], [0.0, x.y * reach, y.y * reach]);
+        // The World icon's arms run right and up from `home`: shift so the turned arms' left and
+        // bottom edges sit where those do.
+        let left = ends_x.iter().copied().fold(0.0f32, f32::min);
+        let bottom = ends_y.iter().copied().fold(0.0f32, f32::max);
+        let origin = pos2(home.x - left, home.y - bottom);
+        IconPlace { origin: if origin.x.is_finite() && origin.y.is_finite() { origin } else { home }, x, y, world }
+    }
+
+    /// The icon's arms out to their labels: the X arm and the Y arm, as screen segments.
+    pub fn arms(&self) -> [[Pos2; 2]; 2] {
         let o = self.origin;
-        [Rect::from_two_pos(o, o + self.x * (ARM + 20.0)).expand(8.0), Rect::from_two_pos(o, o + self.y * (ARM + 22.0)).expand(8.0)]
+        [[o, o + self.x * (ARM + 20.0)], [o, o + self.y * (ARM + 22.0)]]
+    }
+
+    /// Whether `p` is on the icon: within [`HIT`] of an arm (labels included), not merely in the
+    /// box around a turned arm.
+    pub fn hit(&self, p: Pos2) -> bool {
+        self.arms().iter().any(|[a, b]| {
+            let ab = *b - *a;
+            let t = if ab.length_sq() > 0.0 { ((p - *a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
+            (*a + ab * t - p).length() <= HIT
+        })
     }
 }
 
@@ -221,11 +249,18 @@ fn ucs_label(app: &CadApp) -> String {
 /// coordinate-system menu.
 pub fn ucs_icon(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect, place: &IconPlace) {
     let t = Tokens::get();
-    let [x, y] = place.arms();
-    let rx = ui.interact(x, ui.id().with("ucs_x"), Sense::click_and_drag());
-    let ry = ui.interact(y, ui.id().with("ucs_y"), Sense::click_and_drag());
-    let resp = (rx | ry).on_hover_cursor(CursorIcon::PointingHand).on_hover_text(format!("UCS icon: {}", ucs_label(app)));
-    if resp.hovered() {
+    // The arms' boxes, but only a pointer near an arm takes clicks (a turned arm's box is mostly
+    // drawing). The widget stays every frame so its menu, once open, keeps its anchor.
+    let near = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| place.hit(p));
+    let sense = if near { Sense::click_and_drag() } else { Sense::hover() };
+    let [x, y] = place.arms().map(|[a, b]| Rect::from_two_pos(a, b).expand(HIT));
+    let rx = ui.interact(x, ui.id().with("ucs_x"), sense);
+    let ry = ui.interact(y, ui.id().with("ucs_y"), sense);
+    let mut resp = rx | ry;
+    if near {
+        resp = resp.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(format!("UCS icon: {}", ucs_label(app)));
+    }
+    if near && resp.hovered() {
         let o = place.origin;
         let st = Stroke::new(2.0, t.hover);
         let p = ui.painter_at(canvas);
@@ -374,14 +409,17 @@ mod tests {
         assert!((p.x - vec2(0.0, -1.0)).length() < 1e-6 && (p.y - vec2(-1.0, 0.0)).length() < 1e-6, "{p:?}");
         assert!((p.origin - pos2(c.center().x + 20.0, c.center().y - 10.0)).length() < 1e-3);
         // Its click areas lie along the turned arms.
-        let [ax, ay] = p.arms();
-        assert!(ax.contains(p.origin + p.x * 40.0) && ay.contains(p.origin + p.y * 40.0));
-        // Noorigin, or an origin off screen: the corner.
+        assert!(p.hit(p.origin + p.x * 40.0) && p.hit(p.origin + p.y * 40.0));
+        // Noorigin, or an origin off screen: the corner, the turned icon in the World icon's place.
+        let corner = IconPlace::corner_turned(c, p.x, p.y, false).origin;
         app.run("ucsicon", json!({"origin": false})).unwrap();
-        assert_eq!(IconPlace::of(&app, c, to_screen).origin, IconPlace::corner(c).origin);
+        assert_eq!(IconPlace::of(&app, c, to_screen).origin, corner);
         app.run("ucsicon", json!({"origin": true})).unwrap();
         app.run("ucs", json!({"option": "origin", "origin": [1e6, 0]})).unwrap();
-        assert_eq!(IconPlace::of(&app, c, to_screen).origin, IconPlace::corner(c).origin);
+        assert_eq!(IconPlace::of(&app, c, to_screen).origin, corner);
+        app.run("ucs", json!({"option": "world"})).unwrap();
+        app.run("ucs", json!({"option": "origin", "origin": [1e6, 0]})).unwrap();
+        assert_eq!(IconPlace::of(&app, c, to_screen).origin, IconPlace::corner(c).origin, "unturned: where it always was");
         // The menu switch turns UCSICON off through its command.
         app.run("ui.toggle.ucsicon", json!({"on": false})).unwrap();
         assert_eq!(app.session.ucsicon_bits() & 1, 0);
@@ -389,6 +427,43 @@ mod tests {
         assert_eq!(app.session.ucsicon_bits() & 1, 1, "a toggle without `on` flips it");
         app.run("ui.toggle.ucsicon.origin", json!({"on": false})).unwrap();
         assert_eq!(app.session.ucsicon_bits(), 1);
+    }
+
+    /// At the corner, a turned icon's arms and labels stay on the canvas at every angle, inside
+    /// the World icon's corner box.
+    #[test]
+    fn a_turned_corner_icon_stays_on_the_canvas() {
+        let c = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0));
+        let home = IconPlace::corner(c).origin;
+        let reach = ARM + LABEL;
+        let (box_left, box_bottom) = (home.x, home.y);
+        for deg in (0..360).step_by(15) {
+            let a = (deg as f32).to_radians();
+            // Screen y runs down: the Y arm is the X arm turned a quarter counterclockwise on screen.
+            let (x, y) = (vec2(a.cos(), -a.sin()), vec2(-a.sin(), -a.cos()));
+            let p = IconPlace::corner_turned(c, x, y, false);
+            for end in [p.origin, p.origin + x * reach, p.origin + y * reach] {
+                assert!(c.contains(end), "{deg}°: {end:?} off {c:?}");
+                assert!(end.x >= box_left - 1e-3 && end.y <= box_bottom + 1e-3, "{deg}°: {end:?}");
+            }
+        }
+        // Unturned, exactly where the World icon always was.
+        assert_eq!(IconPlace::corner_turned(c, vec2(1.0, 0.0), vec2(0.0, -1.0), true).origin, home);
+    }
+
+    /// Only a pointer near an arm is on the icon: on a 45° UCS the corner of the arm's box, well
+    /// away from the arm, is drawing.
+    #[test]
+    fn ucs_icon_hits_follow_the_arms_not_their_boxes() {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let p = IconPlace { origin: pos2(200.0, 200.0), x: vec2(s, -s), y: vec2(-s, -s), world: false };
+        assert!(p.hit(p.origin) && p.hit(p.origin + p.x * 50.0) && p.hit(p.origin + p.y * (ARM + 20.0)));
+        assert!(p.hit(p.origin + p.x * 30.0 + p.y * 7.0), "within reach of the X arm");
+        // The X arm's box spans 200..257 across; its far corner is 40 points from the arm.
+        let box_corner = pos2(200.0 + (ARM + 20.0) * s, 200.0);
+        assert!(!p.hit(box_corner), "{box_corner:?}");
+        assert!(!p.hit(p.origin + p.x * (ARM + 40.0)), "past the label");
+        assert!(!p.hit(pos2(f32::NAN, 0.0)));
     }
 
     #[test]

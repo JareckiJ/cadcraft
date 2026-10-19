@@ -196,6 +196,15 @@ pub fn set_current(d: &mut Drawing, space: &Space, frame: &UcsFrame, name: &str)
     }
 }
 
+/// `space`'s UCS Previous history, kept in the drawing (so undo restores it) and, for a layout,
+/// with the layout (so it follows a rename and goes with a delete). `None`: no such layout.
+fn previous_mut<'a>(d: &'a mut Drawing, space: &Space) -> Option<&'a mut Vec<Ucs>> {
+    match space {
+        Space::Model => Some(&mut d.ucs_previous),
+        Space::Paper(layout) => d.layouts.iter_mut().find(|l| l.name.eq_ignore_ascii_case(layout)).map(|l| &mut l.ucs_previous),
+    }
+}
+
 /// The named UCS `name` of the drawing's UCS table, if it has one with usable axes.
 pub fn named(d: &Drawing, name: &str) -> Option<(UcsFrame, String)> {
     let u = d.ucss.iter().find(|u| u.name.eq_ignore_ascii_case(name.trim()))?;
@@ -244,14 +253,14 @@ impl Session {
         if old == frame && old_name.eq_ignore_ascii_case(name) {
             return Ok(());
         }
-        set_current(self.doc_mut()?, &space, &frame, name);
-        let st = self.state_mut()?;
-        st.ucs_previous.push((space.clone(), old, old_name));
-        // At most MAX_PREVIOUS per space: drop that space's oldest.
-        if st.ucs_previous.iter().filter(|(s, _, _)| *s == space).count() > MAX_PREVIOUS
-            && let Some(i) = st.ucs_previous.iter().position(|(s, _, _)| *s == space)
-        {
-            st.ucs_previous.remove(i);
+        let d = self.doc_mut()?;
+        set_current(d, &space, &frame, name);
+        if let Some(h) = previous_mut(d, &space) {
+            h.push(old.record(&old_name));
+            // At most MAX_PREVIOUS: drop the oldest.
+            if h.len() > MAX_PREVIOUS {
+                h.remove(0);
+            }
         }
         Ok(())
     }
@@ -259,11 +268,15 @@ impl Session {
     /// Go back to the UCS before the current one in this space; `false` when there is none.
     pub fn ucs_previous(&mut self) -> Result<bool> {
         let space = self.space();
-        let st = self.state_mut()?;
-        let Some(i) = st.ucs_previous.iter().rposition(|(s, _, _)| *s == space) else { return Ok(false) };
-        let (_, frame, name) = st.ucs_previous.remove(i);
-        set_current(self.doc_mut()?, &space, &frame, &name);
-        Ok(true)
+        let d = self.doc_mut()?;
+        // An entry with unusable axes (none is ever stored) is skipped, not restored.
+        while let Some(u) = previous_mut(d, &space).and_then(|h| h.pop()) {
+            if let Some(frame) = UcsFrame::of(&u) {
+                set_current(d, &space, &frame, &u.name);
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// UCSICON: 1 the icon is shown, 2 at the UCS origin (when that is on screen).

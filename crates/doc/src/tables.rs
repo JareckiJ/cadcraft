@@ -788,11 +788,23 @@ pub struct Layout {
     /// `None`: the World UCS. Its name is empty when it isn't a named UCS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ucs: Option<Ucs>,
+    /// The layout's earlier UCSs for UCS Previous, oldest first: they go with the layout when it
+    /// is renamed and with it when it is deleted. Never written to a file.
+    #[serde(skip)]
+    pub ucs_previous: Vec<Ucs>,
 }
 
 impl Layout {
     pub fn new(name: &str, tab_order: u32) -> Self {
-        Layout { name: name.into(), tab_order, page: PageSetup::default(), entities: EntityStore::new(), view: None, ucs: None }
+        Layout {
+            name: name.into(),
+            tab_order,
+            page: PageSetup::default(),
+            entities: EntityStore::new(),
+            view: None,
+            ucs: None,
+            ucs_previous: Vec::new(),
+        }
     }
 }
 
