@@ -93,7 +93,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("parameters", "Parameters Manager", run_parameters)
             .menu(&["Tools", "Parametric", "Parameters Manager"])
             .alias(&["par", "parametersclose"])
-            .params("{} lists; {name, expr | value, description?} sets (new name = user parameter) and re-solves; {delete: name}"),
+            .params("{} lists; {name, expr | value, description?} sets (new name = user parameter) and re-solves; {delete: name}; {name, rename: newName} renames it in every expression"),
         CommandSpec::new("constraintsettings", "Constraint Settings", run_constraintsettings)
             .menu(&["Tools", "Parametric", "Constraint Settings"])
             .alias(&["csettings"])
@@ -873,6 +873,10 @@ fn run_parameters(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(EngineError::Other(format!("`{name}` is used by `{}`", row.name)));
         }
         *s.doc_mut()? = d;
+    } else if let (Some(old), Some(to)) = (str_param(p, "name"), str_param(p, "rename")) {
+        let mut d = s.doc()?.clone();
+        cs::rename_parameter(&mut d, old.trim(), to.trim()).map_err(err)?;
+        *s.doc_mut()? = d;
     } else if let Some(name) = str_param(p, "name") {
         let expr = match (str_param(p, "expr"), p.get("value").and_then(Value::as_f64)) {
             (Some(e), _) => e.to_string(),
@@ -1136,8 +1140,9 @@ pub fn after_command(s: &mut Session, before: Option<&Arc<Drawing>>, ok: bool) {
     }
     let mut d = (*st.doc).clone();
     let purged = cs::purge_invalid(&mut d);
+    let restored = cs::restore_fixed(&mut d, before);
     let satisfied = cs::all_satisfied(&d);
-    if purged.is_empty() && satisfied {
+    if purged.is_empty() && !restored && satisfied {
         return;
     }
     let mut msg = Vec::new();
