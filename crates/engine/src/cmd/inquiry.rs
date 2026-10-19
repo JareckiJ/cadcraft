@@ -9,6 +9,7 @@ use crate::units::{format_angle, format_distance};
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 mod regions;
+mod shapes;
 
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = vec![
@@ -41,8 +42,9 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("status", "Status", run_status).menu(&["Tools", "Inquiry", "Status"]).noundo(),
         CommandSpec::new("drawing.inspect", "Inspect Drawing", run_inspect).params("{entities?: bool, limit?: n}").noundo(),
         CommandSpec::new("entities", "Query Entities", run_entities)
-            .params("{type?, layer?, window?: [[x,y],[x,y]], crossing?: bool (default true; false = entirely inside), limit?, offset?} → {count (all matches), returned, offset, entities}")
+            .params("{type?, layer?, selected?: bool (default false; true = current selection in active space), window?: [[x,y],[x,y]], crossing?: bool (default true; false = entirely inside), limit?, offset?} → {count (all matches), returned, offset, entities}")
             .noundo(),
+        CommandSpec::new("shapes", "Analyze Shapes", shapes::run).params(shapes::PARAMS).noundo(),
         CommandSpec::new("texts", "Query Texts", run_texts)
             .params("{contains?: text (any case), layer?, window?: [[x,y],[x,y]] (by insertion point), limit? (default 200), offset?} → {count (all matches), returned, offset, texts: [{handle, type, layer, text, at, height, rotation (degrees), style, tag? (attributes)}]}: the readable text of TEXT, MTEXT (formatting removed), block attributes and multileaders")
             .noundo(),
@@ -280,7 +282,7 @@ fn run_list(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "message": texts.join("\n\n") }))
 }
 
-fn area_of(pts: &[Vec2]) -> (f64, f64) {
+pub(super) fn area_of(pts: &[Vec2]) -> (f64, f64) {
     let a = cadcraft_geom::shoelace(pts).abs();
     let n = pts.len();
     let per: f64 = (0..n).filter_map(|i| Some(pts.get(i)?.dist(*pts.get((i + 1) % n)?))).sum();
@@ -302,7 +304,7 @@ fn area_text(s: &Session, a: f64, per: f64) -> String {
 }
 
 /// Area and perimeter of a closed object (AREA's Object option).
-fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
+pub(super) fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
     let d = s.doc()?;
     let e = d.entity(h).ok_or_else(|| bad("area", "no such object"))?;
     Ok(match &e.kind {
@@ -320,7 +322,9 @@ fn object_area(s: &Session, h: Handle) -> Result<(f64, f64)> {
             }
             let a = el.major.xy().len();
             let b = a * el.ratio;
-            (cadcraft_geom::PI * a * b, cadcraft_geom::PI * (3.0 * (a + b) - ((3.0 * a + b) * (a + 3.0 * b)).sqrt()))
+            // The perimeter integrated around the ellipse, not a closed-form estimate (those
+            // fall short as the ellipse flattens: 0.3% on a 100:1 one).
+            (cadcraft_geom::PI * a * b, arc.arc_length_from(0.0, cadcraft_geom::TAU))
         }
         EntityKind::Hatch(hh) => {
             // Odd parity, as drawn: a loop nested inside an odd number of other loops is an unfilled island.
@@ -434,14 +438,17 @@ fn run_entities(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .transpose()?;
     let crossing = given("crossing").map_or(Ok(true), |v| v.as_bool().ok_or_else(|| bad(CMD, "`crossing` must be true or false")))?;
+    let selected = given("selected").map_or(Ok(false), |v| v.as_bool().ok_or_else(|| bad(CMD, "`selected` must be true or false")))?;
     let limit = count("limit", 500)?;
     let offset = count("offset", 0)?;
     let st = s.state()?;
     let d = &st.doc;
     let Some(store) = d.space(&st.space) else { return Ok(json!({ "count": 0, "returned": 0, "entities": [] })) };
     let tol = window.as_ref().map(crate::select::window_tol).unwrap_or(0.0);
+    let selection: std::collections::HashSet<Handle> = if selected { st.selection.iter().copied().collect() } else { Default::default() };
     let matches: Vec<&std::sync::Arc<cadcraft_doc::Entity>> = store
         .iter()
+        .filter(|e| !selected || selection.contains(&e.handle))
         .filter(|e| ty.as_ref().is_none_or(|t| e.kind.type_name().to_ascii_lowercase() == *t || e.kind.dxf_name().to_ascii_lowercase() == *t))
         .filter(|e| layer.as_ref().is_none_or(|l| e.common.layer.to_ascii_lowercase() == *l))
         .filter(|e| window.as_ref().is_none_or(|w| crate::select::in_window(d, e, None, w, crossing, tol)))
