@@ -421,53 +421,78 @@ fn block_preview_ready(app: &CadApp, name: &str) -> bool {
     app.block_previews.key == Some((st.uid, st.revision)) && app.block_previews.lists.contains_key(&name.to_ascii_uppercase())
 }
 
-fn blocks(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+pub fn open_blocks_palette(app: &mut CadApp) -> Result<serde_json::Value, String> {
+    let panel = crate::docking::Panel::Blocks;
+    let first = !app.ui.docking.layout.contains(&panel) && !app.ui.docking.hidden.iter().any(|(p, _)| *p == panel);
+    let r = crate::docking::command(app, false, &serde_json::json!({ "operation": "open", "panel": panel.id() }))?;
+    if first && app.ui.docking.layout.contains(&crate::docking::Panel::Layers) {
+        let moved = serde_json::json!({
+            "operation": "move",
+            "panel": panel.id(),
+            "target": crate::docking::Panel::Layers.id(),
+            "zone": "bottom"
+        });
+        if let Ok(r) = crate::docking::command(app, false, &moved) {
+            return Ok(r);
+        }
+    }
+    Ok(r)
+}
+
+pub fn blocks_panel(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut pick = None;
     let names: Vec<String> = app.session.doc().map(|d| d.blocks.keys().filter(|k| !k.starts_with('*')).cloned().collect()).unwrap_or_default();
-    egui::Window::new(crate::tl!("Blocks")).id(egui::Id::new("Blocks")).open(open).default_size(vec2(320.0, 360.0)).show(ctx, |ui| {
-        if names.is_empty() {
-            ui.label(crate::tl!("No blocks defined in this drawing."));
-            return;
-        }
-        let id = egui::Id::new("blockfilter");
-        let mut filter = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
-        ui.horizontal(|ui| {
-            ui.label(crate::tl!("Filter"));
-            ui.text_edit_singleline(&mut filter);
-        });
-        ui.data_mut(|d| d.insert_temp(id, filter.clone()));
-        let f = filter.to_lowercase();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // At most one visible preview is built per frame, so a large library opens at once.
-            let mut build = true;
-            for n in names.iter().filter(|n| f.is_empty() || n.to_lowercase().contains(&f)) {
-                let row = ui
-                    .horizontal(|ui| {
-                        let (rect, _) = ui.allocate_exact_size(THUMB, egui::Sense::hover());
-                        if ui.is_rect_visible(rect) {
-                            let list = if block_preview_ready(app, n) || std::mem::take(&mut build) {
-                                block_preview(app, n)
-                            } else {
-                                ui.ctx().request_repaint();
-                                None
-                            };
-                            let note = if list.is_some() { crate::tl!("Empty") } else { "" };
-                            crate::bedit::draw_preview_at(ui, rect, list.as_deref(), note);
-                        }
-                        ui.label(n);
-                    })
-                    .response
-                    .interact(egui::Sense::click())
-                    .on_hover_text(crate::tl!("Insert this block"));
-                if row.clicked() {
-                    pick = Some(n.clone());
-                }
+    ui.add_space(4.0);
+    if names.is_empty() {
+        ui.label(crate::tl!("No blocks defined in this drawing."));
+        return;
+    }
+    let id = egui::Id::new("blockfilter");
+    let mut filter = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.add_space(6.0);
+        ui.label(crate::tl!("Filter"));
+        ui.text_edit_singleline(&mut filter);
+    });
+    ui.data_mut(|d| d.insert_temp(id, filter.clone()));
+    let f = filter.to_lowercase();
+    egui::ScrollArea::vertical().id_salt("dock-blocks").auto_shrink([false, false]).show(ui, |ui| {
+        // At most one visible preview is built per frame, so a large library opens at once.
+        let mut build = true;
+        for n in names.iter().filter(|n| f.is_empty() || n.to_lowercase().contains(&f)) {
+            let row = ui
+                .horizontal(|ui| {
+                    ui.add_space(6.0);
+                    let (rect, _) = ui.allocate_exact_size(THUMB, egui::Sense::hover());
+                    if ui.is_rect_visible(rect) {
+                        let list = if block_preview_ready(app, n) || std::mem::take(&mut build) {
+                            block_preview(app, n)
+                        } else {
+                            ui.ctx().request_repaint();
+                            None
+                        };
+                        let note = if list.is_some() { crate::tl!("Empty") } else { "" };
+                        crate::bedit::draw_preview_at(ui, rect, list.as_deref(), note);
+                    }
+                    ui.label(n);
+                })
+                .response
+                .interact(egui::Sense::click())
+                .on_hover_text(crate::tl!("Insert this block"));
+            if row.clicked() {
+                pick = Some(n.clone());
             }
-        });
+        }
     });
     if let Some(n) = pick {
         insert_block(app, &n);
     }
+}
+
+fn blocks(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    egui::Window::new(crate::tl!("Blocks")).id(egui::Id::new("Blocks")).open(open).default_size(vec2(320.0, 360.0)).show(ctx, |ui| {
+        blocks_panel(app, ui);
+    });
 }
 
 /// Start INSERT with `name` already given at its block name prompt, so the next prompt asks for

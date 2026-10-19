@@ -73,3 +73,11 @@ fn filtering_blocks_shows_only_matching_blocks() {
     assert!(h.query_by_label("Valve_DN50").is_none());
     assert!(h.query_by_label("Damper_Fire").is_none());
 }
+
+#[test]
+fn blocks_menu_opens_the_dockable_blocks_palette() {
+    let mut app = CadApp::new(Session::new(), Services::default());
+    assert!(!app.ui.docking.layout.contains(&cadcraft_ui_egui::docking::Panel::Blocks));
+    app.run("ui.dialog.blocks", json!({})).unwrap();
+    assert!(app.ui.docking.layout.contains(&cadcraft_ui_egui::docking::Panel::Blocks));
+}
