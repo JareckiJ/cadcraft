@@ -109,6 +109,7 @@ menu	Modify	Edita
 	Box	Parallelepipedo
 	Break	Spezza
 	Break At Point	Spezza in un punto
+	Break-line Symbol	Simbolo linea di interruzione
 	Bring Above Objects	Porta sopra gli oggetti
 	Bring Annotations to Front	Porta le annotazioni in primo piano
 	Bring to Front	Porta in primo piano
