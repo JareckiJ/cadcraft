@@ -168,15 +168,20 @@ fn replace_word(k: &mut EntityKind, word: &str, rep: &str) -> usize {
     n
 }
 
-/// Restricted Damerau–Levenshtein distance, giving up past `max`.
-fn distance(a: &[char], b: &[char], max: usize) -> Option<usize> {
+/// Restricted Damerau–Levenshtein distance, giving up past `max`. `rows` is scratch space that
+/// callers reuse across calls, so a scan over a whole dictionary does not allocate per word.
+fn distance(a: &[char], b: &[char], max: usize, rows: &mut [Vec<usize>; 3]) -> Option<usize> {
     if a.len().abs_diff(b.len()) > max {
         return None;
     }
     let w = b.len() + 1;
-    let mut prev2 = vec![0usize; w];
-    let mut prev: Vec<usize> = (0..w).collect();
-    let mut cur = vec![0usize; w];
+    let [prev2, prev, cur] = rows;
+    prev2.clear();
+    prev2.resize(w, 0);
+    prev.clear();
+    prev.extend(0..w);
+    cur.clear();
+    cur.resize(w, 0);
     for i in 1..=a.len() {
         if let Some(c0) = cur.first_mut() {
             *c0 = i;
@@ -199,21 +204,31 @@ fn distance(a: &[char], b: &[char], max: usize) -> Option<usize> {
         if best > max {
             return None;
         }
-        std::mem::swap(&mut prev2, &mut prev);
-        std::mem::swap(&mut prev, &mut cur);
+        std::mem::swap(prev2, prev);
+        std::mem::swap(prev, cur);
     }
     prev.get(b.len()).copied().filter(|d| *d <= max)
 }
 
-/// Up to five dictionary words close to `word`, nearest first.
+/// Up to five dictionary words close to `word`, nearest first. One scan of the dictionary:
+/// callers compute this once per word, never per frame (see `SpellM::sug`).
 pub(crate) fn suggestions(dict: &HashSet<String>, word: &str) -> Vec<String> {
     let w: Vec<char> = word.to_lowercase().chars().collect();
     let max = if w.len() <= 4 { 1 } else { 2 };
-    let mut found: Vec<(usize, &String)> = dict
-        .iter()
-        .filter(|d| d.chars().count().abs_diff(w.len()) <= max)
-        .filter_map(|d| distance(&w, &d.chars().collect::<Vec<_>>(), max).map(|n| (n, d)))
-        .collect();
+    let mut rows: [Vec<usize>; 3] = Default::default();
+    let mut buf: Vec<char> = Vec::new();
+    let mut found: Vec<(usize, &String)> = Vec::new();
+    for d in dict {
+        // Cheap length test first: no allocation for words that cannot be close.
+        if d.chars().count().abs_diff(w.len()) > max {
+            continue;
+        }
+        buf.clear();
+        buf.extend(d.chars());
+        if let Some(n) = distance(&w, &buf, max, &mut rows) {
+            found.push((n, d));
+        }
+    }
     found.sort();
     found.into_iter().take(5).map(|(_, d)| d.clone()).collect()
 }
@@ -305,6 +320,9 @@ struct SpellM {
     queue: Vec<(Handle, String)>,
     ignored: HashSet<String>,
     changed: usize,
+    /// Suggestions for the word being asked about, computed once when it becomes the current
+    /// one: `prompt` runs every frame and must stay a cheap read.
+    sug: Vec<String>,
 }
 
 impl SpellM {
@@ -332,9 +350,11 @@ impl SpellM {
             if self.ignored.contains(&w.to_lowercase()) || known(&self.dict, w) {
                 self.queue.pop();
             } else {
+                self.sug = suggestions(&self.dict, w);
                 return Ok(Step::Continue);
             }
         }
+        self.sug.clear();
         s.echo(format!("Spelling check complete. {} word(s) changed.", self.changed));
         Ok(Step::Done)
     }
@@ -356,8 +376,7 @@ impl Interactive for SpellM {
         match self.queue.last() {
             None => self.sel.prompt(),
             Some((_, w)) => {
-                let sug = suggestions(&self.dict, w);
-                let hint = if sug.is_empty() { String::new() } else { format!(" (suggestions: {})", sug.join(", ")) };
+                let hint = if self.sug.is_empty() { String::new() } else { format!(" (suggestions: {})", self.sug.join(", ")) };
                 Prompt::new(format!("Unknown word \"{w}\"{hint}. Enter replacement"), Accept::TEXT).kw(&["Ignore", "All", "Add"]).default("Ignore")
             }
         }
@@ -414,6 +433,22 @@ mod tests {
         assert_eq!(suggestions(&dict, "teh"), vec!["ten", "the"]);
         assert_eq!(suggestions(&dict, "anodise"), vec!["anodize"]);
         assert!(suggestions(&dict, "zzzzzz").is_empty());
-        assert_eq!(distance(&['a', 'b'], &['b', 'a'], 2), Some(1));
+        assert_eq!(distance(&['a', 'b'], &['b', 'a'], 2, &mut Default::default()), Some(1));
+    }
+
+    /// The prompt (asked for every frame) reads the suggestions cached when the word became
+    /// current: it does not touch the dictionary, however large.
+    #[test]
+    fn prompt_does_not_rescan_the_dictionary() {
+        let mut s = Session::new();
+        let mut m = SpellM { dict: (0..300_000).map(|i| format!("word{i:06}")).collect(), ..SpellM::default() };
+        m.dict.insert("anodize".into());
+        m.queue.push((Handle(1), "anodise".into()));
+        assert!(matches!(m.next(&mut s), Ok(Step::Continue)));
+        // Gone dictionary: a prompt that scanned it would lose the suggestion.
+        m.dict = HashSet::new();
+        for _ in 0..1000 {
+            assert!(m.prompt(&s).message.contains("suggestions: anodize"));
+        }
     }
 }

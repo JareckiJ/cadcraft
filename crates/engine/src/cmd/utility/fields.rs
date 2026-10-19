@@ -252,6 +252,19 @@ fn each_text(k: &mut EntityKind, f: &mut dyn FnMut(&mut String) -> usize) -> usi
     }
 }
 
+/// Whether an object holds a text with a field code.
+fn has_field_code(k: &EntityKind) -> bool {
+    let code = |t: &String| t.contains("%<");
+    match k {
+        EntityKind::Text(t) => code(&t.value),
+        EntityKind::MText(t) => code(&t.contents),
+        EntityKind::Insert(i) => i.attribs.iter().any(|a| code(&a.text.value)),
+        EntityKind::MLeader(m) => m.text.as_ref().is_some_and(|t| code(&t.contents)),
+        EntityKind::Table(t) => t.cells.iter().flatten().any(|c| code(&c.text)),
+        _ => false,
+    }
+}
+
 /// Evaluate the fields of `handles` again (all objects in every space when `None`). Returns
 /// the fields found and the objects changed.
 pub(crate) fn update_fields(s: &mut Session, handles: Option<&[Handle]>, now: Option<f64>) -> Result<(usize, usize)> {
@@ -270,6 +283,10 @@ pub(crate) fn update_fields(s: &mut Session, handles: Option<&[Handle]>, now: Op
         let d = s.doc()?;
         for h in hs {
             let Some(e) = d.entity(h) else { continue };
+            // Look before copying: most objects (hatches, splines, ...) hold no field.
+            if !has_field_code(&e.kind) {
+                continue;
+            }
             let mut k = e.kind.clone();
             let n = each_text(&mut k, &mut |t: &mut String| {
                 if !t.contains("%<") {
