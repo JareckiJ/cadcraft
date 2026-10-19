@@ -119,6 +119,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Entry |
 |---|---|
+| 2026-10-19 | DWG save: a 2018 drawing's render settings went through the R2000 bridge DXF in their 2018 form and came out as class version 3, one of the two reasons BricsCAD refused CADCraft's DWGs (#907); kept render settings now take the declared version's form. The other reason, an empty constraint group written short, is fixed in acadrust (hakanaktt/acadrust#146). |
 | 2026-10-14 | HATCHEDIT adds boundaries from internal points or closed objects and removes selected loops in the dialog, command line and JSON command; associative links and undo are covered by tests. |
 | 2026-10-12 | TRIM: a pick after a closed polyline's last cut keeps only the complementary run instead of an extra circuit of the outline (#726) |
 | 2026-10-12 | HATCHEDIT refuses an explicit bad `scale` or `angle` before it edits anything, so a rejected request leaves the drawing, undo and redo as they were (#724) |
