@@ -461,13 +461,19 @@ pub(super) fn read_char(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispEr
     arity(&a, 0, 1)?;
     let Some(Value::File(id)) = a.first() else { return Ok(Flow::Value(Value::Nil)) };
     let Some(f) = ctx.env.files.get_mut(id).filter(|f| !f.writing) else { return Err(LispError::bad_arg("streamp", &a[0])) };
-    let Some(line) = f.lines.front_mut() else { return Ok(Flow::Value(Value::Nil)) };
-    if line.is_empty() {
-        f.lines.pop_front();
-        return Ok(Flow::Value(Value::Int(10)));
+    let Some(line) = f.lines.front() else { return Ok(Flow::Value(Value::Nil)) };
+    // From a cursor into the line, so reading a long line a character at a time stays linear.
+    match line.get(f.pos..).and_then(|rest| rest.chars().next()) {
+        Some(c) => {
+            f.pos += c.len_utf8();
+            Ok(Flow::Value(Value::Int(i32::try_from(u32::from(c)).unwrap_or(0))))
+        }
+        None => {
+            f.lines.pop_front();
+            f.pos = 0;
+            Ok(Flow::Value(Value::Int(10)))
+        }
     }
-    let c = line.remove(0);
-    Ok(Flow::Value(Value::Int(i32::try_from(u32::from(c)).unwrap_or(0))))
 }
 
 /// `(write-char code [file])`: writes one character; `code`.

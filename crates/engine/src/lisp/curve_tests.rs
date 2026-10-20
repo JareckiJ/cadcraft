@@ -190,6 +190,29 @@ fn what_is_not_a_curve_is_an_error() {
     assert_eq!(eval(&mut s, "(vlax-curve-getEndParam)"), Err("too few arguments".into()));
 }
 
+/// `read-char` reads on from where it left off in a line (multi-byte characters whole, 10 at
+/// each line end), and `read-line` gives the rest of a line `read-char` has started.
+#[test]
+fn read_char_and_read_line_share_their_place_in_the_file() {
+    let mut s = session();
+    let dir = std::env::temp_dir().join(format!("cadcraft-lisp-readchar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("r.txt");
+    std::fs::write(&path, "h\u{e9}llo\nab\n").unwrap();
+    let p = path.to_string_lossy().replace('\\', "/");
+    let code = format!(
+        "(setq f (open \"{p}\" \"r\")) (list (read-char f) (read-char f) (read-line f) (read-char f) (read-char f) (read-char f) (read-char f) (progn (close f) 1))"
+    );
+    // h, é (233, one character of two bytes), the rest "llo", then a, b, the line end, the end.
+    assert_eq!(ok(&mut s, &code), "(104 233 \"llo\" 97 98 10 nil 1)");
+    // A long line read a character at a time comes out whole, in order.
+    std::fs::write(&path, format!("{}\n", "xy".repeat(2000))).unwrap();
+    let code = format!("(setq f (open \"{p}\" \"r\") n 0 c (read-char f)) (while (and c (/= c 10)) (setq n (1+ n) c (read-char f))) (close f) n");
+    assert_eq!(ok(&mut s, &code), "4000");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn files_and_folders() {
     let mut s = session();

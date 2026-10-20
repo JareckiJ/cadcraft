@@ -194,7 +194,10 @@ impl GetRequest {
             GetKind::Kword => Err("Invalid option keyword.".into()),
             GetKind::File { new } => {
                 let Some(name) = self.file.complete(t).or_else(|| self.file.complete(&self.file.default)) else { return Ok(Value::Nil) };
-                if !new && !super::builtins::file_exists(&name) {
+                // Open mode checks the file is there where files can be checked. In the browser
+                // (wasm32) there is no file system to look in, so the name is taken as given, and
+                // opening it then fails the way every file function there does (`open` gives nil).
+                if !new && cfg!(not(target_arch = "wasm32")) && !super::builtins::file_exists(&name) {
                     return Err(format!("Can't find file {name}.").as_str().into());
                 }
                 Ok(Value::str(&name))

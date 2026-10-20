@@ -577,7 +577,7 @@ impl Ellipse {
         let l: f64 = (0..n)
             .map(|i| {
                 let (a, b) = (t0 + h * i as f64, t0 + h * (i + 1) as f64);
-                adaptive_gauss(a, b, gauss(a, b, speed), &speed, MAX_GAUSS_DEPTH)
+                adaptive_gauss(a, b, gauss(a, b, speed), &speed, MAX_GAUSS_DEPTH, 0.0)
             })
             .sum();
         if l.is_finite() { l } else { 0.0 }
