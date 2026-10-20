@@ -121,6 +121,8 @@ pub struct CanvasState {
     pub param: crate::parametric::Cache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
+    /// A lasso selection opened by a press-and-drag.
+    drag_lasso: bool,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -1369,12 +1371,16 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if !in_active {
             app.canvas.hot_grips.clear();
             app.session.pending_window = None;
+            app.session.pending_lasso = None;
             app.canvas.drag_window = false;
+            app.canvas.drag_lasso = false;
             if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_err() && active_vp.is_some() {
                 let _ = app.run("pspace", serde_json::json!({}));
             }
             app.session.pending_window = None;
+            app.session.pending_lasso = None;
             app.canvas.drag_window = false;
+            app.canvas.drag_lasso = false;
             app.canvas.list = None;
             return;
         }
@@ -1497,7 +1503,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let idle_dbl = dbl_primary && app.session.running.is_none();
     if idle_dbl {
         app.session.pending_window = None;
+        app.session.pending_lasso = None;
         app.canvas.drag_window = false;
+        app.canvas.drag_lasso = false;
     }
     let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
     // Clicks.
@@ -1533,18 +1541,47 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.session.echo(e.to_string());
         }
     }
-    // Press-and-drag selection window (AutoCAD's PICKDRAG = 2; click-click still works): a drag
-    // that starts while objects are being selected opens a window where the button went down,
+    // Press-and-drag selection window or lasso (AutoCAD's PICKDRAG = 2; click-click still works):
+    // a drag that starts while objects are being selected opens a lasso/window where the button went down,
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
     if resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
         && app.session.pending_window.is_none()
+        && app.session.pending_lasso.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
         && grip_at(app, &xf, Some(origin)).is_none()
         && crate::dyngrips::at(app, &xf, Some(origin)).is_none()
     {
-        app.canvas.drag_window = app.session.begin_window(xf.to_world(origin));
+        let start = xf.to_world(origin);
+        app.canvas.drag_lasso = app.session.begin_lasso(start);
+        if !app.canvas.drag_lasso {
+            app.canvas.drag_window = app.session.begin_window(start);
+        }
+    }
+    if app.canvas.drag_lasso
+        && resp.dragged_by(egui::PointerButton::Primary)
+        && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+    {
+        app.session.push_lasso(xf.to_world(pos));
+    }
+    if app.canvas.drag_lasso && resp.drag_stopped_by(egui::PointerButton::Primary) {
+        app.canvas.drag_lasso = false;
+        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+            app.session.push_lasso(xf.to_world(pos));
+        }
+        let done = if app.session.prompting() {
+            match app.session.finish_command_lasso() {
+                Ok(Some(hs)) => app.session.input(Input::Pick(hs)),
+                Ok(None) => Ok(()),
+                Err(e) => Err(e),
+            }
+        } else {
+            app.session.idle_lasso(mods.shift)
+        };
+        if let Err(e) = done {
+            app.session.echo(e.to_string());
+        }
     }
     if app.canvas.drag_window && resp.drag_stopped_by(egui::PointerButton::Primary) {
         app.canvas.drag_window = false;
@@ -1822,6 +1859,36 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             painter.extend(Shape::dashed_line(&pts, st, 5.0, 3.0));
         } else {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
+        }
+    }
+    // Pending selection lasso.
+    if let Some(pl) = &app.session.pending_lasso
+        && pl.pts.len() >= 2
+    {
+        let mut screen_pts: Vec<Pos2> = pl.pts.iter().map(|p| xf.to_screen(*p)).collect();
+        let crossing = pl.is_crossing();
+        if let Some(fill) = selection_area_fill(&app.session.settings, crossing)
+            && screen_pts.len() >= 3
+        {
+            let mut mesh = egui::Mesh::default();
+            for (i, p) in screen_pts.iter().enumerate() {
+                mesh.colored_vertex(*p, fill);
+                if i >= 2 {
+                    mesh.indices.extend_from_slice(&[0, (i - 1) as u32, i as u32]);
+                }
+            }
+            if !mesh.is_empty() {
+                painter.add(Shape::mesh(mesh));
+            }
+        }
+        let st = Stroke::new(1.0, if crossing { t.crossing_stroke } else { t.window_stroke });
+        if let Some(first) = screen_pts.first().copied() {
+            screen_pts.push(first);
+        }
+        if crossing {
+            painter.extend(Shape::dashed_line(&screen_pts, st, 5.0, 3.0));
+        } else {
+            painter.add(Shape::line(screen_pts, st));
         }
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
@@ -2611,6 +2678,24 @@ pub(crate) mod tests {
         app.session.pending_window = Some(cadcraft_engine::PendingWindow { corner: Vec2::ZERO, during_command: true });
         let text = painted_text(&mut app, &ctx, at);
         assert!(text.contains(&format!("   {}  <", arch(c.len()))), "no {} in:\n{text}", arch(c.len()));
+    }
+
+    #[test]
+    fn pending_lasso_renders_without_panic() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let at = pos2(700.0, 450.0);
+        painted_text(&mut app, &ctx, at);
+        app.session.pending_lasso = Some(cadcraft_engine::PendingLasso {
+            pts: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)],
+            during_command: false,
+        });
+        // Render with pending lasso
+        let _ = painted_text(&mut app, &ctx, at);
+        // Crossing lasso (initial point moving to left)
+        app.session.pending_lasso =
+            Some(cadcraft_engine::PendingLasso { pts: vec![Vec2::new(10.0, 0.0), Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0)], during_command: false });
+        let _ = painted_text(&mut app, &ctx, at);
     }
 }
 

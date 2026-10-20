@@ -526,6 +526,32 @@ pub struct PendingWindow {
     pub during_command: bool,
 }
 
+/// A pending lasso selection started by a press-and-drag, collecting freehand polygon points.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PendingLasso {
+    pub pts: Vec<Vec2>,
+    pub during_command: bool,
+}
+
+impl PendingLasso {
+    /// Whether the lasso is in crossing mode: AutoCAD standard is crossing when dragged to the
+    /// left from its start (first move `x < start.x`) or counter-clockwise; Window when dragged
+    /// to the right (`x > start.x`) or clockwise.
+    pub fn is_crossing(&self) -> bool {
+        let (Some(first), Some(second)) = (self.pts.first(), self.pts.get(1)) else { return false };
+        if (second.x - first.x).abs() > 1e-6 {
+            return second.x < first.x;
+        }
+        // If initial horizontal movement was tiny, check any later point or polygon signed area.
+        for p in &self.pts[2..] {
+            if (p.x - first.x).abs() > 1e-6 {
+                return p.x < first.x;
+            }
+        }
+        false
+    }
+}
+
 /// Options and values the interactive commands remember for the rest of the session, offered as
 /// the `<default>` the next time they ask (as AutoCAD does). Values AutoCAD keeps in a drawing
 /// system variable (HPNAME, OFFSETDIST, FILLETRAD, CHAMFERA, POLYSIDES…) live in the drawing
@@ -658,6 +684,7 @@ pub struct Session {
     pub clipboard: Vec<Entity>,
     pub clipboard_base: Vec2,
     pub pending_window: Option<PendingWindow>,
+    pub pending_lasso: Option<PendingLasso>,
     /// A selection mode typed at "Select objects" (W, C, F, WP, CP) collecting its points.
     pub select_mode: Option<select::SelectMode>,
     /// SIngle typed at "Select objects": the next selection ends the prompt.
@@ -715,6 +742,7 @@ impl Session {
             clipboard: Vec::new(),
             clipboard_base: Vec2::ZERO,
             pending_window: None,
+            pending_lasso: None,
             select_mode: None,
             select_single: false,
             untitled_counter: 0,
@@ -1126,6 +1154,7 @@ impl Session {
             && let Some(m) = select::SelectMode::from_keyword(t)
         {
             self.pending_window = None;
+            self.pending_lasso = None;
             self.select_mode = Some(m);
             return Ok(None);
         }
@@ -1187,6 +1216,7 @@ impl Session {
             }
             Input::Cancel => {
                 self.pending_window = None;
+                self.pending_lasso = None;
                 Ok(Some(Input::Cancel))
             }
             other => Ok(Some(other)),
@@ -1705,8 +1735,77 @@ impl Session {
         if !corner.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
             return false;
         }
+        self.pending_lasso = None;
         self.pending_window = Some(PendingWindow { corner, during_command });
         true
+    }
+
+    /// Open a lasso selection at `start`, collecting freehand polygon points during a drag.
+    pub fn begin_lasso(&mut self, start: Vec2) -> bool {
+        let during_command = self.running.is_some();
+        if !start.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
+            return false;
+        }
+        self.pending_window = None;
+        self.pending_lasso = Some(PendingLasso { pts: vec![start], during_command });
+        true
+    }
+
+    /// Add a point to the pending lasso selection if it meets a minimum distance threshold.
+    pub fn push_lasso(&mut self, p: Vec2) {
+        if !p.is_finite() {
+            return;
+        }
+        if let Some(pl) = &mut self.pending_lasso {
+            if pl.pts.len() >= select::MAX_MODE_POINTS {
+                return;
+            }
+            if let Some(last) = pl.pts.last()
+                && (p.x - last.x).hypot(p.y - last.y) < 1e-5
+            {
+                return;
+            }
+            pl.pts.push(p);
+        }
+    }
+
+    /// Complete a lasso selection during an active command prompt, returning the selected handles.
+    pub fn finish_command_lasso(&mut self) -> Result<Option<Vec<Handle>>> {
+        let Some(pl) = self.pending_lasso.take() else { return Ok(None) };
+        let space = self.space();
+        let crossing = pl.is_crossing();
+        let hs = if pl.pts.len() >= 3 {
+            select::select_polygon(self.doc()?, &space, &pl.pts, crossing)
+        } else if let (Some(a), Some(b)) = (pl.pts.first(), pl.pts.last()) {
+            select::select_window(self.doc()?, &space, Bounds2::new(*a, *b), crossing)
+        } else {
+            Vec::new()
+        };
+        Ok(Some(cmd::groups::expand(self, hs)))
+    }
+
+    /// Complete a lasso selection while idle (no command active), updating the session selection.
+    pub fn idle_lasso(&mut self, shift: bool) -> Result<()> {
+        let Some(pl) = self.pending_lasso.take() else { return Ok(()) };
+        let space = self.space();
+        let pickadd = self.settings.pickadd;
+        let crossing = pl.is_crossing();
+        let hs = if pl.pts.len() >= 3 {
+            select::select_polygon(self.doc()?, &space, &pl.pts, crossing)
+        } else if let (Some(a), Some(b)) = (pl.pts.first(), pl.pts.last()) {
+            select::select_window(self.doc()?, &space, Bounds2::new(*a, *b), crossing)
+        } else {
+            Vec::new()
+        };
+        let hs = cmd::groups::expand(self, hs);
+        let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
+        if shift && pickadd {
+            sel.retain(|h| !hs.contains(h));
+        } else {
+            sel.extend(hs);
+        }
+        self.set_selection(sel);
+        Ok(())
     }
 
     /// A click with no command running: pick/toggle objects or start a selection window.
@@ -1716,6 +1815,7 @@ impl Session {
     pub fn idle_click(&mut self, p: Vec2, shift: bool) -> Result<()> {
         let space = self.space();
         let pickadd = self.settings.pickadd;
+        self.pending_lasso = None;
         if let Some(pw) = self.pending_window.take() {
             let crossing = p.x < pw.corner.x;
             let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);

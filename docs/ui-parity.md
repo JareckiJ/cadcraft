@@ -128,7 +128,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Pick, implied window (left→right) and crossing (right→left) | yes | yes, coloured and dashed rectangles (`lib.rs:576-589`, `canvas.rs:823-836`), filled as SELECTIONAREA, WINDOWAREACOLOR, CROSSINGAREACOLOR and SELECTIONAREAOPACITY say (Visual Effect Settings) |
 | Keywords W, C, WP, CP, F, BOX, AU, SI, M, G (group), CL (class) | yes | yes: CLass (#U6); W, C, F, WP, CP (#226); BOX, AUto, SIngle, Multiple, Group, Add, Remove, Undo (#428); ALL, Last, Previous |
 | Press-drag selection windows (PICKDRAG) | yes | yes (#63, PICKDRAG = 2) |
-| Lasso | yes | **no** |
+| Lasso | yes | yes (freehand polygon drag with crossing/window direction detection, filled area and dashed outline) |
 | Selection cycling (SELECTIONCYCLING) | yes | yes: cycles overlapping candidates on pick; SELECTIONCYCLING toggle and status bar button |
 | Selection preview, hover highlight | yes | selected and hovered objects redrawn in the selection colour, fills half see-through (SELECTIONEFFECT 1; 0 dashed), selection effect color; HIGHLIGHT (not saved), SELECTIONPREVIEW, PREVIEWEFFECT, PREVIEWFILTER (Visual Effect Settings) |
 | PICKADD, PICKFIRST, PICKAUTO | yes | PICKADD (Shift), PICKFIRST |
