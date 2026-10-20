@@ -27,7 +27,6 @@ pub(super) fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOption
     if points.is_finite() { points } else { 0.0 }
 }
 
-/// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
 /// Start TEXTEDIT on the text, mtext or attribute definition at `p` (the objects its shortcut menu
 /// offers Edit Text for); false when there is none.
 pub(super) fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {

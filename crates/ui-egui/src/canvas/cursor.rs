@@ -158,8 +158,6 @@ pub(super) fn tooltip(p: &egui::Painter, at: Pos2, text: &str) {
     p.galley(r.min + vec2(4.0, 2.0), galley, Color32::BLACK);
 }
 
-/// Half the side of the pick box: the pick aperture (PICKBOX × 1.5 pixels, as `select::pick` is
-/// called with), so the square shows what a click hits. `None` when PICKBOX is 0 (no box).
 /// The candidate Tab has cycled to, if cycling: a Tab press starts or advances it, and the
 /// cursor leaving the aperture where it started ends it.
 pub(super) fn snap_cycle(app: &mut CadApp, raw: Vec2, ap: f64) -> Option<usize> {
@@ -214,6 +212,8 @@ pub(super) fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
     app.session.cursor_deferred = app.canvas.snap.and_then(|h| h.deferred);
 }
 
+/// Half the side of the pick box: the pick aperture (PICKBOX × 1.5 pixels, as `select::pick` is
+/// called with), so the square shows what a click hits. `None` when PICKBOX is 0 (no box).
 pub(super) fn pickbox_half(pickbox: f64) -> Option<f32> {
     let half = (pickbox * 1.5) as f32;
     (half.is_finite() && half >= 1.0).then_some(half)
