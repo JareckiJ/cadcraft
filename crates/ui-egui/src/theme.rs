@@ -949,7 +949,7 @@ mod tests {
         let readable = dir.join("readable.ttf");
         std::fs::write(&denied, [1, 2, 3]).unwrap();
         std::fs::write(&readable, [4, 5, 6]).unwrap();
-        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::File::open(&denied).is_err() {
             let paths = [denied.to_str().unwrap(), readable.to_str().unwrap()];
             assert!(denied.is_file(), "existence alone must not select this candidate");
