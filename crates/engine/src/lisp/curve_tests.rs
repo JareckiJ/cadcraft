@@ -277,6 +277,20 @@ fn getfiled_asks_at_the_command_line() {
     s.input(crate::Input::Enter).unwrap();
     assert!(!s.lisp_running());
     assert_eq!(to_text(&s.lisp_var("F"), true), "nil");
+    // Enter on a default that isn't there, in open mode, asks again as a typed name does; a file
+    // that is there is taken.
+    s.cmdline("(setq f (getfiled \"Open\" \"no-such-default-anywhere\" \"lsp\" 0))").unwrap();
+    s.input(crate::Input::Enter).unwrap();
+    assert!(s.lisp_running(), "a default that isn't there asks again");
+    let dir = std::env::temp_dir().join(format!("cadcraft-getfiled-enter-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = dir.join("here.lsp");
+    std::fs::write(&real, "(princ)").unwrap();
+    let real = real.to_string_lossy().replace('\\', "/");
+    s.cmdline(&real).unwrap();
+    assert!(!s.lisp_running());
+    assert_eq!(to_text(&s.lisp_var("F"), true), format!("\"{real}\""));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

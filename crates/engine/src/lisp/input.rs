@@ -73,6 +73,17 @@ impl FileAsk {
     }
 }
 
+/// `getfiled`'s answer `name`, typed or the default taken with Enter: open mode (`new` false)
+/// asks again for a file that isn't there, where files can be checked. In the browser (wasm32)
+/// there is no file system to look in, so the name is taken as given, and opening it then fails
+/// the way every file function there does (`open` gives nil).
+fn file_answer(name: String, new: bool) -> Result<Value, Again> {
+    if !new && cfg!(not(target_arch = "wasm32")) && !super::builtins::file_exists(&name) {
+        return Err(format!("Can't find file {name}.").as_str().into());
+    }
+    Ok(Value::str(&name))
+}
+
 impl GetRequest {
     /// The prompt the command line shows.
     pub fn prompt(&self) -> Prompt {
@@ -113,9 +124,13 @@ impl GetRequest {
                 if matches!(self.kind, GetKind::String { .. }) {
                     return Ok(Value::str(""));
                 }
-                if let GetKind::File { .. } = self.kind {
-                    // Enter takes the default name, or cancels the choice (nil) without one.
-                    return Ok(self.file.complete(&self.file.default).map(|n| Value::str(&n)).unwrap_or_default());
+                if let GetKind::File { new } = self.kind {
+                    // Enter takes the default name (checked as a typed one is), or cancels the choice
+                    // (nil) without one.
+                    return match self.file.complete(&self.file.default) {
+                        Some(name) => file_answer(name, new),
+                        None => Ok(Value::Nil),
+                    };
                 }
                 if no_null {
                     return Err(match self.kind {
@@ -194,13 +209,7 @@ impl GetRequest {
             GetKind::Kword => Err("Invalid option keyword.".into()),
             GetKind::File { new } => {
                 let Some(name) = self.file.complete(t).or_else(|| self.file.complete(&self.file.default)) else { return Ok(Value::Nil) };
-                // Open mode checks the file is there where files can be checked. In the browser
-                // (wasm32) there is no file system to look in, so the name is taken as given, and
-                // opening it then fails the way every file function there does (`open` gives nil).
-                if !new && cfg!(not(target_arch = "wasm32")) && !super::builtins::file_exists(&name) {
-                    return Err(format!("Can't find file {name}.").as_str().into());
-                }
-                Ok(Value::str(&name))
+                file_answer(name, new)
             }
             GetKind::Int => match t.trim().parse::<i32>() {
                 Ok(i) if (-32768..=32767).contains(&i) => self.check_number(f64::from(i), true),
