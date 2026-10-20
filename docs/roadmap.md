@@ -103,7 +103,7 @@ AutoLISP surface, AI features with openly licensed local models, and every remai
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-20 | minor | M7: ETRANSMIT packages drawings, recursive xrefs, images and CSV links with portable paths and a manifest; see [remaining limits](etransmit.md). Milestone percentage unchanged. |
+| 2026-10-20 | minor | M7: ETRANSMIT packages drawings and explicitly authorized xrefs, validated PNG/JPEG images and UTF-8 CSV links with portable paths and a manifest; see [remaining limits](etransmit.md). Milestone percentage unchanged. |
 | 2026-10-12 | minor | Block Editor for static blocks landed: "Use blocks" evidence updated; status and hours unchanged (REFEDIT and dynamic blocks remain) |
 | 2026-10-11 | minor | Alpha-gate evidence refreshed for merged work (#459, #525, #528, #160, #186, #564); statuses and hours unchanged |
 | 2026-10-10 | minor | Merged main: fmt fixed, Ukrainian catalog noted in M13, ready for real work 38% |

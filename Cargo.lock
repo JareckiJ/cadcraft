@@ -644,6 +644,7 @@ dependencies = [
  "cadcraft-io",
  "cadcraft-render",
  "craft-docpath",
+ "image",
  "log",
  "rstar",
  "serde",
