@@ -144,28 +144,30 @@ fn resolve_xref_path(s: &Session, path: &str, block_name: &str) -> Result<String
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (block_name, file);
+        Err(bad("refedit", "editing xrefs in place is not available on the web"))
+    }
     #[cfg(not(target_arch = "wasm32"))]
     {
         let md = std::fs::metadata(&file).map_err(|e| bad("refedit", format!("{}: {e}", file.display())))?;
         if md.permissions().readonly() {
             return Err(bad("refedit", format!("xref \"{block_name}\" file is read-only ({})", file.display())));
         }
+        Ok(file_str)
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        return Err(bad("refedit", "editing xrefs in place is not available on the web"));
-    }
-
-    Ok(file_str)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn write_back_xref(_nd: &Drawing, _r: &RefEdit, _file_path: &str) -> Result<()> {
+    Err(bad("refclose", "files are not available on the web"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn write_back_xref(nd: &Drawing, r: &RefEdit, file_path: &str) -> Result<()> {
     let hooks = crate::cmd::file::io().ok_or_else(|| bad("refclose", "file formats are not available in this build"))?;
-    #[cfg(not(target_arch = "wasm32"))]
     let bytes = std::fs::read(file_path).map_err(|e| bad("refclose", format!("{file_path}: {e}")))?;
-    #[cfg(target_arch = "wasm32")]
-    return Err(bad("refclose", "files are not available on the web"));
-
     let mut xref_doc = (hooks.read)(&bytes, file_path).map_err(|e| bad("refclose", format!("reading {file_path}: {e}")))?;
 
     let xref_root_name = r.nested_path.first().cloned().unwrap_or_else(|| r.block.clone());
