@@ -240,6 +240,7 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
                 }
             }
         }
+        EntityKind::MLine(m) => m.vertices.iter_mut().for_each(|v| mv(&mut v.p)),
         EntityKind::Arc(a) => {
             // Arcs keep their shape: move when the centre is inside.
             if inside(a.center.xy()) {
