@@ -47,6 +47,8 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("CHAMFERD", Kind::Angle, Def::Real(0.0)),
     ("CHAMMODE", Kind::Choice(&[0, 1]), Def::Int(0)),
     ("CIRCLERAD", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
+    // Kept for LISP routines and scripts that switch it around their commands; no command reads it yet.
+    ("CMDECHO", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("CMLJUST", Kind::Choice(&[0, 1, 2]), Def::Int(0)),
     ("CMLSCALE", Kind::AnyReal, Def::Units(1.0, 20.0)),
     ("CPLOTSTYLE", Kind::ReadOnlyStr, Def::Str("ByLayer")),
@@ -54,6 +56,8 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("DONUTID", Kind::Real { min: 0.0, strict: false }, Def::Real(0.5)),
     ("DONUTOD", Kind::Real { min: 0.0, strict: true }, Def::Real(1.0)),
     ("EDGEMODE", Kind::Choice(&[0, 1]), Def::Int(0)),
+    // Like CMDECHO: kept for routines that switch file dialogs off around a script; no command reads it yet.
+    ("FILEDIA", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("HPANG", Kind::Angle, Def::Real(0.0)),
     // 1: HATCH and GRADIENT typed or from a menu open the Hatch and Gradient dialog; 0: the command line.
     ("HPDLGMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
