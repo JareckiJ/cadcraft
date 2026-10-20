@@ -274,7 +274,7 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(l) = d.layouts.iter_mut().find(|l| l.name == from) {
         l.name = to.clone();
     }
-    if d.active_layout.as_ref() == Some(&from) {
+    if d.active_layout.as_ref().is_some_and(|a| a.eq_ignore_ascii_case(&from)) {
         d.active_layout = Some(to.clone());
     }
     let (old, new) = (Space::Paper(from.clone()), Space::Paper(to.clone()));

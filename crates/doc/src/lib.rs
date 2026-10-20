@@ -307,7 +307,7 @@ impl Drawing {
     pub fn paper_space_layouts(&self) -> Vec<&Layout> {
         let mut ls: Vec<&Layout> = self.layouts.iter().collect();
         ls.sort_by_key(|l| l.tab_order);
-        if let Some(i) = self.active_layout.as_ref().and_then(|a| ls.iter().position(|l| &l.name == a)) {
+        if let Some(i) = self.active_layout.as_ref().and_then(|a| ls.iter().position(|l| l.name.eq_ignore_ascii_case(a))) {
             let active = ls.remove(i);
             ls.insert(0, active);
         }
