@@ -73,3 +73,10 @@ fn without_an_active_layout_the_first_tab_is_active() {
     d.active_layout = Some("gone".into());
     assert_eq!(dwg_active_layout(&dwg(&d)), "S1");
 }
+
+#[test]
+fn the_active_layout_name_is_matched_ignoring_case() {
+    let mut d = three_sheets();
+    d.active_layout = Some("s2".into());
+    assert_eq!(dwg_active_layout(&dwg(&d)), "S2");
+}

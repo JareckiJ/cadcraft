@@ -930,6 +930,14 @@ mod tests {
     }
 
     #[test]
+    fn rename_keeps_the_active_layout_whatever_its_case() {
+        let mut s = session_with_model();
+        s.doc_mut().unwrap().active_layout = Some("layout1".into());
+        s.execute("layout.rename", &json!({"from": "Layout1", "to": "Sheet A"})).unwrap();
+        assert_eq!(s.doc().unwrap().active_layout.as_deref(), Some("Sheet A"));
+    }
+
+    #[test]
     fn rename_copy_delete() {
         let mut s = session_with_model();
         s.execute("layout.set", &json!({"name": "Layout1"})).unwrap();
