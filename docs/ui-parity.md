@@ -194,10 +194,11 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
   name, a point), ends the input of a running command, and between commands repeats the last one
   (#1387). Holding it (250 ms, AutoCAD's time-sensitive right-click) opens the command menu while
   a command runs: Enter, Cancel, Recent Input, the prompt's options, Snap Overrides, Pan/Zoom.
-  Held between commands (or any right-click with the time-sensitive right-click turned off in
-  Options), it opens a shortcut menu (Repeat, Recent Commands,
-  Clipboard ▸, Isolate ▸, the selection's editing commands, Draw Order ▸, Group, the selected
-  object type's edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom; #325, #512).
+  Held between commands, it opens a shortcut menu (Repeat, Recent Commands, Clipboard ▸,
+  Isolate ▸, the selection's editing commands, Draw Order ▸, Group, the selected object type's
+  edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom; #325, #512). With the
+  time-sensitive right-click turned off in Options, every right-click opens one of these menus:
+  the command menu while a command runs, the shortcut menu between commands.
   The command line, drawing tabs, layout tabs, Layers palette rows and the Properties palette
   have menus too (#512). Still missing: in-place layout tab rename, Move or Copy, Select All
   Layouts.
