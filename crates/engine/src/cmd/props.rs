@@ -6,7 +6,7 @@ mod rename;
 pub use matchprop::MatchProps;
 
 use cadcraft_color::Color;
-use cadcraft_doc::{EntityKind, Lineweight, Transparency};
+use cadcraft_doc::{Drawing, EntityKind, HAlign, Lineweight, Transparency, VAlign};
 use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
@@ -204,6 +204,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|n| d.dim_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("dimension style `{n}` not found"))))
         .transpose()?;
     let dim_over = dim_overrides(p)?;
+    let attdef = attdef_fields(p, d)?;
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {
@@ -303,6 +304,56 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                         for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
                             q.x += d.x;
                             q.y += d.y;
+                        }
+                    }
+                }
+                EntityKind::AttDef(a) => {
+                    if let Some(t) = &attdef.tag {
+                        a.tag.clone_from(t);
+                    }
+                    if let Some(v) = str_param(p, "prompt") {
+                        a.prompt = v.to_string();
+                    }
+                    if let Some(v) = str_param(p, "text") {
+                        a.text.value = v.to_string();
+                    }
+                    if let Some(x) = num("height").filter(|x| *x > 0.0) {
+                        a.text.height = x;
+                    }
+                    if let Some(x) = num("rotation") {
+                        a.text.rotation = x.to_radians();
+                    }
+                    if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
+                        a.text.width_factor = x;
+                    }
+                    if let Some((h, v)) = attdef.justify {
+                        // The point the text is placed by stays; the text re-justifies about it.
+                        let at = a.text.justify_point();
+                        let at = Vec3 { x: at.x, y: at.y, z: a.text.insert.z };
+                        a.text.halign = h;
+                        a.text.valign = v;
+                        a.text.insert = at;
+                        a.text.align_pt = if h == HAlign::Left && v == VAlign::Baseline { None } else { Some(at) };
+                    }
+                    if let Some(st) = &attdef.style {
+                        a.text.style.clone_from(st);
+                    }
+                    if let Some(to) = p.get("position").and_then(point_value) {
+                        let d = to - a.text.justify_point();
+                        for q in std::iter::once(&mut a.text.insert).chain(a.text.align_pt.as_mut()) {
+                            q.x += d.x;
+                            q.y += d.y;
+                        }
+                    }
+                    for (key, flag) in [
+                        ("invisible", &mut a.invisible),
+                        ("constant", &mut a.constant),
+                        ("verify", &mut a.modes.verify),
+                        ("preset", &mut a.modes.preset),
+                        ("lockPosition", &mut a.modes.lock_position),
+                    ] {
+                        if let Some(b) = p.get(key).and_then(Value::as_bool) {
+                            *flag = b;
                         }
                     }
                 }
@@ -1075,6 +1126,36 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()
+}
+
+/// `properties.set`'s attribute definition fields that can be wrong, checked before anything
+/// changes: `tag` (a word), `justify` (a TEXT justification code) and `style` (an existing text style).
+struct AttdefFields {
+    tag: Option<String>,
+    justify: Option<(HAlign, VAlign)>,
+    style: Option<String>,
+}
+
+fn attdef_fields(p: &Value, d: &Drawing) -> Result<AttdefFields> {
+    let tag = str_param(p, "tag")
+        .map(|t| {
+            let t = t.trim();
+            if t.is_empty() || t.contains(' ') {
+                Err(bad("properties.set", "an attribute tag must not be empty or contain spaces"))
+            } else {
+                Ok(t.to_ascii_uppercase())
+            }
+        })
+        .transpose()?;
+    let justify = str_param(p, "justify")
+        .map(|j| {
+            super::draw::justify(j).ok_or_else(|| bad("properties.set", "`justify` must be L, C, R, A, M, F, TL, TC, TR, ML, MC, MR, BL, BC or BR"))
+        })
+        .transpose()?;
+    let style = str_param(p, "style")
+        .map(|n| d.text_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("text style `{n}` not found"))))
+        .transpose()?;
+    Ok(AttdefFields { tag, justify, style })
 }
 
 #[cfg(test)]

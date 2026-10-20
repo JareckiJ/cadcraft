@@ -93,6 +93,7 @@ ignored; there are no context menus. Remaining: **≈ 110–170 Opus 5.5 hours**
 | Isometric drafting (ISODRAFT, isoplanes F5) | yes | yes (#556): ISODRAFT and the status-bar toggle set SNAPSTYL and the plane; ISOPLANE / F5 / Ctrl+E cycle Left, Top, Right (SNAPISOPAIR); ortho, direct distance entry and the crosshair follow the plane's axes; ELLIPSE Isocircle (radius or Diameter, also for elliptical arcs); Drafting Settings snap style radio. Engine: `snap/iso.rs`, `cmd/settings/iso.rs` |
 | Drafting Settings dialog | yes | yes (`dialogs.rs:36-80`) |
 | Hatch and Gradient / Hatch Edit dialogs | yes | yes (`hatchdlg.rs`): pattern swatches, gradient colours and shapes, origin, pick points or objects, associative, separate, island detection; Hatch Edit adds boundaries from points or closed objects and removes selected loops; opened by HATCH, GRADIENT (HPDLGMODE), HATCHEDIT, right-click or double-clicking a hatch; no Preview or Inherit Properties |
+| Attribute Definition dialog (ATTDEF) | yes | yes (`attdefdlg.rs`): modes (Invisible, Constant, Verify, Preset, Lock position), tag, prompt and default, insertion point typed or specified on screen, justification, text style, height and rotation, align below the previous definition; -ATTDEF asks the same at the command line (Justify and Style options, height and rotation); a definition's rows in Properties; no Annotative, Multiple lines or boundary width |
 
 ## Dynamic input (≈ 45%)
 
@@ -203,6 +204,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Attribute Definition dialog (ATTDEF typed, from the menu or the Tool Sets; -ATTDEF keeps the command line with Justify, Style, height and rotation prompts and the modes); Properties rows for attribute definitions (tag, prompt, default, style, justification, height, rotation, width factor, modes) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |
 | 2026-10-14 | minor | Hatch Edit dialog adds boundaries from picked points or closed objects and removes selected loops |

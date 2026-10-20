@@ -694,6 +694,9 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// The Attribute Definition dialog's answers for the ATTDEF it starts to pick the start point
+    /// on screen (everything but the point); the command takes them when it begins.
+    pub attdef_answers: Option<Value>,
 }
 
 impl Default for Session {
@@ -743,6 +746,7 @@ impl Session {
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            attdef_answers: None,
         }
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
