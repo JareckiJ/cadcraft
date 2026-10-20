@@ -348,9 +348,9 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
         added.extend(
             paths
                 .into_iter()
-                .filter_map(|p| read_capped(p, MAX_UI_FONT_BYTES))
+                .filter_map(|p| cjk_font_data(p, language))
                 .enumerate()
-                .map(|(i, bytes)| (format!("system-cjk-{i}"), std::sync::Arc::new(egui::FontData::from_owned(bytes)))),
+                .map(|(i, data)| (format!("system-cjk-{i}"), std::sync::Arc::new(data))),
         );
         // العربية: an installed Arabic face after the Latin ones (egui's bundled faces carry no
         // Arabic glyphs), for the Arabic interface.
@@ -724,6 +724,13 @@ fn prefer_traditional<'a>(
 
 pub fn cjk_font_for(language: &str) -> Option<&'static std::path::Path> {
     #[cfg(not(target_arch = "wasm32"))]
+    if language == "zh-Hant"
+        && cfg!(target_os = "macos")
+        && let Some((path, _)) = macos_traditional_font()
+    {
+        return Some(path);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     let traditional = if language == "zh-Hant" {
         static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
         FOUND.get_or_init(|| first_readable_font(traditional_cjk_candidates(), |path| read_capped(path, MAX_UI_FONT_BYTES).is_some())).as_deref()
@@ -735,12 +742,59 @@ pub fn cjk_font_for(language: &str) -> Option<&'static std::path::Path> {
     prefer_traditional(language, traditional, cjk_font())
 }
 
+/// Preserve a collection's selected face when handing its bytes to egui.
+#[cfg(not(target_arch = "wasm32"))]
+fn font_data_for_face(face: &cadcraft_fonts::ttf::Face) -> egui::FontData {
+    let mut data = egui::FontData::from_owned(face.bytes.as_ref().clone());
+    data.index = face.index;
+    data
+}
+
+/// Inspect metadata instead of assuming that PingFang TC occupies any particular TTC slot.
+#[cfg(not(target_arch = "wasm32"))]
+fn traditional_collection_face(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
+    cadcraft_fonts::ttf::faces(&bytes).into_iter().find(|face| face.has_family_name("PingFang TC"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_traditional_collection(candidates: &[&str]) -> Option<(std::path::PathBuf, cadcraft_fonts::ttf::Face)> {
+    candidates.iter().find_map(|path| {
+        let bytes = read_capped(std::path::Path::new(path), MAX_UI_FONT_BYTES)?;
+        let face = traditional_collection_face(std::sync::Arc::new(bytes))?;
+        Some((std::path::PathBuf::from(path), face))
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn macos_traditional_font() -> Option<&'static (std::path::PathBuf, cadcraft_fonts::ttf::Face)> {
+    static FOUND: std::sync::OnceLock<Option<(std::path::PathBuf, cadcraft_fonts::ttf::Face)>> = std::sync::OnceLock::new();
+    FOUND
+        .get_or_init(|| load_traditional_collection(&["/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/Supplemental/PingFang.ttc"]))
+        .as_ref()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cjk_font_data(path: &std::path::Path, language: &str) -> Option<egui::FontData> {
+    let selected = if language == "zh-Hant" && cfg!(target_os = "macos") { macos_traditional_font() } else { None };
+    cjk_font_data_for_selection(path, selected)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cjk_font_data_for_selection(path: &std::path::Path, selected: Option<&(std::path::PathBuf, cadcraft_fonts::ttf::Face)>) -> Option<egui::FontData> {
+    if let Some((selected_path, face)) = selected
+        && path == selected_path
+    {
+        return Some(font_data_for_face(face));
+    }
+    read_capped(path, MAX_UI_FONT_BYTES).map(egui::FontData::from_owned)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn traditional_cjk_candidates() -> &'static [&'static str] {
     if cfg!(windows) {
         &["C:\\Windows\\Fonts\\msjh.ttc"]
     } else if cfg!(target_os = "macos") {
-        // PingFang's TC face needs a collection face index, which this path-only API cannot express.
+        // Collections are selected by family and loaded with their actual index separately.
         &[]
     } else {
         &[
@@ -856,11 +910,112 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(candidates, ["C:\\Windows\\Fonts\\msjh.ttc"]);
         } else if cfg!(target_os = "macos") {
-            assert!(candidates.is_empty(), "TC collections need a face index before being preferred");
+            assert!(candidates.is_empty(), "macOS collections use the separate family-aware selector");
         } else {
             assert_eq!(candidates.len(), 4);
             assert!(candidates.iter().all(|path| path.ends_with("NotoSansCJKtc-Regular.otf")));
         }
+    }
+
+    /// Original metadata-only TTC: no installed/proprietary font or glyph artwork.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn named_collection(families: &[&str], name_id: u16) -> Vec<u8> {
+        let mut bytes = b"ttcf".to_vec();
+        bytes.extend(0x0001_0000_u32.to_be_bytes());
+        bytes.extend((families.len() as u32).to_be_bytes());
+        bytes.resize(12 + 4 * families.len(), 0);
+        for (i, family) in families.iter().enumerate() {
+            let offset = bytes.len() as u32;
+            bytes[12 + i * 4..16 + i * 4].copy_from_slice(&offset.to_be_bytes());
+            bytes.extend(0x0001_0000_u32.to_be_bytes());
+            for value in [1_u16, 16, 0, 0] {
+                bytes.extend(value.to_be_bytes());
+            }
+            bytes.extend(b"name");
+            bytes.extend(0_u32.to_be_bytes()); // checksum: metadata parser does not need it
+            bytes.extend((offset + 28).to_be_bytes());
+            bytes.extend((18 + family.len() as u32 * 2).to_be_bytes());
+            for value in [0_u16, 1, 18, 3, 1, 0x0409, name_id, family.len() as u16 * 2, 0] {
+                bytes.extend(value.to_be_bytes());
+            }
+            for c in family.encode_utf16() {
+                bytes.extend(c.to_be_bytes());
+            }
+            while !bytes.len().is_multiple_of(4) {
+                bytes.push(0);
+            }
+        }
+        bytes
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn traditional_collection_uses_named_face_and_preserves_egui_index() {
+        for families in [
+            ["PingFang TC", "PingFang SC", "PingFang HK"],
+            ["PingFang SC", "PingFang TC", "PingFang HK"],
+            ["PingFang HK", "PingFang SC", "PingFang TC"],
+        ] {
+            for name_id in [1, 16] {
+                // legacy and typographic family names
+                let bytes = named_collection(&families, name_id);
+                let face = super::traditional_collection_face(std::sync::Arc::new(bytes.clone())).unwrap();
+                assert_eq!(face.index as usize, families.iter().position(|name| *name == "PingFang TC").unwrap());
+                let data = super::font_data_for_face(&face);
+                assert_eq!(data.index, face.index);
+                assert_eq!(data.font.as_ref(), bytes);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn traditional_collection_rejects_unknown_malformed_and_full_name_only() {
+        for bytes in [
+            vec![],
+            vec![0xff; 32],
+            named_collection(&["PingFang SC", "PingFang HK"], 1),
+            named_collection(&["Not PingFang TC", "PingFang TC Extra"], 1),
+            named_collection(&["PingFang TC"], 4),
+        ] {
+            assert!(super::traditional_collection_face(std::sync::Arc::new(bytes)).is_none());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn traditional_collection_truncation_and_bad_offsets_do_not_panic() {
+        let bytes = named_collection(&["PingFang SC", "PingFang TC"], 1);
+        for end in 0..bytes.len() {
+            let _ = super::traditional_collection_face(std::sync::Arc::new(bytes[..end].to_vec()));
+        }
+        let mut corrupt = bytes;
+        corrupt[12..20].fill(0xff);
+        assert!(super::traditional_collection_face(std::sync::Arc::new(corrupt)).is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn traditional_collection_file_chain_skips_failures() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-tc-collection-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let missing = dir.join("missing.ttc");
+        let malformed = dir.join("malformed.ttc");
+        let sc = dir.join("sc.ttc");
+        let tc = dir.join("tc.ttc");
+        std::fs::write(&malformed, [0xff; 32]).unwrap();
+        std::fs::write(&sc, named_collection(&["PingFang SC"], 1)).unwrap();
+        std::fs::write(&tc, named_collection(&["PingFang SC", "PingFang TC"], 1)).unwrap();
+        let paths: Vec<_> = [&missing, &malformed, &sc, &tc].iter().map(|p| p.to_str().unwrap()).collect();
+        let selected = super::load_traditional_collection(&paths).unwrap();
+        assert_eq!(selected.0, tc);
+        assert_eq!(selected.1.index, 1);
+        assert_eq!(super::cjk_font_data_for_selection(&tc, Some(&selected)).unwrap().index, 1);
+        assert_eq!(super::cjk_font_data_for_selection(&sc, Some(&selected)).unwrap().index, 0);
+        assert_eq!(super::cjk_font_data_for_selection(&tc, None).unwrap().index, 0);
+        assert!(super::cjk_font_data_for_selection(&missing, Some(&selected)).is_none());
+        assert!(super::load_traditional_collection(&paths[..3]).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
