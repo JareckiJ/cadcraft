@@ -138,6 +138,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | Dynamic blocks: polar and XY parameters (names, value sets, corner grips) and array actions (row and column offsets) read; arrayed copies saved with AutoCAD's `AcDbBlockArrayActionTag`, without which AutoCAD can't change the reference again |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-13 | minor | Dynamic blocks: rotation and flip parameters and actions read; changed references saved with AutoCAD's value records and history (flip state after the points, flip grip state) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
