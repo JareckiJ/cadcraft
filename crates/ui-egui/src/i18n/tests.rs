@@ -1323,12 +1323,31 @@ fn chinese_font_cache_tracks_tc_sc_and_other_language_switches() {
     }
 }
 
-#[test]
-fn traditional_chinese_covers_current_reference_catalog() {
-    let (reference, reference_errors) = parse(include_str!("uk.tsv"));
-    let (traditional, traditional_errors) = parse(include_str!("zh-Hant.tsv"));
-    assert!(reference_errors.is_empty() && traditional_errors.is_empty());
+fn assert_no_stale_catalog_keys(reference_source: &str, translated_source: &str) {
+    let (reference, reference_errors) = parse(reference_source);
+    let (translated, translated_errors) = parse(translated_source);
+    assert!(reference_errors.is_empty() && translated_errors.is_empty());
     let reference_keys: BTreeSet<_> = reference.keys().copied().collect();
-    let traditional_keys: BTreeSet<_> = traditional.keys().copied().collect();
-    assert_eq!(traditional_keys, reference_keys);
+    let translated_keys: BTreeSet<_> = translated.keys().copied().collect();
+    let stale: Vec<_> = translated_keys.difference(&reference_keys).collect();
+    assert!(stale.is_empty(), "catalog keys absent from reference: {stale:?}");
+}
+
+#[test]
+fn traditional_chinese_has_no_stale_reference_keys() {
+    // Coverage gaps stay non-fatal under REPORTED, as for the other optional catalogs.
+    assert_no_stale_catalog_keys(include_str!("uk.tsv"), include_str!("zh-Hant.tsv"));
+}
+
+#[test]
+fn traditional_chinese_gaps_are_reported_not_required() {
+    assert!(REPORTED.contains(&"zh-Hant") && !REQUIRED.contains(&"zh-Hant"));
+    assert_no_stale_catalog_keys("\tExisting\tExisting\n\tNew command\tNew command\n", "\tExisting\t現有\n");
+    check("zh-Hant", "fixture translations", vec!["New command".into()]);
+}
+
+#[test]
+#[should_panic(expected = "catalog keys absent from reference")]
+fn traditional_chinese_stale_keys_are_rejected() {
+    assert_no_stale_catalog_keys("\tExisting\tExisting\n", "\tRemoved command\t已移除的指令\n");
 }

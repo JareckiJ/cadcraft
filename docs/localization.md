@@ -1,7 +1,7 @@
 # Interface languages
 
 Choose **Edit → Interface Language** and select **Auto (system language)**, **English**,
-**Українська**, **Português (Brasil)**, **Deutsch**, **Español**, **Čeština** (Czech), **Русский**, **Français**, **简体中文**, **Italiano**, **한국어** (Korean), **Svenska** (Swedish), **العربية** (Arabic), **Magyar** (Hungarian), **Türkçe** (Turkish), or **Ελληνικά** (Greek).
+**Українська**, **Português (Brasil)**, **Deutsch**, **Español**, **Čeština** (Czech), **Русский**, **Français**, **简体中文**, **繁體中文**, **Italiano**, **한국어** (Korean), **Svenska** (Swedish), **العربية** (Arabic), **Magyar** (Hungarian), **Türkçe** (Turkish), or **Ελληνικά** (Greek).
 The interface updates without restarting, including the native macOS menus.
 The choice is saved with the other interface preferences (`cadcraft.prefs`, beside the theme):
 eframe storage on the desktop, browser local storage on the web. Installations without a saved
@@ -11,7 +11,8 @@ Auto uses the first supported language in the operating system's preferred local
 browser's `navigator.languages` on the web. BCP 47 and POSIX tags select their primary language:
 `uk-UA` → `uk`, `de_AT.UTF-8` → `de`, `es-MX` → `es`, `pt_BR.UTF-8` → `pt-BR`,
 `cs-CZ` and `cs_CZ.UTF-8` → `cs`, `it-IT` and `it_CH.UTF-8` → `it`, `ko-KR` and `ko_KR.UTF-8` → `ko`,
-`sv-SE`, `sv-FI` and `sv_SE.UTF-8` → `sv`, `hu-HU` and `hu_HU.UTF-8` → `hu`, `tr-TR` and `tr_TR.UTF-8` → `tr`. Unsupported languages fall back to English.
+`sv-SE`, `sv-FI` and `sv_SE.UTF-8` → `sv`, `hu-HU` and `hu_HU.UTF-8` → `hu`, `tr-TR` and `tr_TR.UTF-8` → `tr`. For Chinese, explicit script wins over region: `zh-TW` and `zh-HK` → `zh-Hant`,
+`zh-Hant` → `zh-Hant`, while `zh-Hans-TW` and bare `zh` → `zh`. Unsupported languages fall back to English.
 Set `CADCRAFT_LOCALE=cs-CZ` to override the desktop's locale for a launch.
 An explicit saved language choice takes precedence over that override.
 
@@ -22,7 +23,7 @@ Automation can select the language through the existing control channel:
 ```
 
 The `ui.set` method also accepts `{"interfaceLanguage":"cs"}`. Supported values are `auto`,
-`en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv`, `ar`, `hu`, `tr`, and `el`; invalid values are rejected without changing the current
+`en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `zh-Hant`, `it`, `ko`, `sv`, `ar`, `hu`, `tr`, and `el`; invalid values are rejected without changing the current
 selection. Resetting palettes keeps the language choice.
 
 ## Translation coverage
@@ -165,15 +166,19 @@ integration adds 29 keys and removes the obsolete `WCS ⌄` key. Commands, accep
 keywords, CLI/MCP/control labels, drawing text and user names retain their source spelling.
 Traditional Chinese count entries have one plural form.
 
-Traditional Chinese prefers Microsoft JhengHei on Windows; other interfaces retain their
-existing system-font choices. All embedded CJK faces remain available. The Traditional
+Traditional Chinese prefers readable Microsoft JhengHei on Windows and Noto Sans CJK TC
+single-face OTF candidates on Linux/FreeBSD, then falls back to the existing generic CJK font.
+Unreadable, empty or oversized Traditional candidates are skipped. Other interfaces retain their
+existing system-font choices. macOS still uses the generic fallback: preferring the TC face in
+PingFang collections requires face-index support and remains follow-up work. All embedded CJK faces remain available. The Traditional
 interface orders Hant faces first, while Simplified Chinese orders Hans faces first.
 The availability gate accepts installed CJK fonts or embedded Hans/Hant faces, including
 web builds made with CRAFT_FONTS_DIR. Without either, English is shown while the saved
 Chinese preference remains intact. No font files are added by this contribution.
 
 Regression tests cover script/region selection, saved preferences, plural templates,
-unchanged automation/user data, font ordering and exact current-reference key coverage.
+unchanged automation/user data, font ordering and stale reference keys. Missing translations
+remain non-fatal under `REPORTED`, matching the other optional catalogs.
 The integration received static catalog checks only in the Windows editing environment:
 Rust tooling was unavailable. Compilation, cargo xtask ci, native/embedded-font rendering,
 DPI, layout and persistence still require validation before claiming release support.
