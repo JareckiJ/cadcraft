@@ -168,7 +168,7 @@ Traditional Chinese count entries have one plural form.
 
 Traditional Chinese prefers readable Microsoft JhengHei on Windows and Noto Sans CJK TC
 single-face OTF candidates on Linux/FreeBSD, then falls back to the existing generic CJK font.
-Unreadable, empty or oversized Traditional candidates are skipped. Other interfaces retain their
+Unreadable, empty or oversized Traditional and generic CJK candidates are skipped. Other interfaces retain their
 existing system-font choices. On macOS, PingFang collections are scanned for the `PingFang TC` family name;
 the discovered face index is passed to egui rather than assuming a fixed collection order.
 Unreadable collections or collections without that family retain the generic fallback.

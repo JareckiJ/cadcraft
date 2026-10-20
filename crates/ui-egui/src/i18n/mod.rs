@@ -234,6 +234,7 @@ pub fn locale_language(tag: &str) -> Option<&'static str> {
     // Explicit script wins over region. Hant and Traditional regions precede the generic Simplified catalog.
     let mut script = None;
     let mut traditional_region = false;
+    let mut region_seen = false;
     for subtag in subtags {
         if subtag.is_empty() || !subtag.bytes().all(|c| c.is_ascii_alphanumeric()) {
             return None;
@@ -246,8 +247,14 @@ pub fn locale_language(tag: &str) -> Option<&'static str> {
                 return None;
             }
             script = Some(subtag);
-        } else if ["TW", "HK", "MO"].iter().any(|r| r.eq_ignore_ascii_case(subtag)) {
-            traditional_region = true;
+        } else if (subtag.len() == 2 && subtag.bytes().all(|c| c.is_ascii_alphabetic()))
+            || (subtag.len() == 3 && subtag.bytes().all(|c| c.is_ascii_digit()))
+        {
+            if region_seen {
+                return None;
+            }
+            region_seen = true;
+            traditional_region = ["TW", "HK", "MO"].iter().any(|r| r.eq_ignore_ascii_case(subtag));
         }
     }
     match script {

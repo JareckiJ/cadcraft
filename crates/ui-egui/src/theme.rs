@@ -448,7 +448,7 @@ pub fn cjk_font() -> Option<&'static std::path::Path> {
                         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
                     ]
                 };
-                candidates.iter().map(std::path::PathBuf::from).find(|p| p.is_file())
+                first_readable_ui_font(candidates)
             })
             .as_deref()
     }
@@ -733,7 +733,7 @@ pub fn cjk_font_for(language: &str) -> Option<&'static std::path::Path> {
     #[cfg(not(target_arch = "wasm32"))]
     let traditional = if language == "zh-Hant" {
         static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-        FOUND.get_or_init(|| first_readable_font(traditional_cjk_candidates(), |path| read_capped(path, MAX_UI_FONT_BYTES).is_some())).as_deref()
+        FOUND.get_or_init(|| first_readable_ui_font(traditional_cjk_candidates())).as_deref()
     } else {
         None
     };
@@ -804,6 +804,12 @@ fn traditional_cjk_candidates() -> &'static [&'static str] {
             "/usr/local/share/fonts/noto/NotoSansCJKtc-Regular.otf",
         ]
     }
+}
+
+/// Skip unusable candidates in preference order, using the same cap as font installation.
+#[cfg(not(target_arch = "wasm32"))]
+fn first_readable_ui_font(candidates: &[&str]) -> Option<std::path::PathBuf> {
+    first_readable_font(candidates, |path| read_capped(path, MAX_UI_FONT_BYTES).is_some())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -901,6 +907,59 @@ mod tests {
         assert_eq!(super::prefer_traditional("zh-Hant", unavailable.as_deref(), Some(generic)), Some(generic));
         assert_eq!(super::prefer_traditional("zh-Hant", unavailable.as_deref(), None), None);
         assert_eq!(super::prefer_traditional("zh", found.as_deref(), Some(generic)), Some(generic));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn generic_cjk_candidates_skip_invalid_files_and_keep_readable_order() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-generic-cjk-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let missing = dir.join("missing.ttf");
+        let empty = dir.join("empty.ttf");
+        let oversized = dir.join("oversized.ttf");
+        let first = dir.join("first.ttf");
+        let second = dir.join("second.ttf");
+        std::fs::write(&empty, []).unwrap();
+        // Set length past the actual production cap without writing the contents.
+        std::fs::File::create(&oversized).unwrap().set_len(super::MAX_UI_FONT_BYTES + 1).unwrap();
+        std::fs::write(&first, [1, 2, 3]).unwrap();
+        std::fs::write(&second, [4, 5, 6]).unwrap();
+        let paths: Vec<_> = [&missing, &empty, &dir, &oversized, &first, &second].iter().map(|p| p.to_str().unwrap()).collect();
+        assert!(super::first_readable_ui_font(&paths[..4]).is_none());
+        let found = super::first_readable_ui_font(&paths).unwrap();
+        assert_eq!(found, first);
+        assert_eq!(super::cjk_font_data(&found, "zh").unwrap().font.as_ref(), [1, 2, 3]);
+        assert_eq!(super::prefer_traditional("zh-Hant", None, Some(&found)), Some(found.as_path()));
+        let tc = std::path::Path::new("preferred-tc.otf");
+        assert_eq!(super::prefer_traditional("zh-Hant", Some(tc), Some(&found)), Some(tc));
+        std::fs::write(&first, []).unwrap();
+        assert_eq!(super::first_readable_ui_font(&paths), Some(second.clone()));
+        std::fs::write(&second, []).unwrap();
+        assert!(super::first_readable_ui_font(&paths).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    #[test]
+    fn generic_cjk_candidates_skip_permission_denied_files() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("cadcraft-generic-permissions-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let denied = dir.join("denied.ttf");
+        let readable = dir.join("readable.ttf");
+        std::fs::write(&denied, [1, 2, 3]).unwrap();
+        std::fs::write(&readable, [4, 5, 6]).unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        if std::fs::File::open(&denied).is_err() {
+            let paths = [denied.to_str().unwrap(), readable.to_str().unwrap()];
+            assert!(denied.is_file(), "existence alone must not select this candidate");
+            assert!(super::read_capped(&denied, super::MAX_UI_FONT_BYTES).is_none());
+            assert_eq!(super::first_readable_ui_font(&paths), Some(readable.clone()));
+        } else {
+            eprintln!("SKIP permission-denied branch: process can bypass mode bits");
+        }
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(not(target_arch = "wasm32"))]

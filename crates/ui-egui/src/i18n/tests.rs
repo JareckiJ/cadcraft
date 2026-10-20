@@ -1200,6 +1200,39 @@ fn traditional_chinese_locale_selection_respects_script_and_region() {
 }
 
 #[test]
+fn duplicate_chinese_regions_are_not_locale_candidates() {
+    for tag in
+        ["zh-TW-CN", "zh-CN-TW", "zh-HK-MO", "zh-TW-TW", "zh-419-TW", "zh-TW-419", "zh-419-001", "zh-Hant-TW-CN", "zh-Hans-CN-TW", "ZH_tw_cn.UTF-8"]
+    {
+        assert_eq!(locale_language(tag), None, "{tag}");
+    }
+}
+
+#[test]
+fn auto_skips_duplicate_regions_and_preserves_valid_locale_priority() {
+    for invalid in ["zh-TW-CN", "zh-Hans-CN-TW", "zh-419-TW", "zh-TW-419"] {
+        for (later, expected) in [("de-DE", "de"), ("zh-Hant-HK", "zh-Hant"), ("zh-Hans-TW", "zh"), ("xx-XX", "en")] {
+            let locales = [invalid.into(), later.into(), "en-US".into()];
+            assert_eq!(Preference::Auto.resolve(&locales), expected, "{invalid}, {later}");
+        }
+        let locales = [invalid.into(), "zz-ZZ".into(), "zh-TW".into(), "de-DE".into()];
+        assert_eq!(Preference::Auto.resolve(&locales), "zh-Hant");
+        assert_eq!(Preference::Auto.resolve(&[invalid.into()]), "en");
+    }
+    for (tag, expected) in [
+        ("zh-419", "zh"),
+        ("zh-Hant-419", "zh-Hant"),
+        ("zh-Hans-HK", "zh"),
+        ("zh-Hant-TW-variant", "zh-Hant"),
+        ("zh-TW-u-rg-cnzzzz", "zh-Hant"),
+        ("zh-TW-x-cn", "zh-Hant"),
+    ] {
+        assert_eq!(locale_language(tag), Some(expected), "{tag}");
+    }
+    assert_eq!(Preference::Auto.resolve(&["de-DE".into(), "zh-TW".into()]), "de");
+}
+
+#[test]
 fn traditional_chinese_counts_and_user_values_are_preserved() {
     with_language("zh-Hant", || {
         for n in [0, 1, 2, 11, 21, 100, u64::MAX] {
