@@ -1,6 +1,6 @@
 //! `grip.*` commands: the undoable, scriptable form of grip editing (see `crate::grips`).
 
-use cadcraft_doc::{Entity, EntityKind, Handle};
+use cadcraft_doc::{ArrayKind, ArrayParams, Entity, EntityKind, Handle};
 use cadcraft_geom::{Mat3, Vec2};
 use serde_json::{Value, json};
 
@@ -35,6 +35,169 @@ fn index_param(cmd: &str, p: &Value) -> Result<usize> {
     usize::try_from(i).map_err(|_| bad(cmd, "index out of range"))
 }
 
+fn stretch_array_grip(s: &mut Session, h: Handle, mut p: ArrayParams, i: usize, to: Vec2) -> Result<()> {
+    let e = curves::entity(s, h)?;
+    let EntityKind::Insert(ins) = &e.kind else {
+        return Err(bad("grip.stretch", "not an insert"));
+    };
+    let base = ins.insert.xy();
+    match &mut p.kind {
+        ArrayKind::Rect(r) => {
+            let ux = Vec2::from_angle(r.axis_angle);
+            let uy = ux.perp();
+            match i {
+                0 => {
+                    let d = s.doc_mut()?;
+                    d.modify_entity(h, |e| {
+                        if let EntityKind::Insert(ins) = &mut e.kind {
+                            ins.insert = to.to3(ins.insert.z);
+                        }
+                    })?;
+                    return Ok(());
+                }
+                1 => {
+                    let v = to - base;
+                    let sp = v.dot(ux);
+                    if sp.abs() > 1e-6 {
+                        r.col_spacing = sp;
+                    }
+                }
+                2 => {
+                    let v = to - base;
+                    let sp = v.dot(uy);
+                    if sp.abs() > 1e-6 {
+                        r.row_spacing = sp;
+                    }
+                }
+                3 => {
+                    let v = to - base;
+                    let dist = v.dot(ux);
+                    if r.col_spacing.abs() > 1e-6 {
+                        let c = (dist / r.col_spacing).round() as i64 + 1;
+                        r.cols = u32::try_from(c.max(1)).unwrap_or(1);
+                    }
+                }
+                4 => {
+                    let v = to - base;
+                    let dist = v.dot(uy);
+                    if r.row_spacing.abs() > 1e-6 {
+                        let rows = (dist / r.row_spacing).round() as i64 + 1;
+                        r.rows = u32::try_from(rows.max(1)).unwrap_or(1);
+                    }
+                }
+                5 => {
+                    let v = to - base;
+                    let cdist = v.dot(ux);
+                    let rdist = v.dot(uy);
+                    if r.col_spacing.abs() > 1e-6 {
+                        let c = (cdist / r.col_spacing).round() as i64 + 1;
+                        r.cols = u32::try_from(c.max(1)).unwrap_or(1);
+                    }
+                    if r.row_spacing.abs() > 1e-6 {
+                        let rows = (rdist / r.row_spacing).round() as i64 + 1;
+                        r.rows = u32::try_from(rows.max(1)).unwrap_or(1);
+                    }
+                }
+                _ => return Err(bad("grip.stretch", "invalid grip index for rect array")),
+            }
+        }
+        ArrayKind::Polar(k) => match i {
+            0 => {
+                k.center = to - base;
+            }
+            1 => {
+                let d = s.doc_mut()?;
+                d.modify_entity(h, |e| {
+                    if let EntityKind::Insert(ins) = &mut e.kind {
+                        ins.insert = to.to3(ins.insert.z);
+                    }
+                })?;
+                return Ok(());
+            }
+            2 => {
+                let center_w = base + k.center;
+                let v0 = -k.center;
+                let v1 = to - center_w;
+                let a0 = v0.angle();
+                let a1 = v1.angle();
+                let mut diff = (a1 - a0).to_degrees();
+                while diff <= 0.0 {
+                    diff += 360.0;
+                }
+                if diff > 1e-3 && k.fill.abs() > 1e-3 {
+                    let count = (k.fill.abs() / diff).round() as u32;
+                    k.items = count.max(2);
+                }
+            }
+            3 => {
+                let center_w = base + k.center;
+                let v0 = -k.center;
+                let v1 = to - center_w;
+                let a0 = v0.angle();
+                let a1 = v1.angle();
+                let mut diff = (a1 - a0).to_degrees();
+                while diff <= 0.0 {
+                    diff += 360.0;
+                }
+                if (diff - 360.0).abs() < 1.0 {
+                    k.fill = 360.0;
+                } else if diff.abs() > 1e-3 {
+                    k.fill = diff;
+                }
+            }
+            4 => {
+                if k.rows > 1 {
+                    let out_dir = (-k.center).normalized();
+                    let d = if out_dir == Vec2::ZERO { Vec2::X } else { out_dir };
+                    let dist = (to - base).dot(d);
+                    let sp = dist / f64::from(k.rows - 1);
+                    if sp > 1e-4 {
+                        k.row_spacing = sp;
+                    }
+                }
+            }
+            _ => return Err(bad("grip.stretch", "invalid grip index for polar array")),
+        },
+        ArrayKind::Path(pa) => match i {
+            0 => {
+                let d = s.doc_mut()?;
+                d.modify_entity(h, |e| {
+                    if let EntityKind::Insert(ins) = &mut e.kind {
+                        ins.insert = to.to3(ins.insert.z);
+                    }
+                })?;
+                return Ok(());
+            }
+            1 => {
+                let to_local = to - base;
+                let d = cadcraft_geom::segments_length_of(&pa.path, to_local);
+                if d > 1e-4 {
+                    pa.spacing = d;
+                }
+            }
+            2 => {
+                let to_local = to - base;
+                let d = cadcraft_geom::segments_length_of(&pa.path, to_local);
+                if pa.spacing > 1e-4 {
+                    let count = (d / pa.spacing).round() as i64 + 1;
+                    pa.items = u32::try_from(count.max(1)).unwrap_or(1);
+                }
+            }
+            3 => {
+                if pa.rows > 1 {
+                    let row_dist = (to - base).y;
+                    let sp = row_dist / f64::from(pa.rows - 1);
+                    if sp > 1e-4 {
+                        pa.row_spacing = sp;
+                    }
+                }
+            }
+            _ => return Err(bad("grip.stretch", "invalid grip index for path array")),
+        },
+    }
+    super::array::edit::rebuild(s, h, p, None)
+}
+
 fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
     let h = curves::handle_param(p, "handle")
         .or_else(|| targets(s, p).ok().and_then(|t| t.first().copied()))
@@ -45,18 +208,23 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
     let e = curves::entity(s, h)?;
+    if let Some(a) = s.doc()?.array_params(&e) {
+        stretch_array_grip(s, h, a, i, to)?;
+        return Ok(json!({ "handle": h.hex(), "handles": [h.hex()] }));
+    }
     let k = stretch_grip(&e.kind, i, to).ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
     let mut edits = vec![(h, k)];
     // The other `handles` with a grip on the same point stretch with it (connected objects stay
     // connected); locked ones and edits that would be degenerate are left alone.
-    let from = e.kind.grips().get(i).copied().unwrap_or(to);
+    let doc = s.doc()?;
+    let from = doc.entity_grips(&e).get(i).copied().unwrap_or(to);
     let tol = 1e-9 * (1.0 + from.len());
     for o in targets(s, p)? {
         if o == h || edits.iter().any(|(x, _)| *x == o) || curves::is_locked(s, o) {
             continue;
         }
         let Ok(oe) = curves::entity(s, o) else { continue };
-        if let Some(j) = oe.kind.grips().iter().position(|g| g.near(from, tol))
+        if let Some(j) = doc.entity_grips(&oe).iter().position(|g| g.near(from, tol))
             && let Some(k) = stretch_grip(&oe.kind, j, to)
         {
             edits.push((o, k));
@@ -86,7 +254,9 @@ fn base_point(s: &Session, cmd: &str, p: &Value, hs: &[Handle]) -> Result<Vec2> 
         .or_else(|| hs.first().copied())
         .ok_or_else(|| bad(cmd, "`base` or `baseHandle` + `index` is required"))?;
     let i = index_param(cmd, p)?;
-    let g = curves::entity(s, h)?.kind.grips();
+    let ent = curves::entity(s, h)?;
+    let doc = s.doc()?;
+    let g = doc.entity_grips(&ent);
     g.get(i).copied().ok_or_else(|| bad(cmd, "no such grip"))
 }
 
@@ -115,7 +285,11 @@ fn run_grip_stretch(s: &mut Session, p: &Value) -> Result<Value> {
         None => {
             let base = match point_param(p, "base") {
                 Some(b) => b,
-                None => curves::entity(s, h0)?.kind.grips().get(i0).copied().ok_or_else(|| bad(cmd, "no such grip"))?,
+                None => {
+                    let ent = curves::entity(s, h0)?;
+                    let doc = s.doc()?;
+                    doc.entity_grips(&ent).get(i0).copied().ok_or_else(|| bad(cmd, "no such grip"))?
+                }
             };
             point_req(cmd, p, "to")? - base
         }
@@ -172,14 +346,14 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
         None => moves.push((h, vec![(i, to)])),
     };
     for &(h, i) in hot.iter().take(MAX_GRIPS) {
-        let Some(from) = d.entity(h).and_then(|e| e.kind.grips().get(i).copied()) else { continue };
+        let Some(from) = d.entity(h).and_then(|e| d.entity_grips(e).get(i).copied()) else { continue };
         add(h, i, from + delta);
         let tol = 1e-9 * (1.0 + from.len());
         for &o in others.iter().take(MAX_GRIPS) {
             if o == h {
                 continue;
             }
-            if let Some(j) = d.entity(o).and_then(|e| e.kind.grips().iter().position(|g| g.near(from, tol))) {
+            if let Some(j) = d.entity(o).and_then(|e| d.entity_grips(e).iter().position(|g| g.near(from, tol))) {
                 add(o, j, from + delta);
             }
         }

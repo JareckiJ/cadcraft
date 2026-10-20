@@ -215,8 +215,8 @@ fn rename_foreign_record_updates_keys_and_targets() {
     d.rename_foreign_record("LAYER", "WALLS", "PARTITIONS");
     assert!(d.foreign.records.is_empty());
 
-    let mut extra = cadcraft_doc::foreign::ForeignExtra::default();
-    extra.xdata = vec![cadcraft_doc::RawTag { code: 1000, value: "app_data".into() }];
+    let extra =
+        cadcraft_doc::foreign::ForeignExtra { xdata: vec![cadcraft_doc::RawTag { code: 1000, value: "app_data".into() }], ..Default::default() };
     std::sync::Arc::make_mut(&mut d.foreign).records.insert(("LAYER".into(), "WALLS".into()), extra);
     std::sync::Arc::make_mut(&mut d.foreign).targets.insert(Handle(0x100), ("LAYER".into(), "WALLS".into()));
 

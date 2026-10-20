@@ -273,8 +273,7 @@ pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
 pub fn parse_ascii_recovering(text: &str) -> Result<Vec<Tag>> {
     let mut tags = Vec::new();
     let mut lines = text.lines().enumerate();
-    loop {
-        let Some((_ln, code_line)) = lines.next() else { break };
+    while let Some((_ln, code_line)) = lines.next() {
         let ct = code_line.trim();
         if ct.is_empty() {
             continue;

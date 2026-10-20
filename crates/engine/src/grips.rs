@@ -528,7 +528,8 @@ impl Session {
 
     /// Grip points of an object (the indices `grip_edit` takes).
     pub fn grips_of(&self, handle: Handle) -> Result<Vec<Vec2>> {
-        self.doc()?.entity(handle).map(|e| e.kind.grips()).ok_or_else(|| EngineError::Other("no such object".into()))
+        let doc = self.doc()?;
+        doc.entity(handle).map(|e| doc.entity_grips(e)).ok_or_else(|| EngineError::Other("no such object".into()))
     }
 }
 

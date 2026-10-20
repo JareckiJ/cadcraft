@@ -89,13 +89,13 @@ fn run_audit(s: &mut Session, p: &Value) -> Result<Value> {
         s.state_mut()?.doc = Arc::new(copy);
     }
     let report = crate::audit::Report { issues, fixed: fix };
-    if crate::audit::auditctl() == 1 {
-        if let Ok(st) = s.state() {
-            let doc_path = st.path.as_deref().unwrap_or(&st.title);
-            let total_objects = crate::audit::count_entities(&st.doc);
-            let content = crate::audit::format_adt(&report, doc_path, total_objects);
-            crate::audit::write_adt_file(st.path.as_deref(), &st.title, &content);
-        }
+    if crate::audit::auditctl() == 1
+        && let Ok(st) = s.state()
+    {
+        let doc_path = st.path.as_deref().unwrap_or(&st.title);
+        let total_objects = crate::audit::count_entities(&st.doc);
+        let content = crate::audit::format_adt(&report, doc_path, total_objects);
+        crate::audit::write_adt_file(st.path.as_deref(), &st.title, &content);
     }
     Ok(report.to_json())
 }

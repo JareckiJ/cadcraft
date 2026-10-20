@@ -71,7 +71,9 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(SelOp::new(SelKind::Flatten)))),
         CommandSpec::new("arraypath", "Path Array", run_arraypath)
             .menu(&["Modify", "Array", "Path Array"])
-            .params("{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true)}")
+            .params(
+                "{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true), rows?, rowSpacing?, rowElevation?, levels?, levelSpacing?, base? ([x, y]), associative?: bool (default ARRAYASSOCIATIVITY, on)} → {handle (the array, when associative), created (copies), associative?: bool}",
+            )
             .interactive(|_| Ok(Box::new(PathArrayM::default()))),
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
@@ -2081,7 +2083,63 @@ fn run_arraypath(s: &mut Session, p: &Value) -> Result<Value> {
     let path = curves::handle_param(p, "path").ok_or_else(|| bad("arraypath", "`path` (handle) is required"))?;
     let count = p.get("count").and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     let spacing = p.get("spacing").and_then(Value::as_f64);
-    let r = arraypath(s, &hs, path, count, spacing, bool_or(p, "align", true))?;
+    let align = bool_or(p, "align", true);
+    let associative = bool_or(p, "associative", false);
+    if associative {
+        let pk = curves::entity(s, path)?.kind;
+        let c = Chain::of(&pk).ok_or_else(|| other("Select a line, arc, circle, polyline, ellipse or spline as the path."))?;
+        let l = c.len();
+        if l <= 1e-12 {
+            return Err(other("The path has no length."));
+        }
+        let objs: Vec<Handle> = hs.iter().copied().filter(|h| *h != path).collect();
+        if objs.is_empty() {
+            return Err(other("Select objects to array."));
+        }
+        let (n, step) = match (count, spacing) {
+            (_, Some(sp)) if sp.is_finite() && sp > 0.0 => (((l / sp).floor() as usize).saturating_add(1), sp),
+            (Some(n), _) => {
+                let n = n.max(1);
+                (n, if c.closed { l / n as f64 } else { l / (n.max(2) - 1) as f64 })
+            }
+            _ => (6, if c.closed { l / 6.0 } else { l / 5.0 }),
+        };
+        super::array::check_size(s, n as u64, objs.len())?;
+        let (p0, _) = c.at_length(0.0).ok_or_else(|| other("The path has no length."))?;
+        let base = point_param(p, "base").unwrap_or(p0);
+        let to_local = Mat3::translate(-base);
+        let mut local_segs = c.segs;
+        for seg in &mut local_segs {
+            seg.transform(&to_local);
+        }
+        let rows = p.get("rows").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(1).max(1);
+        let row_spacing = p.get("rowSpacing").and_then(Value::as_f64).unwrap_or(1.0);
+        let row_elevation = p.get("rowElevation").and_then(Value::as_f64).unwrap_or(0.0);
+        let levels = p.get("levels").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(1).max(1);
+        let level_spacing = p.get("levelSpacing").and_then(Value::as_f64).unwrap_or(1.0);
+        let pa = cadcraft_doc::PathArray {
+            path: local_segs,
+            closed: c.closed,
+            items: u32::try_from(n).unwrap_or(u32::MAX),
+            spacing: step,
+            align,
+            rows,
+            row_spacing,
+            row_elevation,
+        };
+        let p2 = cadcraft_doc::ArrayParams {
+            source: "*".into(),
+            kind: cadcraft_doc::ArrayKind::Path(pa),
+            levels,
+            level_spacing,
+            replaced: Vec::new(),
+            editing: None,
+            erased: Vec::new(),
+        };
+        let h = super::array::make_assoc(s, &objs, base, p2)?;
+        return Ok(json!({ "handle": h.hex(), "created": n.saturating_sub(1), "associative": true }));
+    }
+    let r = arraypath(s, &hs, path, count, spacing, align)?;
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 

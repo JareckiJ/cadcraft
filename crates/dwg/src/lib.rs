@@ -429,7 +429,7 @@ mod native {
     }
 
     fn from_hex(s: &str) -> Option<Vec<u8>> {
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return None;
         }
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
@@ -468,17 +468,17 @@ mod native {
     fn collect_raw_dwg(doc: &acadrust::CadDocument) -> Vec<RawItem> {
         let mut items = Vec::new();
         for e in doc.entities() {
-            if let acadrust::entities::EntityType::Unknown(u) = e {
-                if let (Some(data), Some(v)) = (&u.raw_dwg_data, u.dwg_source_version) {
-                    items.push(RawItem {
-                        is_entity: true,
-                        handle: u.common.handle.value(),
-                        type_code: u.dwg_type_code,
-                        version: version_code(v),
-                        data: data.clone(),
-                        handle_bits: u.dwg_handle_bits,
-                    });
-                }
+            if let acadrust::entities::EntityType::Unknown(u) = e
+                && let (Some(data), Some(v)) = (&u.raw_dwg_data, u.dwg_source_version)
+            {
+                items.push(RawItem {
+                    is_entity: true,
+                    handle: u.common.handle.value(),
+                    type_code: u.dwg_type_code,
+                    version: version_code(v),
+                    data: data.clone(),
+                    handle_bits: u.dwg_handle_bits,
+                });
             }
         }
         for (h, o) in &doc.objects {
@@ -562,49 +562,48 @@ mod native {
             }
             if let Some(rest) = trimmed.strip_prefix("E ") {
                 let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.len() == 5 {
-                    if let (Ok(h), Ok(tc), Some(data)) = (
+                if parts.len() == 5
+                    && let (Ok(h), Ok(tc), Some(data)) = (
                         u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16),
                         parts.get(1).copied().unwrap_or_default().parse::<i16>(),
                         parts.get(3).copied().and_then(from_hex),
-                    ) {
-                        let bits = parts.get(4).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
-                        let version_str = match parts.get(2).copied() {
-                            Some("AC1009") => "AC1009",
-                            Some("AC1012") => "AC1012",
-                            Some("AC1014") => "AC1014",
-                            Some("AC1015") => "AC1015",
-                            Some("AC1018") => "AC1018",
-                            Some("AC1021") => "AC1021",
-                            Some("AC1024") => "AC1024",
-                            Some("AC1027") => "AC1027",
-                            Some("AC1032") => "AC1032",
-                            _ => "AC1032",
-                        };
-                        items.push(RawItem { is_entity: true, handle: h, type_code: tc, version: version_str, data, handle_bits: bits });
-                    }
+                    )
+                {
+                    let bits = parts.get(4).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                    let version_str = match parts.get(2).copied() {
+                        Some("AC1009") => "AC1009",
+                        Some("AC1012") => "AC1012",
+                        Some("AC1014") => "AC1014",
+                        Some("AC1015") => "AC1015",
+                        Some("AC1018") => "AC1018",
+                        Some("AC1021") => "AC1021",
+                        Some("AC1024") => "AC1024",
+                        Some("AC1027") => "AC1027",
+                        Some("AC1032") => "AC1032",
+                        _ => "AC1032",
+                    };
+                    items.push(RawItem { is_entity: true, handle: h, type_code: tc, version: version_str, data, handle_bits: bits });
                 }
             } else if let Some(rest) = trimmed.strip_prefix("O ") {
                 let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.len() == 4 {
-                    if let (Ok(h), Some(data)) =
+                if parts.len() == 4
+                    && let (Ok(h), Some(data)) =
                         (u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16), parts.get(2).copied().and_then(from_hex))
-                    {
-                        let bits = parts.get(3).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
-                        let version_str = match parts.get(1).copied() {
-                            Some("AC1009") => "AC1009",
-                            Some("AC1012") => "AC1012",
-                            Some("AC1014") => "AC1014",
-                            Some("AC1015") => "AC1015",
-                            Some("AC1018") => "AC1018",
-                            Some("AC1021") => "AC1021",
-                            Some("AC1024") => "AC1024",
-                            Some("AC1027") => "AC1027",
-                            Some("AC1032") => "AC1032",
-                            _ => "AC1032",
-                        };
-                        items.push(RawItem { is_entity: false, handle: h, type_code: 0, version: version_str, data, handle_bits: bits });
-                    }
+                {
+                    let bits = parts.get(3).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                    let version_str = match parts.get(1).copied() {
+                        Some("AC1009") => "AC1009",
+                        Some("AC1012") => "AC1012",
+                        Some("AC1014") => "AC1014",
+                        Some("AC1015") => "AC1015",
+                        Some("AC1018") => "AC1018",
+                        Some("AC1021") => "AC1021",
+                        Some("AC1024") => "AC1024",
+                        Some("AC1027") => "AC1027",
+                        Some("AC1032") => "AC1032",
+                        _ => "AC1032",
+                    };
+                    items.push(RawItem { is_entity: false, handle: h, type_code: 0, version: version_str, data, handle_bits: bits });
                 }
             }
         }
@@ -616,23 +615,23 @@ mod native {
         for item in items {
             if item.is_entity {
                 for e in doc.entities_mut() {
-                    if let acadrust::entities::EntityType::Unknown(u) = e {
-                        if u.common.handle.value() == item.handle {
-                            u.raw_dwg_data = Some(item.data.clone());
-                            u.dwg_type_code = item.type_code;
-                            u.dwg_source_version = version_from_code(item.version).or(Some(doc_version));
-                            u.dwg_handle_bits = item.handle_bits;
-                        }
+                    if let acadrust::entities::EntityType::Unknown(u) = e
+                        && u.common.handle.value() == item.handle
+                    {
+                        u.raw_dwg_data = Some(item.data.clone());
+                        u.dwg_type_code = item.type_code;
+                        u.dwg_source_version = version_from_code(item.version).or(Some(doc_version));
+                        u.dwg_handle_bits = item.handle_bits;
                     }
                 }
             } else {
                 for (h, o) in doc.objects.iter_mut() {
-                    if h.value() == item.handle {
-                        if let acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, raw_dwg_handle_bits, .. } = o {
-                            *raw_dwg_data = Some(item.data.clone());
-                            *raw_dwg_version = version_from_code(item.version).or(Some(doc_version));
-                            *raw_dwg_handle_bits = item.handle_bits;
-                        }
+                    if h.value() == item.handle
+                        && let acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, raw_dwg_handle_bits, .. } = o
+                    {
+                        *raw_dwg_data = Some(item.data.clone());
+                        *raw_dwg_version = version_from_code(item.version).or(Some(doc_version));
+                        *raw_dwg_handle_bits = item.handle_bits;
                     }
                 }
             }
