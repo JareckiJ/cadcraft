@@ -57,8 +57,13 @@ fn without_them_nothing_changes() {
     let a = add(&mut s, json!({"tag": "T", "at": [10, 10]}));
     assert_eq!((a.text.halign, a.text.valign, a.text.align_pt), (HAlign::Left, VAlign::Baseline, None));
     assert_eq!(a.text.style, "Standard", "the current text style");
+    // With another current style, that one: not always Standard.
+    s.execute("style.current", &json!({"name": "ROMANS"})).unwrap();
+    let a = add(&mut s, json!({"tag": "T", "at": [10, 10]}));
+    assert_eq!(a.text.style, "ROMANS", "the current text style");
     let a = add(&mut s, json!({"tag": "T", "at": [10, 10], "justify": "L"}));
     assert_eq!((a.text.halign, a.text.valign, a.text.align_pt), (HAlign::Left, VAlign::Baseline, None));
+    assert_eq!(a.text.style, "ROMANS", "the current text style");
 }
 
 #[test]
@@ -67,6 +72,10 @@ fn a_bad_justification_or_style_is_refused() {
     let n = s.doc().unwrap().model.len();
     assert!(s.execute("attdef", &json!({"tag": "T", "at": [0, 0], "justify": "XX"})).is_err());
     assert!(s.execute("attdef", &json!({"tag": "T", "at": [0, 0], "style": "NOPE"})).is_err());
+    // Align and Fit need a second baseline point, which attdef has no way to take.
+    for j in ["A", "ALIGN", "F", "fit"] {
+        assert!(s.execute("attdef", &json!({"tag": "T", "at": [0, 0], "justify": j})).is_err(), "{j}");
+    }
     assert_eq!(s.doc().unwrap().model.len(), n, "nothing added");
 }
 

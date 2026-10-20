@@ -339,6 +339,10 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
     let h = f64_or(p, "height", s.doc()?.header.f64("TEXTSIZE", 0.2));
     // Justification and text style as TEXT and MTEXT take them (#1658).
     let j = super::draw::justify(str_param(p, "justify").unwrap_or("L")).ok_or_else(|| bad("attdef", "unknown justification"))?;
+    // Align and Fit run between two baseline points; `attdef` has one, so it can't express them.
+    if matches!(j.0, HAlign::Aligned | HAlign::Fit) {
+        return Err(bad("attdef", "Align and Fit need two points, which attdef doesn't take yet; use L, C, R, M or TL … BR"));
+    }
     let style = match str_param(p, "style") {
         Some(n) => s.doc()?.text_style(n).map(|t| t.name.clone()).ok_or_else(|| bad("attdef", format!("no text style \"{n}\"")))?,
         None => current_text_style(s),
