@@ -270,8 +270,12 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
     let from = layout_name("layout.rename", s.doc()?, &from)?;
     let to = str_param(p, "to").ok_or_else(|| bad("layout.rename", "`to` is required"))?;
     let to = check_name("layout.rename", s.doc()?, to, Some(&from))?;
-    if let Some(l) = s.doc_mut()?.layouts.iter_mut().find(|l| l.name == from) {
+    let d = s.doc_mut()?;
+    if let Some(l) = d.layouts.iter_mut().find(|l| l.name == from) {
         l.name = to.clone();
+    }
+    if d.active_layout.as_ref() == Some(&from) {
+        d.active_layout = Some(to.clone());
     }
     let (old, new) = (Space::Paper(from.clone()), Space::Paper(to.clone()));
     let st = s.state_mut()?;
