@@ -8,7 +8,6 @@
 //! [`CadApp::logic`](crate::CadApp::logic) resolves once per frame from the user's [`ThemePref`].
 
 use std::cell::Cell;
-use std::sync::Arc;
 
 use egui::{Color32, FontFamily, FontId, Theme, Visuals};
 use serde::{Deserialize, Serialize};
@@ -92,13 +91,13 @@ pub struct Tokens {
     pub hover: Color32,
     pub grip: Color32,
     pub grip_hot: Color32,
+    /// Grips of dynamic block references (AutoCAD's GRIPDYNCOLOR).
+    pub grip_dyn: Color32,
     pub snap: Color32,
     /// COMPARE: objects only in this drawing, only in the other one, and the areas of change.
     pub compare_this: Color32,
     pub compare_other: Color32,
     pub compare_area: Color32,
-    pub window_fill: Color32,
-    pub crossing_fill: Color32,
     pub window_stroke: Color32,
     pub crossing_stroke: Color32,
     pub cmd_bg: Color32,
@@ -152,12 +151,11 @@ impl Tokens {
         hover: Color32::from_rgb(0x9c, 0xc6, 0xff),
         grip: Color32::from_rgb(0x2f, 0x6b, 0xff),
         grip_hot: Color32::from_rgb(0xff, 0x3b, 0x3b),
+        grip_dyn: Color32::from_rgb(0x26, 0xc6, 0xe8),
         snap: Color32::from_rgb(0x2f, 0xd0, 0x62),
         compare_this: Color32::from_rgb(0x4c, 0xd9, 0x7b),
         compare_other: Color32::from_rgb(0xff, 0x5c, 0x5c),
         compare_area: Color32::from_rgb(0xff, 0xb4, 0x3c),
-        window_fill: Color32::from_rgba_premultiplied(0x18, 0x30, 0x60, 0x50),
-        crossing_fill: Color32::from_rgba_premultiplied(0x18, 0x48, 0x18, 0x50),
         window_stroke: Color32::from_rgb(0x6f, 0xa8, 0xff),
         crossing_stroke: Color32::from_rgb(0x7f, 0xe0, 0x7f),
         cmd_bg: Color32::from_rgba_premultiplied(0x34, 0x3c, 0x4a, 0xf0),
@@ -246,6 +244,8 @@ pub struct Canvas {
     pub paper: Option<Color32>,
     /// The side of an object snap marker, in points.
     pub snap_marker: f32,
+    /// The colour selected objects are highlighted in.
+    pub selection: Option<Color32>,
 }
 
 /// The default object snap marker size.
@@ -253,7 +253,7 @@ pub const SNAP_MARKER: f32 = 11.0;
 
 impl Default for Canvas {
     fn default() -> Self {
-        Canvas { model: None, paper: None, snap_marker: SNAP_MARKER }
+        Canvas { model: None, paper: None, snap_marker: SNAP_MARKER, selection: None }
     }
 }
 
@@ -263,7 +263,7 @@ impl Canvas {
             Some(bg) => t.with_model_background(bg),
             None => t,
         };
-        Tokens { paper: self.paper.unwrap_or(t.paper), ..t }
+        Tokens { paper: self.paper.unwrap_or(t.paper), selection: self.selection.unwrap_or(t.selection), ..t }
     }
 }
 
@@ -302,256 +302,124 @@ pub fn mono() -> FontId {
     FontId::new(12.0, FontFamily::Monospace)
 }
 
-/// Scripts interface text may need a font for beyond the UI font (a set).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Scripts(u8);
-
-impl Scripts {
-    pub const NONE: Scripts = Scripts(0);
-    /// Chinese characters, Japanese kana, bopomofo, CJK punctuation and full-width forms.
-    pub const CJK: Scripts = Scripts(1);
-    pub const HANGUL: Scripts = Scripts(1 << 1);
-    pub const THAI: Scripts = Scripts(1 << 2);
-    pub const DEVANAGARI: Scripts = Scripts(1 << 3);
-    pub const ARABIC: Scripts = Scripts(1 << 4);
-    pub const HEBREW: Scripts = Scripts(1 << 5);
-    /// Each script with a character a font must have to show it.
-    const SAMPLES: [(Scripts, char); 6] = [
-        (Scripts::CJK, '中'),
-        (Scripts::HANGUL, '한'),
-        (Scripts::THAI, 'ก'),
-        (Scripts::DEVANAGARI, 'क'),
-        (Scripts::ARABIC, 'ع'),
-        (Scripts::HEBREW, 'א'),
-    ];
-
-    /// The script of `c`, if it is one of these.
-    pub fn of_char(c: char) -> Scripts {
-        match u32::from(c) {
-            0..=0x058F => Scripts::NONE,
-            0x0590..=0x05FF | 0xFB1D..=0xFB4F => Scripts::HEBREW,
-            0x0600..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF => Scripts::ARABIC,
-            0x0900..=0x097F | 0xA8E0..=0xA8FF => Scripts::DEVANAGARI,
-            0x0E00..=0x0E7F => Scripts::THAI,
-            0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xAC00..=0xD7FF => Scripts::HANGUL,
-            0x2E80..=0x2FDF
-            | 0x3000..=0x312F
-            | 0x3190..=0x31FF
-            | 0x3400..=0x4DBF
-            | 0x4E00..=0x9FFF
-            | 0xF900..=0xFAFF
-            | 0xFF00..=0xFFEF
-            | 0x20000..=0x3FFFF => Scripts::CJK,
-            _ => Scripts::NONE,
-        }
-    }
-
-    /// The scripts of `text`'s characters.
-    pub fn of(text: &str) -> Scripts {
-        text.chars().fold(Scripts::NONE, |s, c| s | Scripts::of_char(c))
-    }
-
-    pub fn contains(self, other: Scripts) -> bool {
-        self.0 & other.0 == other.0
-    }
-
-    pub fn intersects(self, other: Scripts) -> bool {
-        self.0 & other.0 != 0
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    fn without(self, other: Scripts) -> Scripts {
-        Scripts(self.0 & !other.0)
-    }
-}
-
-impl std::ops::BitOr for Scripts {
-    type Output = Scripts;
-    fn bitor(self, rhs: Scripts) -> Scripts {
-        Scripts(self.0 | rhs.0)
-    }
-}
-
-impl std::ops::BitOrAssign for Scripts {
-    fn bitor_assign(&mut self, rhs: Scripts) {
-        self.0 |= rhs.0;
-    }
-}
-
-/// Interface fonts read so far. They stay for the process, so showing a script again never
-/// re-reads a file, and egui shares these `Arc`s on every install instead of copying the bytes.
-#[derive(Default)]
-struct FontCache {
-    /// The UI font (`None` until first read; `Some(None)`: none installed).
-    primary: Option<Option<Arc<egui::FontData>>>,
-    /// Loaded fallback faces, each once.
-    faces: Vec<Arc<egui::FontData>>,
-    /// Scripts looked for, with the face that shows them (`None`: the UI font has them, or no
-    /// installed font does).
-    resolved: Vec<(Scripts, Option<usize>)>,
-    /// Scripts being looked for off the UI thread.
-    loading: Scripts,
-}
-
-fn font_cache() -> std::sync::MutexGuard<'static, FontCache> {
-    static CACHE: std::sync::OnceLock<std::sync::Mutex<FontCache>> = std::sync::OnceLock::new();
-    CACHE.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Bumped each time fonts finish loading off the UI thread, so the caller installs them.
-static FONTS_LOADED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Changes when fallback fonts finished loading since the last [`install_fonts`].
-pub fn fonts_generation() -> u64 {
-    FONTS_LOADED.load(std::sync::atomic::Ordering::Acquire)
-}
-
-/// Install the interface fonts: a system UI font when one is installed (not bundled), else egui's,
-/// then fallback faces for the `scripts` interface text needs (issue #658: a Chinese file name on
-/// a tab). Chinese takes [`cjk_font`] first; other scripts, and Chinese without it, take an
-/// installed font found the way drawing text finds one ([`cadcraft_fonts::ttf::fallback_for`]).
-/// Faces not read yet are looked for off the UI thread; [`fonts_generation`] changes when they are
-/// ready, and installing again shows them.
-pub fn install_fonts(ctx: &egui::Context, scripts: Scripts) {
+/// Load a system UI font at run time when one is installed (not bundled), else keep egui's;
+/// then CJK fonts after the Latin ones, so Latin text keeps its look, in every interface
+/// language: file, layout and layer names can be Japanese or Chinese whatever the interface
+/// shows (#513). In a Chinese interface (`language` "zh…") the Chinese font comes first, else a
+/// Japanese one, so names take their own glyph forms; in an Arabic interface an installed
+/// Arabic font follows. A font embedded from craft-fonts comes
+/// last, for systems without any (and the web build, which has no system fonts). A Korean
+/// interface adds a Hangul font only when the CJK font found doesn't cover Hangul
+/// ([`korean_font`]).
+pub fn install_fonts(ctx: &egui::Context, language: &str) {
+    let mut fonts = egui::FontDefinitions::default();
+    let mut added: Vec<(String, std::sync::Arc<egui::FontData>)> = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    let chinese = language.starts_with("zh");
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let (fonts, missing, primary) = {
-            let mut c = font_cache();
-            let primary = c.primary.get_or_insert_with(read_ui_font).clone();
-            let mut fonts = egui::FontDefinitions::default();
-            if let Some(data) = &primary {
-                fonts.font_data.insert("system-ui".into(), data.clone());
+        let candidates: &[&str] = if cfg!(target_os = "macos") {
+            &["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial.ttf"]
+        } else if cfg!(windows) {
+            &["C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\arial.ttf"]
+        } else {
+            &[
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            ]
+        };
+        for path in candidates {
+            if let Ok(bytes) = std::fs::read(path) {
+                fonts.font_data.insert("system-ui".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
                 if let Some(f) = fonts.families.get_mut(&FontFamily::Proportional) {
                     f.insert(0, "system-ui".into());
                 }
+                break;
             }
-            let mut missing = Scripts::NONE;
-            let mut shown: Vec<usize> = Vec::new();
-            for (s, _) in Scripts::SAMPLES {
-                if !scripts.contains(s) {
-                    continue;
-                }
-                match c.resolved.iter().find(|(k, _)| *k == s) {
-                    Some((_, Some(i))) if !shown.contains(i) => shown.push(*i),
-                    Some(_) => {}
-                    None => missing |= s,
-                }
-            }
-            // After the Latin fonts, so Latin text keeps its look.
-            for i in shown {
-                if let Some(data) = c.faces.get(i) {
-                    let name = format!("system-fallback-{i}");
-                    fonts.font_data.insert(name.clone(), data.clone());
-                    for family in [FontFamily::Proportional, FontFamily::Monospace] {
-                        if let Some(f) = fonts.families.get_mut(&family) {
-                            f.push(name.clone());
-                        }
-                    }
-                }
-            }
-            let missing = missing.without(c.loading);
-            c.loading |= missing;
-            (fonts, missing, primary)
-        };
-        ctx.set_fonts(fonts);
-        if !missing.is_empty() {
-            let ctx = ctx.clone();
-            let spawned = std::thread::Builder::new().name("ui-fonts".into()).spawn(move || {
-                load_fallback_faces(missing, primary.as_deref());
-                ctx.request_repaint();
-            });
-            if let Err(e) = spawned {
-                log::warn!("interface fonts for other scripts not loaded: {e}");
-                font_cache().loading = Scripts::NONE;
+        }
+        let mut paths: Vec<&std::path::Path> = Vec::new();
+        if !chinese {
+            paths.extend(japanese_font());
+        }
+        paths.extend(cjk_font());
+        paths.dedup();
+        added.extend(
+            paths
+                .into_iter()
+                .filter_map(|p| read_capped(p, MAX_UI_FONT_BYTES))
+                .enumerate()
+                .map(|(i, bytes)| (format!("system-cjk-{i}"), std::sync::Arc::new(egui::FontData::from_owned(bytes)))),
+        );
+        // العربية: an installed Arabic face after the Latin ones (egui's bundled faces carry no
+        // Arabic glyphs), for the Arabic interface.
+        if language == "ar"
+            && let Some(bytes) = arabic_font().and_then(|p| read_capped(p, MAX_UI_FONT_BYTES))
+        {
+            added.push(("system-arabic".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes))));
+        }
+    }
+    let embedded: Vec<_> = cadcraft_fonts::CRAFT_FONTS.iter().collect();
+    added.extend(
+        embedded_ui_faces(&embedded, language)
+            .into_iter()
+            .map(|f| (format!("craft-{}", f.stem()), std::sync::Arc::new(egui::FontData::from_static(f.bytes)))),
+    );
+    // Korean: Noto Sans CJK and most CJK fonts above already cover Hangul; else a Hangul font.
+    if language == "ko"
+        && !cjk_covers_hangul()
+        && let Some(face) = korean_font()
+    {
+        let mut data = egui::FontData::from_owned(face.bytes.as_ref().clone());
+        data.index = face.index;
+        added.push(("korean-ui".into(), std::sync::Arc::new(data)));
+    }
+    for (name, data) in added {
+        fonts.font_data.insert(name.clone(), data);
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            if let Some(f) = fonts.families.get_mut(&family) {
+                f.push(name.clone());
             }
         }
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = (ctx, scripts);
+    ctx.set_fonts(fonts);
 }
 
-/// The system UI font, if one is installed.
-#[cfg(not(target_arch = "wasm32"))]
-fn read_ui_font() -> Option<Arc<egui::FontData>> {
-    let candidates: &[&str] = if cfg!(target_os = "macos") {
-        &["/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/Helvetica.ttc", "/Library/Fonts/Arial.ttf"]
-    } else if cfg!(windows) {
-        &["C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\arial.ttf"]
-    } else {
-        &[
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        ]
-    };
-    candidates.iter().find_map(|p| read_capped(std::path::Path::new(p), MAX_UI_FONT_BYTES)).map(|b| Arc::new(egui::FontData::from_owned(b)))
-}
-
-/// Look for faces for `missing` (off the UI thread) and record them in the font cache.
-#[cfg(not(target_arch = "wasm32"))]
-fn load_fallback_faces(missing: Scripts, primary: Option<&egui::FontData>) {
-    use cadcraft_fonts::ttf::{Face, fallback_for};
-    let primary = primary.and_then(|d| Face::new(Arc::new(d.font.to_vec()), d.index));
-    let mut found: Vec<(Scripts, Option<Face>)> = Vec::new();
-    for (s, sample) in Scripts::SAMPLES {
-        if !missing.contains(s) {
-            continue;
-        }
-        let face = if primary.as_ref().is_some_and(|p| p.has_glyph(sample)) {
-            None
-        } else if let Some(f) = found.iter().filter_map(|(_, f)| f.as_ref()).find(|f| f.has_glyph(sample)) {
-            Some(f.clone())
-        } else {
-            let preferred = (s == Scripts::CJK)
-                .then(cjk_font)
-                .flatten()
-                .and_then(|p| read_capped(p, MAX_UI_FONT_BYTES))
-                .and_then(|b| Face::new(Arc::new(b), 0))
-                .filter(|f| f.has_glyph(sample));
-            preferred.or_else(|| fallback_for(sample))
-        };
-        found.push((s, face));
+/// The faces `build.rs` embedded from craft-fonts that the interface loads, in order: every CJK
+/// face, because file, layout and layer names can be Japanese or Chinese whatever the interface
+/// shows (#513), with the interface's own face leading. A sans-serif face reads best, and a
+/// Chinese interface takes the face with its own glyphs ahead of a Japanese one — a Japanese face
+/// shares most ideographs but lacks the simplified-only ones (图 园 测), which would be tofu.
+/// العربية adds its Arabic face after those, egui's bundled faces carrying no Arabic glyphs.
+fn embedded_ui_faces<'a>(faces: &[&'a cadcraft_fonts::CraftFont], language: &str) -> Vec<&'a cadcraft_fonts::CraftFont> {
+    let cjk = |f: &&cadcraft_fonts::CraftFont| f.style == "Regular" && f.scripts.iter().any(|s| matches!(*s, "Jpan" | "Hans" | "Hant"));
+    let mut out: Vec<_> = faces.iter().copied().filter(cjk).collect();
+    out.sort_by_key(|f| !f.family.contains("Gothic") && !f.family.contains("Sans"));
+    if language.starts_with("zh") {
+        out.sort_by_key(|f| !f.scripts.contains(&"Hans"));
     }
-    let mut c = font_cache();
-    let mut ids: Vec<(Face, usize)> = Vec::new();
-    for (s, face) in found {
-        let i = face.map(|f| match ids.iter().find(|(g, _)| *g == f) {
-            Some((_, i)) => *i,
-            None => {
-                let (bytes, index) = f.data();
-                // A file read here has no other owner, so its bytes move to egui; one from the font
-                // table (shared with drawing text) is copied.
-                let font = Arc::try_unwrap(bytes.clone()).unwrap_or_else(|shared| shared.to_vec());
-                let mut data = egui::FontData::from_owned(font);
-                data.index = index;
-                c.faces.push(Arc::new(data));
-                let i = c.faces.len() - 1;
-                ids.push((f, i));
-                i
-            }
-        });
-        c.resolved.push((s, i));
+    if language == "ar" {
+        out.extend(faces.iter().copied().filter(|f| f.style == "Regular" && f.scripts.contains(&"Arab")));
     }
-    c.loading = c.loading.without(missing);
-    drop(c);
-    FONTS_LOADED.fetch_add(1, std::sync::atomic::Ordering::Release);
+    out
 }
 
-/// Largest interface font file read (CJK collections are 15–60 MB).
-#[cfg(not(target_arch = "wasm32"))]
+/// Largest interface font file read or embedded face copied (CJK collections are 15–60 MB).
 const MAX_UI_FONT_BYTES: u64 = 96 * 1024 * 1024;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn read_capped(path: &std::path::Path, max: u64) -> Option<Vec<u8>> {
-    let len = std::fs::metadata(path).ok()?.len();
+    use std::io::Read as _;
+    let file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
     if len == 0 || len > max {
         return None;
     }
-    std::fs::read(path).ok()
+    // Enforce the cap during the read too, even if the file grows after metadata was read.
+    let mut bytes = Vec::new();
+    file.take(max.saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    (!bytes.is_empty() && bytes.len() as u64 <= max).then_some(bytes)
 }
 
 /// An installed font with Chinese characters, for the Chinese interface; fonts are never bundled
@@ -587,14 +455,209 @@ pub fn cjk_font() -> Option<&'static std::path::Path> {
     None
 }
 
-/// Whether `text` has Chinese, Japanese or Korean characters that only a CJK font can show.
-pub fn needs_cjk(text: &str) -> bool {
-    Scripts::of(text).intersects(Scripts::CJK | Scripts::HANGUL)
+/// An installed font with Arabic glyphs, for the العربية interface; fonts are never bundled
+/// (only looked for where the OS or common packages put them). Checked once.
+pub fn arabic_font() -> Option<&'static std::path::Path> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        FOUND
+            .get_or_init(|| {
+                let candidates: &[&str] = if cfg!(target_os = "macos") {
+                    &[
+                        "/System/Library/Fonts/GeezaPro.ttc",
+                        "/System/Library/Fonts/Supplemental/Geeza Pro.ttf",
+                        "/System/Library/Fonts/Supplemental/Al Nile.ttc",
+                        "/System/Library/Fonts/Supplemental/Baghdad.ttf",
+                    ]
+                } else if cfg!(windows) {
+                    &[
+                        "C:\\Windows\\Fonts\\segoeui.ttf",
+                        "C:\\Windows\\Fonts\\tahoma.ttf",
+                        "C:\\Windows\\Fonts\\trado.ttf",
+                        "C:\\Windows\\Fonts\\arabtype.ttf",
+                        "C:\\Windows\\Fonts\\arial.ttf",
+                    ]
+                } else {
+                    &[
+                        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+                        "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
+                        "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
+                        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                        "/usr/share/fonts/truetype/amiri/Amiri-Regular.ttf",
+                        "/usr/share/fonts/truetype/kacst/KacstOne.ttf",
+                    ]
+                };
+                candidates.iter().map(std::path::PathBuf::from).find(|p| p.is_file())
+            })
+            .as_deref()
+    }
+    #[cfg(target_arch = "wasm32")]
+    None
 }
 
-/// Whether the interface can show `language`: Chinese needs an installed CJK font.
+/// An installed Japanese font, for Japanese names in a non-Chinese interface. Checked once.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn japanese_font() -> Option<&'static std::path::Path> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        FOUND
+            .get_or_init(|| {
+                let candidates: &[&str] = if cfg!(target_os = "macos") {
+                    &["/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"]
+                } else if cfg!(windows) {
+                    &["C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc", "C:\\Windows\\Fonts\\msgothic.ttc"]
+                } else {
+                    &[
+                        "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+                        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+                        "/usr/share/fonts/ipa-pgothic/ipagp.ttf",
+                        "/usr/share/fonts/vl-gothic/VL-PGothic-Regular.ttf",
+                    ]
+                };
+                candidates.iter().map(std::path::PathBuf::from).find(|p| p.is_file())
+            })
+            .as_deref()
+    }
+    #[cfg(target_arch = "wasm32")]
+    None
+}
+
+/// The Hangul letters the Korean interface shows: its catalog and its own name.
+fn hangul_letters() -> &'static std::collections::BTreeSet<char> {
+    static LETTERS: std::sync::OnceLock<std::collections::BTreeSet<char>> = std::sync::OnceLock::new();
+    LETTERS.get_or_init(|| {
+        include_str!("i18n/ko.tsv")
+            .lines()
+            .filter_map(|line| line.split('\t').nth(2))
+            .flat_map(str::chars)
+            .chain("한국어".chars())
+            .filter(|c| matches!(c, '\u{1100}'..='\u{11ff}' | '\u{3130}'..='\u{318f}' | '\u{a960}'..='\u{a97f}' | '\u{ac00}'..='\u{d7ff}'))
+            .collect()
+    })
+}
+
+/// Whether `face` has every Hangul letter the Korean interface shows (rejects malformed fonts
+/// and Chinese- or Japanese-only faces).
+fn covers_hangul(face: &cadcraft_fonts::ttf::Face) -> bool {
+    hangul_letters().iter().all(|c| face.has_glyph(*c))
+}
+
+/// The first face of a font file (the one egui uses) when it covers the Korean interface.
+fn korean_face(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
+    cadcraft_fonts::ttf::faces(&bytes).into_iter().find(covers_hangul)
+}
+
+/// Whether the CJK fonts [`install_fonts`] loads in every language already show Hangul (Noto Sans
+/// CJK, Microsoft YaHei, PingFang do). Only asked about Korean, so other interfaces never read the
+/// font twice. Checked once.
+pub fn cjk_covers_hangul() -> bool {
+    static COVERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *COVERS.get_or_init(|| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // egui uses a collection's first face, and each letter from the first font with it.
+            let first_covers = |p: &std::path::Path| {
+                read_capped(p, MAX_UI_FONT_BYTES)
+                    .and_then(|bytes| cadcraft_fonts::ttf::faces(&std::sync::Arc::new(bytes)).into_iter().next())
+                    .is_some_and(|face| covers_hangul(&face))
+            };
+            if cjk_font().is_some_and(first_covers) {
+                return true;
+            }
+        }
+        cadcraft_fonts::CRAFT_FONTS
+            .iter()
+            .filter(|f| f.style == "Regular" && f.scripts.iter().any(|s| matches!(*s, "Jpan" | "Hans" | "Hant")))
+            .any(|f| cadcraft_fonts::ttf::faces(&std::sync::Arc::new(f.bytes.to_vec())).first().is_some_and(covers_hangul))
+    })
+}
+
+/// A Hangul font for the Korean interface when the CJK fonts don't cover it: a Korean face from
+/// the optional craft-fonts input, else one installed where the OS or common packages put it.
+/// Nothing is bundled or downloaded; without one the interface stays English. Only looked for
+/// when Korean is asked about. Checked once; collections are scanned with the fonts crate's
+/// face-count cap and reads are capped.
+pub fn korean_font() -> Option<&'static cadcraft_fonts::ttf::Face> {
+    static FOUND: std::sync::OnceLock<Option<cadcraft_fonts::ttf::Face>> = std::sync::OnceLock::new();
+    FOUND
+        .get_or_init(|| {
+            for font in cadcraft_fonts::CRAFT_FONTS.iter().filter(|f| f.scripts.iter().any(|s| matches!(*s, "Hang" | "Kore"))) {
+                if font.bytes.len() as u64 > MAX_UI_FONT_BYTES {
+                    continue;
+                }
+                if let Some(face) = korean_face(std::sync::Arc::new(font.bytes.to_vec())) {
+                    return Some(face);
+                }
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let candidates: &[&str] = if cfg!(target_os = "macos") {
+                    &[
+                        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+                        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
+                        "/Library/Fonts/NanumGothic.ttf",
+                    ]
+                } else if cfg!(windows) {
+                    &["C:\\Windows\\Fonts\\malgun.ttf", "C:\\Windows\\Fonts\\gulim.ttc"]
+                } else {
+                    &[
+                        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                        "/usr/share/fonts/nanum/NanumGothic.ttf",
+                        "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+                        "/usr/local/share/fonts/nanum/NanumGothic.ttf",
+                        "/usr/local/share/fonts/noto/NotoSansCJK-Regular.ttc",
+                    ]
+                };
+                for path in candidates {
+                    if let Some(face) =
+                        read_capped(std::path::Path::new(path), MAX_UI_FONT_BYTES).and_then(|bytes| korean_face(std::sync::Arc::new(bytes)))
+                    {
+                        return Some(face);
+                    }
+                }
+            }
+            None
+        })
+        .as_ref()
+}
+
+/// Whether the interface in `language` shows Hangul (the Korean name in the language picker):
+/// in every language when the CJK fonts cover it, in a Korean interface with [`korean_font`].
+pub fn shows_hangul(language: &str) -> bool {
+    cjk_covers_hangul() || (language == "ko" && korean_font().is_some())
+}
+
+/// Whether the interface can show `language` without missing-glyph boxes: Chinese needs a font
+/// with its glyphs (installed, or the CJK face this build embedded from craft-fonts), Korean a
+/// font with Hangul, العربية an installed Arabic font or the embedded Arabic face.
 pub fn can_show(language: &str) -> bool {
-    !language.starts_with("zh") || cjk_font().is_some()
+    match language {
+        "ko" => shows_hangul("ko"),
+        "ar" => arabic_font().is_some() || embedded_script("Arab"),
+        l if l.starts_with("zh") => cjk_font().is_some() || embedded_script("Hans") || embedded_script("Hant"),
+        _ => true,
+    }
+}
+
+/// Whether a face this build embedded from craft-fonts carries `script` (ISO 15924). The web
+/// build has no system fonts, so there the interface rides on the embedded faces alone; the
+/// Korean gate already asks this way ([`korean_font`]) and Arabic and Chinese match it. Only a
+/// build made with `CRAFT_FONTS_DIR` embeds any (`build.rs`), so the rest is unchanged.
+fn embedded_script(script: &str) -> bool {
+    any_script(cadcraft_fonts::CRAFT_FONTS, script)
+}
+
+/// Whether any face of `faces` carries `script` (ISO 15924), the question [`embedded_script`]
+/// asks of the table this build embedded.
+fn any_script(faces: &[cadcraft_fonts::CraftFont], script: &str) -> bool {
+    faces.iter().any(|f| f.style == "Regular" && f.scripts.contains(&script))
 }
 
 /// egui's visuals for `theme`, from its tokens.
@@ -650,20 +713,55 @@ pub fn apply(ctx: &egui::Context, theme: Theme, follow_system: bool) {
 }
 
 #[cfg(test)]
-mod script_tests {
-    use super::Scripts;
+mod tests {
+    use cadcraft_fonts::CraftFont;
+
+    /// A face shaped like `build.rs` writes them, with no font file (as in `cadcraft-fonts`).
+    fn face(family: &'static str, scripts: &'static [&'static str]) -> CraftFont {
+        CraftFont { family, style: "Regular", scripts, bytes: &[] }
+    }
+
+    fn families<'a>(faces: &[&'a CraftFont]) -> Vec<&'a str> {
+        faces.iter().map(|f| f.family).collect()
+    }
 
     #[test]
-    fn scripts_of_interface_text() {
-        assert_eq!(Scripts::of("Drawing1 Ünterlage_é.dwg"), Scripts::NONE);
-        assert_eq!(Scripts::of("图纸A_t3.dwg"), Scripts::CJK);
-        assert_eq!(Scripts::of("図面カタカナ"), Scripts::CJK);
-        assert_eq!(Scripts::of("도면"), Scripts::HANGUL);
-        assert_eq!(Scripts::of("แบบ"), Scripts::THAI);
-        assert_eq!(Scripts::of("नक्शा"), Scripts::DEVANAGARI);
-        assert_eq!(Scripts::of("خريطة"), Scripts::ARABIC);
-        assert_eq!(Scripts::of("שרטוט"), Scripts::HEBREW);
-        let mixed = Scripts::of("图纸 도면");
-        assert!(mixed.contains(Scripts::CJK | Scripts::HANGUL) && !mixed.intersects(Scripts::THAI));
+    fn korean_font_rejects_invalid_or_glyphless_files() {
+        for bytes in [vec![], vec![0xff; 32], vec![0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]] {
+            assert!(super::korean_face(std::sync::Arc::new(bytes)).is_none());
+        }
+    }
+
+    /// The interface's own script leads the embedded faces it loads, and العربية adds its face.
+    #[test]
+    fn embedded_faces_lead_with_the_interfaces_own_script() {
+        let japanese = face("BIZ UDPGothic", &["Jpan", "Latn"]);
+        let chinese = face("Han Test Face", &["Hans", "Latn"]);
+        let arabic = face("Noto Sans Arabic", &["Arab"]);
+        let faces = [&japanese, &chinese, &arabic];
+        // Every interface reads CJK names, so both CJK faces load, the sans-serif face first.
+        assert_eq!(families(&super::embedded_ui_faces(&faces, "en")), ["BIZ UDPGothic", "Han Test Face"]);
+        // A Chinese interface takes the Han face first: a Japanese face lacks 图 园 测.
+        assert_eq!(families(&super::embedded_ui_faces(&faces, "zh")), ["Han Test Face", "BIZ UDPGothic"]);
+        // العربية adds the Arabic face, after the CJK ones egui's bundled faces have no glyphs for.
+        assert_eq!(families(&super::embedded_ui_faces(&faces, "ar")), ["BIZ UDPGothic", "Han Test Face", "Noto Sans Arabic"]);
+        // Another weight is a style of a face, not an interface face of its own.
+        let bold = CraftFont { family: "BIZ UDPGothic", style: "Bold", scripts: &["Jpan"], bytes: &[] };
+        assert!(super::embedded_ui_faces(&[&bold], "en").is_empty());
+    }
+
+    /// What the gate asks of the table: an embedded face of the script stands in for an installed
+    /// font, which the web build never has. The default (no `CRAFT_FONTS_DIR`) table answers no,
+    /// leaving the installed-font answer the gate had before.
+    #[test]
+    fn embedded_faces_answer_for_their_scripts() {
+        let faces = [face("BIZ UDPGothic", &["Jpan", "Latn"]), face("Noto Sans Arabic", &["Arab"])];
+        assert!(super::any_script(&faces, "Jpan") && super::any_script(&faces, "Arab"));
+        assert!(!super::any_script(&faces, "Hans") && !super::any_script(&faces, "Hant"));
+        // A `Bold`-only face is not the interface's, and a script code is matched whole.
+        let bold = CraftFont { family: "Some Han Bold", style: "Bold", scripts: &["Hans"], bytes: &[] };
+        assert!(!super::any_script(&[bold], "Hans") && !super::any_script(&faces, "Ara"));
+        assert!(!super::embedded_script("Hans") || super::can_show("zh"));
+        assert!(super::can_show("en") && super::can_show("uk"));
     }
 }
