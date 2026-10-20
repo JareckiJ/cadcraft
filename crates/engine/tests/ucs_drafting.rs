@@ -61,6 +61,23 @@ fn ortho_follows_the_ucs_axes() {
     assert!(ang_eq(d.angle(), 120.0 * DEG) || ang_eq(d.angle(), 300.0 * DEG), "{:?}", d.angle() / DEG);
 }
 
+/// Holding Shift turns ortho on (or off) while it is held, along the current UCS's axes too.
+#[test]
+fn shift_ortho_follows_the_ucs_axes() {
+    let mut s = session();
+    s.settings.orthomode = false;
+    turned(&mut s, 30.0);
+    let shifted = CursorQuery { shift: true, ..query(Some(Vec2::ZERO)) };
+    let p = s.snap_cursor(Vec2::new(10.0, 4.0), &shifted).point;
+    let along = 10.0 * (30.0 * DEG).cos() + 4.0 * (30.0 * DEG).sin();
+    assert!(near(p, along * (30.0 * DEG).cos(), along * (30.0 * DEG).sin()), "Shift: ortho on, along the UCS X axis: {p:?}");
+    // Without Shift the cursor goes where it is; with ORTHOMODE on, Shift turns it off.
+    assert!(near(s.snap_cursor(Vec2::new(10.0, 4.0), &query(Some(Vec2::ZERO))).point, 10.0, 4.0));
+    s.settings.orthomode = true;
+    assert!(near(s.snap_cursor(Vec2::new(10.0, 4.0), &shifted).point, 10.0, 4.0), "Shift: ortho off");
+    assert!(s.settings.orthomode, "ORTHOMODE itself is unchanged");
+}
+
 #[test]
 fn direct_distance_with_ortho_goes_along_the_ucs_axis() {
     let mut s = session();
