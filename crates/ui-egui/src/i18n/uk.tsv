@@ -76,6 +76,7 @@
 	Area	Площа
 	Arrange Panel	Розташувати панель
 	Array	Масив
+	ArtCraft Website	Вебсайт ArtCraft
 	Attach	Приєднати
 	Attribute	Атрибут
 	Attribute Definition	Визначення атрибута
@@ -115,6 +116,8 @@
 	ByColor	За кольором
 	ByLayer	За шаром
 	CADCraft Help	Довідка CADCraft
+	CADCraft on GitHub	CADCraft на GitHub
+	CADCraft Website	Вебсайт CADCraft
 	Cancel	Скасувати
 	Cartesian (x, y)	Декартові (x, y)
 	Center	Центр
@@ -447,7 +450,7 @@
 	Jogged	Зі зламом
 	Jogged Linear	Лінійний зі зламом
 	Join	Об'єднати
-	Join the ArtCraft Discord…	Приєднатися до Discord ArtCraft…
+	Join the CADCraft Discord...	Приєднатися до Discord CADCraft...
 	Join us on Discord	Приєднуйтеся до нас у Discord
 	Isometric Plane	Ізометрична площина
 	Isometric snap	Ізометрична крокова прив'язка
@@ -747,6 +750,7 @@
 	Rename Text Style	Перейменувати текстовий стиль
 	Rename...	Перейменувати...
 	Repeat {command}	Повторити {command}
+	Report an Issue...	Повідомити про проблему...
 	Requires a point (x,y, @dx,dy or @d<a).	Потрібна точка (x,y, @dx,dy або @d<a).
 	Reset Palettes	Скинути палітри
 	Restore	Відновити

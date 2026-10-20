@@ -35,6 +35,7 @@ pub mod grip_dyn;
 pub mod i18n;
 pub mod icons;
 pub mod layers;
+pub mod links;
 pub mod managers;
 pub mod menus;
 pub mod opening;
@@ -109,6 +110,8 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// A URL waiting to be opened by `egui::Context::open_url` in the browser.
+    pub pending_url: Option<String>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -180,15 +183,17 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            pending_url: None,
         }
     }
 }
 
-/// Host services (file pickers, clipboard) injected by the app so this crate stays portable.
+/// Host services (file pickers, clipboard, URL opening) injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    pub open_url: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
 }
 
 pub struct CadApp {
@@ -576,6 +581,9 @@ impl CadApp {
             self.shown_interface_scale = Some(scale);
         }
         self.drain_control(ctx);
+        if let Some(url) = self.ui.pending_url.take() {
+            ctx.open_url(egui::OpenUrl::new_tab(&url));
+        }
         self.finish_opening();
         self.opening.show(ctx);
         if !self.synthetic.is_empty() {

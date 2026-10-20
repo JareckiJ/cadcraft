@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (stable dash anchors on filled-object highlights) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-18 · **Change:** minor (Help menu links to Discord, websites, GitHub, and issue reporting) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -42,6 +42,7 @@ ignored; there are no context menus. Remaining: **≈ 110–170 Opus 5.5 hours**
 
 | Input | AutoCAD | CADCraft | Evidence |
 |---|---|---|---|
+| 2026-10-18 | minor | Help menu community and project links (Discord, CADCraft website, ArtCraft website, GitHub, Report an Issue; #1537, #1550) |
 | `x,y[,z]`, `@dx,dy`, `@d<a`, `d<a`, `#x,y`, bare `@` | yes | yes; `#` equals absolute because there is no UCS; Z parsed then discarded | `prompt.rs:147-180` |
 | `*x,y` (WCS override) | yes | yes (`*x,y`, `*@dx,dy`, `@*dx,dy`); the same as the plain forms because there is no UCS | `prompt.rs` |
 | Direct distance entry | yes, honours ortho, polar and tracking paths | yes, ortho; polar only through the UI's snapped cursor | `lib.rs:782-793` |
