@@ -25,7 +25,7 @@ pub fn url_for(id: &str) -> Option<&'static str> {
     match id {
         // Keep the legacy ID working for callers using the original Discord command.
         "ui.discord" => Some(DISCORD),
-        other => COMMANDS.iter().find(|command| command.0 == other).map(|command| command.1),
+        other => COMMANDS.iter().find(|command| command.0.eq_ignore_ascii_case(other)).map(|command| command.1),
     }
 }
 
@@ -58,6 +58,19 @@ mod tests {
         assert_eq!(url_for("ui.discord"), Some(DISCORD));
         assert!(url_for("help.appPage").is_none());
         assert!(url_for("unknown").is_none());
+    }
+
+    #[test]
+    fn typed_camel_case_help_links_survive_cmdline_normalization() {
+        let mut app = CadApp::new(Session::empty(), Default::default());
+
+        assert_eq!(app.cmdline("help.artcraftWebsite"), None);
+        assert_eq!(app.ui.pending_url.as_deref(), Some(ARTCRAFT_WEBSITE));
+
+        app.ui.pending_url = None;
+
+        assert_eq!(app.cmdline("help.reportIssue"), None);
+        assert_eq!(app.ui.pending_url.as_deref(), Some(ISSUES));
     }
 
     #[test]
