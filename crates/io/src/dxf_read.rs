@@ -161,6 +161,20 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
             a => a,
         };
     }
+    let (background, background_scale) = if let Some(flag) = t.i(90).filter(|&f| f != 0) {
+        let bg = if let Some(tc) = t.i(420) {
+            Some(Color::True(Rgb::from_u32(tc as u32)))
+        } else if let Some(aci) = t.i(63) {
+            Some(Color::from_aci(aci as i16))
+        } else if flag == 2 {
+            Some(Color::ByBlock)
+        } else {
+            Some(Color::WHITE)
+        };
+        (bg, t.f(45))
+    } else {
+        (None, None)
+    };
     MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
@@ -175,6 +189,8 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         line_spacing: t.fd(44, 1.0),
         line_spacing_exact: t.i(73) == Some(2),
         columns: columns.map(|(c, _)| c),
+        background,
+        background_scale,
     }
 }
 
@@ -1563,7 +1579,9 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 if name.is_empty() || !finite || d.ucss.len() >= MAX_OBJECTS {
                     continue;
                 }
-                let u = Ucs { name: name.clone(), origin, x_axis, y_axis };
+                let elevation = t.fd(146, 0.0);
+                let ortho_type = t.i(79).unwrap_or(0) as i16;
+                let u = Ucs { name: name.clone(), origin, x_axis, y_axis, elevation, ortho_type };
                 match d.ucss.iter_mut().find(|x| x.name.eq_ignore_ascii_case(&name)) {
                     Some(x) => *x = u,
                     None => d.ucss.push(u),

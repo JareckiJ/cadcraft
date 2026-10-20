@@ -54,6 +54,8 @@ pub(super) fn block(s: &mut Session, from: &str, to: &str) -> Result<()> {
     let mut b = d.blocks.remove(&key).ok_or_else(|| bad("rename", "no such block"))?;
     Arc::make_mut(&mut b).name = to.clone();
     d.blocks.insert(to.clone(), b);
+    d.rename_foreign_record("BLOCK", &key, &to);
+    d.rename_foreign_record("BLOCK_RECORD", &key, &to);
     let uses = |k: &EntityKind| match k {
         EntityKind::Insert(i) => i.block.eq_ignore_ascii_case(&key),
         EntityKind::MLeader(m) => m.block.as_ref().is_some_and(|b| b.block.eq_ignore_ascii_case(&key)),
@@ -100,6 +102,23 @@ pub(super) fn simple(s: &mut Session, table: &str, from: &str, to: &str) -> Resu
     }
     let n = names.iter_mut().find(|n| n.eq_ignore_ascii_case(from)).ok_or_else(|| bad("rename", format!("no {table} `{from}`")))?;
     let old = std::mem::replace(&mut **n, to.clone());
+    match table {
+        "mleaderstyle" => {
+            d.rename_foreign_record("MLEADERSTYLE", &old, &to);
+            d.rename_foreign_record("NOD/ACAD_MLEADERSTYLE", &old, &to);
+        }
+        "tablestyle" => {
+            d.rename_foreign_record("TABLESTYLE", &old, &to);
+            d.rename_foreign_record("NOD/ACAD_TABLESTYLE", &old, &to);
+        }
+        "view" => {
+            d.rename_foreign_record("VIEW", &old, &to);
+        }
+        "ucs" => {
+            d.rename_foreign_record("UCS", &old, &to);
+        }
+        _ => {}
+    }
     let current = match table {
         "mleaderstyle" => "CMLEADERSTYLE",
         "tablestyle" => "CTABLESTYLE",
@@ -139,7 +158,8 @@ pub(super) fn vport(s: &mut Session, from: &str, to: &str) -> Result<()> {
         .iter_mut()
         .find(|c| !c.is_active() && c.name.eq_ignore_ascii_case(from))
         .ok_or_else(|| bad("rename", format!("no viewport configuration `{from}`")))?;
-    vp.name = to;
+    vp.name = to.clone();
+    d.rename_foreign_record("VPORT", from, &to);
     Ok(())
 }
 
@@ -208,6 +228,8 @@ pub(super) fn plotstyle(s: &mut Session, from: &str, to: &str) -> Result<()> {
     if !changed {
         return Err(bad("rename", format!("no plot style `{from}`")));
     }
+    d.rename_foreign_record("PLOTSTYLE", from, &to);
+    d.rename_foreign_record("NOD/ACAD_PLOTSTYLENAME", from, &to);
     Ok(())
 }
 
@@ -225,7 +247,9 @@ pub(super) fn material(s: &mut Session, from: &str, to: &str) -> Result<()> {
         return Err(bad("rename", format!("a material `{to}` already exists")));
     }
     let m = d.materials.iter_mut().find(|m| m.name.eq_ignore_ascii_case(from)).ok_or_else(|| bad("rename", format!("no material `{from}`")))?;
-    m.name = to;
+    m.name = to.clone();
+    d.rename_foreign_record("MATERIAL", from, &to);
+    d.rename_foreign_record("NOD/ACAD_MATERIAL", from, &to);
     Ok(())
 }
 

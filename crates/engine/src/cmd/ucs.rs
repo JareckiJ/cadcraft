@@ -121,7 +121,7 @@ pub fn run_ucs_3point(s: &mut Session, p: &Value) -> Result<Value> {
     let z_axis = z_raw.normalized();
     let y_axis = z_axis.cross(x_axis);
 
-    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis };
+    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis, elevation: 0.0, ortho_type: 0 };
     s.set_current_ucs(ucs)?;
     Ok(json!({ "origin": [origin.x, origin.y, origin.z] }))
 }
@@ -144,7 +144,7 @@ pub fn run_ucs_zaxis(s: &mut Session, p: &Value) -> Result<Value> {
     let x_axis = ax.normalized();
     let y_axis = z_axis.cross(x_axis);
 
-    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis };
+    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis, elevation: 0.0, ortho_type: 0 };
     s.set_current_ucs(ucs)?;
     Ok(json!({ "origin": [origin.x, origin.y, origin.z] }))
 }
@@ -186,7 +186,7 @@ fn rotate_ucs(cur: &Ucs, axis: char, angle_deg: f64) -> Ucs {
             y = ny;
         }
     }
-    Ucs { name: String::new(), origin: cur.origin, x_axis: x.normalized(), y_axis: y.normalized() }
+    Ucs { name: String::new(), origin: cur.origin, x_axis: x.normalized(), y_axis: y.normalized(), elevation: cur.elevation, ortho_type: cur.ortho_type }
 }
 
 pub fn run_ucs_rotate_axis(s: &mut Session, axis: char, p: &Value) -> Result<Value> {
@@ -985,7 +985,7 @@ pub fn run_ucs_face(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad("ucs", "selected entity is not a 3D face")),
     };
 
-    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis };
+    let ucs = Ucs { name: String::new(), origin, x_axis, y_axis, elevation: 0.0, ortho_type: 0 };
     s.set_current_ucs(ucs)?;
     s.echo("UCS aligned to selected face.");
     Ok(json!({

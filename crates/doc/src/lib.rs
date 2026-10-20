@@ -404,6 +404,13 @@ impl Drawing {
             i += 1;
         }
     }
+
+    /// Update foreign record keys and targets when a named item is renamed.
+    pub fn rename_foreign_record(&mut self, kind: &str, from: &str, to: &str) {
+        if !self.foreign.records.is_empty() || !self.foreign.targets.is_empty() {
+            std::sync::Arc::make_mut(&mut self.foreign).rename_record(kind, from, to);
+        }
+    }
 }
 
 mod anno;

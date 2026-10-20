@@ -281,6 +281,12 @@ pub struct MText {
     /// one column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub columns: Option<MTextColumns>,
+    /// Background fill colour (DXF 90/63/420); `None` when background fill is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<cadcraft_color::Color>,
+    /// Fill box scale (DXF 45); 1.5 default when background fill is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_scale: Option<f64>,
 }
 fn attach_tl() -> u8 {
     1

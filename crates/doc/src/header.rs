@@ -106,6 +106,8 @@ impl Header {
             origin: self.point("UCSORG").unwrap_or(Vec3::ZERO),
             x_axis: self.point("UCSXDIR").filter(|v| v.len() > 1e-6).unwrap_or(Vec3::new(1.0, 0.0, 0.0)).normalized(),
             y_axis: self.point("UCSYDIR").filter(|v| v.len() > 1e-6).unwrap_or(Vec3::new(0.0, 1.0, 0.0)).normalized(),
+            elevation: self.elevation(),
+            ortho_type: self.i64("UCSORTHOVIEW", 0) as i16,
         }
     }
 
@@ -114,6 +116,8 @@ impl Header {
         self.set("UCSORG", HVal::Point(ucs.origin));
         self.set("UCSXDIR", HVal::Point(ucs.x_axis));
         self.set("UCSYDIR", HVal::Point(ucs.y_axis));
+        self.set_elevation(ucs.elevation);
+        self.set("UCSORTHOVIEW", HVal::Int(i64::from(ucs.ortho_type)));
     }
 
     pub fn view_dir(&self) -> Vec3 {

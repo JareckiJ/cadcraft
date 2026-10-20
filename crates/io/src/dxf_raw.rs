@@ -574,8 +574,8 @@ pub(crate) fn unknown_entity(u: &Unknown, e: &Entity, owner: &str, paper: bool) 
     let fixed = out.len();
     let mut in_group = false;
     let mut owner_seen = false;
-    let mut layer = false;
     let mut paper_done = !paper;
+    let mut past_acdb_entity = false;
     for r in u.tags.iter().take_while(|r| r.code < 1000) {
         match r.code {
             102 => {
@@ -588,25 +588,55 @@ pub(crate) fn unknown_entity(u: &Unknown, e: &Entity, owner: &str, paper: bool) 
                 owner_seen = true;
                 continue;
             }
-            8 => {
-                layer = true;
-                out.push(Tag::s(8, e.common.layer.clone()));
+            8 | 6 | 62 | 420 | 430 | 370 | 48 | 60 | 440 if !past_acdb_entity => {
                 continue;
             }
             _ => {}
         }
         out.push(tag(r));
-        if r.code == 100 && r.value.trim() == "AcDbEntity" && !paper_done {
-            out.push(Tag::i(67, 1));
-            paper_done = true;
+        if r.code == 100 {
+            if r.value.trim() == "AcDbEntity" {
+                if !paper_done {
+                    out.push(Tag::i(67, 1));
+                    paper_done = true;
+                }
+            } else {
+                past_acdb_entity = true;
+            }
         }
     }
     let mut lead = Vec::new();
     if !paper_done {
         lead.push(Tag::i(67, 1));
     }
-    if !layer {
-        lead.push(Tag::s(8, e.common.layer.clone()));
+    lead.push(Tag::s(8, e.common.layer.clone()));
+    if !e.common.linetype.eq_ignore_ascii_case("bylayer") {
+        lead.push(Tag::s(6, e.common.linetype.clone()));
+    }
+    match e.common.color {
+        cadcraft_color::Color::ByLayer => {}
+        cadcraft_color::Color::ByBlock => lead.push(Tag::i(62, 0)),
+        cadcraft_color::Color::Index(i) => lead.push(Tag::i(62, i64::from(i))),
+        cadcraft_color::Color::True(rgb) => {
+            lead.push(Tag::i(62, i64::from(cadcraft_color::nearest_aci(rgb))));
+            lead.push(Tag::i(420, i64::from(rgb.to_u32())));
+        }
+    }
+    if e.common.lineweight != cadcraft_doc::Lineweight::ByLayer {
+        lead.push(Tag::i(370, i64::from(e.common.lineweight.to_dxf())));
+    }
+    if (e.common.ltscale - 1.0).abs() > 1e-12 {
+        lead.push(Tag::f(48, e.common.ltscale));
+    }
+    if !e.common.visible {
+        lead.push(Tag::i(60, 1));
+    }
+    match e.common.transparency {
+        cadcraft_doc::Transparency::ByLayer => {}
+        cadcraft_doc::Transparency::ByBlock => lead.push(Tag::i(440, 0x0100_0000)),
+        cadcraft_doc::Transparency::Percent(p) => {
+            lead.push(Tag::i(440, i64::from(0x0200_0000 | ((100 - u32::from(p.min(90))) * 255 / 100))));
+        }
     }
     out.splice(fixed..fixed, lead);
     out

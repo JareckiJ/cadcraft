@@ -139,3 +139,125 @@ fn viewport_ids_survive_dwg_and_the_paper_viewport_stays_implicit() {
     assert!(!text.contains("PAPERVIEW"));
     assert_eq!(viewport_ids(&cadcraft_io::read_dxf(text.as_bytes()).unwrap().layouts[0]), [1, 2]);
 }
+
+#[test]
+fn ucs_elevation_and_ortho_survives_dwg_and_dxf() {
+    let mut d = Drawing::new_metric();
+    d.ucss.push(Ucs {
+        name: "Elevated".into(),
+        origin: Vec3::new(10.0, 20.0, 30.0),
+        x_axis: Vec3::X,
+        y_axis: Vec3::Y,
+        elevation: 15.5,
+        ortho_type: 2,
+    });
+    let dxf = cadcraft_io::write_dxf(&d);
+    assert!(dxf.contains("146\r\n15.5") || dxf.contains("146\n15.5"));
+    assert!(dxf.contains(" 79\r\n2") || dxf.contains("79\n2"));
+    let back_dxf = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
+    let u_dxf = back_dxf.ucss.iter().find(|u| u.name == "Elevated").unwrap();
+    assert_eq!(u_dxf.elevation, 15.5);
+    assert_eq!(u_dxf.ortho_type, 2);
+
+    let back_dwg = through_dwg(&d);
+    let u_dwg = back_dwg.ucss.iter().find(|u| u.name == "Elevated").unwrap();
+    assert_eq!(u_dwg.elevation, 15.5);
+    assert_eq!(u_dwg.ortho_type, 2);
+}
+
+#[test]
+fn mtext_background_color_survives_dwg_and_dxf() {
+    let mut d = Drawing::new_metric();
+    let h = d
+        .add(
+            &Space::Model,
+            Common::default(),
+            EntityKind::MText(MText {
+                insert: Vec3::new(5.0, 5.0, 0.0),
+                height: 2.5,
+                width: 50.0,
+                attach: 1,
+                rotation: 0.0,
+                style: "Standard".into(),
+                contents: "Hello Background".into(),
+                line_spacing: 1.0,
+                line_spacing_exact: false,
+                columns: None,
+                background: Some(Color::True(Rgb(250, 240, 230))),
+                background_scale: Some(1.25),
+            }),
+        )
+        .unwrap();
+
+    let dxf = cadcraft_io::write_dxf(&d);
+    let back_dxf = cadcraft_io::read_dxf(dxf.as_bytes()).unwrap();
+    let e_dxf = back_dxf.entity(h).unwrap();
+    if let EntityKind::MText(m) = &e_dxf.kind {
+        assert_eq!(m.background, Some(Color::True(Rgb(250, 240, 230))));
+        assert_eq!(m.background_scale, Some(1.25));
+    } else {
+        panic!("expected MText");
+    }
+
+    let back_dwg = through_dwg(&d);
+    let e_dwg = back_dwg.entity(h).unwrap();
+    if let EntityKind::MText(m) = &e_dwg.kind {
+        assert_eq!(m.background, Some(Color::True(Rgb(250, 240, 230))));
+        assert_eq!(m.background_scale, Some(1.25));
+    } else {
+        panic!("expected MText");
+    }
+}
+
+#[test]
+fn rename_foreign_record_updates_keys_and_targets() {
+    let mut d = Drawing::new_metric();
+    d.rename_foreign_record("LAYER", "WALLS", "PARTITIONS");
+    assert!(d.foreign.records.is_empty());
+
+    let mut extra = cadcraft_doc::foreign::ForeignExtra::default();
+    extra.xdata = vec![cadcraft_doc::RawTag { code: 1000, value: "app_data".into() }];
+    std::sync::Arc::make_mut(&mut d.foreign).records.insert(("LAYER".into(), "WALLS".into()), extra);
+    std::sync::Arc::make_mut(&mut d.foreign).targets.insert(Handle(0x100), ("LAYER".into(), "WALLS".into()));
+
+    d.rename_foreign_record("LAYER", "WALLS", "PARTITIONS");
+    assert!(!d.foreign.records.contains_key(&("LAYER".into(), "WALLS".into())));
+    assert!(d.foreign.records.contains_key(&("LAYER".into(), "PARTITIONS".into())));
+    assert_eq!(d.foreign.targets.get(&Handle(0x100)), Some(&("LAYER".into(), "PARTITIONS".into())));
+}
+
+#[test]
+fn unknown_entity_common_properties_follow_edits_on_dxf_write() {
+    let mut d = Drawing::new_metric();
+    let _ = d
+        .add(
+            &Space::Model,
+            Common {
+                layer: "0".into(),
+                color: Color::True(Rgb(10, 20, 30)),
+                lineweight: Lineweight::Mm100(50),
+                visible: false,
+                transparency: Transparency::Percent(50),
+                ..Common::default()
+            },
+            EntityKind::Unknown(Unknown {
+                dxf_type: "CUSTOM_SOLVER".into(),
+                tags: vec![
+                    cadcraft_doc::RawTag { code: 100, value: "AcDbEntity".into() },
+                    cadcraft_doc::RawTag { code: 8, value: "OLD_LAYER".into() },
+                    cadcraft_doc::RawTag { code: 62, value: "1".into() },
+                    cadcraft_doc::RawTag { code: 100, value: "AcDbCustomSolver".into() },
+                    cadcraft_doc::RawTag { code: 1, value: "custom_data".into() },
+                ],
+            }),
+        )
+        .unwrap();
+
+    let dxf = cadcraft_io::write_dxf(&d);
+    assert!(dxf.contains("420\r\n660510") || dxf.contains("420\n660510")); // 10*65536 + 20*256 + 30
+    assert!(dxf.contains("370\r\n50") || dxf.contains("370\n50"));
+    assert!(dxf.contains(" 60\r\n1") || dxf.contains("60\n1"));
+    assert!(dxf.contains("440\r\n") || dxf.contains("440\n"));
+}
+
+

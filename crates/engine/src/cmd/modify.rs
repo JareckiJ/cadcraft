@@ -1531,6 +1531,8 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                         line_spacing: 1.0,
                         line_spacing_exact: false,
                         columns: None,
+                        background: None,
+                        background_scale: None,
                     }),
                 });
             }
