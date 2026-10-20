@@ -8,6 +8,80 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 21.10.2026 (0.9.0-b11)
+
+### Русский
+
+**Меню приложения (кнопка CADCraft)**
+- Строки стали выше, текст крупнее. Слева от каждого пункта крупный значок.
+
+**Значки**
+- «Сохранить как»: крупный карандаш рядом с дискетой.
+- «Импорт» и «Экспорт»: крупные стрелки.
+
+**Текст (TEXT) и мультивыноска (MLEADER)**
+- Пока вы указываете точку вставки, высоту и угол текста, рядом с курсором видна рамка, которую займёт строка.
+- После этого открывается окно редактирования текста прямо на чертеже, как у многострочного текста. Enter завершает строку, и окно открывается для следующей строки под ней. Enter в пустой строке завершает команду.
+- У мультивыноски, пока вы указываете точки, виден отрезок до курсора. После последней точки открывается окно редактирования текста.
+- В палитре «Свойства» у мультивыноски появился тип выноски «Нет». Линия выноски и полка скрываются, но не удаляются: если снова выбрать «Прямая» или «Сплайн», выноска вернётся. В файл DXF записывается тип выноски «невидимая».
+
+**Диспетчер блоков**
+- Кнопка «Блоки» открывает диспетчер блоков: слева список блоков чертежа с поиском, справа предпросмотр выбранного блока, число объектов и вхождений, базовая точка, описание.
+- Кнопки: «Вставить» (или двойной щелчок по блоку), «Редактировать блок», «Переименовать», «Удалить» (только неиспользуемый блок), «Сохранить в файл» (WBLOCK), «Создать».
+
+**Предварительный просмотр печати**
+- Сверху кнопки «Увеличить» и «Уменьшить» (лупа с плюсом и с минусом) и «Показать целиком». Колёсико мыши увеличивает и уменьшает изображение вокруг курсора.
+- Лист можно перетаскивать мышью. Когда изображение больше окна, снизу и справа появляются полосы прокрутки.
+- Окно можно растягивать. Изображение рисуется в более высоком разрешении.
+
+**Пакетная печать — менеджер печати**
+- Пакетная печать открывается в отдельном окне. В нём список листов текущего чертежа в порядке вкладок.
+- Порядок меняется перетаскиванием строки или кнопками «Переместить в самый верх», «Переместить выше», «Переместить ниже», «Переместить в самый низ».
+- Правый щелчок по листу: «Дублировать» (лист напечатается ещё раз) и «Удалить».
+- В разделе «Добавить листы из» можно выбрать любой открытый чертёж и добавить его листы по одному или все сразу. По умолчанию листы других чертежей в список не попадают.
+- Внизу выбор: «Один файл PDF со всеми листами» или «Отдельный файл PDF для каждого листа».
+
+**Панель «Слои»**
+- Если слоёв много, у списка текущего слоя появляется полоса прокрутки.
+- В панель можно добавить выпадающие списки «Текущий текстовый стиль», «Текущий размерный стиль» и «Текущий тип линий» (в «Настроить панель инструментов», раздел «Слои»). В новой настройке они уже стоят в конце панели. У длинных списков тоже есть прокрутка.
+
+### English
+
+**Application menu (the CADCraft button)**
+- Taller rows, larger text, and a large icon to the left of each item.
+
+**Icons**
+- Save As: a large pencil beside the floppy disk.
+- Import and Export: large arrows.
+
+**TEXT and MLEADER**
+- While you pick the text's start point, height and angle, a frame by the cursor shows where the line will go.
+- Then the text editor opens right on the drawing, as for multiline text. Enter finishes the line and the editor opens for the next line below it. Enter on an empty line ends the command.
+- While you pick a multileader's points, the segment to the cursor is shown. After the last point the text editor opens.
+- The Properties palette offers leader type None for multileaders. The leader line and landing are hidden, not deleted: choosing Straight or Spline again brings them back. DXF files store it as an invisible leader.
+
+**Block Manager**
+- The Blocks button opens a Block Manager: the drawing's blocks in a list with search on the left, and on the right a preview of the selected block, its object and reference counts, base point and description.
+- Buttons: Insert (or double-click a block), Edit Block, Rename, Delete (only a block nothing uses), Save to File (WBLOCK), Create.
+
+**Plot Preview**
+- Zoom In and Zoom Out buttons (a magnifier with plus and minus) and Zoom to Fit at the top. The mouse wheel zooms about the cursor.
+- Drag the sheet to move it. Scroll bars appear at the bottom and on the right when the image is larger than the window.
+- The window can be resized, and the image is rendered at a higher resolution.
+
+**Batch Plot is now a print manager**
+- Batch Plot opens its own window, listing the current drawing's sheets in tab order.
+- Change the order by dragging a row or with Move to Top, Move Higher, Move Lower and Move to Bottom.
+- Right-click a sheet for Duplicate (it prints again) and Delete.
+- Under "Add sheets from" choose any open drawing and add its sheets one by one or all at once. Other drawings' sheets are not in the list unless you add them.
+- At the bottom choose "One PDF file with all sheets" or "A separate PDF file for each sheet".
+
+**Layers bar**
+- The current-layer list scrolls when there are many layers.
+- Current Text Style, Current Dimension Style and Current Linetype drop-downs can be added to the bar (Customize Tool Bar, Layers section). A fresh setup has them at the end of the bar. Long lists scroll too.
+
+---
+
 ## 20.10.2026 (0.9.0-b10)
 
 ### Русский

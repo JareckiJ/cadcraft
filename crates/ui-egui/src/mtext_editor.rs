@@ -131,7 +131,10 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let code = usize::from(mt.attach.clamp(1, 9) - 1);
     let (col, row) = ((code % 3) as f64, (code / 3) as f64);
     let ww = f64::from(width) / scale;
-    let corner = cadcraft_geom::Vec2::new(mt.insert.x - col * ww / 2.0, mt.insert.y + row * base_h * 2.0);
+    // One line of text: the editor's line sits on the text's own line (its top a little above the
+    // cap height), so what is typed shows where the text goes.
+    let rise = if line { 0.75 } else { 2.0 };
+    let corner = cadcraft_geom::Vec2::new(mt.insert.x - col * ww / 2.0, mt.insert.y + row * base_h * rise);
     let at = app.canvas.xf.map_or(rect.center(), |x| x.to_screen(corner));
     let max_x = (rect.right() - width - 8.0).max(rect.left());
     let pos = pos2(at.x.clamp(rect.left(), max_x), at.y.clamp(rect.top() + st.top, (rect.bottom() - 120.0).max(rect.top() + st.top)));
@@ -201,7 +204,9 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
                 let r = app.session.input(cadcraft_engine::Input::Text(contents));
                 report(app, r);
             }
-            if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") {
+            // MTEXT ends its text with Enter; MLEADER takes Enter for "no text" when nothing was typed.
+            let still_asking = app.session.current_prompt().is_some_and(|p| p.accept.text && !p.accept.point);
+            if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") || (st.fmt.is_empty() && still_asking) {
                 let _ = app.session.input(cadcraft_engine::Input::Enter);
             }
         }

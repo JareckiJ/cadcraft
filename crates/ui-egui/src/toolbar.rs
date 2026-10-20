@@ -143,9 +143,24 @@ impl Bar {
                 "fillet",
                 "erase",
             ],
-            Bar::Layers => {
-                &["ui.dialog.layers", LAYER_COMBO, "|", "laymcur", "laymch", "layerp", "|", "layiso", "layoff", "layfrz", "laylck", "layulk"]
-            }
+            Bar::Layers => &[
+                "ui.dialog.layers",
+                LAYER_COMBO,
+                "|",
+                "laymcur",
+                "laymch",
+                "layerp",
+                "|",
+                "layiso",
+                "layoff",
+                "layfrz",
+                "laylck",
+                "layulk",
+                "|",
+                TEXTSTYLE_COMBO,
+                DIMSTYLE_COMBO,
+                LINETYPE_COMBO,
+            ],
         };
         ids.iter().map(|s| s.to_string()).collect()
     }
@@ -185,8 +200,26 @@ pub fn state(ui: &crate::UiState, bar: Bar) -> BarState {
 
 /// The current-layer drop-down, an item only the bars hold (not a command).
 pub const LAYER_COMBO: &str = "layer.combo";
+/// The current text style, dimension style and linetype drop-downs.
+pub const TEXTSTYLE_COMBO: &str = "textstyle.combo";
+pub const DIMSTYLE_COMBO: &str = "dimstyle.combo";
+pub const LINETYPE_COMBO: &str = "linetype.combo";
 /// Width of the current-layer drop-down in a row.
 const COMBO_W: f32 = 220.0;
+/// Width of the style and linetype drop-downs in a row.
+const STYLE_COMBO_W: f32 = 160.0;
+/// Most height a drop-down's list takes before it scrolls.
+const COMBO_LIST_H: f32 = 320.0;
+
+/// Whether `command` is one of the bars' drop-downs (not a command).
+pub fn is_combo(command: &str) -> bool {
+    [LAYER_COMBO, TEXTSTYLE_COMBO, DIMSTYLE_COMBO, LINETYPE_COMBO].contains(&command)
+}
+
+/// A drop-down's width in a row.
+fn combo_width(command: &str) -> f32 {
+    if command == LAYER_COMBO { COMBO_W } else { STYLE_COMBO_W }
+}
 /// The category of the layer tools.
 const LAYERS_CATEGORY: &str = "Layers";
 /// The layer tools (the Layers palette's row) and the current layer.
@@ -201,6 +234,9 @@ const LAYER_TOOLS: &[(Icon, &str, &str)] = &[
     (Icon::LayerFreeze, "layfrz", "Freeze Layer"),
     (Icon::LayerLock, "laylck", "Lock Layer"),
     (Icon::Unlock, "layulk", "Unlock Layer"),
+    (Icon::Text, TEXTSTYLE_COMBO, "Current Text Style"),
+    (Icon::DimLinear, DIMSTYLE_COMBO, "Current Dimension Style"),
+    (Icon::Line, LINETYPE_COMBO, "Current Linetype"),
 ];
 
 /// The default bar: file, undo, output, exchange, navigation, palettes, inquiry and help groups.
@@ -374,7 +410,7 @@ pub fn add_item(items: &mut Vec<String>, command: &str, index: Option<usize>) ->
 pub fn tooltip(ui: &mut egui::Ui, tool: &Tool, mac: bool) {
     ui.set_max_width(280.0);
     ui.label(RichText::new(crate::i18n::t(tool.label)).strong());
-    if !tool.command.starts_with("ui.") && tool.command != LAYER_COMBO {
+    if !tool.command.starts_with("ui.") && !is_combo(tool.command) {
         let name = tool.command.split('.').next().unwrap_or(tool.command).to_ascii_uppercase();
         let mut line = format!("{} {name}", crate::tl!("Command:"));
         if let Some(alias) = cadcraft_engine::find_command(tool.command).and_then(|c| c.aliases.first()) {
@@ -413,6 +449,8 @@ enum Action {
     AppCommand(&'static str),
     SetLayer(String),
     LayerToggle(String, &'static str, bool),
+    /// A style or linetype drop-down's choice: the drop-down and the name.
+    SetCurrent(&'static str, String),
 }
 
 /// The bar's right-click menu; `item` is the button it was opened on.
@@ -511,6 +549,62 @@ fn layer_rows(app: &CadApp) -> Option<(String, Vec<crate::palettes::LayerRow>)> 
     Some((cur, d.layers.iter().map(|l| (l.name.clone(), l.on, l.frozen, l.locked, l.color)).collect()))
 }
 
+/// The current name and every name of a style or linetype drop-down.
+fn combo_names(app: &CadApp, combo: &str) -> Option<(String, Vec<String>)> {
+    let d = app.session.doc().ok()?;
+    Some(match combo {
+        TEXTSTYLE_COMBO => (d.header.str("TEXTSTYLE", "Standard").to_string(), d.text_styles.iter().map(|s| s.name.clone()).collect()),
+        DIMSTYLE_COMBO => (d.header.str("DIMSTYLE", "Standard").to_string(), d.dim_styles.iter().map(|s| s.name.clone()).collect()),
+        LINETYPE_COMBO => {
+            let mut names = vec!["ByLayer".to_string(), "ByBlock".to_string()];
+            for l in &d.linetypes {
+                if !names.iter().any(|n| n.eq_ignore_ascii_case(&l.name)) {
+                    names.push(l.name.clone());
+                }
+            }
+            if !names.iter().any(|n| n.eq_ignore_ascii_case("Continuous")) {
+                names.insert(2, "Continuous".into());
+            }
+            (d.header.str("CELTYPE", "ByLayer").to_string(), names)
+        }
+        _ => return None,
+    })
+}
+
+/// A drop-down's list of names: picking one makes it current. It scrolls when long.
+fn name_list(ui: &mut egui::Ui, salt: &str, current: &str, names: &[String]) -> Option<String> {
+    let mut picked = None;
+    // A scroll bar that is always there once the list is longer than the drop-down.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    egui::ScrollArea::vertical().id_salt(("cc_combo_list", salt)).max_height(COMBO_LIST_H).auto_shrink([false, true]).show(ui, |ui| {
+        for n in names {
+            let shown = if ["ByLayer", "ByBlock"].contains(&n.as_str()) { crate::i18n::t(n).to_string() } else { n.clone() };
+            if ui.selectable_label(n.eq_ignore_ascii_case(current), shown).clicked() {
+                picked = Some(n.clone());
+            }
+        }
+    });
+    picked
+}
+
+/// The current layer list in a drop-down, scrolling when there are many layers.
+fn layer_popup(ui: &mut egui::Ui, salt: &str, cur: &str, rows: &[crate::palettes::LayerRow], action: &mut Option<Action>) -> bool {
+    let mut set_current = None;
+    let mut toggle = None;
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    egui::ScrollArea::vertical().id_salt(("cc_layer_list", salt)).max_height(COMBO_LIST_H).auto_shrink([false, true]).show(ui, |ui| {
+        crate::palettes::layer_list(ui, rows, cur, &mut set_current, &mut toggle);
+    });
+    if let Some(name) = set_current {
+        *action = Some(Action::SetLayer(name));
+        return true;
+    }
+    if let Some((name, key, on)) = toggle {
+        *action = Some(Action::LayerToggle(name, key, on));
+    }
+    false
+}
+
 /// Lay out and run `bar` in `area`: a row, or a column when `vertical`.
 fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: Bar) {
     let t = Tokens::get();
@@ -600,8 +694,8 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
     let extent = |item: &String| {
         if item == SEPARATOR {
             SEP
-        } else if item == LAYER_COMBO && !vertical {
-            COMBO_W + GAP
+        } else if is_combo(item) && !vertical {
+            combo_width(item) + GAP
         } else {
             BUTTON + GAP
         }
@@ -641,12 +735,15 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
             continue;
         }
         let Some(tool) = find(item) else { continue };
-        let combo = tool.command == LAYER_COMBO;
-        let len = if combo && !vertical { COMBO_W } else { BUTTON };
+        let combo = is_combo(tool.command);
+        let names = if combo && tool.command != LAYER_COMBO { combo_names(app, tool.command) } else { None };
+        let len = if combo && !vertical { combo_width(tool.command) } else { BUTTON };
         let br = slot(pos, len, if combo && !vertical { 24.0 } else { BUTTON });
         let resp = ui.interact(br, id.with(("tb", tool.command)), Sense::click() | Sense::DRAG);
-        if combo {
+        if tool.command == LAYER_COMBO {
             paint_combo(ui, br, resp.hovered() || resp.dragged(), vertical, layers.as_ref());
+        } else if combo {
+            paint_name_combo(ui, br, resp.hovered() || resp.dragged(), vertical, tool.icon, names.as_ref().map(|(c, _)| c.as_str()));
         } else {
             if resp.hovered() || resp.dragged() {
                 ui.painter().rect_filled(br, 3.0, t.control_hover.gamma_multiply(0.6));
@@ -656,32 +753,46 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
         icons::describe_control(ui, &resp, &tool.accessible_label(mac), None, false);
         let resp = if dragging {
             resp
-        } else if combo {
+        } else if tool.command == LAYER_COMBO {
             let current = layers.as_ref().map(|(cur, _)| cur.clone()).unwrap_or_default();
             resp.on_hover_ui(|ui| {
                 ui.label(RichText::new(crate::i18n::t(tool.label)).strong());
                 ui.label(RichText::new(format!("{} {current}", crate::tl!("Current layer:"))).weak());
             })
+        } else if combo {
+            let current = names.as_ref().map(|(c, _)| c.clone()).unwrap_or_default();
+            resp.on_hover_ui(|ui| {
+                ui.label(RichText::new(crate::i18n::t(tool.label)).strong());
+                ui.label(RichText::new(current).weak());
+            })
         } else {
             resp.on_hover_ui(|ui| tooltip(ui, &tool, mac))
         };
         resp.context_menu(|ui| options_menu(ui, bar, shown_bars, Some(index), dock, &mut action));
-        if combo {
+        let align = if vertical { egui::RectAlign::RIGHT_START } else { egui::RectAlign::BOTTOM_START };
+        if tool.command == LAYER_COMBO {
             if let Some((cur, rows)) = &layers {
-                let align = if vertical { egui::RectAlign::RIGHT_START } else { egui::RectAlign::BOTTOM_START };
                 egui::Popup::from_toggle_button_response(&resp)
                     .align(align)
                     .width(COMBO_W.max(240.0))
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .show(|ui| {
-                        let mut set_current = None;
-                        let mut toggle = None;
-                        crate::palettes::layer_list(ui, rows, cur, &mut set_current, &mut toggle);
-                        if let Some(name) = set_current {
-                            action = Some(Action::SetLayer(name));
+                        if layer_popup(ui, "bar", cur, rows, &mut action) {
                             ui.close();
-                        } else if let Some((name, key, on)) = toggle {
-                            action = Some(Action::LayerToggle(name, key, on));
+                        }
+                    });
+            }
+        } else if combo {
+            if let Some((cur, list)) = &names {
+                let command = tool.command;
+                egui::Popup::from_toggle_button_response(&resp)
+                    .align(align)
+                    .width(STYLE_COMBO_W.max(200.0))
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                    .show(|ui| {
+                        if let Some(n) = name_list(ui, command, cur, list) {
+                            action = Some(Action::SetCurrent(command, n));
+                            ui.close();
                         }
                     });
             }
@@ -759,16 +870,21 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
                 let Some(tool) = find(item) else { continue };
                 if tool.command == LAYER_COMBO {
                     // The drop-down does not fit a menu row: its layers are listed in place.
-                    if let Some((cur, rows)) = &layers {
-                        let mut set_current = None;
-                        let mut toggle = None;
-                        crate::palettes::layer_list(ui, rows, cur, &mut set_current, &mut toggle);
-                        if let Some(name) = set_current {
-                            action = Some(Action::SetLayer(name));
+                    if let Some((cur, rows)) = &layers
+                        && layer_popup(ui, "more", cur, rows, &mut action)
+                    {
+                        ui.close();
+                    }
+                    continue;
+                }
+                if is_combo(tool.command) {
+                    if let Some((cur, list)) = combo_names(app, tool.command) {
+                        ui.label(RichText::new(crate::i18n::t(tool.label)).weak());
+                        if let Some(n) = name_list(ui, tool.command, &cur, &list) {
+                            action = Some(Action::SetCurrent(tool.command, n));
                             ui.close();
-                        } else if let Some((name, key, on)) = toggle {
-                            action = Some(Action::LayerToggle(name, key, on));
                         }
+                        ui.separator();
                     }
                     continue;
                 }
@@ -815,6 +931,16 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
         }
         Some(Action::LayerToggle(name, key, on)) => {
             let _ = app.run("layer.set", json!({ "name": name, key: on }));
+        }
+        Some(Action::SetCurrent(combo, name)) => {
+            let r = match combo {
+                TEXTSTYLE_COMBO => app.run("style.current", json!({ "name": name })),
+                DIMSTYLE_COMBO => app.run("dimstyle.current", json!({ "name": name })),
+                _ => app.run("linetype", json!({ "current": name })),
+            };
+            if let Err(e) = r {
+                app.session.echo(e);
+            }
         }
         None => {}
     }
@@ -873,17 +999,14 @@ fn app_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, vertical: bool) -> bo
     let align = if vertical { egui::RectAlign::RIGHT_START } else { egui::RectAlign::BOTTOM_START };
     let mut picked = None;
     egui::Popup::menu(&resp).align(align).show(|ui| {
-        ui.set_min_width(200.0);
+        ui.set_min_width(260.0);
+        ui.spacing_mut().item_spacing.y = 2.0;
         for (command, label) in APP_MENU {
             if *command == SEPARATOR {
                 ui.separator();
                 continue;
             }
-            let mut button = egui::Button::new(crate::i18n::t(label));
-            if let Some(sc) = cadcraft_engine::find_command(command).and_then(|c| c.shortcut) {
-                button = button.shortcut_text(crate::menus::shortcut_label(sc, ui.ctx().os().is_mac()));
-            }
-            let r = ui.add(button);
+            let r = app_menu_row(ui, command, label);
             crate::control::record_widget(ui, &r, label, "button", None);
             if r.clicked() {
                 picked = Some(*command);
@@ -896,6 +1019,45 @@ fn app_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, vertical: bool) -> bo
         return true;
     }
     false
+}
+
+/// The icon beside an application-menu command.
+pub fn app_menu_icon(command: &str) -> Icon {
+    match command {
+        "new" => Icon::New,
+        "open" => Icon::Open,
+        "qsave" => Icon::Save,
+        "saveas" => Icon::SaveAs,
+        "import" => Icon::Import,
+        "export" => Icon::Export,
+        "plot" => Icon::Plot,
+        "publish" => Icon::Publish,
+        "close" => Icon::Close,
+        _ => Icon::Gear,
+    }
+}
+
+/// One row of the application menu: a large icon, the label in a larger font and the shortcut on
+/// the right, 36 points tall.
+fn app_menu_row(ui: &mut egui::Ui, command: &str, label: &str) -> egui::Response {
+    let t = Tokens::get();
+    let width = ui.available_width().max(260.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
+    let text = crate::i18n::t(label);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text.to_string()));
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 3.0, t.control_hover);
+    }
+    let icon = Rect::from_center_size(pos2(rect.left() + 22.0, rect.center().y), vec2(28.0, 28.0));
+    icons::paint(ui.painter(), icon, app_menu_icon(command), false);
+    let font = egui::FontId::proportional(crate::theme::body().size + 3.0);
+    let text_color = if resp.hovered() { ui.visuals().widgets.hovered.fg_stroke.color } else { t.text };
+    ui.painter().text(pos2(rect.left() + 46.0, rect.center().y), egui::Align2::LEFT_CENTER, text, font, text_color);
+    if let Some(sc) = cadcraft_engine::find_command(command).and_then(|c| c.shortcut) {
+        let sc = crate::menus::shortcut_label(sc, ui.ctx().os().is_mac());
+        ui.painter().text(pos2(rect.right() - 8.0, rect.center().y), egui::Align2::RIGHT_CENTER, sc, crate::theme::body(), t.text_dim);
+    }
+    resp
 }
 
 /// Run a bar's tool: layer tools act at once (as in the Layers palette), the others start like a
@@ -935,6 +1097,27 @@ fn paint_combo(ui: &egui::Ui, rect: Rect, hovered: bool, vertical: bool, layers:
         crate::palettes::swatch(p, Rect::from_min_size(pos2(x + 2.0, rect.center().y - 5.0), vec2(10.0, 10.0)), *color);
         let text_rect = Rect::from_min_max(pos2(x + 18.0, rect.top()), pos2(rect.right() - 22.0, rect.bottom()));
         p.with_clip_rect(text_rect).text(pos2(text_rect.left(), rect.center().y), egui::Align2::LEFT_CENTER, name, crate::theme::body(), t.text);
+    }
+    icons::paint(p, Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(12.0, 12.0)), Icon::ChevronDown, false);
+}
+
+/// A style or linetype drop-down: its icon and the current name in a row, the icon in a column.
+fn paint_name_combo(ui: &egui::Ui, rect: Rect, hovered: bool, vertical: bool, icon: Icon, current: Option<&str>) {
+    let t = Tokens::get();
+    let p = ui.painter();
+    if vertical {
+        if hovered {
+            p.rect_filled(rect, 3.0, t.control_hover.gamma_multiply(0.6));
+        }
+        icons::paint(p, rect.shrink(4.0), icon, false);
+        return;
+    }
+    p.rect_filled(rect, 3.0, if hovered { t.control_hover } else { t.control });
+    icons::paint(p, Rect::from_min_size(pos2(rect.left() + 4.0, rect.center().y - 8.0), vec2(16.0, 16.0)), icon, false);
+    if let Some(name) = current {
+        let shown = if ["ByLayer", "ByBlock"].contains(&name) { crate::i18n::t(name).to_string() } else { name.to_string() };
+        let text_rect = Rect::from_min_max(pos2(rect.left() + 24.0, rect.top()), pos2(rect.right() - 22.0, rect.bottom()));
+        p.with_clip_rect(text_rect).text(pos2(text_rect.left(), rect.center().y), egui::Align2::LEFT_CENTER, shown, crate::theme::body(), t.text);
     }
     icons::paint(p, Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(12.0, 12.0)), Icon::ChevronDown, false);
 }

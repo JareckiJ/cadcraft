@@ -1654,3 +1654,44 @@
 	No hatch patterns (.pat files) in this folder	У цій теці немає зразків штрихування (файлів .pat)
 	Black	Чорна
 	Light Blue	Світло-блакитна
+	Current Text Style	Поточний текстовий стиль
+	Current Dimension Style	Поточний розмірний стиль
+	Current Linetype	Поточний тип ліній
+	Block Manager	Диспетчер блоків
+	Search blocks	Пошук блоків
+	blocks	блоків
+	Create...	Створити...
+	Make a block from objects (BLOCK)	Створити блок з об'єктів (БЛОК)
+	Double-click to insert	Подвійне клацання — вставити
+	No blocks match the search.	Немає блоків, що відповідають пошуку.
+	The block is empty	Блок порожній
+	Objects	Об'єкти
+	References	Входження
+	Base point	Базова точка
+	External reference	Зовнішнє посилання
+	Edit Block	Редагувати блок
+	Open in the Block Editor	Відкрити в редакторі блоків
+	Delete a block that no object uses	Видалити блок, який не використовується
+	Save to File...	Зберегти у файл...
+	Write the block as a drawing (WBLOCK)	Записати блок як окреме креслення (ПБЛОК)
+	The block is in use and can't be deleted	Блок використовується, видалити його не можна
+	The drawing is closed	Креслення закрите
+	closed	закрите
+	Batch Plot	Пакетний друк
+	Sheets to plot, in order	Аркуші для друку, по порядку
+	Duplicate	Дублювати
+	No sheets. Add sheets below.	Аркушів немає. Додайте аркуші нижче.
+	Move to Top	Перемістити на самий верх
+	Move to Bottom	Перемістити в самий низ
+	Clear List	Очистити список
+	Add sheets from	Додати аркуші з
+	Add All	Додати всі
+	Add this sheet to the end of the list	Додати цей аркуш у кінець списку
+	One PDF file with all sheets	Один файл PDF з усіма аркушами
+	A separate PDF file for each sheet	Окремий файл PDF для кожного аркуша
+	Plot...	Друк...
+	There is no file dialog here	Тут немає вікна вибору файлу
+	sheets	аркушів
+	Zoom to Fit	Показати повністю
+	Move Higher	Перемістити вище
+	Move Lower	Перемістити нижче

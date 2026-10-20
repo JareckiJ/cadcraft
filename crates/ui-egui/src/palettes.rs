@@ -1160,11 +1160,26 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                     }
                 });
                 group(ui, "Leaders");
-                let (straight, spline) = (crate::tl!("Straight").to_string(), crate::tl!("Spline").to_string());
+                let (straight, spline, none) = (crate::tl!("Straight").to_string(), crate::tl!("Spline").to_string(), crate::tl!("None").to_string());
                 prop_row(ui, "Leader type", |ui| {
-                    let cur = if ml.spline { &spline } else { &straight };
-                    if let Some(n) = pick_menu(ui, cur, [straight.clone(), spline.clone()]) {
-                        set = Some(json!({ "handles": ids, "leaderType": if n == spline { "spline" } else { "straight" } }));
+                    let cur = if ml.leaderless() {
+                        &none
+                    } else if ml.spline {
+                        &spline
+                    } else {
+                        &straight
+                    };
+                    // None only hides the leader lines, so a multileader without any can't get them back.
+                    let choices = if ml.leaders.is_empty() { vec![none.clone()] } else { vec![straight.clone(), spline.clone(), none.clone()] };
+                    if let Some(n) = pick_menu(ui, cur, choices) {
+                        let v = if n == spline {
+                            "spline"
+                        } else if n == none {
+                            "none"
+                        } else {
+                            "straight"
+                        };
+                        set = Some(json!({ "handles": ids, "leaderType": v }));
                     }
                 });
                 // The arrowhead: built-in ones and the drawing's arrowhead blocks, as for dimensions.

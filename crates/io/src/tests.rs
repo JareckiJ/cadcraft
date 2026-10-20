@@ -1554,6 +1554,7 @@ fn mleader_is_written_as_multileader() {
         arrow_size: 2.5,
         arrow: String::new(),
         spline: false,
+        no_leader: false,
         block: None,
     };
     d.add(&Space::Model, Default::default(), EntityKind::MLeader(m.clone())).unwrap();

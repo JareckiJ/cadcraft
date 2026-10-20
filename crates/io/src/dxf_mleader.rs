@@ -332,6 +332,7 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             row_spacing: 0.0,
         }
     });
+    let no_leader = p.leader_type == Some(0) && !leaders.is_empty();
     MLeader {
         leaders,
         landing,
@@ -341,6 +342,7 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
         arrow_size: pos(p.arrow_ctx).or(pos(p.arrow)).unwrap_or(def.arrow_size),
         arrow: String::new(),
         spline: p.leader_type == Some(2),
+        no_leader,
         block,
     }
 }
@@ -589,7 +591,7 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
     i(
         &mut t,
         170,
-        if m.leaders.is_empty() {
+        if m.leaderless() {
             0
         } else if m.spline {
             2

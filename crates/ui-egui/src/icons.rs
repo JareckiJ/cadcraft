@@ -144,6 +144,12 @@ pub enum Icon {
     PickAdd,
     SelectObjects,
     QuickSelect,
+    ZoomIn,
+    ZoomOut,
+    MoveTop,
+    MoveUp,
+    MoveDown,
+    MoveBottom,
 }
 
 struct Pen<'a> {
@@ -247,8 +253,15 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.rect(8.0, 4.0, 8.0, 5.0, b);
             pen.rect(7.0, 13.0, 10.0, 7.0, b);
             if icon == SaveAs {
-                pen.la(15.0, 22.0, 22.0, 15.0);
-                pen.fill_c(15.0, 22.0, 1.2, a);
+                // A large pencil across the lower-right corner: body, ferrule line and a filled tip.
+                pen.p.add(egui::Shape::convex_polygon(
+                    [(12.6, 19.4), (20.6, 11.4), (23.6, 14.4), (15.6, 22.4)].iter().map(|(x, y)| pen.at(*x, *y)).collect(),
+                    t.panel,
+                    Stroke::NONE,
+                ));
+                pen.poly(&[(12.6, 19.4), (20.6, 11.4), (23.6, 14.4), (15.6, 22.4)], true, a);
+                pen.la(19.0, 13.0, 22.0, 16.0);
+                pen.tri([(12.6, 19.4), (15.6, 22.4), (10.8, 24.0)], a);
             }
         }
         Undo => {
@@ -280,12 +293,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
         }
         Import | Export => {
             pen.poly(&[(5.0, 3.0), (14.0, 3.0), (18.0, 7.0), (18.0, 21.0), (5.0, 21.0)], true, b);
+            // A large, thick arrow: into the page for Import, out of it for Export.
+            let thick = Stroke::new(pen.w * 2.0, a);
             if icon == Import {
-                pen.la(1.0, 13.0, 11.0, 13.0);
-                pen.arrow_tip(12.0, 13.0, 1.0, 0.0, a);
+                pen.p.line_segment([pen.at(0.5, 13.0), pen.at(8.0, 13.0)], thick);
+                pen.big_arrow(14.5, 13.0, 1.0, 0.0, 7.0, 5.0, a);
             } else {
-                pen.la(11.0, 13.0, 21.0, 13.0);
-                pen.arrow_tip(23.0, 13.0, 1.0, 0.0, a);
+                pen.p.line_segment([pen.at(9.0, 13.0), pen.at(17.0, 13.0)], thick);
+                pen.big_arrow(24.0, 13.0, 1.0, 0.0, 7.0, 5.0, a);
             }
         }
         Attach => {
@@ -832,6 +847,26 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             for (x, y) in [(3.0, 3.0), (13.0, 3.0), (3.0, 13.0), (13.0, 13.0)] {
                 pen.fill_rect(x, y, 8.0, 8.0, if x == 3.0 && y == 3.0 { a } else { b });
             }
+        }
+        ZoomIn | ZoomOut => {
+            pen.c(10.0, 10.0, 7.0, b);
+            p.line_segment([pen.at(15.0, 15.0), pen.at(21.5, 21.5)], Stroke::new(pen.w * 2.2, b));
+            pen.la(6.5, 10.0, 13.5, 10.0);
+            if icon == ZoomIn {
+                pen.la(10.0, 6.5, 10.0, 13.5);
+            }
+        }
+        MoveTop | MoveBottom => {
+            // A bar at the end the arrow points to.
+            let (bar, tip, tail, dir) = if icon == MoveTop { (4.0, 7.0, 21.0, -1.0) } else { (20.0, 17.0, 3.0, 1.0) };
+            p.line_segment([pen.at(5.0, bar), pen.at(19.0, bar)], Stroke::new(pen.w * 1.6, a));
+            pen.l(12.0, tail, 12.0, tip - 5.0 * dir);
+            pen.big_arrow(12.0, tip, 0.0, dir, 6.0, 4.5, b);
+        }
+        MoveUp | MoveDown => {
+            let dir = if icon == MoveUp { -1.0 } else { 1.0 };
+            pen.l(12.0, 12.0 - 8.0 * dir, 12.0, 12.0 + 2.0 * dir);
+            pen.big_arrow(12.0, 12.0 + 8.0 * dir, 0.0, dir, 7.0, 5.0, b);
         }
         Close => {
             pen.l(6.0, 6.0, 18.0, 18.0);

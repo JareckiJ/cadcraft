@@ -1349,3 +1349,44 @@
 	Preview	Предпросмотр
 	Black	Чёрная
 	Light Blue	Светло-голубая
+	Current Text Style	Текущий текстовый стиль
+	Current Dimension Style	Текущий размерный стиль
+	Current Linetype	Текущий тип линий
+	Block Manager	Диспетчер блоков
+	Search blocks	Поиск блоков
+	blocks	блоков
+	Create...	Создать...
+	Make a block from objects (BLOCK)	Создать блок из объектов (БЛОК)
+	Double-click to insert	Двойной щелчок — вставить
+	No blocks match the search.	Нет блоков, подходящих под поиск.
+	The block is empty	Блок пуст
+	Objects	Объекты
+	References	Вхождения
+	Base point	Базовая точка
+	External reference	Внешняя ссылка
+	Edit Block	Редактировать блок
+	Open in the Block Editor	Открыть в редакторе блоков
+	Delete a block that no object uses	Удалить блок, который не используется
+	Save to File...	Сохранить в файл...
+	Write the block as a drawing (WBLOCK)	Записать блок как отдельный чертёж (ПБЛОК)
+	The block is in use and can't be deleted	Блок используется, удалить его нельзя
+	The drawing is closed	Чертёж закрыт
+	closed	закрыт
+	Batch Plot	Пакетная печать
+	Sheets to plot, in order	Листы для печати, по порядку
+	Duplicate	Дублировать
+	No sheets. Add sheets below.	Листов нет. Добавьте листы ниже.
+	Move to Top	Переместить в самый верх
+	Move to Bottom	Переместить в самый низ
+	Clear List	Очистить список
+	Add sheets from	Добавить листы из
+	Add All	Добавить все
+	Add this sheet to the end of the list	Добавить этот лист в конец списка
+	One PDF file with all sheets	Один файл PDF со всеми листами
+	A separate PDF file for each sheet	Отдельный файл PDF для каждого листа
+	Plot...	Печать...
+	There is no file dialog here	Здесь нет окна выбора файла
+	sheets	листов
+	Zoom to Fit	Показать целиком
+	Move Higher	Переместить выше
+	Move Lower	Переместить ниже

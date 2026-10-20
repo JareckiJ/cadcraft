@@ -37,6 +37,7 @@ fn text_mleader() -> MLeader {
         arrow_size: 0.3,
         arrow: String::new(),
         spline: false,
+        no_leader: false,
         block: None,
     }
 }
@@ -132,6 +133,7 @@ fn spline_leader_with_block_content_and_attributes() {
         arrow_size: 0.18,
         arrow: String::new(),
         spline: true,
+        no_leader: false,
         block: Some(ins),
     };
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(m.clone())).unwrap();

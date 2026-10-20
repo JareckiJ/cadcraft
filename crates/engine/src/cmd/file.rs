@@ -30,6 +30,19 @@ pub struct IoHooks {
 
 static IO: OnceLock<IoHooks> = OnceLock::new();
 
+/// Plot sheets of several drawings into one PDF, one page each in order, with JSON options for
+/// the whole file (installed by the app; PUBLISH with `combine` across open drawings).
+pub type PlotBookHook = fn(&[(&Drawing, cadcraft_doc::Space)], &Value) -> std::result::Result<Vec<u8>, String>;
+
+static PLOT_BOOK: OnceLock<PlotBookHook> = OnceLock::new();
+
+pub fn set_plot_book(h: PlotBookHook) {
+    let _ = PLOT_BOOK.set(h);
+}
+pub fn plot_book() -> Option<PlotBookHook> {
+    PLOT_BOOK.get().copied()
+}
+
 pub fn set_io(h: IoHooks) {
     let _ = IO.set(h);
 }

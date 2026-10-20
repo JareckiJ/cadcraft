@@ -16,7 +16,7 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline, dogleg (landing distance; 0 = no landing), textHeight}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -405,8 +405,9 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                         m.arrow_size = x;
                     }
                     match str_param(p, "leaderType").map(str::to_ascii_lowercase).as_deref() {
-                        Some("spline") => m.spline = true,
-                        Some("straight") => m.spline = false,
+                        Some("spline") => (m.spline, m.no_leader) = (true, false),
+                        Some("straight") => (m.spline, m.no_leader) = (false, false),
+                        Some("none") => m.no_leader = true,
                         _ => {}
                     }
                     if let Some(x) = num("dogleg").filter(|x| *x >= 0.0) {

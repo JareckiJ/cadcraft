@@ -114,6 +114,7 @@ fn scale_scales_multileader_text_width_and_columns() {
         arrow_size: 1.0,
         arrow: String::new(),
         spline: false,
+        no_leader: false,
         block: None,
     };
     let h = s.add_entity(EntityKind::MLeader(ml)).unwrap();

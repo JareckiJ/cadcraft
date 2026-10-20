@@ -10,7 +10,9 @@
 
 pub mod animation;
 pub mod autosave;
+pub mod batchplot;
 pub mod bedit;
+pub mod blockmgr;
 pub mod canvas;
 pub mod chrome;
 pub mod clipboard;

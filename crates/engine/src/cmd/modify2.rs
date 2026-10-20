@@ -2173,7 +2173,7 @@ fn text_of(k: &EntityKind) -> Option<String> {
 }
 
 /// A box for the in-place editor showing one line of text where `t` sits.
-fn line_box(t: &cadcraft_doc::Text) -> cadcraft_doc::MText {
+pub(crate) fn line_box(t: &cadcraft_doc::Text) -> cadcraft_doc::MText {
     use cadcraft_doc::{HAlign, VAlign};
     let col = match t.halign {
         HAlign::Left => 0u8,

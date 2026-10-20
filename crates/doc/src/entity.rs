@@ -718,12 +718,21 @@ pub struct MLeader {
     /// `leaders` is a multileader without a leader line (leader type None).
     #[serde(default)]
     pub spline: bool,
+    /// Leader type None set on a multileader that has leader lines: they are kept (to come back
+    /// with Straight or Spline) but not drawn, nor the landing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_leader: bool,
     /// Block content in place of the text: a block reference placed at the landing.
     #[serde(default)]
     pub block: Option<Insert>,
 }
 
 impl MLeader {
+    /// It draws no leader line (leader type None).
+    pub fn leaderless(&self) -> bool {
+        self.no_leader || self.leaders.is_empty()
+    }
+
     /// The arrowhead it draws: its own, else its style's (in `d`).
     pub fn arrow_in<'a>(&'a self, d: &'a crate::Drawing) -> &'a str {
         if self.arrow.trim().is_empty() {
@@ -735,6 +744,9 @@ impl MLeader {
 
     /// Each leader line as drawn: through its points to the landing, smoothed for spline leaders.
     pub fn leader_paths(&self) -> Vec<Vec<Vec2>> {
+        if self.no_leader {
+            return Vec::new();
+        }
         self.leaders
             .iter()
             .map(|l| {
