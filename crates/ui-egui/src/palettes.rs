@@ -1064,9 +1064,9 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 });
                 prop_row(ui, "Justify", |ui| {
                     let current = crate::attdefdlg::justification_name(a.text.halign, a.text.valign);
-                    ui.menu_button(crate::i18n::t(current), |ui| {
+                    ui.menu_button(crate::i18n::justify(current), |ui| {
                         for (name, code) in crate::attdefdlg::JUSTIFICATIONS {
-                            if ui.button(crate::i18n::t(name)).clicked() {
+                            if ui.button(crate::i18n::justify(name)).clicked() {
                                 set = Some(json!({ "handles": ids, "justify": code }));
                                 ui.close();
                             }
