@@ -1008,3 +1008,344 @@
 	Sheet Books to PDF...	Книги листов в PDF...
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
+	Add Separator	Добавить разделитель
+	Add to Tool Bar	Добавить на панель инструментов
+	Alias:	Псевдоним:
+	Command:	Команда:
+	Commands	Команды
+	Customize Tool Bar	Настройка панели инструментов
+	Customize Tool Bar...	Настроить панель инструментов...
+	Dock Tool Bar	Закрепить панель инструментов
+	Dock at Left	Закрепить слева
+	Dock at Top	Закрепить сверху
+	Drag buttons along the Tool Bar to reorder them, or its handle to dock it.	Перетаскивайте кнопки вдоль панели, чтобы изменить их порядок, а маркер панели — чтобы закрепить её.
+	Drag to dock the Tool Bar at the top or on the left	Перетащите, чтобы закрепить панель инструментов сверху или слева
+	Hide Tool Bar	Скрыть панель инструментов
+	Left (column)	Слева (столбец)
+	More toolbar commands	Другие команды панели инструментов
+	Move Down	Вниз
+	Move Tool Bar Button	Переместить кнопку панели инструментов
+	Move Up	Вверх
+	Position:	Положение:
+	Remove from Tool Bar	Убрать с панели инструментов
+	Reset Tool Bar	Сбросить панель инструментов
+	Reset to Default	По умолчанию
+	Search:	Поиск:
+	Separator	Разделитель
+	Shortcut:	Клавиши:
+	Show Tool Bar	Показывать панель инструментов
+	Tool Bar Position	Положение панели инструментов
+	Tool Bar buttons	Кнопки панели инструментов
+	Top	Сверху
+	Top (row)	Сверху (строка)
+	Standard Tool Bar	Стандартная панель
+	Tool Sets Tool Bar	Панель «Наборы инструментов»
+	Layers Tool Bar	Панель «Слои»
+	More Tool Sets bar commands	Другие команды панели «Наборы инструментов»
+	More Layers bar commands	Другие команды панели «Слои»
+	Current layer:	Текущий слой:
+	Tool Bar:	Панель:
+	Tool Bars	Панели инструментов
+	Show on Tool Bar	Показывать на панели
+	Current Layer	Текущий слой
+	Options	Параметры
+	Options...	Параметры...
+	Display	Экран
+	Open and Save	Открытие и сохранение
+	Selection	Выбор
+	User Preferences	Пользовательские настройки
+	Profiles	Профили
+	Changes apply at once and are kept for next time.	Изменения применяются сразу и сохраняются до следующего запуска.
+	Fonts	Шрифты
+	Font folders	Папки шрифтов
+	Put TrueType or OpenType fonts (.ttf, .otf, .ttc) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins.	Положите шрифты TrueType или OpenType (.ttf, .otf, .ttc) в папку и добавьте её сюда. Эти папки просматриваются раньше системных шрифтов; папка выше в списке имеет приоритет.
+	No font folders yet	Папок шрифтов пока нет
+	This folder does not exist	Такой папки нет
+	Add Folder...	Добавить папку...
+	Folder path	Путь к папке
+	Look for Fonts Again	Найти шрифты заново
+	After adding or removing font files in a folder	После добавления или удаления файлов шрифтов в папке
+	Fonts found in these folders:	Шрифтов найдено в этих папках:
+	Every font this drawing uses was found.	Все шрифты этого чертежа найдены.
+	Fonts this drawing uses that were not found:	Шрифты чертежа, которые не найдены:
+	style	стиль
+	Fonts not found:	Не найдены шрифты:
+	Text in them is drawn with	Текст в них рисуется шрифтом
+	Add a font folder in Tools ▸ Options ▸ Fonts.	Добавьте папку шрифтов: Инструменты ▸ Параметры ▸ Шрифты.
+	Cell	Ячейка
+	Tab: next cell · Shift+Tab: previous · Alt+↑↓: cell above, below	Tab — следующая ячейка · Shift+Tab — предыдущая · Alt+↑↓ — ячейка выше, ниже
+	Tab: next cell	Tab — следующая ячейка
+	Previous cell (Shift+Tab)	Предыдущая ячейка (Shift+Tab)
+	Next cell (Tab)	Следующая ячейка (Tab)
+	Enter to finish	Enter — завершить
+	the measured value	измеренное значение
+	Insert <>	Вставить <>
+	Insert the measured value at the cursor	Вставить измеренное значение в позицию курсора
+	Measured Value Only	Только измеренное
+	Replace the text with the measured value	Заменить текст измеренным значением
+	Missing Fonts	Отсутствующие шрифты
+	List Fonts	Список шрифтов
+	Edit Text	Редактировать текст
+	Edit Table Cells	Редактировать ячейки таблицы
+	Dimension Text	Текст размера
+	Align left	По левому краю
+	Align right	По правому краю
+	Justify	По ширине
+	Additional symbols	Дополнительные символы
+	Close (same as Cancel)	Закрыть (то же, что «Отмена»)
+	Center line	Осевая линия
+	Almost equal	Приблизительно равно
+	Not equal	Не равно
+	Less than or equal	Меньше или равно
+	Greater than or equal	Больше или равно
+	Multiplication	Умножение
+	Division	Деление
+	Square root	Квадратный корень
+	Infinity	Бесконечность
+	Delta	Дельта
+	Ohm	Ом
+	Micro	Микро
+	Pi	Пи
+	Alpha	Альфа
+	Beta	Бета
+	Gamma	Гамма
+	Phi	Фи
+	Squared	В квадрате
+	Cubed	В кубе
+	One half	Одна вторая
+	One quarter	Одна четвёртая
+	Three quarters	Три четверти
+	Per mille	Промилле
+	Bullet	Маркер
+	Number sign	Знак номера
+	Insert tab	Вставить табуляцию
+	Text color	Цвет текста
+	Application menu	Меню приложения
+	Batch Print...	Пакетная печать...
+	A style with this name already exists.	Стиль с таким именем уже есть.
+	Above	Над линией
+	Above Dim Line	Над размерной линией
+	Above dimension text	Над текстом размера
+	Aligned with dimension line	Вдоль размерной линии
+	Alignment	Ориентация
+	All styles	Все стили
+	Alt enabled	Альт. единицы
+	Alt format	Альт. формат
+	Alt multiplier	Альт. множитель
+	Alt precision	Альт. точность
+	Alt prefix	Альт. префикс
+	Alt round	Альт. округление
+	Alt suffix	Альт. суффикс
+	Alternate Units	Альтернативные единицы
+	Alternate units	Альтернативные единицы
+	Always keep text between ext lines	Всегда помещать текст между выносными
+	Angle format	Формат углов
+	Angle precision	Точность углов
+	Angular dimensions	Угловые размеры
+	Annotative	Аннотативный
+	Arc length symbol	Символ длины дуги
+	Architectural	Архитектурные
+	Architectural Stacked	Архитектурные (дробь)
+	Architectural tick	Архитектурная засечка
+	Arrow 1	Стрелка 1
+	Arrow 2	Стрелка 2
+	Arrow size	Размер стрелки
+	Arrowheads	Стрелки
+	Arrows	Стрелки
+	At Ext Line 1	У 1-й выносной
+	At Ext Line 2	У 2-й выносной
+	Baseline spacing	Шаг в базовых размерах
+	Basic	Номинальный
+	Below	Под линией
+	Beside the dimension line	Рядом с размерной линией
+	Both text and arrows	Текст и стрелки
+	Bottom	Снизу
+	Box filled	Квадрат залитый
+	Center Vertically	По центру по вертикали
+	Center marks	Маркеры центра
+	Centered	По центру
+	Closed blank	Замкнутая пустая
+	Closed filled	Замкнутая залитая
+	Compare Dimension Styles	Сравнение размерных стилей
+	Compare...	Сравнить...
+	Compare:	Сравнить:
+	Copy of	Копия
+	Create New Dimension Style	Новый размерный стиль
+	Current dimension style:	Текущий размерный стиль:
+	Datum triangle	Треугольник базы
+	Datum triangle filled	Треугольник базы залитый
+	Decimal	Десятичные
+	Decimal Degrees	Десятичные градусы
+	Decimal separator	Десятичный разделитель
+	Degrees Minutes Seconds	Градусы/минуты/секунды
+	Deviation	Отклонения
+	Diagonal	Диагональная
+	Differences found:	Найдено отличий:
+	Dim line 1	Разм. линия 1 скрыта
+	Dim line 2	Разм. линия 2 скрыта
+	Dim line color	Цвет разм. линии
+	Dim line inside	Разм. линия внутри
+	Dim line lineweight	Вес разм. линии
+	Dim prefix	Префикс
+	Dim roundoff	Округление
+	Dim scale linear	Масштаб измерений
+	Dim scale overall	Глобальный масштаб
+	Dim suffix	Суффикс
+	Dim units	Единицы
+	Dimension Style Manager	Диспетчер размерных стилей
+	Dimension lines	Размерные линии
+	Display alternate units	Показывать альтернативные единицы
+	Dot	Точка
+	Dot blank	Точка пустая
+	Dot small	Точка малая
+	Dot small blank	Точка малая пустая
+	Draw dim line between ext lines	Размерная линия между выносными
+	Draw frame around text	Рамка вокруг текста
+	Either text or arrows (best fit)	Текст или стрелки (оптимально)
+	Engineering	Инженерные
+	Ext line 1	Выносная 1 скрыта
+	Ext line 2	Выносная 2 скрыта
+	Ext line color	Цвет выносных
+	Ext line ext	Удлинение выносных
+	Ext line fixed	Фикс. длина выносных
+	Ext line fixed length	Длина выносных
+	Ext line lineweight	Вес выносных
+	Ext line offset	Отступ выносных
+	Extend beyond dim lines	Удлинение за размерные
+	Extend beyond ticks	Удлинение за засечки
+	Extension lines	Выносные линии
+	Fine tuning	Подгонка элементов
+	Fit	Размещение
+	Fit options	Опции размещения
+	Fixed length extension lines	Выносные линии фикс. длины
+	Fraction format	Формат дробей
+	Fraction height scale	Масштаб высоты дробей
+	Fractional	Дробные
+	Fractional Stacked	Дробные (дробь)
+	Gradians	Грады
+	ISO standard	Согласно ISO
+	Integral	Интеграл
+	JIS	JIS
+	Jog angle	Угол излома
+	Limits	Предельные размеры
+	Linear dimensions	Линейные размеры
+	Lines	Линии
+	Lines & Arrows	Линии и стрелки
+	Linetype ext line 1	Тип выносной 1
+	Linetype ext line 2	Тип выносной 2
+	List:	Показать:
+	Lower value	Нижнее значение
+	Mark	Маркер
+	Measurement scale factor	Масштаб измерений
+	Method	Способ
+	Middle	Посередине
+	Modify Dimension Style:	Изменение размерного стиля:
+	Modify...	Изменить...
+	Move Text Only	Переместить только текст
+	Move outside the extension lines	Выносить за выносные линии
+	Move with Dim Line	Переместить с размерной линией
+	Move with Leader	Переместить с выноской
+	Multiplier for alt units	Множитель альт. единиц
+	New Dimension Style:	Новый размерный стиль:
+	New Style Name:	Имя нового стиля:
+	New...	Новый...
+	Not Stacked	Не в столбик
+	Oblique	Наклонная
+	Offset from dim line	Отступ от размерной линии
+	Offset from origin	Отступ от объекта
+	Open	Разомкнутая
+	Open 30	Разомкнутая 30
+	Origin indicator	Начало отсчёта
+	Origin indicator 2	Начало отсчёта 2
+	Outside	Снаружи
+	Over Ext Line 1	Над 1-й выносной
+	Over Ext Line 2	Над 2-й выносной
+	Over dimension line, with leader	Над размерной линией, с выноской
+	Over dimension line, without leader	Над размерной линией, без выноски
+	Override Current Style:	Переопределение текущего стиля:
+	Override...	Переопределить...
+	Overrides apply to new dimensions in the current style.	Переопределения применяются к новым размерам текущего стиля.
+	Overrides apply to the current style	Переопределения задаются для текущего стиля
+	Preceding dimension text	Перед текстом размера
+	Precision	Точность
+	Prefix	Префикс
+	Preview of:	Образец:
+	Primary Units	Основные единицы
+	Radians	Радианы
+	Radius jog dimension	Радиус с изломом
+	Rename	Переименовать
+	Reset Text Position	Восстановить положение текста
+	Right angle	Прямой угол
+	Round distances to	Округлять до
+	Round off	Округление
+	Scale for dimension features	Масштаб размерных элементов
+	Scaling for height	Масштаб высоты
+	Scientific	Научные
+	Second	Вторая
+	Size	Размер
+	Start With:	На основе:
+	Styles in use	Используемые стили
+	Styles:	Стили:
+	Suffix	Суффикс
+	Suppress arrows if they don't fit inside	Подавлять стрелки, если не помещаются
+	Suppress dim line 1	Скрыть размерную линию 1
+	Suppress dim line 2	Скрыть размерную линию 2
+	Suppress ext line 1	Скрыть выносную 1
+	Suppress ext line 2	Скрыть выносную 2
+	Suppress leading zeros	Подавлять ведущие нули
+	Suppress trailing zeros	Подавлять хвостовые нули
+	Symbols and Arrows	Символы и стрелки
+	Symmetrical	Симметрично
+	Text alignment	Ориентация текста
+	Text appearance	Свойства текста
+	Text frame	Рамка текста
+	Text inside	Текст внутри
+	Text movement	Перемещение текста
+	Text offset	Отступ текста
+	Text placement	Выравнивание текста
+	Text pos hor	Текст по горизонтали
+	Text pos vert	Текст по вертикали
+	The two styles are the same.	Стили совпадают.
+	Tick size	Размер засечки
+	Tolerance display	Отображение допуска
+	Tolerance format	Формат допусков
+	Tolerance limit lower	Нижний допуск
+	Tolerance limit upper	Верхний допуск
+	Tolerance pos vert	Положение допуска
+	Tolerance precision	Точность допуска
+	Tolerance text height	Высота текста допуска
+	Tolerances	Допуски
+	Unit format	Формат единиц
+	Units format	Формат единиц
+	Upper value	Верхнее значение
+	Use overall scale of	Глобальный масштаб
+	Variable	Переменная
+	Vertical position	Положение по вертикали
+	When text is not in the default position	Если текст не в стандартном положении
+	Windows Desktop	Как в Windows
+	With:	С:
+	overrides	переопределений
+	Measurement	Значение
+	User Arrow:	Пользовательская:
+	Leaders	Выноски
+	Leader type	Тип выноски
+	Arrowhead	Стрелка
+	Arrowhead size	Размер стрелки
+	Landing distance	Длина полки
+	Straight	Прямая
+	Annotate	Аннотации
+	3D Modeling	3D-моделирование
+	Float Panel	Плавающая панель
+	Pin to Left	Закрепить слева
+	Transform to Ribbon	Превратить в ленту
+	Move to Group	Переместить в группу
+	Close Panel	Закрыть панель
+	Custom Patterns	Свои образцы
+	Folder with hatch pattern files (.pat):	Папка с файлами образцов штриховки (.pat):
+	Browse...	Обзор...
+	Reload	Обновить
+	Read the folder again	Прочитать папку заново
+	No hatch patterns (.pat files) in this folder	В этой папке нет образцов штриховки (файлов .pat)
+	Preview	Предпросмотр
+	Black	Чёрная
+	Light Blue	Светло-голубая

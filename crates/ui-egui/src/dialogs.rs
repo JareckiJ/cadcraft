@@ -23,6 +23,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "units" => units(app, ctx, &mut open),
         "hatch" => crate::hatchdlg::dialog(app, ctx, &mut open),
         "about" => about(ctx, &mut open),
+        o if o == "toolbar" || o.starts_with("toolbar:") => crate::toolbar::dialog(app, ctx, o, &mut open),
         "preview" => crate::exchange::dialog(app, ctx, &mut open),
         "commands" => commands(app, ctx, &mut open),
         "blocks" => blocks(app, ctx, &mut open),
@@ -321,7 +322,7 @@ fn about(ctx: &egui::Context, open: &mut bool) {
                 2 => crate::credits::models_ui(ui),
                 _ => {
                     ui.heading(crate::tl!("CADCraft"));
-                    ui.label(crate::tf!("Version {version}", version = env!("CARGO_PKG_VERSION")));
+                    ui.label(crate::tf!("Version {version}", version = crate::VERSION));
                     ui.label(crate::tl!("Computer-aided design and drafting: an open-source, clean-room CAD application written in pure Rust."));
                     ui.add_space(6.0);
                     ui.label(RichText::new(crate::tl!("One of the Crafting Apps by the ArtCraft team and community.")).color(t.text_dim));

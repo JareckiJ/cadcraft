@@ -17,6 +17,7 @@ fn spline_leader_and_block_content_are_written() {
         text: None,
         style: "Standard".into(),
         arrow_size: 1.0,
+        arrow: String::new(),
         spline: true,
         block: Some(Insert {
             block: "TAG".into(),

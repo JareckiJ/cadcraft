@@ -942,6 +942,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 style: cx.mleader_style(&m.style),
                 text_style: m.text.as_ref().and_then(|t| cx.style(&t.style)),
                 block: m.block.as_ref().and_then(|b| cx.block_records.get(&b.block.to_ascii_uppercase()).cloned()),
+                arrow: Some(m.arrow.trim()).filter(|a| !a.is_empty()).and_then(|a| cx.arrow(a)),
             };
             w.t.extend(crate::dxf_mleader::entity_tags(d, m, &refs));
         }
@@ -1665,7 +1666,11 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     for s in &d.dim_styles {
         arrow_names.extend([s.arrow_block.clone(), s.arrow_block1.clone(), s.arrow_block2.clone(), s.leader_arrow_block.clone()]);
     }
+    arrow_names.extend(d.mleader_styles.iter().map(|s| s.arrow_block.clone()));
     for e in &every {
+        if let EntityKind::MLeader(m) = &e.kind {
+            arrow_names.push(m.arrow.clone());
+        }
         if let EntityKind::Dimension(dm) = &e.kind {
             for (k, v) in &dm.overrides {
                 let Some(f) = DimStyle::field_name(k).filter(|f| f.starts_with("arrowBlock") || *f == "leaderArrowBlock") else { continue };
@@ -2257,7 +2262,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     let byblock_ltype = ltype_handles.get("BYBLOCK").cloned();
     for (s, h) in mleader_styles.iter().zip(&mleader_handles) {
-        mleader_style_obj(&mut w, s, h, &mleader_dict, byblock_ltype.as_deref(), cx.style(&s.text_style));
+        let arrow = Some(s.arrow_block.trim()).filter(|a| !a.is_empty()).and_then(|a| cx.arrow(a));
+        mleader_style_obj(&mut w, s, h, &mleader_dict, byblock_ltype.as_deref(), cx.style(&s.text_style), arrow);
     }
     // Multiline styles.
     w.t.extend(crate::dxf_mline::objects(&cx.mlines, &root_dict));
@@ -2359,6 +2365,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(3, &l.name);
         w.s(350, layout_handles.get(i).cloned().unwrap_or_default());
     }
+    // Plot paper units of a layout that names none: the drawing's measurement system.
+    let metric_paper = d.header.i64("MEASUREMENT", 0) == 1;
     let layout_obj = |w: &mut W, h: &str, name: &str, tab: i64, brh: &str, flags: i64, page: &PageSetup, view: Option<(Vec2, f64)>| {
         // Plot scale: a standard scale when fitting or 1:1, otherwise custom (142 paper units
         // per 143 drawing units).
@@ -2405,7 +2413,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.f(c, v);
         }
         w.i(70, plot_flags);
-        w.i(72, 0);
+        w.i(72, i64::from(page.mm_units.unwrap_or(metric_paper)));
         w.i(73, i64::from(page.landscape));
         w.i(74, plot_type);
         w.s(7, &page.plot_style_table);
@@ -2571,7 +2579,15 @@ fn group_obj(w: &mut W, g: &Group, h: &str, dict: &str, written: &std::collectio
 /// A MLEADERSTYLE object (DXF Reference, OBJECTS: MLEADERSTYLE): MText content and straight
 /// ByBlock leaders with the style's landing gap, dogleg length, arrow size, text style and
 /// text height.
-fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, byblock_ltype: Option<&str>, text_style: Option<String>) {
+fn mleader_style_obj(
+    w: &mut W,
+    s: &MLeaderStyle,
+    h: &str,
+    dict: &str,
+    byblock_ltype: Option<&str>,
+    text_style: Option<String>,
+    arrow: Option<String>,
+) {
     // ByBlock as a 32-bit colour value (0xC1000000).
     const BYBLOCK: i64 = -1_056_964_608;
     w.s(0, "MLEADERSTYLE");
@@ -2597,6 +2613,9 @@ fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, byblock_l
     w.i(291, 1);
     w.f(43, s.dogleg);
     w.s(3, "");
+    if let Some(a) = arrow {
+        w.s(341, &a);
+    }
     w.f(44, s.arrow_size);
     w.s(300, "");
     if let Some(ts) = text_style {

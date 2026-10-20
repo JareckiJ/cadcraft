@@ -112,6 +112,7 @@ fn scale_scales_multileader_text_width_and_columns() {
         text: Some(text),
         style: "Standard".into(),
         arrow_size: 1.0,
+        arrow: String::new(),
         spline: false,
         block: None,
     };

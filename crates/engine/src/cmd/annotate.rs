@@ -454,6 +454,7 @@ fn mleader_kind(s: &Session, pts: &[Vec2], text: &str, landing: bool) -> Option<
         }),
         style: st.name.clone(),
         arrow_size: st.arrow_size * k,
+        arrow: String::new(),
         spline: false,
         block: None,
     }))

@@ -96,8 +96,14 @@ impl Sheet {
     pub fn bounds(&self) -> Bounds2 {
         Bounds2::new(Vec2::ZERO, self.size)
     }
-    /// The sheet for a page setup in a drawing whose paper units are `unit_mm` millimetres.
+    /// The sheet for a page setup in a drawing whose paper units are `unit_mm` millimetres (the
+    /// layout's own paper units, when it names them, win).
     pub fn from_page(page: &PageSetup, unit_mm: f64) -> Sheet {
+        let unit_mm = match page.mm_units {
+            Some(true) => 1.0,
+            Some(false) => 25.4,
+            None => unit_mm,
+        };
         let sane = |v: f64, d: f64| if v.is_finite() && v > 0.0 { v.min(100_000.0) } else { d };
         let w = sane(page.width_mm, 215.9);
         let h = sane(page.height_mm, 279.4);

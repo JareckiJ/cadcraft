@@ -47,6 +47,9 @@ fn same_content(a: &ListKey, b: &ListKey) -> bool {
 #[derive(Default)]
 pub struct CanvasState {
     pub list: Option<DisplayList>,
+    /// The font set the list was drawn with ([`cadcraft_fonts::ttf::generation`]): a new font
+    /// folder redraws the text.
+    font_generation: u64,
     key: ListKey,
     /// The area `list` was built for (hatch patterns exist only inside it); a view leaving it
     /// rebuilds the list.
@@ -106,6 +109,10 @@ pub struct CanvasState {
     grip_editing: bool,
     /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click opened.
     grip_menu: Option<(Handle, usize)>,
+    /// The grip with options under the resting cursor, and since when; its menu opens on hover.
+    grip_hover: Option<((Handle, usize), f64)>,
+    /// The grip whose menu opened on hover, and where the menu is.
+    grip_popup: Option<((Handle, usize), Pos2)>,
     /// Dynamic block grips of the selection (cached), the one being dragged, and the list grip
     /// whose choices are open (and whether it opened this frame).
     pub(crate) dyn_grips: crate::dyngrips::Cache,
@@ -244,6 +251,12 @@ fn prim_color32(prim: &cadcraft_render::DPrim, bg: Rgb) -> Color32 {
 /// yet, is built at once.
 fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::Context) {
     let px = 1.0 / xf.scale;
+    let fonts = cadcraft_fonts::ttf::generation();
+    if app.canvas.font_generation != fonts {
+        app.canvas.font_generation = fonts;
+        app.canvas.list = None;
+        app.canvas.job = None;
+    }
     let Ok(st) = app.session.state() else { return };
     // Rebuild when the drawing changes, the zoom moves by more than 2x (tessellation band) or a
     // view leaves the area the list was built for.
@@ -1366,6 +1379,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let pp = xf_paper.to_world(hp);
         let in_rect = |v: &cadcraft_doc::Viewport| (pp.x - v.center.x).abs() <= v.width / 2.0 && (pp.y - v.center.y).abs() <= v.height / 2.0;
         let in_active = active_vp.as_ref().is_some_and(|v| active_clip.as_ref().map_or(in_rect(v), |c| c.contains(pp)));
+        // On the sheet itself (no viewport active), a block, text or dimension drawn on the sheet
+        // is edited as in model space; elsewhere the click goes into a viewport.
+        let on_sheet = app.session.state().is_ok_and(|st| st.mspace.is_none());
+        if on_sheet && app.session.running.is_none() && edit_text_at(app, pp) {
+            return;
+        }
         if !in_active {
             app.canvas.hot_grips.clear();
             app.session.pending_window = None;
@@ -1379,7 +1398,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             return;
         }
     }
-    // Double-click text to edit it, as in AutoCAD: TEXTEDIT with that object already picked.
+    // Double-click text, a dimension, a multileader or a table cell to edit it in place, as in
+    // AutoCAD: TEXTEDIT (TABLEDIT) with that object already picked.
     if inside
         && dbl_primary
         && app.session.running.is_none()
@@ -1572,6 +1592,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     } else if idle || app.canvas.snap_menu {
         crate::context_menu::show(app, &resp);
     }
+    // Resting the cursor on a grip with options opens its menu too, as in AutoCAD.
+    if idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_none() {
+        hover_grip_menu(app, ui, &xf, hover_pos, inside);
+    } else {
+        app.canvas.grip_hover = None;
+        app.canvas.grip_popup = None;
+    }
 
     // Hover highlight (throttled to cursor movement).
     // The cursor picks objects (pick box, rollover highlight): "Select objects" and single-object
@@ -1753,7 +1780,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
             if let Some(e) = st.doc.entity(*h) {
-                for (gi, g) in e.kind.grips().into_iter().enumerate() {
+                for (gi, g) in cadcraft_engine::grips::grip_points(&st.doc, &e.kind).into_iter().enumerate() {
                     let sp = xf.to_screen(g);
                     if rect.contains(sp) {
                         let r = Rect::from_center_size(sp, vec2(gs * 2.0, gs * 2.0));
@@ -1847,6 +1874,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if let Some(hp) = hover_pos {
             draw_crosshair(app, &painter, rect, hp, selecting);
         }
+        if !app.session.settings.dynmode
+            && !app.cmd.buffer.is_empty()
+            && let Some(hp) = hover_pos
+        {
+            // Dynamic Input off: what is typed still shows by the cursor.
+            echo_box(&painter, hp, None, &app.cmd.buffer, false);
+        }
         if app.session.settings.dynmode
             && let Some(hp) = hover_pos
         {
@@ -1866,13 +1900,41 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 /// offers Edit Text for); false when there is none.
 fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
     use cadcraft_engine::doc::EntityKind;
-    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
-        app.session.doc().ok()?.entity(h).map(|e| matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)))
+    // A block reference: its attributes (Enhanced Attribute Editor), or the Block Editor for a
+    // block without them, as in AutoCAD. External references are left alone.
+    let block = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
+        let d = app.session.doc().ok()?;
+        let EntityKind::Insert(i) = &d.entity(h)?.kind else { return None };
+        let xref = d.blocks.get(&i.block).is_some_and(|b| b.xref_path.is_some());
+        (!xref).then(|| (h, i.attribs.iter().any(|a| !a.constant)))
     });
-    if is_text != Some(true) {
-        return false;
+    if let Some((h, attributes)) = block {
+        if attributes {
+            app.start("attedit");
+            if let Err(e) = app.session.input(Input::Pick(vec![h])) {
+                app.session.echo(e.to_string());
+            }
+        } else if let Err(e) = app.run("bedit", serde_json::json!({ "handle": h.hex() })) {
+            app.session.echo(e);
+        }
+        return true;
     }
-    app.start("textedit");
+    let picked = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
+        app.session.doc().ok()?.entity(h).map(|e| match &e.kind {
+            EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Dimension(_) => Some("textedit.object"),
+            EntityKind::MLeader(m) if m.text.is_some() => Some("textedit.object"),
+            EntityKind::Table(t) if t.cell_at_point(p).is_some() => Some("tabledit.cell"),
+            _ => None,
+        })
+    });
+    // Inside a table cell, away from its lines: the cell.
+    let command = picked.flatten().or_else(|| {
+        let d = app.session.doc().ok()?;
+        let space = d.space(&app.session.space())?;
+        space.iter().any(|e| matches!(&e.kind, EntityKind::Table(t) if t.cell_at_point(p).is_some())).then_some("tabledit.cell")
+    });
+    let Some(command) = command else { return false };
+    app.start(command);
     if let Err(e) = app.session.input(Input::Point(p)) {
         app.session.echo(e.to_string());
     }
@@ -2029,7 +2091,13 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
             hover
         }
     };
-    let Some(prompt) = app.session.current_prompt() else { return };
+    let Some(prompt) = app.session.current_prompt() else {
+        // At "Command:": the command name being typed.
+        if !app.cmd.buffer.is_empty() {
+            echo_box(p, at, None, &app.cmd.buffer, false);
+        }
+        return;
+    };
     // DYNPROMPT = 0: no prompt beside the cursor (the value boxes stay).
     let show_prompt = app.session.settings.dynprompt;
     let options = show_prompt && !prompt.keywords.is_empty();
@@ -2042,13 +2110,18 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
         options_menu(app, p, r, hover);
         return;
     }
+    // Text typed at a prompt (a number of sides, a name, an option) shows in a box by the cursor,
+    // so the eyes needn't go to the command line and back.
+    if !app.cmd.buffer.is_empty() {
+        let r = echo_box(p, at, show_prompt.then(|| crate::i18n::t(&prompt.message)), &app.cmd.buffer, options);
+        options_menu(app, p, r, hover);
+        return;
+    }
     if !show_prompt {
         return;
     }
     let mut text = crate::i18n::t(&prompt.message).to_string();
-    if !app.cmd.buffer.is_empty() {
-        text = format!("{}: {}", crate::i18n::t(&prompt.message), app.cmd.buffer);
-    } else if let (Some(base), Some(c)) = (prompt.base, app.canvas.cursor) {
+    if let (Some(base), Some(c)) = (prompt.base, app.canvas.cursor) {
         text = format!(
             "{}   {}  <  {}°",
             crate::i18n::t(&prompt.message),
@@ -2067,6 +2140,33 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
         options_hint(p, r);
     }
     options_menu(app, p, r, hover);
+}
+
+/// The text being typed at the command line, in an input box beside the cursor, after the prompt
+/// (`message`) when there is one; returns the tooltip's rectangle.
+fn echo_box(p: &egui::Painter, at: Pos2, message: Option<&str>, typed: &str, options: bool) -> Rect {
+    let t = Tokens::get();
+    let label = message.map(|m| p.layout_no_wrap(format!("{m}:"), crate::theme::small(), t.text_dim));
+    let value = p.layout_no_wrap(typed.to_string(), crate::theme::body(), t.text);
+    let box_size = vec2((value.size().x + 14.0).max(48.0), value.size().y + 6.0);
+    let label_w = label.as_ref().map_or(0.0, |g| g.size().x + 8.0);
+    let hint = if options { OPTIONS_HINT_W } else { 0.0 };
+    let r = tooltip_frame(p, at, vec2(label_w + box_size.x + 10.0 + hint, box_size.y + 8.0));
+    if let Some(g) = label {
+        let y = r.center().y - g.size().y / 2.0;
+        p.galley(pos2(r.left() + 6.0, y), g, t.text_dim);
+    }
+    let b = Rect::from_min_size(pos2(r.left() + 5.0 + label_w, r.top() + 4.0), box_size);
+    p.rect_filled(b, 2.0, t.field);
+    p.rect_stroke(b, 2.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    let text_at = pos2(b.left() + 5.0, b.center().y - value.size().y / 2.0);
+    let caret_x = text_at.x + value.size().x + 1.0;
+    p.galley(text_at, value, t.text);
+    p.line_segment([pos2(caret_x, b.top() + 3.0), pos2(caret_x, b.bottom() - 3.0)], Stroke::new(1.0, t.text));
+    if options {
+        options_hint(p, r);
+    }
+    r
 }
 
 /// The drawing's length units: (LUNITS, LUPREC).
@@ -2328,6 +2428,77 @@ fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
         app.canvas.grip_menu = None;
     }
     let Some(choice) = chosen else { return };
+    apply_grip_choice(app, g, choice);
+}
+
+/// Seconds the cursor rests on a grip before its menu opens.
+const GRIP_HOVER_DELAY: f64 = 0.4;
+
+/// The grip menu that opens when the cursor rests on a grip with options (a dimension's text
+/// grip, a polyline vertex…); it closes when the cursor leaves the grip and the menu.
+fn hover_grip_menu(app: &mut CadApp, ui: &egui::Ui, xf: &Xf, hover: Option<Pos2>, inside: bool) {
+    let ctx = ui.ctx().clone();
+    let now = ctx.input(|i| i.time);
+    let busy = ctx.input(|i| i.pointer.any_down()) || ctx.dragged_id().is_some();
+    let over = if inside && !busy { grip_at(app, xf, hover).filter(|g| !grip_options(app, *g).is_empty()) } else { None };
+    if let Some((g, at)) = app.canvas.grip_popup {
+        let options = grip_options(app, g);
+        if options.is_empty() {
+            app.canvas.grip_popup = None;
+            return;
+        }
+        let mut chosen: Option<Option<cadcraft_engine::grips::GripAction>> = None;
+        let area = egui::Area::new(egui::Id::new("cc_grip_hover_menu")).order(egui::Order::Foreground).fixed_pos(at).show(&ctx, |ui| {
+            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                ui.set_min_width(170.0);
+                // Menu items: the whole row lights up, no button frames.
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                    ui.spacing_mut().button_padding = vec2(8.0, 4.0);
+                    let item = |ui: &mut egui::Ui, label: &str| ui.add(egui::Button::new(crate::i18n::t(label)).frame_when_inactive(false)).clicked();
+                    let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
+                    if item(ui, if vertex { "Stretch Vertex" } else { "Stretch" }) {
+                        chosen = Some(None);
+                    }
+                    for a in &options {
+                        if item(ui, a.label()) {
+                            chosen = Some(Some(*a));
+                        }
+                    }
+                });
+            });
+        });
+        let on_menu = ctx.pointer_latest_pos().is_some_and(|p| area.response.rect.expand(8.0).contains(p));
+        if let Some(choice) = chosen {
+            app.canvas.grip_popup = None;
+            app.canvas.grip_hover = None;
+            apply_grip_choice(app, g, choice);
+        } else if !on_menu && over != Some(g) {
+            app.canvas.grip_popup = None;
+            app.canvas.grip_hover = over.map(|g| (g, now));
+        }
+        return;
+    }
+    match (over, app.canvas.grip_hover) {
+        (Some(g), Some((h, since))) if h == g => {
+            if now - since >= GRIP_HOVER_DELAY {
+                let point = app.session.grips_of(g.0).ok().and_then(|p| p.get(g.1).copied());
+                if let Some(p) = point {
+                    app.canvas.grip_popup = Some((g, xf.to_screen(p) + vec2(10.0, 10.0)));
+                }
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(GRIP_HOVER_DELAY - (now - since) + 0.01));
+            }
+        }
+        (Some(g), _) => {
+            app.canvas.grip_hover = Some((g, now));
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(GRIP_HOVER_DELAY + 0.01));
+        }
+        (None, _) => app.canvas.grip_hover = None,
+    }
+}
+
+/// Run a grip menu choice: Stretch (`None`) or an option, on grip `g` made hot.
+fn apply_grip_choice(app: &mut CadApp, g: (Handle, usize), choice: Option<cadcraft_engine::grips::GripAction>) {
     app.canvas.hot_grips = vec![g];
     let r = app.session.start_grip_edit(&[g]).and_then(|()| match choice {
         Some(a) => app.session.input(Input::Keyword(a.keyword().to_string())),
@@ -2353,7 +2524,7 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        for (i, g) in e.kind.grips().into_iter().enumerate() {
+        for (i, g) in cadcraft_engine::grips::grip_points(&st.doc, &e.kind).into_iter().enumerate() {
             let sp = xf.to_screen(g);
             if (sp.x - hp.x).abs() <= gs && (sp.y - hp.y).abs() <= gs {
                 return Some((*h, i));
@@ -2625,6 +2796,51 @@ mod hatch_pick_tests {
         assert_eq!(super::hatch_at(&app, Vec2::new(5.0, 5.0), 10.0).map(|h| h.hex()), Some(hx));
         assert_eq!(super::hatch_at(&app, Vec2::new(25.0, 0.0), 10.0), None, "a line is not a hatch");
         assert_eq!(super::hatch_at(&app, Vec2::new(60.0, 60.0), 10.0), None);
+    }
+
+    #[test]
+    fn double_clicking_text_dimensions_and_table_cells_opens_the_in_place_editor() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        // The text sits away from the drawing area's top-left corner (the viewport label).
+        app.session.execute("line", &json!({ "points": [[-10, 20], [-9, 20]] })).unwrap();
+        app.session.execute("mtext", &json!({ "at": [0, 10], "text": "hello world", "height": 1.0 })).unwrap();
+        app.session.execute("table", &json!({ "at": [20, 10], "rows": 2, "cols": 2, "colWidth": 6, "rowHeight": 2 })).unwrap();
+        let _ = app.session.zoom_extents();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
+        let mut time = 0.0;
+        let mut frame = |app: &mut CadApp, events: Vec<egui::Event>| {
+            time += 0.1;
+            app.logic(&ctx);
+            let input = egui::RawInput { screen_rect: screen, events, time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| app.ui(ui));
+            out.textures_delta.clear();
+        };
+        let mut double_click = |app: &mut CadApp, world: Vec2| {
+            // Far enough from any earlier click not to count as its second or third.
+            for _ in 0..10 {
+                frame(app, Vec::new());
+            }
+            let at = app.canvas.xf.unwrap().to_screen(world);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            };
+            frame(app, vec![egui::Event::PointerMoved(at)]);
+            frame(app, vec![button(true), button(false)]);
+            frame(app, vec![button(true), button(false)]);
+            frame(app, Vec::new());
+        };
+        double_click(&mut app, Vec2::new(1.0, 9.6));
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("textedit.object"));
+        assert!(matches!(app.session.text_editor().map(|e| e.kind), Some(cadcraft_engine::EditorKind::MText)));
+        app.session.cancel();
+        app.session.set_selection(Vec::new());
+        double_click(&mut app, Vec2::new(23.0, 7.0));
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("tabledit.cell"));
+        assert!(matches!(app.session.text_editor().map(|e| e.kind), Some(cadcraft_engine::EditorKind::TableCell { .. })));
     }
 
     #[test]

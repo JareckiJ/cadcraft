@@ -201,3 +201,50 @@ fn json_forms_take_fence_crossing_edge_mode_and_mode() {
     assert_eq!(r["extended"], 1);
     assert_eq!(lines(&s), vec![((0.0, 0.0), (10.0, 0.0)), ((10.0, -5.0), (10.0, 5.0))]);
 }
+
+/// The handle of the line with these ends.
+fn handle_of(s: &Session, seg: Seg) -> cadcraft_engine::doc::Handle {
+    s.doc()
+        .unwrap()
+        .model
+        .iter()
+        .find(|e| matches!(&e.kind, EntityKind::Line(l) if ((r(l.a.x), r(l.a.y)), (r(l.b.x), r(l.b.y))) == seg))
+        .unwrap()
+        .handle
+}
+
+#[test]
+fn objects_selected_before_trim_are_its_cutting_edges_and_stay_highlighted() {
+    let mut s = ladder();
+    let edge = handle_of(&s, ((0.0, -5.0), (0.0, 5.0)));
+    s.set_selection(vec![edge]);
+    s.cmdline("TRIM").unwrap();
+    assert_eq!(s.selection(), [edge], "the edge stays selected (highlighted) while TRIM runs");
+    // Only the x = 0 line cuts: the y = 0 line loses its left part, the x = 10 line doesn't cut.
+    s.script("-2,0\n").unwrap();
+    assert_eq!(s.selection(), [edge]);
+    assert!(lines(&s).contains(&((0.0, 0.0), (15.0, 0.0))), "{:?}", lines(&s));
+    s.script("\n").unwrap();
+    assert!(s.running.is_none());
+    assert!(s.selection().is_empty(), "the highlight ends with the command");
+    // Cancelling ends it too.
+    s.set_selection(vec![edge]);
+    s.cmdline("EXTEND").unwrap();
+    assert_eq!(s.selection(), [edge]);
+    s.cancel();
+    assert!(s.selection().is_empty());
+}
+
+#[test]
+fn a_pick_in_empty_space_draws_a_fence_line_and_trims_what_it_crosses() {
+    let mut s = ladder();
+    // Quick mode. From empty space at 5,-3 to 5,3: both horizontal lines are cut between the edges.
+    s.script("TRIM 5,-3\n").unwrap();
+    assert_eq!(s.current_prompt().map(|p| p.message), Some("Specify end point of the fence line".into()));
+    s.script("5,3\n\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(
+        lines(&s),
+        with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (0.0, 2.0)), ((10.0, 0.0), (15.0, 0.0)), ((10.0, 2.0), (15.0, 2.0))])
+    );
+}

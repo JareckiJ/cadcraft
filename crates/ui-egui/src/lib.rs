@@ -19,7 +19,9 @@ pub mod cmdline;
 pub mod context_menu;
 pub mod control;
 pub mod credits;
+pub mod custom_patterns;
 pub mod dialogs;
+pub mod dimstyles;
 pub mod docking;
 pub mod hatchdlg;
 mod mtext_editor;
@@ -44,6 +46,7 @@ pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
 pub mod theme;
+pub mod toolbar;
 pub mod viewcube;
 pub mod vpscale;
 
@@ -73,6 +76,14 @@ pub struct UiState {
     pub show_toolsets: bool,
     pub show_palettes: bool,
     pub show_toolbar: bool,
+    /// Where the Tool Bar is docked: along the top (a row of buttons) or the left edge (a column).
+    pub toolbar_dock: toolbar::Dock,
+    /// The Tool Bar's buttons in order, as command ids; `"|"` separates groups ([`toolbar`]).
+    pub toolbar_items: Vec<String>,
+    /// The Tool Sets bar (drawing and editing tools): shown, dock, buttons ([`toolbar`]).
+    pub toolsets_bar: toolbar::BarState,
+    /// The Layers bar (layer tools and the current layer): shown, dock, buttons.
+    pub layers_bar: toolbar::BarState,
     pub show_file_tabs: bool,
     pub show_status_bar: bool,
     pub show_command_line: bool,
@@ -86,7 +97,13 @@ pub struct UiState {
     pub system_cursor: bool,
     /// "Drafting" or "Modeling".
     pub toolset_tab: String,
+    /// Tool Sets shown as a ribbon (tabs of tool groups) under the menu bar instead of a palette.
+    pub toolsets_ribbon: bool,
+    /// The ribbon's open tab ([`palettes::RIBBON`]).
+    pub ribbon_tab: String,
     pub collapsed_groups: Vec<String>,
+    /// The folder the Hatch and Gradient dialog's Custom Patterns tab lists `.pat` files from.
+    pub pattern_folder: String,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
     pub hidden_tools: Vec<String>,
@@ -159,6 +176,10 @@ impl Default for UiState {
             show_toolsets: true,
             show_palettes: true,
             show_toolbar: true,
+            toolbar_dock: toolbar::Dock::default(),
+            toolbar_items: toolbar::default_items(),
+            toolsets_bar: toolbar::Bar::ToolSets.default_state(),
+            layers_bar: toolbar::Bar::Layers.default_state(),
             show_file_tabs: true,
             show_status_bar: true,
             show_command_line: true,
@@ -167,7 +188,10 @@ impl Default for UiState {
             show_layer_list: false,
             system_cursor: std::env::var("CADCRAFT_SYSTEM_CURSOR").is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false" | "off")),
             toolset_tab: "Drafting".into(),
+            toolsets_ribbon: false,
+            ribbon_tab: "Draw".into(),
             collapsed_groups: Vec::new(),
+            pattern_folder: String::new(),
             hidden_tools: Vec::new(),
             properties_all: true,
             in_window_menu: !cfg!(target_os = "macos"),
@@ -183,11 +207,20 @@ impl Default for UiState {
     }
 }
 
+/// The version shown in Help ▸ About and the window: the package version, or the build's own
+/// label when one is given at build time (`CADCRAFT_VERSION_LABEL`, such as `0.9.0-b3`).
+pub const VERSION: &str = match option_env!("CADCRAFT_VERSION_LABEL") {
+    Some(label) => label,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Host services (file pickers, clipboard) injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Pick a folder (Options ▸ Fonts); `None` where the host has no folder dialog.
+    pub pick_folder: Option<Box<dyn Fn() -> Option<String>>>,
 }
 
 pub struct CadApp {
@@ -509,6 +542,22 @@ impl CadApp {
                 if let Some(w) = v.get("warnings").and_then(Value::as_array).and_then(|w| w.first()).and_then(Value::as_str) {
                     self.set_status(w.to_string());
                 }
+                // Fonts the drawing's text styles name that can't be found: say what stands in.
+                let missing = self.session.doc().map(cadcraft_engine::cmd::missing_fonts).unwrap_or_default();
+                if !missing.is_empty() {
+                    let names: Vec<&str> = missing.iter().map(|(_, f)| f.as_str()).take(6).collect();
+                    let more = if missing.len() > names.len() { format!(" (+{})", missing.len() - names.len()) } else { String::new() };
+                    let msg = format!(
+                        "{} {}{more}. {} {}. {}",
+                        crate::tl!("Fonts not found:"),
+                        names.join(", "),
+                        crate::tl!("Text in them is drawn with"),
+                        cadcraft_engine::cmd::substitute_font(),
+                        crate::tl!("Add a font folder in Tools ▸ Options ▸ Fonts.")
+                    );
+                    self.session.echo(msg.clone());
+                    self.set_status(msg);
+                }
                 // A dynamic block's own drawing: ask whether to open it in the Block Editor.
                 if self.session.state().is_ok_and(|st| cadcraft_engine::blockedit::has_authoring_elements(&st.doc)) {
                     self.ui.dialog = Some("authoring".into());
@@ -545,9 +594,12 @@ impl CadApp {
         // browser report changes as input); the saved choice itself never changes here.
         let shown = self.ui.theme.resolve(ctx.system_theme());
         theme::set_active(shown);
+        let palette = self.ui.theme.palette();
+        let palette_changed = theme::palette() != palette;
+        theme::set_palette(palette);
         theme::set_canvas(self.options.canvas());
         let follows_system = self.ui.theme == theme::ThemePref::System;
-        if self.shown_theme != Some(shown) || self.shown_follows_system != follows_system {
+        if self.shown_theme != Some(shown) || self.shown_follows_system != follows_system || palette_changed {
             theme::apply(ctx, shown, follows_system);
             self.shown_theme = Some(shown);
             self.shown_follows_system = follows_system;
@@ -622,9 +674,15 @@ impl CadApp {
         if self.ui.in_window_menu {
             menus::menu_bar(self, ui);
         }
+        // Tool Sets as a ribbon: right under the menu bar.
+        if self.ui.show_toolsets && self.ui.toolsets_ribbon {
+            palettes::ribbon(self, ui);
+        }
         if self.ui.show_status_bar {
             chrome::status_bar(self, ui);
         }
+        toolbar::top_panels(self, ui);
+        toolbar::left_panels(self, ui);
         if self.ui.show_file_tabs {
             chrome::file_tabs(self, ui);
         }

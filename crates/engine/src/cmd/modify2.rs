@@ -76,8 +76,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
             .alias(&["ed", "ddedit"])
-            .params("{handle, text} (text, mtext, attribute definitions, dimension text override)")
+            .params("{handle, text} (text, mtext, attribute definitions, dimension text override, multileader text)")
             .interactive(|_| Ok(Box::new(TextEditM::default()))),
+        // Double-clicking text, a dimension or a multileader: TEXTEDIT for that one object, in the
+        // in-place editor.
+        CommandSpec::new("textedit.object", "Edit Text", run_textedit)
+            .params("same as textedit")
+            .interactive(|_| Ok(Box::new(TextEditM { single: true, ..TextEditM::default() }))),
     ]
 }
 
@@ -2162,6 +2167,69 @@ fn text_of(k: &EntityKind) -> Option<String> {
         EntityKind::AttDef(a) => Some(a.text.value.clone()),
         EntityKind::MText(t) => Some(t.contents.replace("\\P", "\n")),
         EntityKind::Dimension(d) => Some(if d.text.is_empty() { "<>".into() } else { d.text.clone() }),
+        EntityKind::MLeader(m) => m.text.as_ref().map(|t| t.contents.replace("\\P", "\n")),
+        _ => None,
+    }
+}
+
+/// A box for the in-place editor showing one line of text where `t` sits.
+fn line_box(t: &cadcraft_doc::Text) -> cadcraft_doc::MText {
+    use cadcraft_doc::{HAlign, VAlign};
+    let col = match t.halign {
+        HAlign::Left => 0u8,
+        HAlign::Right => 2,
+        _ => 1,
+    };
+    let row = match t.valign {
+        VAlign::Top => 0u8,
+        VAlign::Middle => 1,
+        _ if t.halign == HAlign::Middle => 1,
+        _ => 2,
+    };
+    let left_baseline = t.halign == HAlign::Left && t.valign == VAlign::Baseline;
+    let at = if left_baseline { t.insert } else { t.align_pt.unwrap_or(t.insert) };
+    cadcraft_doc::MText {
+        insert: at,
+        height: t.height,
+        width: 0.0,
+        attach: row * 3 + col + 1,
+        rotation: t.rotation,
+        style: t.style.clone(),
+        contents: t.value.clone(),
+        line_spacing: 1.0,
+        line_spacing_exact: false,
+        columns: None,
+    }
+}
+
+/// What the in-place editor edits for object `h`: an MTEXT or multileader text as multiline
+/// text, a TEXT or attribute definition as one line, a dimension's text with `<>` for its value.
+pub(crate) fn editor_for(s: &Session, h: Handle) -> Option<crate::TextEditor> {
+    use crate::{EditorKind, TextEditor};
+    let d = s.doc().ok()?;
+    let key = h.hex();
+    match &d.entity(h)?.kind {
+        EntityKind::MText(t) => Some(TextEditor { mtext: t.clone(), kind: EditorKind::MText, key }),
+        EntityKind::MLeader(m) => m.text.clone().map(|mtext| TextEditor { mtext, kind: EditorKind::MText, key }),
+        EntityKind::Text(t) => Some(TextEditor { mtext: line_box(t), kind: EditorKind::Line, key }),
+        EntityKind::AttDef(a) => Some(TextEditor { mtext: line_box(&a.text), kind: EditorKind::Line, key }),
+        EntityKind::Dimension(dm) => {
+            let g = cadcraft_render::dimension_in(d, dm);
+            let measured = cadcraft_render::dimension_in(d, &cadcraft_doc::Dimension { text: String::new(), block: None, ..dm.clone() }).value;
+            let mtext = cadcraft_doc::MText {
+                insert: g.text_pos.to3(0.0),
+                height: if g.text_height > 0.0 && g.text_height.is_finite() { g.text_height } else { 0.18 },
+                width: 0.0,
+                attach: 5,
+                rotation: g.text_angle,
+                style: d.dim_style(&dm.style).map(|st| st.text_style.clone()).unwrap_or_else(|| dm.style.clone()),
+                contents: if dm.text.is_empty() { "<>".into() } else { dm.text.clone() },
+                line_spacing: 1.0,
+                line_spacing_exact: false,
+                columns: None,
+            };
+            Some(TextEditor { mtext, kind: EditorKind::Dimension { measured }, key })
+        }
         _ => None,
     }
 }
@@ -2179,6 +2247,10 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
             d.text = if text == "<>" { String::new() } else { text.to_string() };
             d.block = None;
         }
+        EntityKind::MLeader(m) => match &mut m.text {
+            Some(t) => t.contents = text.replace('\n', "\\P"),
+            None => return Err(other("This multileader has no text.")),
+        },
         _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
     }
     set_kind(s, h, k)
@@ -2197,6 +2269,8 @@ fn run_textedit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 struct TextEditM {
     h: Option<(Handle, String)>,
+    /// What the in-place editor shows for the picked object.
+    editor: Option<crate::TextEditor>,
     /// Edits made in this run, newest last: each object as it was before (the Undo option).
     edits: Vec<(Handle, EntityKind)>,
     /// Single mode: end after one edit (the Mode option; Multiple by default).
@@ -2234,6 +2308,7 @@ impl Interactive for TextEditM {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 let old = text_of(&curves::entity(s, h)?.kind).ok_or_else(|| other("Select a text, mtext, attribute definition or dimension."))?;
+                self.editor = editor_for(s, h);
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }
@@ -2243,10 +2318,12 @@ impl Interactive for TextEditM {
                 set_text(s, h, &t)?;
                 self.edits.push((h, before));
                 self.h = None;
+                self.editor = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (Some(_), Input::Enter) => {
                 self.h = None;
+                self.editor = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (None, Input::Enter) => Ok(Step::Done),
@@ -2263,6 +2340,9 @@ impl Interactive for TextEditM {
             }
             _ => Ok(Step::Continue),
         }
+    }
+    fn text_editor(&self) -> Option<crate::TextEditor> {
+        if self.mode || self.h.is_none() { None } else { self.editor.clone() }
     }
 }
 

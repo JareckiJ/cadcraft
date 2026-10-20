@@ -222,6 +222,8 @@ enum Stage {
     Fence(Vec<Vec2>),
     /// A crossing window: its first corner once picked.
     Crossing(Option<Vec2>),
+    /// A pick in empty space: a line from this point; everything it crosses is trimmed (extended).
+    Line(Vec2),
     Mode,
     Project,
     Edge,
@@ -249,6 +251,15 @@ impl TrimM {
         s.echo(if self.extend { "Select boundary edges ..." } else { "Select cutting edges ..." });
         s.set_selection(Vec::new());
         self.stage = Stage::Edges(Vec::new());
+    }
+    /// The cutting (boundary) edges stay selected, so they show highlighted until the command
+    /// ends; with no edges (every object cuts) nothing is.
+    fn show_edges(&self, s: &mut Session) {
+        let shown: Vec<Handle> = match (&self.edges, s.doc()) {
+            (Some(edges), Ok(d)) => edges.iter().copied().filter(|h| d.entity(*h).is_some()).collect(),
+            _ => Vec::new(),
+        };
+        s.set_selection(shown);
     }
     /// Run `f` as one undoable step of the command; a step that changed nothing records none.
     fn step(&mut self, s: &mut Session, f: impl FnOnce(&mut Self, &mut Session) -> Result<()>) -> Result<()> {
@@ -315,7 +326,8 @@ impl Interactive for TrimM {
         if self.extend { "EXTEND" } else { "TRIM" }
     }
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
-        s.set_selection(Vec::new());
+        // Objects selected before the command are its cutting (boundary) edges.
+        let pre = s.selection().to_vec();
         let quick = quick_mode(s);
         let proj = match proj_mode(s) {
             0 => "None",
@@ -327,7 +339,13 @@ impl Interactive for TrimM {
             if edge_mode(s) { "Extend" } else { "None" },
             if quick { "Quick" } else { "Standard" }
         ));
-        if !quick {
+        if !pre.is_empty() {
+            let n = pre.len();
+            self.edges = Some(pre);
+            self.show_edges(s);
+            let what = if self.extend { "boundary" } else { "cutting" };
+            s.echo(format!("{n} {what} edge{} selected.", if n == 1 { "" } else { "s" }));
+        } else if !quick {
             self.select_edges(s);
         }
         Ok(Step::Continue)
@@ -357,6 +375,7 @@ impl Interactive for TrimM {
                 Some(l) => Prompt::new("Specify next fence point", Accept::POINT).kw(&["Undo"]).base(*l),
             },
             Stage::Crossing(None) => Prompt::new("Specify first corner", Accept::POINT),
+            Stage::Line(a) => Prompt::new("Specify end point of the fence line", Accept::POINT).base(*a),
             Stage::Crossing(Some(_)) => Prompt::new("Specify opposite corner", Accept::POINT),
             Stage::Mode => {
                 let msg = if self.extend { "Enter an extend mode option" } else { "Enter a trim mode option" };
@@ -395,8 +414,8 @@ impl Interactive for TrimM {
                         self.stage = Stage::Edges(picked);
                     }
                     Input::Enter => {
-                        s.set_selection(Vec::new());
                         self.edges = if picked.is_empty() { None } else { Some(picked) };
+                        self.show_edges(s);
                         self.stage = Stage::Pick;
                     }
                     _ => {}
@@ -415,7 +434,7 @@ impl Interactive for TrimM {
                         self.stage = Stage::Erase(picked);
                     }
                     Input::Enter => {
-                        s.set_selection(Vec::new());
+                        self.show_edges(s);
                         self.step(s, |_, s| {
                             let d = s.doc_mut()?;
                             for h in &picked {
@@ -455,6 +474,21 @@ impl Interactive for TrimM {
                 }
                 Ok(Step::Continue)
             }
+            Stage::Line(a) => {
+                match i {
+                    Input::Point(b) => {
+                        self.stage = Stage::Pick;
+                        let r = self.step(s, |m, s| fence(s, &[a, b], extending, m.edges(quick, implied), quick).map(|_| ()));
+                        if let Err(e) = r {
+                            s.echo(e.to_string());
+                        }
+                        self.show_edges(s);
+                    }
+                    Input::Enter | Input::Keyword(_) => self.stage = Stage::Pick,
+                    _ => {}
+                }
+                Ok(Step::Continue)
+            }
             Stage::Crossing(first) => {
                 match (first, i) {
                     (None, Input::Point(p)) => self.stage = Stage::Crossing(Some(p)),
@@ -475,17 +509,22 @@ impl Interactive for TrimM {
                     let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
                     let space = s.space();
                     let Some(h) = crate::select::pick(s.doc()?, &space, p, ap) else {
-                        // A pick in empty space opens a crossing window there.
-                        self.stage = Stage::Crossing(Some(p));
+                        // A pick in empty space starts a fence line there: what it crosses is
+                        // trimmed (extended) once its end point is picked.
+                        self.stage = Stage::Line(p);
                         return Ok(Step::Continue);
                     };
                     let r = self.step(s, |m, s| apply(s, h, p, extending, m.edges(quick, implied), quick).map(|_| ()));
                     if let Err(e) = r {
                         s.echo(e.to_string());
                     }
+                    self.show_edges(s);
                     Ok(Step::Continue)
                 }
-                Input::Enter => Ok(Step::Done),
+                Input::Enter => {
+                    s.set_selection(Vec::new());
+                    Ok(Step::Done)
+                }
                 Input::Keyword(k) => {
                     match k.as_str() {
                         "cuTting edges" | "Boundary edges" => self.select_edges(s),
@@ -526,6 +565,7 @@ impl Interactive for TrimM {
                 .filter_map(|w| Some(line(*w.first()?, *w.get(1)?)))
                 .collect(),
             Stage::Crossing(Some(a)) => vec![lwpoly(rect_vertices(*a, c), true)],
+            Stage::Line(a) => vec![line(*a, c)],
             _ => Vec::new(),
         }
     }

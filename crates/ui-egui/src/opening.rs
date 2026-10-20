@@ -67,7 +67,7 @@ impl Opening {
     /// The text of the card: the file and how long it has taken, or how many files are queued.
     fn label(&self) -> Option<String> {
         let first = self.jobs.first()?;
-        let name = std::path::Path::new(&first.path).file_name().map_or_else(|| first.path.clone(), |n| n.to_string_lossy().to_string());
+        let name = crate::menus::file_name(&first.path);
         let secs = first.started.elapsed().as_secs_f32();
         let more = self.jobs.len() - 1;
         Some(if more == 0 { format!("Opening {name}... {secs:.0} s") } else { format!("Opening {name} and {more} more... {secs:.0} s") })
@@ -110,7 +110,7 @@ mod tests {
     /// cannot be read is reported like a failed OPEN without adding a drawing.
     #[test]
     fn open_path_reads_in_the_background_and_reports_failure() {
-        let mut app = CadApp::new(Session::new(), Services { pick_open: None, pick_save: None });
+        let mut app = CadApp::new(Session::new(), Services { pick_open: None, pick_save: None, pick_folder: None });
         let before = app.session.docs.len();
         let missing = std::env::temp_dir().join(format!("cadcraft-missing-{}.dxf", std::process::id()));
         let p = missing.to_string_lossy().to_string();

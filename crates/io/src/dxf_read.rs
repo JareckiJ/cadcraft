@@ -2063,6 +2063,7 @@ impl Objects {
             let st = MLeaderStyle {
                 name: name.clone(),
                 arrow_size: num(44, def.arrow_size, 0.0),
+                arrow_block: t.s(341).and_then(|h| rx.brs.get(&h.trim().to_ascii_uppercase()).cloned()).unwrap_or_default(),
                 text_height: t.f(45).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(def.text_height),
                 landing_gap: num(42, def.landing_gap, 0.0),
                 dogleg: num(43, def.dogleg, 0.0),
@@ -2193,6 +2194,12 @@ fn page_setup(t: &T) -> PageSetup {
         p.height_mm = w.max(h);
     }
     p.margins_mm = [mm(40, p.margins_mm[0]), mm(41, p.margins_mm[1]), mm(42, p.margins_mm[2]), mm(43, p.margins_mm[3])];
+    // Plot paper units: 0 inches, 1 millimetres (2 pixels: raster devices, drawn as millimetres).
+    p.mm_units = match t.i(72) {
+        Some(0) => Some(false),
+        Some(1 | 2) => Some(true),
+        _ => None,
+    };
     // Plot rotation 1 or 3 turns the media a quarter turn; media defined wider than tall is
     // already landscape.
     let rotated = matches!(t.i(73), Some(1 | 3));

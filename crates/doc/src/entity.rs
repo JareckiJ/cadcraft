@@ -710,6 +710,10 @@ pub struct MLeader {
     pub style: String,
     #[serde(default = "one")]
     pub arrow_size: f64,
+    /// Arrowhead of the leader lines: a DIMBLK-style name (`_DotSmall`, `_Open30`, `_None`…) or a
+    /// user arrowhead block of the drawing; empty for the style's (closed filled by default).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub arrow: String,
     /// Leader lines are smooth curves through their points (leader type Spline). An empty
     /// `leaders` is a multileader without a leader line (leader type None).
     #[serde(default)]
@@ -720,6 +724,15 @@ pub struct MLeader {
 }
 
 impl MLeader {
+    /// The arrowhead it draws: its own, else its style's (in `d`).
+    pub fn arrow_in<'a>(&'a self, d: &'a crate::Drawing) -> &'a str {
+        if self.arrow.trim().is_empty() {
+            d.mleader_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&self.style)).map_or("", |s| s.arrow_block.as_str())
+        } else {
+            &self.arrow
+        }
+    }
+
     /// Each leader line as drawn: through its points to the landing, smoothed for spline leaders.
     pub fn leader_paths(&self) -> Vec<Vec<Vec2>> {
         self.leaders

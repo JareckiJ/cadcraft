@@ -65,6 +65,7 @@ fn multileader_styles_and_current_style_round_trip() {
     let callout = MLeaderStyle {
         name: "Callout".into(),
         arrow_size: 2.0,
+        arrow_block: "_DotSmall".into(),
         text_height: 3.0,
         landing_gap: 1.0,
         dogleg: 5.0,
@@ -97,6 +98,10 @@ fn layout_page_setup_and_paper_view_round_trip() {
     second.page.lineweights = false;
     second.page.plot_area = "window".into();
     second.page.device = "DWG To PDF.pc3".into();
+    // An inch drawing's layouts are written with inch paper units, and read back saying so.
+    for l in &mut d.layouts {
+        l.page.mm_units = Some(false);
+    }
     let r = round_trip(&d);
     for (a, b) in d.layouts.iter().zip(&r.layouts) {
         assert_eq!(a.name, b.name);
@@ -104,6 +109,23 @@ fn layout_page_setup_and_paper_view_round_trip() {
         assert_eq!(a.view, b.view, "{}", a.name);
     }
     assert_eq!(r.layouts.len(), d.layouts.len());
+}
+
+#[test]
+fn a_layout_in_millimetres_in_an_inch_drawing_is_drawn_in_millimetres() {
+    // As AutoCAD writes it: MEASUREMENT 0 (inches) but the layout's plot paper units are mm, so
+    // paper space is in millimetres and an A3 sheet is 420 × 297 units, not 16.5 × 11.7.
+    let mut d = Drawing::new_imperial();
+    let l = d.layouts.get_mut(0).expect("Layout1");
+    l.page.width_mm = 297.0;
+    l.page.height_mm = 420.0;
+    l.page.margins_mm = [0.0; 4];
+    l.page.mm_units = Some(true);
+    let r = round_trip(&d);
+    let page = &r.layouts.first().expect("Layout1").page;
+    assert_eq!(page.mm_units, Some(true));
+    let sheet = cadcraft_render::paper::Sheet::from_page(page, cadcraft_render::paper::paper_unit_mm(&r));
+    assert!((sheet.size.x - 420.0).abs() < 1e-9 && (sheet.size.y - 297.0).abs() < 1e-9, "{:?}", sheet.size);
 }
 
 #[test]

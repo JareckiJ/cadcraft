@@ -1552,6 +1552,7 @@ fn mleader_is_written_as_multileader() {
         text: Some(text),
         style: "Standard".into(),
         arrow_size: 2.5,
+        arrow: String::new(),
         spline: false,
         block: None,
     };

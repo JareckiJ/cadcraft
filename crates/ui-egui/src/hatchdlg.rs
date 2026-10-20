@@ -22,6 +22,10 @@ pub(crate) const ORIGIN_MODES: [&str; 5] = ["bottomLeft", "bottomRight", "topRig
 #[derive(Clone, Debug, PartialEq)]
 pub struct Fill {
     pub gradient: bool,
+    /// The Custom Patterns tab is open (a pattern from a `.pat` file in the user's folder).
+    pub custom: bool,
+    /// The `.pat` file of a custom pattern: loaded when OK is pressed.
+    pub pattern_file: Option<String>,
     pub pattern: String,
     pub scale: f64,
     /// Pattern or gradient angle, degrees.
@@ -76,6 +80,8 @@ pub fn create_state(d: &Drawing, uid: u64, gradient: bool) -> HatchDlgState {
     let origin_mode = mode.checked_sub(1).and_then(|i| usize::try_from(i).ok()).and_then(|i| ORIGIN_MODES.get(i)).copied().unwrap_or("bottomLeft");
     let fill = Fill {
         gradient,
+        custom: false,
+        pattern_file: None,
         pattern: h.str("HPNAME", "ANSI31"),
         scale,
         angle,
@@ -347,6 +353,16 @@ pub fn resume(app: &mut CadApp) {
 /// OK: run the dialog's command. True when the dialog closes; a failed command keeps it open
 /// with the error (the drawing is unchanged).
 pub fn ok(app: &mut CadApp) -> bool {
+    // A custom pattern joins the pattern list from its file first.
+    let file = app.hatch_dlg.as_ref().filter(|st| st.fill.custom && !st.fill.gradient).and_then(|st| st.fill.pattern_file.clone());
+    if let Some(file) = file
+        && let Err(e) = app.run("hatch.patterns", json!({ "file": file }))
+    {
+        if let Some(st) = app.hatch_dlg.as_mut() {
+            st.error = Some(e);
+        }
+        return false;
+    }
     let Some(call) = app.hatch_dlg.as_ref().map(ok_call) else { return true };
     let Some((cmd, p)) = call else {
         app.hatch_dlg = None;
@@ -371,6 +387,8 @@ enum Action {
     Ok,
     Cancel,
     Pick(PickMode),
+    /// Choose the Custom Patterns folder.
+    BrowseFolder,
 }
 
 fn shape_label(name: &str) -> &'static str {
@@ -412,11 +430,13 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     };
     let title = if st.edit.is_empty() { crate::tl!("Hatch and Gradient") } else { crate::tl!("Hatch Edit") };
     let mut action = Action::None;
+    let mut folder = app.ui.pattern_folder.clone();
+    let can_browse = app.services.pick_folder.is_some();
     egui::Window::new(title).id(egui::Id::new("hatch_dialog")).open(open).collapsible(false).resizable(false).show(ctx, |ui| {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(340.0);
-                fill_ui(ui, &mut st.fill, &mut action);
+                ui.set_width(if st.fill.custom { 400.0 } else { 340.0 });
+                fill_ui(ui, &mut st.fill, &mut action, &mut folder, can_browse);
             });
             // Space, not a vertical separator: a separator takes the height available, and the
             // window grew by it every frame until the buttons left the screen.
@@ -441,6 +461,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         });
     });
     app.hatch_dlg = Some(st);
+    app.ui.pattern_folder = folder;
     match action {
         Action::Ok => {
             if ok(app) {
@@ -452,6 +473,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             *open = false;
         }
         Action::Pick(mode) => start_pick(app, mode),
+        Action::BrowseFolder => {
+            if let Some(dir) = app.services.pick_folder.as_ref().and_then(|pick| pick()) {
+                app.ui.pattern_folder = dir;
+                crate::custom_patterns::reload();
+            }
+        }
         Action::None => {
             if !*open {
                 app.hatch_dlg = None;
@@ -460,13 +487,37 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
-fn fill_ui(ui: &mut egui::Ui, f: &mut Fill, action: &mut Action) {
+fn fill_ui(ui: &mut egui::Ui, f: &mut Fill, action: &mut Action, folder: &mut String, can_browse: bool) {
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut f.gradient, false, crate::tl!("Pattern"));
-        ui.selectable_value(&mut f.gradient, true, crate::tl!("Gradient"));
+        if ui.selectable_label(!f.gradient && !f.custom, crate::tl!("Pattern")).clicked() {
+            f.gradient = false;
+            f.custom = false;
+        }
+        if ui.selectable_label(f.gradient, crate::tl!("Gradient")).clicked() {
+            f.gradient = true;
+            f.custom = false;
+        }
+        if ui.selectable_label(!f.gradient && f.custom, crate::tl!("Custom Patterns")).clicked() {
+            f.gradient = false;
+            f.custom = true;
+        }
     });
     ui.separator();
-    if f.gradient {
+    if f.custom && !f.gradient {
+        if let crate::custom_patterns::TabAction::Browse = crate::custom_patterns::tab_ui(ui, folder, &mut f.pattern, &mut f.pattern_file, can_browse)
+        {
+            *action = Action::BrowseFolder;
+        }
+        ui.add_space(4.0);
+        egui::Grid::new("hatch_custom_pattern").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+            ui.label(crate::tl!("Angle"));
+            ui.add(egui::DragValue::new(&mut f.angle).speed(1.0).range(-360.0..=360.0).clamp_existing_to_range(false).suffix("°"));
+            ui.end_row();
+            ui.label(crate::tl!("Scale"));
+            ui.add(egui::DragValue::new(&mut f.scale).speed(0.05).range(0.0001..=1.0e6).clamp_existing_to_range(false));
+            ui.end_row();
+        });
+    } else if f.gradient {
         egui::Grid::new("hatch_gradient").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
             ui.label(crate::tl!("Color 1"));
             if let Some(c) = crate::layers::color_button(ui, egui::Id::new("hatch_color1"), f.color1, false, 160.0) {

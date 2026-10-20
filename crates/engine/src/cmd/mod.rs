@@ -32,6 +32,7 @@ mod pline_opts;
 pub mod plotters;
 mod props;
 pub use props::MatchProps;
+pub use props::{missing_fonts, substitute_font};
 mod qselect;
 mod selecttools;
 mod settings;

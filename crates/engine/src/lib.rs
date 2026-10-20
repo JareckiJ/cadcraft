@@ -43,7 +43,7 @@ pub use cadcraft_geom as geom;
 pub use cadcraft_render as render;
 pub use cmd::hatch::{HatchPicks, PatternChoice, PickMode, pattern_choices};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
-pub use prompt::{Accept, Drag, Input, Interactive, Picker, Prompt, Step};
+pub use prompt::{Accept, Drag, EditorKind, Input, Interactive, Picker, Prompt, Step, TextEditor};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -1269,6 +1269,11 @@ impl Session {
         }
         self.pending_window = None;
         self.select_mode = None;
+        // TRIM and EXTEND keep their edges selected (highlighted) while they run; they stay
+        // selected no longer than the command, however it ends.
+        if matches!(run.id.as_str(), "trim" | "extend") {
+            self.set_selection(Vec::new());
+        }
         let label = find_command(&run.id).map(|c| c.label).unwrap_or("Command");
         let _ = cancelled;
         if let Some(m) = cmd::blocks::refedit::after_command(self, &run.before, &run.id) {
@@ -1345,6 +1350,11 @@ impl Session {
     /// ([`Interactive::editing_mtext`]).
     pub fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         self.running.as_ref().and_then(|r| r.machine.editing_mtext())
+    }
+
+    /// The text the running command edits in place ([`Interactive::text_editor`]).
+    pub fn text_editor(&self) -> Option<TextEditor> {
+        self.running.as_ref().and_then(|r| r.machine.text_editor())
     }
 
     pub fn current_prompt(&self) -> Option<Prompt> {

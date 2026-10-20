@@ -214,6 +214,13 @@ impl Pen<'_> {
         let (nx, ny) = (-uy, ux);
         self.tri([(x, y), (x - ux * 3.0 + nx * 1.4, y - uy * 3.0 + ny * 1.4), (x - ux * 3.0 - nx * 1.4, y - uy * 3.0 - ny * 1.4)], c);
     }
+    /// A larger arrowhead than [`Pen::arrow_tip`]: `len` long, `half` wide either side.
+    fn big_arrow(&self, x: f32, y: f32, dx: f32, dy: f32, len: f32, half: f32, c: Color32) {
+        let l = (dx * dx + dy * dy).sqrt().max(1e-3);
+        let (ux, uy) = (dx / l, dy / l);
+        let (nx, ny) = (-uy, ux);
+        self.tri([(x, y), (x - ux * len + nx * half, y - uy * len + ny * half), (x - ux * len - nx * half, y - uy * len - ny * half)], c);
+    }
     fn text(&self, x: f32, y: f32, s: &str, size: f32, c: Color32) {
         self.p.text(self.at(x, y), egui::Align2::CENTER_CENTER, s, egui::FontId::proportional(size * self.sc()), c);
     }
@@ -481,20 +488,24 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.la(14.0, 21.0, 19.0, 21.0);
         }
         Move => {
-            pen.la(12.0, 3.0, 12.0, 21.0);
-            pen.la(3.0, 12.0, 21.0, 12.0);
-            pen.arrow_tip(12.0, 2.0, 0.0, -1.0, a);
-            pen.arrow_tip(12.0, 22.0, 0.0, 1.0, a);
-            pen.arrow_tip(2.0, 12.0, -1.0, 0.0, a);
-            pen.arrow_tip(22.0, 12.0, 1.0, 0.0, a);
+            pen.la(12.0, 6.0, 12.0, 18.0);
+            pen.la(6.0, 12.0, 18.0, 12.0);
+            pen.big_arrow(12.0, 1.5, 0.0, -1.0, 5.5, 3.3, a);
+            pen.big_arrow(12.0, 22.5, 0.0, 1.0, 5.5, 3.3, a);
+            pen.big_arrow(1.5, 12.0, -1.0, 0.0, 5.5, 3.3, a);
+            pen.big_arrow(22.5, 12.0, 1.0, 0.0, 5.5, 3.3, a);
         }
         Copy => {
             pen.rect(3.0, 3.0, 11.0, 13.0, b);
             pen.rect(10.0, 8.0, 11.0, 13.0, a);
         }
         Rotate => {
-            pen.arc(12.0, 12.0, 8.0, 100.0, 380.0, a);
-            pen.arrow_tip(10.6, 4.1, -1.0, 0.1, a);
+            // Most of a circle, counter-clockwise, ending in an arrowhead along it.
+            pen.arc(12.0, 12.0, 8.0, 50.0, 300.0, a);
+            let end = 300f32.to_radians();
+            let (px, py) = (12.0 + 8.0 * end.cos(), 12.0 - 8.0 * end.sin());
+            let (ux, uy) = (-end.sin(), -end.cos());
+            pen.big_arrow(px + ux * 4.5, py + uy * 4.5, ux, uy, 5.5, 3.3, a);
             pen.dot(12.0, 12.0);
         }
         Scale => {
@@ -519,20 +530,22 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.la(4.0, 18.0, 4.0, 22.0);
         }
         Trim => {
-            pen.l(8.0, 2.0, 8.0, 22.0);
-            pen.l(16.0, 2.0, 16.0, 22.0);
-            pen.l(2.0, 12.0, 8.0, 12.0);
-            pen.l(16.0, 12.0, 22.0, 12.0);
-            for x in [9.5, 12.0, 14.5] {
-                pen.la(x, 12.0, x + 1.0, 12.0);
-            }
-            pen.poly(&[(10.0, 17.0), (12.0, 15.0), (14.0, 17.0)], false, a);
+            // Scissors cutting a line in two: the line's halves apart under the blades.
+            pen.l(1.5, 20.0, 9.0, 20.0);
+            pen.l(15.0, 20.0, 22.5, 20.0);
+            pen.c(7.5, 4.5, 3.0, a);
+            pen.c(16.5, 4.5, 3.0, a);
+            pen.poly(&[(9.3, 6.9), (14.6, 18.5)], false, a);
+            pen.poly(&[(14.7, 6.9), (9.4, 18.5)], false, a);
+            pen.tri([(14.6, 18.5), (13.0, 13.5), (11.8, 14.6)], a);
+            pen.tri([(9.4, 18.5), (11.0, 13.5), (12.2, 14.6)], a);
+            pen.fill_c(12.0, 12.6, 1.3, pen.pt);
         }
         Extend => {
-            pen.l(20.0, 2.0, 20.0, 22.0);
-            pen.l(3.0, 12.0, 11.0, 12.0);
-            pen.la(11.0, 12.0, 19.0, 12.0);
-            pen.arrow_tip(19.5, 12.0, 1.0, 0.0, a);
+            pen.l(21.0, 2.0, 21.0, 22.0);
+            pen.l(2.0, 12.0, 9.0, 12.0);
+            pen.la(9.0, 12.0, 14.0, 12.0);
+            pen.big_arrow(20.5, 12.0, 1.0, 0.0, 7.0, 4.0, a);
         }
         Fillet => {
             pen.l(4.0, 20.0, 4.0, 12.0);
@@ -599,7 +612,21 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.poly(&[(20.0, 6.0), (20.0, 11.0), (11.0, 11.0), (11.0, 14.0)], false, b);
             pen.fill_rect(9.5, 14.0, 3.0, 8.0, a);
         }
-        DimLinear | DimAligned | DimBaseline | DimContinue | QDim => {
+        DimAligned => {
+            // The linear dimension's figure turned 13° counter-clockwise, as an aligned
+            // dimension follows a slanted object.
+            let (sin, cos) = 13f32.to_radians().sin_cos();
+            let r = |x: f32, y: f32| (12.0 + (x - 12.0) * cos + (y - 12.0) * sin, 12.0 - (x - 12.0) * sin + (y - 12.0) * cos);
+            let line = |x1: f32, y1: f32, x2: f32, y2: f32, c: Color32| pen.poly(&[r(x1, y1), r(x2, y2)], false, c);
+            let (y0, y1) = (9.0, 19.0);
+            line(4.0, y1, 4.0, 6.0, b);
+            line(20.0, y1, 20.0, 6.0, b);
+            line(4.0, y0, 20.0, y0, a);
+            let ((ax, ay), (bx, by)) = (r(4.0, y0), r(20.0, y0));
+            pen.arrow_tip(ax, ay, -cos, sin, a);
+            pen.arrow_tip(bx, by, cos, -sin, a);
+        }
+        DimLinear | DimBaseline | DimContinue | QDim => {
             let (y0, y1) = (8.0, 18.0);
             pen.l(4.0, y1, 4.0, 5.0);
             pen.l(20.0, y1, 20.0, 5.0);
@@ -612,7 +639,6 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                     pen.l(12.0, y1, 12.0, 5.0);
                 }
                 QDim => pen.text(12.0, 15.0, "Q", 7.0, b),
-                DimAligned => {}
                 _ => pen.text(12.0, 14.5, "1.5", 6.0, b),
             }
         }
@@ -910,6 +936,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
 
 /// A shared button interaction with CADCraft's original multicolor icon painting.
 pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, tooltip: &str, selected: bool) -> egui::Response {
+    button_bare(ui, icon, size, tooltip, selected).on_hover_text(crate::i18n::t(tooltip))
+}
+
+/// [`button`] without its hover text, for callers that show a richer tooltip
+/// ([`crate::toolbar::tool_button`]).
+pub fn button_bare(ui: &mut egui::Ui, icon: Icon, size: f32, tooltip: &str, selected: bool) -> egui::Response {
     let t = Tokens::get();
     let visuals = |fill| ButtonVisuals { fill, stroke: Stroke::NONE, icon: t.icon };
     let style = IconButtonStyle {
@@ -926,7 +958,7 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, tooltip: &str, selected:
         paint(ui.painter(), rect.shrink(size * 0.08), icon, !ui.is_enabled());
     });
     crate::control::record_widget(ui, &resp, tooltip, "button", Some(selected));
-    resp.on_hover_text(crate::i18n::t(tooltip))
+    resp
 }
 
 /// Labels and focus outlines for controls whose existing geometry is painted by the app.
@@ -945,9 +977,8 @@ pub fn describe_control(ui: &egui::Ui, response: &egui::Response, label: &str, s
                 node.set_selected(selected);
             }
         });
-        if response.clicked() {
-            response.request_focus();
-        }
+        // A click leaves the keyboard with the drawing (shortcuts such as Ctrl+V and typed
+        // commands keep working after switching drawings); Tab still reaches the tab.
     }
     if response.has_focus() && response.rect.width() > 4.0 && response.rect.height() > 4.0 {
         ui.painter().rect_stroke(response.rect.shrink(2.0), 2.0, Stroke::new(1.0, Tokens::get().accent), egui::StrokeKind::Inside);

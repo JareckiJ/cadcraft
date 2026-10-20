@@ -1330,3 +1330,327 @@
 	Justify	За шириною
 	Text color	Колір тексту
 	Click the ruler to add a tab stop, right-click to remove one	Натисніть на лінійку, щоб додати табуляцію; права кнопка видаляє її
+	Add Separator	Додати роздільник
+	Add to Tool Bar	Додати на панель інструментів
+	Alias:	Псевдонім:
+	Command:	Команда:
+	Commands	Команди
+	Customize Tool Bar	Налаштування панелі інструментів
+	Customize Tool Bar...	Налаштувати панель інструментів...
+	Dock Tool Bar	Закріпити панель інструментів
+	Dock at Left	Закріпити ліворуч
+	Dock at Top	Закріпити зверху
+	Drag buttons along the Tool Bar to reorder them, or its handle to dock it.	Перетягуйте кнопки вздовж панелі, щоб змінити їх порядок, а маркер панелі — щоб закріпити її.
+	Drag to dock the Tool Bar at the top or on the left	Перетягніть, щоб закріпити панель інструментів зверху або ліворуч
+	Hide Tool Bar	Сховати панель інструментів
+	Left (column)	Ліворуч (стовпчик)
+	Move Down	Вниз
+	Move Tool Bar Button	Перемістити кнопку панелі інструментів
+	Move Up	Вгору
+	Position:	Розташування:
+	Remove from Tool Bar	Прибрати з панелі інструментів
+	Reset Tool Bar	Скинути панель інструментів
+	Reset to Default	Скинути до типових
+	Search:	Пошук:
+	Separator	Роздільник
+	Shortcut:	Клавіші:
+	Show Tool Bar	Показувати панель інструментів
+	Tool Bar Position	Розташування панелі інструментів
+	Tool Bar buttons	Кнопки панелі інструментів
+	Top	Зверху
+	Top (row)	Зверху (рядок)
+	Standard Tool Bar	Стандартна панель інструментів
+	Tool Sets Tool Bar	Панель «Набори інструментів»
+	Layers Tool Bar	Панель «Шари»
+	More Tool Sets bar commands	Інші команди панелі «Набори інструментів»
+	More Layers bar commands	Інші команди панелі «Шари»
+	Current layer:	Поточний шар:
+	Tool Bar:	Панель:
+	Tool Bars	Панелі інструментів
+	Show on Tool Bar	Показувати на панелі
+	Current Layer	Поточний шар
+	Fonts	Шрифти
+	Font folders	Теки шрифтів
+	Put TrueType or OpenType fonts (.ttf, .otf, .ttc) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins.	Покладіть шрифти TrueType або OpenType (.ttf, .otf, .ttc) у теку й додайте її сюди. Ці теки переглядаються раніше за системні шрифти; тека вище у списку має пріоритет.
+	No font folders yet	Тек шрифтів ще немає
+	This folder does not exist	Такої теки немає
+	Add Folder...	Додати теку...
+	Folder path	Шлях до теки
+	Look for Fonts Again	Знайти шрифти знову
+	After adding or removing font files in a folder	Після додавання чи вилучення файлів шрифтів у теці
+	Fonts found in these folders:	Шрифтів знайдено в цих теках:
+	Every font this drawing uses was found.	Усі шрифти цього креслення знайдено.
+	Fonts this drawing uses that were not found:	Шрифти креслення, яких не знайдено:
+	style	стиль
+	Fonts not found:	Не знайдено шрифтів:
+	Text in them is drawn with	Текст у них малюється шрифтом
+	Add a font folder in Tools ▸ Options ▸ Fonts.	Додайте теку шрифтів: Інструменти ▸ Параметри ▸ Шрифти.
+	Cell	Комірка
+	Tab: next cell · Shift+Tab: previous · Alt+↑↓: cell above, below	Tab — наступна комірка · Shift+Tab — попередня · Alt+↑↓ — комірка вище, нижче
+	Tab: next cell	Tab — наступна комірка
+	Previous cell (Shift+Tab)	Попередня комірка (Shift+Tab)
+	Next cell (Tab)	Наступна комірка (Tab)
+	Enter to finish	Enter — завершити
+	the measured value	виміряне значення
+	Insert <>	Вставити <>
+	Insert the measured value at the cursor	Вставити виміряне значення в позицію курсора
+	Measured Value Only	Лише виміряне
+	Replace the text with the measured value	Замінити текст виміряним значенням
+	Missing Fonts	Відсутні шрифти
+	List Fonts	Список шрифтів
+	Edit Text	Редагувати текст
+	Edit Table Cells	Редагувати комірки таблиці
+	Dimension Text	Текст розміру
+	Align left	За лівим краєм
+	Align right	За правим краєм
+	Additional symbols	Додаткові символи
+	Close (same as Cancel)	Закрити (те саме, що «Скасувати»)
+	Center line	Осьова лінія
+	Almost equal	Приблизно дорівнює
+	Not equal	Не дорівнює
+	Less than or equal	Менше або дорівнює
+	Greater than or equal	Більше або дорівнює
+	Multiplication	Множення
+	Division	Ділення
+	Square root	Квадратний корінь
+	Infinity	Нескінченність
+	Delta	Дельта
+	Ohm	Ом
+	Micro	Мікро
+	Pi	Пі
+	Alpha	Альфа
+	Beta	Бета
+	Gamma	Гамма
+	Phi	Фі
+	Squared	У квадраті
+	Cubed	У кубі
+	One half	Одна друга
+	One quarter	Одна четверта
+	Three quarters	Три чверті
+	Per mille	Проміле
+	Bullet	Маркер
+	Number sign	Знак номера
+	Application menu	Меню програми
+	Batch Print...	Пакетний друк...
+	A style with this name already exists.	Стиль із такою назвою вже є.
+	Above	Над лінією
+	Above Dim Line	Над розмірною лінією
+	Above dimension text	Над текстом розміру
+	Aligned with dimension line	Уздовж розмірної лінії
+	Alignment	Орієнтація
+	All styles	Усі стилі
+	Alt enabled	Альт. одиниці
+	Alt format	Альт. формат
+	Alt multiplier	Альт. множник
+	Alt precision	Альт. точність
+	Alt prefix	Альт. префікс
+	Alt round	Альт. округлення
+	Alt suffix	Альт. суфікс
+	Alternate Units	Альтернативні одиниці
+	Alternate units	Альтернативні одиниці
+	Always keep text between ext lines	Завжди розміщувати текст між виносними
+	Angle format	Формат кутів
+	Angle precision	Точність кутів
+	Angular dimensions	Кутові розміри
+	Annotative	Анотативний
+	Arc length symbol	Символ довжини дуги
+	Architectural	Архітектурні
+	Architectural Stacked	Архітектурні (дріб)
+	Architectural tick	Архітектурна засічка
+	Arrow 1	Стрілка 1
+	Arrow 2	Стрілка 2
+	Arrow size	Розмір стрілки
+	Arrowheads	Стрілки
+	Arrows	Стрілки
+	At Ext Line 1	Біля 1-ї виносної
+	At Ext Line 2	Біля 2-ї виносної
+	Baseline spacing	Крок базових розмірів
+	Basic	Номінальний
+	Below	Під лінією
+	Beside the dimension line	Поруч із розмірною лінією
+	Both text and arrows	Текст і стрілки
+	Bottom	Знизу
+	Box filled	Квадрат залитий
+	Center Vertically	По центру по вертикалі
+	Center marks	Маркери центру
+	Closed blank	Замкнена порожня
+	Closed filled	Замкнена залита
+	Compare Dimension Styles	Порівняння розмірних стилів
+	Compare...	Порівняти...
+	Compare:	Порівняти:
+	Copy of	Копія
+	Create New Dimension Style	Новий розмірний стиль
+	Current dimension style:	Поточний розмірний стиль:
+	Datum triangle	Трикутник бази
+	Datum triangle filled	Трикутник бази залитий
+	Decimal	Десяткові
+	Decimal Degrees	Десяткові градуси
+	Decimal separator	Десятковий роздільник
+	Degrees Minutes Seconds	Градуси/хвилини/секунди
+	Deviation	Відхилення
+	Diagonal	Діагональна
+	Differences found:	Знайдено відмінностей:
+	Dim line 1	Розм. лінія 1 прихована
+	Dim line 2	Розм. лінія 2 прихована
+	Dim line color	Колір розм. лінії
+	Dim line inside	Розм. лінія всередині
+	Dim line lineweight	Вага розм. лінії
+	Dim prefix	Префікс
+	Dim roundoff	Округлення
+	Dim scale linear	Масштаб вимірів
+	Dim scale overall	Глобальний масштаб
+	Dim suffix	Суфікс
+	Dim units	Одиниці
+	Dimension Style Manager	Диспетчер розмірних стилів
+	Dimension lines	Розмірні лінії
+	Display alternate units	Показувати альтернативні одиниці
+	Dot	Точка
+	Dot blank	Точка порожня
+	Dot small	Точка мала
+	Dot small blank	Точка мала порожня
+	Draw dim line between ext lines	Розмірна лінія між виносними
+	Draw frame around text	Рамка навколо тексту
+	Either text or arrows (best fit)	Текст або стрілки (оптимально)
+	Engineering	Інженерні
+	Ext line 1	Виносна 1 прихована
+	Ext line 2	Виносна 2 прихована
+	Ext line color	Колір виносних
+	Ext line ext	Подовження виносних
+	Ext line fixed	Фікс. довжина виносних
+	Ext line fixed length	Довжина виносних
+	Ext line lineweight	Вага виносних
+	Ext line offset	Відступ виносних
+	Extend beyond dim lines	Подовження за розмірні
+	Extend beyond ticks	Подовження за засічки
+	Extension lines	Виносні лінії
+	Fine tuning	Припасування
+	Fit	Розміщення
+	Fit options	Параметри розміщення
+	Fixed length extension lines	Виносні лінії фікс. довжини
+	Fraction format	Формат дробів
+	Fraction height scale	Масштаб висоти дробів
+	Fractional	Дробові
+	Fractional Stacked	Дробові (дріб)
+	Gradians	Гради
+	ISO standard	Згідно з ISO
+	Integral	Інтеграл
+	JIS	JIS
+	Jog angle	Кут зламу
+	Limits	Граничні розміри
+	Linear dimensions	Лінійні розміри
+	Lines	Лінії
+	Lines & Arrows	Лінії та стрілки
+	Linetype ext line 1	Тип виносної 1
+	Linetype ext line 2	Тип виносної 2
+	List:	Показати:
+	Lower value	Нижнє значення
+	Mark	Маркер
+	Measurement scale factor	Масштаб вимірів
+	Method	Спосіб
+	Middle	Посередині
+	Modify Dimension Style:	Зміна розмірного стилю:
+	Modify...	Змінити...
+	Move Text Only	Перемістити лише текст
+	Move outside the extension lines	Виносити за виносні лінії
+	Move with Dim Line	Перемістити з розмірною лінією
+	Move with Leader	Перемістити з виноскою
+	Multiplier for alt units	Множник альт. одиниць
+	New Dimension Style:	Новий розмірний стиль:
+	New Style Name:	Назва нового стилю:
+	New...	Новий...
+	Not Stacked	Не в стовпчик
+	Offset from dim line	Відступ від розмірної лінії
+	Offset from origin	Відступ від об'єкта
+	Open 30	Розімкнена 30
+	Origin indicator	Початок відліку
+	Origin indicator 2	Початок відліку 2
+	Outside	Ззовні
+	Over Ext Line 1	Над 1-ю виносною
+	Over Ext Line 2	Над 2-ю виносною
+	Over dimension line, with leader	Над розмірною лінією, з виноскою
+	Over dimension line, without leader	Над розмірною лінією, без виноски
+	Override Current Style:	Перевизначення поточного стилю:
+	Override...	Перевизначити...
+	Overrides apply to new dimensions in the current style.	Перевизначення застосовуються до нових розмірів поточного стилю.
+	Overrides apply to the current style	Перевизначення задаються для поточного стилю
+	Preceding dimension text	Перед текстом розміру
+	Precision	Точність
+	Prefix	Префікс
+	Preview of:	Зразок:
+	Primary Units	Основні одиниці
+	Radians	Радіани
+	Radius jog dimension	Радіус зі зламом
+	Rename	Перейменувати
+	Reset Text Position	Відновити положення тексту
+	Right angle	Прямий кут
+	Round distances to	Округлювати до
+	Round off	Округлення
+	Scale for dimension features	Масштаб розмірних елементів
+	Scaling for height	Масштаб висоти
+	Scientific	Наукові
+	Second	Друга
+	Size	Розмір
+	Start With:	На основі:
+	Styles in use	Використовувані стилі
+	Styles:	Стилі:
+	Suffix	Суфікс
+	Suppress arrows if they don't fit inside	Приховувати стрілки, якщо не вміщуються
+	Suppress dim line 1	Приховати розмірну лінію 1
+	Suppress dim line 2	Приховати розмірну лінію 2
+	Suppress ext line 1	Приховати виносну 1
+	Suppress ext line 2	Приховати виносну 2
+	Suppress leading zeros	Приховувати початкові нулі
+	Suppress trailing zeros	Приховувати кінцеві нулі
+	Symbols and Arrows	Символи та стрілки
+	Symmetrical	Симетрично
+	Text alignment	Орієнтація тексту
+	Text appearance	Властивості тексту
+	Text frame	Рамка тексту
+	Text inside	Текст усередині
+	Text movement	Переміщення тексту
+	Text offset	Відступ тексту
+	Text placement	Вирівнювання тексту
+	Text pos hor	Текст по горизонталі
+	Text pos vert	Текст по вертикалі
+	The two styles are the same.	Стилі однакові.
+	Tick size	Розмір засічки
+	Tolerance display	Відображення допуску
+	Tolerance format	Формат допусків
+	Tolerance limit lower	Нижній допуск
+	Tolerance limit upper	Верхній допуск
+	Tolerance pos vert	Положення допуску
+	Tolerance precision	Точність допуску
+	Tolerance text height	Висота тексту допуску
+	Tolerances	Допуски
+	Unit format	Формат одиниць
+	Units format	Формат одиниць
+	Upper value	Верхнє значення
+	Use overall scale of	Глобальний масштаб
+	Variable	Змінна
+	Vertical position	Положення по вертикалі
+	When text is not in the default position	Якщо текст не в стандартному положенні
+	Windows Desktop	Як у Windows
+	With:	З:
+	overrides	перевизначень
+	Measurement	Значення
+	User Arrow:	Користувацька:
+	Leaders	Виноски
+	Leader type	Тип виноски
+	Arrowhead	Стрілка
+	Arrowhead size	Розмір стрілки
+	Landing distance	Довжина полички
+	Straight	Пряма
+	Annotate	Анотації
+	3D Modeling	3D-моделювання
+	Float Panel	Плаваюча панель
+	Pin to Left	Закріпити ліворуч
+	Transform to Ribbon	Перетворити на стрічку
+	Move to Group	Перемістити в групу
+	Close Panel	Закрити панель
+	Custom Patterns	Власні зразки
+	Folder with hatch pattern files (.pat):	Тека з файлами зразків штрихування (.pat):
+	Browse...	Огляд...
+	Read the folder again	Прочитати теку знову
+	No hatch patterns (.pat files) in this folder	У цій теці немає зразків штрихування (файлів .pat)
+	Black	Чорна
+	Light Blue	Світло-блакитна

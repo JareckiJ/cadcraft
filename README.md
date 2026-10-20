@@ -10,11 +10,11 @@
 <h1 align="center">CADCraft</h1>
 
 <p align="center">
-  <b>Computer-aided design and drafting; an open-source, clean-room reimplementation of Autodesk AutoCAD, rebuilt in pure Rust.</b>
+  <b>Computer-aided design and drafting; an open-source, modern 2D and 3D CAD application, built in pure Rust.</b>
 </p>
 
 <p align="center">
-  A fast, open-source take on the AutoCAD workflow: the command line, object snaps, layers,
+  A fast, open-source CAD workflow: the command line, object snaps, layers,
   dimensions, hatches, blocks and DXF drawings you already know. It runs natively on macOS,
   Windows, Linux and FreeBSD, and in the browser via WebAssembly.<br>
   <i>By the ArtCraft team.</i>
@@ -247,6 +247,11 @@ accessible labels and keyboard focus. CADCraft keeps its multicolor icon painter
 disabled tint and tool commands. The native host saves workspace visibility and toolset choices
 atomically; `CADCRAFT_CONFIG_DIR` selects an isolated profile. Compact toolbar groups move into a
 More menu, and status readouts truncate with a full-value tooltip before they reach layout tabs.
+The Tool Bar docks at the top (a row of buttons) or on the left edge (a column): drag its handle,
+right-click it, or use **Window ▸ Tool Bar Position**. Drag a button along the bar to reorder it,
+right-click it to remove it, right-click any Tool Sets button to add it, or pick commands in
+**Window ▸ Customize Tool Bar...**. Every button's tooltip names the tool, its command, alias and
+shortcut; the bar's position and buttons are saved with the workspace.
 Painted toolbar and tab controls
 have accessible labels and visible keyboard focus. Property controls remain application-specific.
 
@@ -393,8 +398,6 @@ The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are tradem
 ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
 part of this repository and CADCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
 Forks and modified versions must remove them.
-
-<sub>Autodesk, AutoCAD and DWG are trademarks or registered trademarks of Autodesk, Inc. in the United States and/or other countries. CADCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Autodesk, Inc.; these names are used only to describe the workflows and file formats it is compatible with.</sub>
 
 <p align="center">
   <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>

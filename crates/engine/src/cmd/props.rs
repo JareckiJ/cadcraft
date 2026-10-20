@@ -16,7 +16,7 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline, dogleg (landing distance; 0 = no landing), textHeight}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -38,6 +38,15 @@ pub fn specs() -> Vec<CommandSpec> {
             .alias(&["st"])
             .params("{name, font?, bigFont?, height?, widthFactor?, oblique? (degrees), backwards?, upsideDown?, vertical?, annotative?, current?} → styles"),
         CommandSpec::new("style.list", "List Text Styles", run_style_list).params("{} → text styles").noundo(),
+        CommandSpec::new("fonts.missing", "Missing Fonts", run_fonts_missing)
+            .params("{} → [{style, font, substitute}]: text style fonts CADCraft can't find, and what it draws them with")
+            .noundo(),
+        CommandSpec::new("fonts.rescan", "Look for Fonts Again", run_fonts_rescan)
+            .params("{} → fonts.list: look again for fonts added to or removed from the font folders")
+            .noundo(),
+        CommandSpec::new("fonts.list", "List Fonts", run_fonts_list)
+            .params("{} → {folders, fonts: [{name, family?, user}]}: the fonts text styles can use, the user's font folders' first")
+            .noundo(),
         CommandSpec::new("style.rename", "Rename Text Style", run_style_rename).params("{from, to}"),
         CommandSpec::new("style.delete", "Delete Text Style", run_style_delete).params("{name} (not Standard, the current style or one in use)"),
         CommandSpec::new("style.current", "Set Current Text Style", run_style_current).params("{name}"),
@@ -202,6 +211,16 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let dim_style = str_param(p, "dimStyle")
         .map(|n| d.dim_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("dimension style `{n}` not found"))))
+        .transpose()?;
+    let mleader_style = str_param(p, "mleaderStyle")
+        .map(|n| {
+            d.mleader_styles
+                .iter()
+                .find(|st| st.name.eq_ignore_ascii_case(n))
+                .map(|st| st.name.clone())
+                .or_else(|| n.eq_ignore_ascii_case("Standard").then(|| "Standard".to_string()))
+                .ok_or_else(|| bad("properties.set", format!("multileader style `{n}` not found")))
+        })
         .transpose()?;
     let anno_scale = d.current_anno_scale();
     for h in &hs {
@@ -373,6 +392,38 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(st) = &dim_style {
                         dm.style.clone_from(st);
                         dm.block = None;
+                    }
+                }
+                EntityKind::MLeader(m) => {
+                    if let Some(st) = &mleader_style {
+                        m.style.clone_from(st);
+                    }
+                    if let Some(v) = str_param(p, "arrow") {
+                        m.arrow = v.trim().to_string();
+                    }
+                    if let Some(x) = num("arrowSize").filter(|x| *x >= 0.0) {
+                        m.arrow_size = x;
+                    }
+                    match str_param(p, "leaderType").map(str::to_ascii_lowercase).as_deref() {
+                        Some("spline") => m.spline = true,
+                        Some("straight") => m.spline = false,
+                        _ => {}
+                    }
+                    if let Some(x) = num("dogleg").filter(|x| *x >= 0.0) {
+                        // The content stays at the end of the landing.
+                        let land = m.landing.x;
+                        let side = |x: f64| if x >= land { 1.0 } else { -1.0 };
+                        let shift = x - m.dogleg;
+                        if let Some(t) = &mut m.text {
+                            t.insert.x += shift * side(t.insert.x);
+                        }
+                        if let Some(b) = &mut m.block {
+                            b.insert.x += shift * side(b.insert.x);
+                        }
+                        m.dogleg = x;
+                    }
+                    if let (Some(x), Some(t)) = (num("textHeight").filter(|x| *x > 0.0), &mut m.text) {
+                        t.height = x;
                     }
                 }
                 EntityKind::Hatch(h) => {
@@ -564,6 +615,41 @@ fn run_style(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn run_style_list(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(styles_json(s.doc()?))
+}
+
+/// The font a style font that can't be found is drawn with: FONTALT when it is found, else the
+/// built-in stroke font.
+pub fn substitute_font() -> String {
+    let alt = cadcraft_fonts::ttf::font_alt();
+    if !alt.is_empty() && cadcraft_fonts::ttf::find(&alt).is_some() { alt } else { cadcraft_fonts::BUILTIN_FONT.to_string() }
+}
+
+/// Text style fonts (and big fonts) of `d` that CADCraft can't find, once each.
+pub fn missing_fonts(d: &cadcraft_doc::Drawing) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for st in &d.text_styles {
+        let font = st.font.trim();
+        if !cadcraft_fonts::ttf::available(font) && !out.iter().any(|(_, f)| f.eq_ignore_ascii_case(font)) {
+            out.push((st.name.clone(), font.to_string()));
+        }
+    }
+    out
+}
+
+fn run_fonts_missing(s: &mut Session, _p: &Value) -> Result<Value> {
+    let sub = substitute_font();
+    Ok(json!(missing_fonts(s.doc()?).into_iter().map(|(style, font)| json!({ "style": style, "font": font, "substitute": sub })).collect::<Vec<_>>()))
+}
+
+fn run_fonts_rescan(s: &mut Session, p: &Value) -> Result<Value> {
+    cadcraft_fonts::ttf::rescan();
+    run_fonts_list(s, p)
+}
+
+fn run_fonts_list(_s: &mut Session, _p: &Value) -> Result<Value> {
+    let fonts: Vec<Value> =
+        cadcraft_fonts::ttf::installed().into_iter().map(|f| json!({ "name": f.name, "family": f.family, "user": f.user })).collect();
+    Ok(json!({ "folders": cadcraft_fonts::ttf::font_dirs(), "fonts": fonts }))
 }
 
 fn run_style_current(s: &mut Session, p: &Value) -> Result<Value> {

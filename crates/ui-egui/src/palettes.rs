@@ -126,9 +126,15 @@ fn command_known(id: &str) -> bool {
 
 pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
+    // Right-click anywhere in Tool Sets: where to put it (float, pin, ribbon, group, close).
+    let place = crate::docking::toolsets_place(app);
+    let panel_groups = crate::docking::toolsets_groups(app);
+    let mut panel_action: Option<crate::docking::ToolSetsAction> = None;
     egui::Frame::NONE.fill(t.panel).show(ui, |ui| {
         let r = ui.max_rect();
         let p = ui.painter().clone();
+        ui.interact(r, ui.id().with("ts_background"), Sense::click())
+            .context_menu(|ui| crate::docking::toolsets_menu(ui, place, &panel_groups, &mut panel_action));
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
@@ -164,6 +170,10 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         let mut toggle_group = None;
         let mut tool_visible: Option<(String, bool)> = None;
         let mut restore: Vec<String> = Vec::new();
+        // Right-click a tool: put it on a tool bar or take it off.
+        let toolbar_items: Vec<(crate::toolbar::Bar, Vec<String>)> =
+            crate::toolbar::Bar::ALL.into_iter().map(|bar| (bar, crate::toolbar::state(&app.ui, bar).items)).collect();
+        let mut to_toolbar: Option<(&'static str, crate::toolbar::Bar, bool)> = None;
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -220,7 +230,9 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                         continue;
                                     }
                                     ui.add_enabled_ui(command_known(cmd), |ui| {
-                                        if icons::button(ui, *icon, 40.0, tip, false).clicked() {
+                                        let resp = crate::toolbar::tool_button(ui, *icon, 40.0, cmd, tip);
+                                        toolbar_menu(&resp, cmd, &toolbar_items, &mut to_toolbar, (place, &panel_groups, &mut panel_action));
+                                        if resp.clicked() {
                                             clicked = Some(cmd);
                                         }
                                     });
@@ -236,7 +248,9 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                 ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
                                 for (icon, cmd, tip) in row.iter() {
                                     ui.add_enabled_ui(command_known(cmd), |ui| {
-                                        if icons::button(ui, *icon, 23.0, tip, false).clicked() {
+                                        let resp = crate::toolbar::tool_button(ui, *icon, 23.0, cmd, tip);
+                                        toolbar_menu(&resp, cmd, &toolbar_items, &mut to_toolbar, (place, &panel_groups, &mut panel_action));
+                                        if resp.clicked() {
                                             clicked = Some(cmd);
                                         }
                                     });
@@ -267,9 +281,49 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                 app.ui.collapsed_groups.push(g);
             }
         }
+        if let Some((cmd, bar, add)) = to_toolbar {
+            let id = if add { "ui.toolbar.add" } else { "ui.toolbar.remove" };
+            if let Err(e) = app.run(id, json!({ "command": cmd, "bar": bar.id() })) {
+                app.set_status(&e);
+            }
+        }
         if let Some(c) = clicked {
             app.cmd.buffer.clear();
             app.start(c);
+        }
+    });
+    if let Some(a) = panel_action
+        && let Err(e) = crate::docking::apply_toolsets(app, a, ui.ctx())
+    {
+        app.set_status(&e);
+    }
+}
+
+/// What the Tool Sets panel menu needs: where Tool Sets is, the groups it can join, and where the
+/// choice goes.
+type PanelMenu<'a> = (crate::docking::ToolSetsPlace, &'a [(crate::docking::Panel, String)], &'a mut Option<crate::docking::ToolSetsAction>);
+
+/// The right-click menu of a Tool Sets button: a tick per tool bar puts the tool on that bar or
+/// takes it off.
+fn toolbar_menu(
+    resp: &egui::Response,
+    cmd: &'static str,
+    bars: &[(crate::toolbar::Bar, Vec<String>)],
+    to_toolbar: &mut Option<(&'static str, crate::toolbar::Bar, bool)>,
+    panel: PanelMenu<'_>,
+) {
+    resp.context_menu(|ui| {
+        let (place, groups, out) = panel;
+        crate::docking::toolsets_menu(ui, place, groups, out);
+        ui.separator();
+        ui.label(egui::RichText::new(crate::tl!("Show on Tool Bar")).weak());
+        for (bar, items) in bars {
+            let on = items.iter().any(|i| i == cmd);
+            let mut checked = on;
+            if ui.checkbox(&mut checked, crate::i18n::t(bar.title())).changed() {
+                *to_toolbar = Some((cmd, *bar, checked));
+                ui.close();
+            }
         }
     });
 }
@@ -302,7 +356,7 @@ fn section_header(ui: &mut egui::Ui, title: &str) -> Rect {
     hr
 }
 
-fn swatch(p: &egui::Painter, r: Rect, c: Color) {
+pub(crate) fn swatch(p: &egui::Painter, r: Rect, c: Color) {
     let rgb = c.resolve(Color::Index(7), Color::Index(7));
     p.rect_filled(r, 1.0, Color32::from_rgb(rgb.0, rgb.1, rgb.2));
     p.rect_stroke(r, 1.0, Stroke::new(1.0, Color32::from_gray(30)), egui::StrokeKind::Inside);
@@ -341,6 +395,38 @@ pub fn right_palettes(app: &mut CadApp, ui: &mut egui::Ui) {
     });
 }
 
+/// A layer for the current-layer drop-downs: name, on, frozen, locked, colour.
+pub(crate) type LayerRow = (String, bool, bool, bool, Color);
+
+/// The current-layer drop-down's list: on/off, freeze/thaw and lock/unlock per layer; picking a
+/// name makes it current. The choice comes back in `set_current` or `toggle` (name, key, value).
+pub(crate) fn layer_list(
+    ui: &mut egui::Ui,
+    layers: &[LayerRow],
+    cur: &str,
+    set_current: &mut Option<String>,
+    toggle: &mut Option<(String, &'static str, bool)>,
+) {
+    for (name, on, frozen, locked, color) in layers {
+        ui.horizontal(|ui| {
+            if icons::button(ui, if *on { Icon::Bulb } else { Icon::BulbOff }, 18.0, "On/Off", false).clicked() {
+                *toggle = Some((name.clone(), "on", !*on));
+            }
+            if icons::button(ui, if *frozen { Icon::Snowflake } else { Icon::Sun }, 18.0, "Freeze/Thaw", false).clicked() {
+                *toggle = Some((name.clone(), "frozen", !*frozen));
+            }
+            if icons::button(ui, if *locked { Icon::Lock } else { Icon::Unlock }, 18.0, "Lock/Unlock", false).clicked() {
+                *toggle = Some((name.clone(), "locked", !*locked));
+            }
+            let (sr, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+            swatch(ui.painter(), sr, *color);
+            if ui.selectable_label(name.eq_ignore_ascii_case(cur), name).clicked() {
+                *set_current = Some(name.clone());
+            }
+        });
+    }
+}
+
 pub(crate) fn layers_section(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     section_header(ui, "Layers");
@@ -376,7 +462,7 @@ pub(crate) fn layers_section(app: &mut CadApp, ui: &mut egui::Ui) {
     // Current layer combo.
     let Ok(d) = app.session.doc() else { return };
     let cur = d.header.str("CLAYER", "0");
-    let layers: Vec<(String, bool, bool, bool, Color)> = d.layers.iter().map(|l| (l.name.clone(), l.on, l.frozen, l.locked, l.color)).collect();
+    let layers: Vec<LayerRow> = d.layers.iter().map(|l| (l.name.clone(), l.on, l.frozen, l.locked, l.color)).collect();
     let cur_info = layers.iter().find(|l| l.0.eq_ignore_ascii_case(&cur)).cloned();
     let mut set_current = None;
     let mut toggle: Option<(String, &str, bool)> = None;
@@ -401,24 +487,7 @@ pub(crate) fn layers_section(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         icons::paint(p, Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(12.0, 12.0)), Icon::ChevronDown, false);
         egui::Popup::from_toggle_button_response(&resp).width(w).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-            for (name, on, frozen, locked, color) in &layers {
-                ui.horizontal(|ui| {
-                    if icons::button(ui, if *on { Icon::Bulb } else { Icon::BulbOff }, 18.0, "On/Off", false).clicked() {
-                        toggle = Some((name.clone(), "on", !*on));
-                    }
-                    if icons::button(ui, if *frozen { Icon::Snowflake } else { Icon::Sun }, 18.0, "Freeze/Thaw", false).clicked() {
-                        toggle = Some((name.clone(), "frozen", !*frozen));
-                    }
-                    if icons::button(ui, if *locked { Icon::Lock } else { Icon::Unlock }, 18.0, "Lock/Unlock", false).clicked() {
-                        toggle = Some((name.clone(), "locked", !*locked));
-                    }
-                    let (sr, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
-                    swatch(ui.painter(), sr, *color);
-                    if ui.selectable_label(name.eq_ignore_ascii_case(&cur), name).clicked() {
-                        set_current = Some(name.clone());
-                    }
-                });
-            }
+            layer_list(ui, &layers, &cur, &mut set_current, &mut toggle);
         });
     });
     ui.add_space(4.0);
@@ -837,6 +906,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     let ids: Vec<String> = sel.iter().map(|h| h.hex()).collect();
     let mut set: Option<Value> = None;
     let mut custom_set: Option<Value> = None;
+    let mut dim_override: Option<Value> = None;
     let group = |ui: &mut egui::Ui, title: &str| {
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
         ui.painter().rect_filled(r.shrink2(vec2(6.0, 1.0)), 2.0, t.chrome_dark);
@@ -1046,16 +1116,70 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 num(ui, "Angle", "angle", real(hh.angle.to_degrees()), &mut set, &mut bad, &ids);
             }
             EntityKind::Dimension(dm) => {
-                prop_row(ui, "Text override", |ui| {
-                    if let Some(s) = edit_field(ui, ui.id().with(("dimtxt", &ids)), dm.text.clone()) {
-                        set = Some(json!({ "handles": ids, "textOverride": s }));
-                    }
-                });
                 prop_row(ui, "Dim style", |ui| {
                     if let Some(n) = pick_menu(ui, &dm.style, d.dim_styles.iter().map(|st| st.name.clone())) {
                         set = Some(json!({ "handles": ids, "dimStyle": n }));
                     }
                 });
+                prop_row(ui, "Measurement", |ui| read_only(ui, &cadcraft_render::dimension_in(d, dm).value));
+                prop_row(ui, "Text override", |ui| {
+                    if let Some(s) = edit_field(ui, ui.id().with(("dimtxt", &ids)), dm.text.clone()) {
+                        set = Some(json!({ "handles": ids, "textOverride": s }));
+                    }
+                });
+                // The dimension's style settings with its own overrides; a change overrides that
+                // setting for the selected dimensions (DIMOVERRIDE).
+                let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
+                let before = crate::dimstyles::style_map(&style);
+                let mut after = before.clone();
+                let names = crate::dimstyles::Names::of(d);
+                for (title, rows) in crate::dimstyles::PROPERTIES {
+                    group(ui, title);
+                    for (label, kind) in rows.iter() {
+                        prop_row(ui, label, |ui| {
+                            crate::dimstyles::field_row(ui, egui::Id::new(("cc_dimprop", *title, *label)), &names, &mut after, *kind);
+                        });
+                    }
+                }
+                let changed = crate::dimstyles::changed_fields(&before, &after);
+                if !changed.is_empty() {
+                    let mut p = changed;
+                    p.insert("handles".into(), json!(ids));
+                    dim_override = Some(Value::Object(p));
+                }
+            }
+            EntityKind::MLeader(ml) => {
+                let styles: Vec<String> = if d.mleader_styles.is_empty() {
+                    vec!["Standard".to_string()]
+                } else {
+                    d.mleader_styles.iter().map(|s| s.name.clone()).collect()
+                };
+                prop_row(ui, "Multileader style", |ui| {
+                    if let Some(n) = pick_menu(ui, &ml.style, styles) {
+                        set = Some(json!({ "handles": ids, "mleaderStyle": n }));
+                    }
+                });
+                group(ui, "Leaders");
+                let (straight, spline) = (crate::tl!("Straight").to_string(), crate::tl!("Spline").to_string());
+                prop_row(ui, "Leader type", |ui| {
+                    let cur = if ml.spline { &spline } else { &straight };
+                    if let Some(n) = pick_menu(ui, cur, [straight.clone(), spline.clone()]) {
+                        set = Some(json!({ "handles": ids, "leaderType": if n == spline { "spline" } else { "straight" } }));
+                    }
+                });
+                // The arrowhead: built-in ones and the drawing's arrowhead blocks, as for dimensions.
+                let names = crate::dimstyles::Names::of(d);
+                prop_row(ui, "Arrowhead", |ui| {
+                    if let Some(v) = crate::dimstyles::arrow_combo(ui, egui::Id::new(("cc_mlarrow", &ids)), &names, ml.arrow_in(d)) {
+                        set = Some(json!({ "handles": ids, "arrow": v }));
+                    }
+                });
+                num(ui, "Arrowhead size", "arrowSize", real(ml.arrow_size), &mut set, &mut bad, &ids);
+                num(ui, "Landing distance", "dogleg", real(ml.dogleg), &mut set, &mut bad, &ids);
+                if let Some(t) = &ml.text {
+                    group(ui, "Text");
+                    num(ui, "Text height", "textHeight", real(t.height), &mut set, &mut bad, &ids);
+                }
             }
             EntityKind::Insert(i) => {
                 // A dynamic block reference shows its dynamic block's name, not its anonymous
@@ -1096,5 +1220,167 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     report_bad(app, bad);
     if let Some(p) = custom_set {
         let _ = app.run("blocks.reference.set", p);
+    }
+    if let Some(p) = dim_override {
+        let _ = app.run("dimstyle.override", p);
+    }
+}
+
+/// The Tool Sets ribbon: tabs by task, each a row of the Tool Sets groups (by name).
+pub const RIBBON: &[(&str, &[&str])] = &[
+    ("Draw", &["Draw", "Hatch"]),
+    ("Modify", &["Modify"]),
+    ("Annotate", &["Text", "Dimension", "Leader"]),
+    ("Block", &["Block"]),
+    ("Parametric", &["Parametric"]),
+    ("3D Modeling", &["Primitives", "Solid", "Boolean", "View"]),
+];
+
+/// A Tool Sets group by name (Drafting, then Modeling).
+fn tool_group(name: &str) -> Option<&'static (&'static str, &'static [Tool], &'static [Tool])> {
+    DRAFTING.iter().chain(MODELING.iter()).find(|(n, _, _)| *n == name)
+}
+
+/// Ribbon heights: the tab strip, the tools, the group names under them.
+const RIBBON_TABS: f32 = 26.0;
+const RIBBON_TOOLS: f32 = 80.0;
+const RIBBON_NAMES: f32 = 18.0;
+/// Small ribbon buttons are stacked three to a column.
+const RIBBON_ROWS: usize = 3;
+
+/// Tool Sets as a ribbon, right under the menu bar: a tab per task, its tool groups side by side
+/// (large tools with their names, then small ones in columns of three), the group's name under it.
+pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    let place = crate::docking::toolsets_place(app);
+    let groups = crate::docking::toolsets_groups(app);
+    let mut panel_action: Option<crate::docking::ToolSetsAction> = None;
+    let toolbar_items: Vec<(crate::toolbar::Bar, Vec<String>)> =
+        crate::toolbar::Bar::ALL.into_iter().map(|bar| (bar, crate::toolbar::state(&app.ui, bar).items)).collect();
+    let mut to_toolbar: Option<(&'static str, crate::toolbar::Bar, bool)> = None;
+    let mut clicked: Option<&'static str> = None;
+    let mut tab_clicked: Option<&'static str> = None;
+    if !RIBBON.iter().any(|(n, _)| *n == app.ui.ribbon_tab) {
+        app.ui.ribbon_tab = "Draw".into();
+    }
+    let current = app.ui.ribbon_tab.clone();
+    let hidden: Vec<String> = app.ui.hidden_tools.clone();
+    let height = RIBBON_TABS + RIBBON_TOOLS + RIBBON_NAMES + 4.0;
+    egui::Panel::top("cc_ribbon").exact_size(height).frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+        let r = ui.max_rect();
+        let p = ui.painter().clone();
+        ui.interact(r, ui.id().with("ribbon_background"), Sense::click())
+            .context_menu(|ui| crate::docking::toolsets_menu(ui, place, &groups, &mut panel_action));
+        // Tabs.
+        let strip = Rect::from_min_size(r.min, vec2(r.width(), RIBBON_TABS));
+        p.rect_filled(strip, 0.0, t.chrome);
+        let mut x = r.left() + 6.0;
+        for (name, _) in RIBBON {
+            let label = crate::i18n::t(name);
+            let w = p.layout_no_wrap(label.to_string(), egui::FontId::proportional(13.0), t.text).size().x + 24.0;
+            let tr = Rect::from_min_size(pos2(x, r.top() + 2.0), vec2(w, RIBBON_TABS - 2.0));
+            let active = current == *name;
+            let resp = ui.interact(tr, ui.id().with(("ribbon_tab", name)), Sense::click());
+            if active {
+                p.rect_filled(tr, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, t.panel);
+            } else if resp.hovered() {
+                p.rect_filled(tr, 3.0, t.control_hover);
+            }
+            p.text(tr.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), if active { t.text } else { t.text_dim });
+            icons::describe_control(ui, &resp, label, Some(active), true);
+            resp.context_menu(|ui| crate::docking::toolsets_menu(ui, place, &groups, &mut panel_action));
+            if resp.clicked() {
+                tab_clicked = Some(name);
+            }
+            x += w + 2.0;
+        }
+        // The open tab's groups.
+        let body = Rect::from_min_max(pos2(r.left(), strip.bottom() + 2.0), r.max);
+        let groups_here = RIBBON.iter().find(|(n, _)| *n == current).map_or(&[][..], |(_, g)| *g);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+            egui::ScrollArea::horizontal().id_salt("ribbon_scroll").auto_shrink([false, false]).show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+                    ui.add_space(6.0);
+                    for gname in groups_here {
+                        let Some((name, large, small)) = tool_group(gname) else { continue };
+                        let shown =
+                            |tools: &[Tool]| -> Vec<Tool> { tools.iter().copied().filter(|(_, c, _)| !hidden.iter().any(|h| h == c)).collect() };
+                        let (large, small) = (shown(large), shown(small));
+                        let group = ui.vertical(|ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.set_height(RIBBON_TOOLS);
+                                ui.spacing_mut().item_spacing = vec2(2.0, 1.0);
+                                for (icon, cmd, tip) in &large {
+                                    ui.allocate_ui_with_layout(vec2(66.0, RIBBON_TOOLS), egui::Layout::top_down(egui::Align::Center), |ui| {
+                                        ui.add_enabled_ui(command_known(cmd), |ui| {
+                                            let resp = crate::toolbar::tool_button(ui, *icon, 36.0, cmd, tip);
+                                            toolbar_menu(&resp, cmd, &toolbar_items, &mut to_toolbar, (place, &groups, &mut panel_action));
+                                            if resp.clicked() {
+                                                clicked = Some(cmd);
+                                            }
+                                        });
+                                        ui.add(
+                                            egui::Label::new(egui::RichText::new(crate::i18n::t(tip)).size(11.0).color(t.text_dim))
+                                                .wrap_mode(egui::TextWrapMode::Wrap)
+                                                .halign(egui::Align::Center)
+                                                .selectable(false),
+                                        );
+                                    });
+                                }
+                                for column in small.chunks(RIBBON_ROWS) {
+                                    ui.vertical(|ui| {
+                                        ui.add_space(2.0);
+                                        for (icon, cmd, tip) in column {
+                                            ui.add_enabled_ui(command_known(cmd), |ui| {
+                                                let resp = crate::toolbar::tool_button(ui, *icon, 24.0, cmd, tip);
+                                                toolbar_menu(&resp, cmd, &toolbar_items, &mut to_toolbar, (place, &groups, &mut panel_action));
+                                                if resp.clicked() {
+                                                    clicked = Some(cmd);
+                                                }
+                                            });
+                                        }
+                                    });
+                                }
+                            });
+                        });
+                        // The group's name under its tools, and a line between groups.
+                        let gr = group.response.rect;
+                        let name_rect =
+                            Rect::from_min_size(pos2(gr.left(), body.top() + RIBBON_TOOLS + 1.0), vec2(gr.width().max(40.0), RIBBON_NAMES));
+                        ui.painter().text(
+                            name_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            crate::i18n::t(name),
+                            egui::FontId::proportional(11.5),
+                            t.text_dim,
+                        );
+                        ui.add_space(6.0);
+                        let (sep, _) = ui.allocate_exact_size(vec2(1.0, RIBBON_TOOLS + RIBBON_NAMES - 6.0), Sense::hover());
+                        ui.painter().vline(sep.center().x, sep.y_range(), Stroke::new(1.0, t.border));
+                        ui.add_space(6.0);
+                    }
+                });
+            });
+        });
+        p.hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, t.border));
+    });
+    if let Some(name) = tab_clicked {
+        app.ui.ribbon_tab = name.into();
+    }
+    if let Some((cmd, bar, add)) = to_toolbar {
+        let id = if add { "ui.toolbar.add" } else { "ui.toolbar.remove" };
+        if let Err(e) = app.run(id, json!({ "command": cmd, "bar": bar.id() })) {
+            app.set_status(&e);
+        }
+    }
+    if let Some(c) = clicked {
+        app.cmd.buffer.clear();
+        app.start(c);
+    }
+    if let Some(a) = panel_action
+        && let Err(e) = crate::docking::apply_toolsets(app, a, ui.ctx())
+    {
+        app.set_status(&e);
     }
 }

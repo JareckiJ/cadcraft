@@ -352,6 +352,7 @@ mod tests {
             text: Some(mtext.clone()),
             style: "Standard".into(),
             arrow_size: 1.0,
+            arrow: String::new(),
             spline: false,
             block: None,
         };

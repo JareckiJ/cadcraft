@@ -594,6 +594,9 @@ impl DimStyle {
 pub struct MLeaderStyle {
     pub name: String,
     pub arrow_size: f64,
+    /// Arrowhead (a DIMBLK-style name or a user block); empty for closed filled.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub arrow_block: String,
     pub text_height: f64,
     pub landing_gap: f64,
     pub dogleg: f64,
@@ -607,6 +610,7 @@ impl Default for MLeaderStyle {
         MLeaderStyle {
             name: "Standard".into(),
             arrow_size: 0.18,
+            arrow_block: String::new(),
             text_height: 0.18,
             landing_gap: 0.09,
             dogleg: 0.36,
@@ -735,6 +739,10 @@ pub struct PageSetup {
     pub width_mm: f64,
     pub height_mm: f64,
     pub margins_mm: [f64; 4],
+    /// The layout's paper units (DXF group 72): `Some(true)` millimetres, `Some(false)` inches;
+    /// `None` follows the drawing's MEASUREMENT. Paper space is drawn in these units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mm_units: Option<bool>,
     pub landscape: bool,
     /// "layout" | "extents" | "display" | "window" | "limits".
     pub plot_area: String,
@@ -760,6 +768,7 @@ impl Default for PageSetup {
             width_mm: 215.9,
             height_mm: 279.4,
             margins_mm: [6.35, 6.35, 6.35, 6.35],
+            mm_units: None,
             landscape: true,
             plot_area: "layout".into(),
             scale_to_fit: false,
