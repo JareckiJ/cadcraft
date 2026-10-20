@@ -446,6 +446,8 @@ pub struct Settings {
     pub polarsnap: bool,
     /// POLARDIST: the PolarSnap step; 0 uses the snap X spacing.
     pub polardist: f64,
+    /// OBJECTISOLATIONMODE: 0 (default) isolation lasts for the session; 1 isolation is saved with the drawing.
+    pub objectisolationmode: u8,
 }
 
 impl Default for Settings {
@@ -504,6 +506,7 @@ impl Default for Settings {
             polaraddang: Vec::new(),
             polarsnap: false,
             polardist: 0.0,
+            objectisolationmode: 0,
         }
     }
 }
@@ -1203,6 +1206,24 @@ impl Session {
                 }
             };
         }
+        if mode.kind == select::SelectKind::Class {
+            return match input {
+                Input::Text(name) | Input::Keyword(name) => match select::select_class(self.doc()?, &self.space(), &name) {
+                    Some(hs) => Ok(Some(Input::Pick(hs))),
+                    None => {
+                        self.echo(format!("No objects of class \"{}\".", name.trim()));
+                        Ok(None)
+                    }
+                },
+                Input::Cancel => Ok(Some(input)),
+                Input::Enter => Ok(None),
+                _ => {
+                    self.echo("Invalid class name.");
+                    self.select_mode = Some(mode);
+                    Ok(None)
+                }
+            };
+        }
         match input {
             Input::Point(p) => {
                 if mode.push(p) {
@@ -1425,10 +1446,11 @@ impl Session {
         if let Some(p) = self.lisp_prompt() {
             return p.display();
         }
-        match &self.running {
-            Some(r) if self.suspended.is_some() => format!(">>{} {}", r.id.to_ascii_uppercase(), r.machine.prompt(self).display()),
-            Some(r) => format!("{} {}", r.id.to_ascii_uppercase(), r.machine.prompt(self).display()),
-            None => "Command:".into(),
+        match (&self.running, self.current_prompt()) {
+            (Some(r), Some(p)) if self.suspended.is_some() => format!(">>{} {}", r.id.to_ascii_uppercase(), p.display()),
+            (Some(r), Some(p)) => format!("{} {}", r.id.to_ascii_uppercase(), p.display()),
+            (Some(r), None) => format!("{} ", r.id.to_ascii_uppercase()),
+            (None, _) => "Command:".into(),
         }
     }
 

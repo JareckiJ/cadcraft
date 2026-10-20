@@ -566,7 +566,7 @@ impl StretchM {
                 let d = s.doc()?;
                 let store = d.space(&s.space());
                 let word = t.trim().to_ascii_lowercase();
-                if let Some(m) = SelectMode::from_keyword(&word).filter(|m| m.kind != SelectKind::Group) {
+                if let Some(m) = SelectMode::from_keyword(&word).filter(|m| m.kind != SelectKind::Group && m.kind != SelectKind::Class) {
                     self.mode = Some(m);
                     return Ok(Step::Continue);
                 }

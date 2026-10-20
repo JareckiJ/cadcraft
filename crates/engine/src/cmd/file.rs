@@ -156,7 +156,15 @@ fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<
         return Err(bad(cmd, "binary applies to DXF files only"));
     }
     // A drawing file is the drawing outside the Block Editor; an image is what is shown.
-    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    let base_doc: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    let mut cloned_doc: cadcraft_doc::Drawing;
+    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) && s.settings.objectisolationmode == 0 && !base_doc.hidden_objects.is_empty() {
+        cloned_doc = base_doc.clone();
+        cloned_doc.hidden_objects.clear();
+        &cloned_doc
+    } else {
+        base_doc
+    };
     let r = if *opts == SaveAs::default() {
         (hooks.write)(d, path)
     } else {

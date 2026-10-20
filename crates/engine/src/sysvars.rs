@@ -104,8 +104,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "LWDISPLAY" => json!(i32::from(st.lwdisplay)),
         "PLOTTRANSPARENCYOVERRIDE" => json!(st.plot_transparency_override),
         "SELECTSIMILARMODE" => json!(st.selectsimilarmode),
-        // Isolation is temporary: hidden objects show again when the drawing is reopened.
-        "OBJECTISOLATIONMODE" => json!(0),
+        "OBJECTISOLATIONMODE" => json!(st.objectisolationmode),
         "QPMODE" => json!(i32::from(st.qpmode)),
         "HIGHLIGHT" => json!(i32::from(st.highlight)),
         "SELECTIONEFFECT" => json!(st.selectioneffect),
@@ -310,8 +309,7 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         }
         "SELECTSIMILARMODE" => st.selectsimilarmode = as_i(v).filter(|b| (0..=255).contains(b)).ok_or_else(bad)? as u32,
         "OBJECTISOLATIONMODE" => match as_i(v) {
-            Some(0) => {}
-            Some(1) => return Err(EngineError::Other("OBJECTISOLATIONMODE 1 (isolation saved with the drawing) is not available yet".into())),
+            Some(m @ (0 | 1)) => st.objectisolationmode = m as u8,
             _ => return Err(bad()),
         },
         "QPMODE" => st.qpmode = as_i(v).ok_or_else(bad)? > 0,

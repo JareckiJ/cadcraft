@@ -112,11 +112,14 @@ fn isolate_hide_and_unisolate() {
     assert!(s.doc().unwrap().hidden_objects.is_empty());
     assert_eq!(drawn(&s), all_prims + 1);
     assert_eq!(s.execute("unisolateobjects", &json!({})).unwrap()["shown"], 0);
-    // Nothing to isolate or hide is an error; isolation is temporary only.
+    // Nothing to isolate or hide is an error; test OBJECTISOLATIONMODE.
     assert!(s.execute("isolateobjects", &json!({})).is_err());
     assert!(s.execute("hideobjects", &json!({ "handles": "1A" })).is_err());
     assert!(s.execute("isolateobjects", &json!({ "handles": ["FFFFFF"] })).is_err());
-    assert!(s.execute("setvar", &json!({ "name": "OBJECTISOLATIONMODE", "value": 1 })).is_err());
+    assert!(s.execute("setvar", &json!({ "name": "OBJECTISOLATIONMODE", "value": 2 })).is_err());
+    s.execute("setvar", &json!({ "name": "OBJECTISOLATIONMODE", "value": 1 })).unwrap();
+    assert_eq!(s.execute("getvar", &json!({ "name": "OBJECTISOLATIONMODE" })).unwrap()["value"], json!(1));
+    s.execute("setvar", &json!({ "name": "OBJECTISOLATIONMODE", "value": 0 })).unwrap();
     assert_eq!(s.execute("getvar", &json!({ "name": "OBJECTISOLATIONMODE" })).unwrap()["value"], json!(0));
 }
 
@@ -138,4 +141,61 @@ fn isolate_typed_and_all_skips_hidden() {
     assert_eq!(s.doc().unwrap().hidden_objects.len(), 1);
     s.cmdline("unisolateobjects").unwrap();
     assert!(s.doc().unwrap().hidden_objects.is_empty());
+}
+
+#[test]
+fn select_by_class_and_isolate_toggle() {
+    let (mut s, hs) = drawing();
+    // Test CL / CLass keyword in prompt
+    s.cmdline("erase").unwrap();
+    s.cmdline("cl").unwrap();
+    assert!(s.prompt_text().contains("Enter class name"), "{}", s.prompt_text());
+    s.cmdline("CIRCLE").unwrap();
+    s.cmdline("").unwrap();
+    // Both circles were erased, all 3 lines remain
+    assert_eq!(s.doc().unwrap().model.handles(), vec![hs[0], hs[1], hs[3]]);
+
+    // Test isolateobjects.toggle: with no hidden objects, it runs isolateobjects
+    let res = s.execute("isolateobjects.toggle", &json!({ "handles": [hs[0].hex()] })).unwrap();
+    assert_eq!(res["hidden"], 2);
+
+    // Now isolate with another object
+    let (mut s2, hs2) = drawing();
+    s2.execute("isolateobjects", &json!({ "handles": [hs2[0].hex()] })).unwrap();
+    assert_eq!(s2.doc().unwrap().hidden_objects.len(), 4);
+    // Toggle when objects are isolated runs unisolate
+    let res2 = s2.execute("isolateobjects.toggle", &json!({})).unwrap();
+    assert_eq!(res2["shown"], 4);
+    assert!(s2.doc().unwrap().hidden_objects.is_empty());
+}
+
+#[test]
+fn object_isolation_mode_persistence_roundtrip() {
+    cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read: |bytes, path| cadcraft_io::read(bytes, path).map_err(|e| e.to_string()),
+        write: |doc, path| cadcraft_io::write(doc, path).map_err(|e| e.to_string()),
+        plot: None,
+    });
+
+    let (mut s, hs) = drawing();
+    s.execute("isolateobjects", &json!({ "handles": [hs[0].hex()] })).unwrap();
+    assert_eq!(s.doc().unwrap().hidden_objects.len(), 4);
+
+    let tmp = std::env::temp_dir().join(format!("cadcraft-iso-test-{}.dxf", std::process::id()));
+    let tmp_path = tmp.to_string_lossy().to_string();
+
+    // Default OBJECTISOLATIONMODE = 0: save clears isolation in saved file
+    s.execute("saveas", &json!({ "path": tmp_path })).unwrap();
+    let bytes = std::fs::read(&tmp).unwrap();
+    let read_doc0 = cadcraft_io::read(&bytes, &tmp_path).unwrap();
+    assert!(read_doc0.hidden_objects.is_empty(), "OBJECTISOLATIONMODE 0 does not persist isolation");
+
+    // OBJECTISOLATIONMODE = 1: save preserves hidden objects in file
+    s.execute("setvar", &json!({ "name": "OBJECTISOLATIONMODE", "value": 1 })).unwrap();
+    s.execute("saveas", &json!({ "path": tmp_path })).unwrap();
+    let bytes1 = std::fs::read(&tmp).unwrap();
+    let read_doc1 = cadcraft_io::read(&bytes1, &tmp_path).unwrap();
+    assert_eq!(read_doc1.hidden_objects.len(), 4, "OBJECTISOLATIONMODE 1 persists isolation in file");
+
+    let _ = std::fs::remove_file(&tmp);
 }

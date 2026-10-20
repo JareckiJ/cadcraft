@@ -36,7 +36,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("unisolateobjects", "End Object Isolation", run_unisolate)
             .menu(&["Tools", "Isolate", "End Object Isolation"])
             .params("{} → shows every object ISOLATEOBJECTS or HIDEOBJECTS hid: {shown}"),
+        CommandSpec::new("isolateobjects.toggle", "Toggle Object Isolation", run_isolate_toggle)
+            .params("{} → unisolates if any objects are hidden, or starts isolateobjects"),
     ]
+}
+
+fn run_isolate_toggle(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.doc()?.hidden_objects.is_empty() { run_isolate(s, p) } else { run_unisolate(s, p) }
 }
 
 // ---------------- SELECTSIMILAR ----------------

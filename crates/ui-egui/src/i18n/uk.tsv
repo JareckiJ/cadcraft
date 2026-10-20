@@ -1101,6 +1101,7 @@
 	To	До
 	Toggle PICKADD (off: each pick replaces the selection)	Перемкнути PICKADD (вимкнено: кожен вибір замінює набір вибраних об'єктів)
 	Toggle PICKADD (on: picks add to the selection)	Перемкнути PICKADD (увімкнено: вибране додається до набору вибраних об'єктів)
+	Toggle Object Isolation	Перемкнути ізоляцію об'єктів
 	TOP	ЗВЕРХУ
 	Table	Таблиця
 	Table Breaks	Розриви таблиці

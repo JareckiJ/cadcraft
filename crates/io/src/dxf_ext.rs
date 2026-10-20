@@ -24,6 +24,8 @@ pub(crate) const APP: &str = "CADCRAFT";
 pub(crate) const CONSTRAINTS_KEY: &str = "CADCRAFT_CONSTRAINTS";
 /// Named-object-dictionary key of the saved layer states XRECORD.
 pub(crate) const LAYER_STATES_KEY: &str = "CADCRAFT_LAYERSTATES";
+/// Named-object-dictionary key of the object isolation XRECORD (OBJECTISOLATIONMODE 1).
+pub(crate) const ISOLATION_KEY: &str = "CADCRAFT_ISOLATION";
 /// Named-object-dictionary key of the drawing's plot style tables XRECORD.
 pub(crate) const PLOT_STYLES_KEY: &str = "CADCRAFT_PLOTSTYLES";
 /// Named-object-dictionary key of the annotative scaling XRECORD.
@@ -864,6 +866,34 @@ pub(crate) fn parse_constraints(text: &str) -> Option<(Vec<Constraint>, Parametr
         return None;
     }
     Some((p.constraints, p.parametric))
+}
+
+#[derive(Serialize, Deserialize)]
+struct IsolationPayload {
+    version: u32,
+    #[serde(default)]
+    hidden_handles: Vec<String>,
+}
+
+pub(crate) fn isolation_chunks(hidden: &std::collections::BTreeSet<cadcraft_doc::Handle>) -> Option<Vec<String>> {
+    if hidden.is_empty() {
+        return None;
+    }
+    let p = IsolationPayload { version: 1, hidden_handles: hidden.iter().map(|h| h.hex()).collect() };
+    let json = serde_json::to_string(&p).ok()?;
+    Some(json_chunks(&json))
+}
+
+pub(crate) fn parse_isolation(text: &str) -> Option<std::collections::BTreeSet<cadcraft_doc::Handle>> {
+    if text.len() > MAX_PAYLOAD {
+        return None;
+    }
+    let p: IsolationPayload = serde_json::from_str(text).ok()?;
+    if p.version != 1 {
+        return None;
+    }
+    let set = p.hidden_handles.into_iter().filter_map(|s| cadcraft_doc::Handle::parse_hex(&s)).collect();
+    Some(set)
 }
 
 #[cfg(test)]
