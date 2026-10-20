@@ -1020,6 +1020,30 @@ fn kinded_prims(l: &DisplayList, h: cadcraft_doc::Handle) -> Vec<(Kind, Vec<Vec2
 }
 
 #[test]
+fn window_plot_measures_a_block_again_when_a_block_nested_in_it_changes() {
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        block_entity(1, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) }))
+    };
+    let inner = |a: (f64, f64), b: (f64, f64)| {
+        let mut blk = cadcraft_doc::Block::new("INNER");
+        blk.entities.push(line(a, b));
+        std::sync::Arc::new(blk)
+    };
+    let mut d = Drawing::new_imperial();
+    d.blocks.insert("INNER".into(), inner((500.0, 500.0), (510.0, 500.0)));
+    let mut outer = cadcraft_doc::Block::new("OUTER");
+    outer.entities.push(line((3.0, 3.0), (4.0, 4.0)));
+    outer.entities.push(block_entity(2, Common::default(), insert_of("INNER")));
+    d.blocks.insert("OUTER".into(), std::sync::Arc::new(outer));
+    let h = d.add(&Space::Model, Common::default(), insert_of("OUTER")).unwrap();
+    let opts = Options { view: Some(Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0))), ..Default::default() };
+    assert_eq!(kinded_prims(&build_plot(&d, &Space::Model, &opts), h).len(), 1, "INNER out of the window");
+    // INNER is redefined into the window; OUTER's definition is unchanged.
+    d.blocks.insert("INNER".into(), inner((1.0, 1.0), (2.0, 2.0)));
+    assert_eq!(kinded_prims(&build_plot(&d, &Space::Model, &opts), h).len(), 2, "INNER now reaches the window");
+}
+
+#[test]
 fn window_plot_builds_only_the_block_contents_that_reach_the_window() {
     let line = |h: u64, a: (f64, f64), b: (f64, f64)| {
         block_entity(h, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) }))
