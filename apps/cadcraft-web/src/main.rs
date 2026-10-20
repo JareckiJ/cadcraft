@@ -138,7 +138,6 @@ mod web {
                             app.share.connect(
                                 collabcraft_share::CollabCraft::from_fn(|| Some(craft_cloud_client::Client::from_page())).for_app("cadcraft"),
                             );
-                            cadcraft_ui_egui::cloud::start(&mut app);
                         }
                         app.system_languages =
                             web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|v| v.as_string()).collect()).unwrap_or_default();
