@@ -301,3 +301,40 @@ fn recover_opens_the_file_with_the_fixes_applied() {
     assert_eq!(s.docs.len(), docs);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn auditctl_generates_adt_report_log() {
+    let mut s = Session::new();
+    let dir = std::env::temp_dir().join(format!("cadcraft-auditctl-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let dwg_path = dir.join("test_building.dwg");
+    std::fs::write(&dwg_path, b"dummy").unwrap();
+
+    // AUDITCTL system variable defaults to 0
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "AUDITCTL"), Some(json!(0)));
+
+    // Turn AUDITCTL on
+    s.execute("setvar", &json!({"name": "AUDITCTL", "value": 1})).unwrap();
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "AUDITCTL"), Some(json!(1)));
+
+    // Open drawing with path
+    let mut d = Drawing::new_metric();
+    raw(&mut d, &Space::Model, on("MissingLyr"), line((0.0, 0.0), (10.0, 10.0)));
+    let _ = s.open_drawing(d, "test_building.dwg", Some(dwg_path.to_string_lossy().to_string()));
+
+    // Run AUDIT with fix
+    let r = s.execute("audit", &json!({"fix": true})).unwrap();
+    assert!(r["errors"].as_u64().unwrap() > 0);
+
+    let adt_path = dir.join("test_building.adt");
+    assert!(adt_path.exists(), "AUDITCTL 1 must generate .adt log file");
+    let content = std::fs::read_to_string(&adt_path).unwrap();
+    assert!(content.contains("CADCraft AUDIT Report"), "{content}");
+    assert!(content.contains("Total errors found"), "{content}");
+    assert!(content.contains("Pass 1"), "{content}");
+    assert!(content.contains("Pass 2"), "{content}");
+
+    // Reset AUDITCTL
+    s.execute("setvar", &json!({"name": "AUDITCTL", "value": 0})).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}

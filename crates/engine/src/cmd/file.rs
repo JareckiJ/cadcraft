@@ -94,6 +94,26 @@ pub fn write_as() -> Option<WriteAsHook> {
     WRITE_AS.get().copied()
 }
 
+/// Tolerant drawing reader for RECOVER (installed by hosts whose readers support a recovery mode).
+pub type RecoverHook = fn(&[u8], &str) -> std::result::Result<Drawing, String>;
+
+static RECOVER_HOOK: std::sync::RwLock<Option<RecoverHook>> = std::sync::RwLock::new(None);
+
+/// Install the host's reader for RECOVER; recovery calls that have none use [`IoHooks::read`].
+pub fn set_recover(h: RecoverHook) {
+    if let Ok(mut lock) = RECOVER_HOOK.write() {
+        *lock = Some(h);
+    }
+}
+pub fn recover_hook() -> Option<RecoverHook> {
+    RECOVER_HOOK.read().ok().and_then(|lock| *lock)
+}
+pub fn clear_recover() {
+    if let Ok(mut lock) = RECOVER_HOOK.write() {
+        *lock = None;
+    }
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")

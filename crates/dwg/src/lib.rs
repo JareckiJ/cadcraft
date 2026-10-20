@@ -432,10 +432,7 @@ mod native {
         if s.len() % 2 != 0 {
             return None;
         }
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-            .collect()
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
     }
 
     fn version_code(v: acadrust::DxfVersion) -> &'static str {
@@ -584,23 +581,15 @@ mod native {
                             Some("AC1032") => "AC1032",
                             _ => "AC1032",
                         };
-                        items.push(RawItem {
-                            is_entity: true,
-                            handle: h,
-                            type_code: tc,
-                            version: version_str,
-                            data,
-                            handle_bits: bits,
-                        });
+                        items.push(RawItem { is_entity: true, handle: h, type_code: tc, version: version_str, data, handle_bits: bits });
                     }
                 }
             } else if let Some(rest) = trimmed.strip_prefix("O ") {
                 let parts: Vec<&str> = rest.split_whitespace().collect();
                 if parts.len() == 4 {
-                    if let (Ok(h), Some(data)) = (
-                        u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16),
-                        parts.get(2).copied().and_then(from_hex),
-                    ) {
+                    if let (Ok(h), Some(data)) =
+                        (u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16), parts.get(2).copied().and_then(from_hex))
+                    {
                         let bits = parts.get(3).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
                         let version_str = match parts.get(1).copied() {
                             Some("AC1009") => "AC1009",
@@ -614,14 +603,7 @@ mod native {
                             Some("AC1032") => "AC1032",
                             _ => "AC1032",
                         };
-                        items.push(RawItem {
-                            is_entity: false,
-                            handle: h,
-                            type_code: 0,
-                            version: version_str,
-                            data,
-                            handle_bits: bits,
-                        });
+                        items.push(RawItem { is_entity: false, handle: h, type_code: 0, version: version_str, data, handle_bits: bits });
                     }
                 }
             }
@@ -705,6 +687,4 @@ mod tests {
         assert!(dwg_to_dxf(b"AC1032 this is not a dwg file at all").is_err());
         assert!(dwg_to_dxf(b"").is_err());
     }
-
-
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::*;
-use cadcraft_dxf::{Tag, records, sections};
+use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
 use crate::{IoError, Result};
@@ -1140,6 +1140,10 @@ fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, ski
     let mut out = Vec::new();
     let mut i = 0;
     while let Some((kind, tags)) = recs.get(i) {
+        if kind == "EOF" || kind == "ENDSEC" {
+            i += 1;
+            continue;
+        }
         let t = T(tags);
         let owner = crate::dxf_ext::owner(tags);
         let paper = t.i(67) == Some(1);
@@ -1689,9 +1693,26 @@ fn ltype_pattern(tags: &[Tag], styles: &HashMap<String, String>) -> Vec<DashElem
 /// Read a DXF file into a drawing.
 pub fn read(bytes: &[u8]) -> Result<Drawing> {
     let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
-    let secs = sections(&tags);
+    read_from_tags(&tags)
+}
+
+/// Read a DXF file tolerantly in RECOVER mode, salvaging damaged or truncated files.
+pub fn read_recovering(bytes: &[u8]) -> Result<Drawing> {
+    let tags = cadcraft_dxf::parse_recovering(bytes).map_err(|e| IoError::Format(e.to_string()))?;
+    let mut d = read_from_tags(&tags)?;
+    d.read_notes.push("RECOVER: parsed damaged DXF file in tolerant recovery mode".into());
+    Ok(d)
+}
+
+/// Read a drawing from a stream of parsed DXF tags.
+pub fn read_from_tags(tags: &[Tag]) -> Result<Drawing> {
+    let mut secs = sections(tags);
     if secs.is_empty() {
-        return Err(IoError::Format("no sections found".into()));
+        if !tags.is_empty() {
+            secs.push(Section { name: "ENTITIES".into(), tags: tags.to_vec() });
+        } else {
+            return Err(IoError::Format("no sections found".into()));
+        }
     }
     let mut d = Drawing::new_imperial();
     d.layouts.clear();

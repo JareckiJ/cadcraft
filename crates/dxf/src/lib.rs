@@ -174,6 +174,14 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Tag>> {
     parse_with_limit(bytes, MAX_TAGS)
 }
 
+/// Parse a DXF file tolerantly, salvaging tags when premature EOF or corrupt lines occur.
+pub fn parse_recovering(bytes: &[u8]) -> Result<Vec<Tag>> {
+    if let Some(body) = bytes.strip_prefix(BINARY_SENTINEL) {
+        return parse_binary(body);
+    }
+    parse_ascii_recovering(&codepage::decode_ascii_file(bytes))
+}
+
 /// [`parse`] with an explicit group-code limit. For ASCII DXF the limit is checked up front from
 /// the line count, before the text is decoded or any tag allocated, so an oversized file fails in
 /// milliseconds instead of after it has filled memory.
@@ -259,6 +267,46 @@ fn unescape_unicode(s: &str) -> String {
 
 pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
     parse_ascii_with_limit(text, MAX_TAGS)
+}
+
+/// Parse ASCII DXF text tolerantly, skipping malformed lines and recovering from premature EOF.
+pub fn parse_ascii_recovering(text: &str) -> Result<Vec<Tag>> {
+    let mut tags = Vec::new();
+    let mut lines = text.lines().enumerate();
+    loop {
+        let Some((_ln, code_line)) = lines.next() else { break };
+        let ct = code_line.trim();
+        if ct.is_empty() {
+            continue;
+        }
+        let Ok(code) = ct.parse::<i32>() else {
+            // Corrupted line: skip until a line can be parsed as a group code
+            continue;
+        };
+        let Some((_, val)) = lines.next() else {
+            // Premature EOF: salvage all tags parsed so far
+            break;
+        };
+        let v = typed(code, val);
+        let v = match v {
+            Value::Str(s) => Value::Str(unescape_unicode(&s)),
+            o => o,
+        };
+        tags.push(Tag { code, value: v });
+        if tags.len() > MAX_TAGS {
+            break;
+        }
+        if code == 0 && tags.last().is_some_and(|t| t.str() == "EOF") {
+            break;
+        }
+    }
+    if tags.is_empty() {
+        return Err(DxfError::NotDxf);
+    }
+    if !tags.last().is_some_and(|t| t.code == 0 && t.str() == "EOF") {
+        tags.push(Tag { code: 0, value: Value::Str("EOF".into()) });
+    }
+    Ok(tags)
 }
 
 #[allow(clippy::while_let_loop)]
@@ -540,7 +588,7 @@ pub fn sections(tags: &[Tag]) -> Vec<Section> {
             let name = tags.get(i + 1).filter(|t| t.code == 2).map(Tag::str).unwrap_or_default();
             let start = i + 2;
             let mut j = start;
-            while j < tags.len() && !(tags.get(j).is_some_and(|t| t.code == 0 && t.str() == "ENDSEC")) {
+            while j < tags.len() && !(tags.get(j).is_some_and(|t| t.code == 0 && (t.str() == "ENDSEC" || t.str() == "EOF"))) {
                 j += 1;
             }
             out.push(Section { name, tags: tags.get(start..j).unwrap_or(&[]).to_vec() });

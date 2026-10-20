@@ -64,7 +64,7 @@ fn recoverable_files() -> Vec<crate::autosave::Recoverable> {
 
 #[cfg(target_arch = "wasm32")]
 fn recoverable_files() -> Vec<crate::autosave::Recoverable> {
-    Vec::new()
+    crate::autosave::storage().map(|s| (s.list)()).unwrap_or_default()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,7 +73,11 @@ fn discard_file(path: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn discard_file(_: &str) {}
+fn discard_file(path: &str) {
+    if let Some(s) = crate::autosave::storage() {
+        let _ = (s.delete)(path);
+    }
+}
 
 /// Check the current drawing; with `fix`, repair it (one undo step).
 fn run_audit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -84,7 +88,16 @@ fn run_audit(s: &mut Session, p: &Value) -> Result<Value> {
     if fix && !issues.is_empty() {
         s.state_mut()?.doc = Arc::new(copy);
     }
-    Ok(crate::audit::Report { issues, fixed: fix }.to_json())
+    let report = crate::audit::Report { issues, fixed: fix };
+    if crate::audit::auditctl() == 1 {
+        if let Ok(st) = s.state() {
+            let doc_path = st.path.as_deref().unwrap_or(&st.title);
+            let total_objects = crate::audit::count_entities(&st.doc);
+            let content = crate::audit::format_adt(&report, doc_path, total_objects);
+            crate::audit::write_adt_file(st.path.as_deref(), &st.title, &content);
+        }
+    }
+    Ok(report.to_json())
 }
 
 /// Open a drawing file as tolerantly as the readers allow, then fix what AUDIT finds. The
@@ -101,13 +114,16 @@ fn run_recover(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad("recover", "`path` or `data` (base64) is required")),
     };
     let hooks = file::io().ok_or_else(|| bad("recover", "file formats are not available in this build"))?;
-    let d = (hooks.read)(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?;
+    let d = match file::recover_hook() {
+        Some(recover_fn) => recover_fn(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?,
+        None => (hooks.read)(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?,
+    };
     let title = match str_param(p, "title") {
         Some(t) => t.to_string(),
         None => std::path::Path::new(&name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| name.clone()),
     };
     let copy = bool_or(p, "copy", false);
-    let i = s.open_drawing(d, &title, if copy { None } else { path });
+    let i = s.open_drawing(d, &title, if copy { None } else { path.clone() });
     let st = s.state_mut()?;
     let report = crate::audit::fix(Arc::make_mut(&mut st.doc));
     if report.issues.is_empty() {
@@ -117,6 +133,12 @@ fn run_recover(s: &mut Session, p: &Value) -> Result<Value> {
     if copy && !st.is_dirty() {
         // An unsaved copy (Drawing Recovery): closing it asks to save it under a name.
         st.saved = Arc::new((*st.doc).clone());
+    }
+    if crate::audit::auditctl() == 1 {
+        let doc_path = path.as_deref().unwrap_or(&title);
+        let total_objects = crate::audit::count_entities(&st.doc);
+        let content = crate::audit::format_adt(&report, doc_path, total_objects);
+        crate::audit::write_adt_file(path.as_deref(), &title, &content);
     }
     let uid = st.uid;
     let mut r = report.to_json();
@@ -131,7 +153,10 @@ fn read_path(cmd: &str, path: &str) -> Result<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_path(cmd: &str, _path: &str) -> Result<Vec<u8>> {
+fn read_path(cmd: &str, path: &str) -> Result<Vec<u8>> {
+    if let Some(s) = crate::autosave::storage() {
+        return (s.read)(path).map_err(|e| bad(cmd, format!("{path}: {e}")));
+    }
     Err(bad(cmd, "paths are not available on the web; pass `data`"))
 }
 

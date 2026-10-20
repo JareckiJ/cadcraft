@@ -68,8 +68,25 @@ pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
     }
     match ext(name).as_str() {
         "svg" | "svgz" => svg_read::read(bytes),
-        "dxf" | "" => dxf_read::read(bytes),
+        "dxf" | "sv$" | "" => dxf_read::read(bytes),
         e if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
+        e => Err(IoError::Unsupported(e.to_string())),
+    }
+}
+
+/// Read a drawing tolerantly in RECOVER mode, salvaging damaged or truncated files.
+pub fn read_recovering(bytes: &[u8], name: &str) -> Result<Drawing> {
+    if cadcraft_dwg::is_dwg(bytes) {
+        let (dxf, mut notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
+        let mut d = dxf_read::read_recovering(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        notes.push("RECOVER: DWG object stream recovered".into());
+        d.read_notes.extend(notes);
+        return Ok(d);
+    }
+    match ext(name).as_str() {
+        "svg" | "svgz" => svg_read::read(bytes),
+        "dxf" | "sv$" | "" => dxf_read::read_recovering(bytes),
+        _ if bytes.len() > 4 => dxf_read::read_recovering(bytes).map_err(|_| IoError::Unsupported(ext(name))),
         e => Err(IoError::Unsupported(e.to_string())),
     }
 }
@@ -86,7 +103,7 @@ pub fn write(d: &Drawing, name: &str) -> Result<Vec<u8>> {
 pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>> {
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match ext(name).as_str() {
-        "dxf" | "" => {
+        "dxf" | "sv$" | "" => {
             let tags = dxf_write::tags(d, version);
             Ok(if opts.binary {
                 cadcraft_dxf::write_binary(&tags, version.utf8())
@@ -121,7 +138,7 @@ pub fn write_framed(d: &Drawing, name: &str, window: Option<Bounds2>) -> Result<
         check_window(w)?;
     }
     match ext(name).as_str() {
-        "dxf" | "" | "dwg" => write_with(d, name, &SaveOptions::default()),
+        "dxf" | "sv$" | "" | "dwg" => write_with(d, name, &SaveOptions::default()),
         "svg" => Ok(svg::export_window(d, &Space::Model, window).into_bytes()),
         "png" => png_framed(d, &Space::Model, 2400, 1600, window),
         "pdf" => pdf::pdf(d, &Space::Model, &PdfOptions { compress: true, window, ..PdfOptions::default() }),

@@ -186,7 +186,14 @@ fn rotate_ucs(cur: &Ucs, axis: char, angle_deg: f64) -> Ucs {
             y = ny;
         }
     }
-    Ucs { name: String::new(), origin: cur.origin, x_axis: x.normalized(), y_axis: y.normalized(), elevation: cur.elevation, ortho_type: cur.ortho_type }
+    Ucs {
+        name: String::new(),
+        origin: cur.origin,
+        x_axis: x.normalized(),
+        y_axis: y.normalized(),
+        elevation: cur.elevation,
+        ortho_type: cur.ortho_type,
+    }
 }
 
 pub fn run_ucs_rotate_axis(s: &mut Session, axis: char, p: &Value) -> Result<Value> {

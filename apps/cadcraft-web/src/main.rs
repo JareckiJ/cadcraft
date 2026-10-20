@@ -82,6 +82,51 @@ mod web {
         cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
             cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
         });
+        cadcraft_engine::cmd::file::set_recover(|b, name| cadcraft_io::read_recovering(b, name).map_err(|e| e.to_string()));
+        cadcraft_engine::autosave::set_storage(cadcraft_engine::autosave::StorageHooks {
+            write: |path, bytes| {
+                let window = web_sys::window().ok_or("no window")?;
+                let storage = window.local_storage().map_err(|e| format!("{e:?}"))?.ok_or("no local storage")?;
+                let b64 = cadcraft_engine::cmd::file::base64_encode(bytes);
+                let key = format!("cadcraft.autosave.{path}");
+                storage.set_item(&key, &b64).map_err(|e| format!("{e:?}"))
+            },
+            read: |path| {
+                let window = web_sys::window().ok_or("no window")?;
+                let storage = window.local_storage().map_err(|e| format!("{e:?}"))?.ok_or("no local storage")?;
+                let key = format!("cadcraft.autosave.{path}");
+                let b64 = storage.get_item(&key).map_err(|e| format!("{e:?}"))?.ok_or("not found")?;
+                cadcraft_engine::cmd::file::base64_decode(&b64).ok_or_else(|| "corrupt base64".to_string())
+            },
+            delete: |path| {
+                let window = web_sys::window().ok_or("no window")?;
+                let storage = window.local_storage().map_err(|e| format!("{e:?}"))?.ok_or("no local storage")?;
+                let key = format!("cadcraft.autosave.{path}");
+                storage.remove_item(&key).map_err(|e| format!("{e:?}"))
+            },
+            list: || {
+                let mut out = Vec::new();
+                let Some(window) = web_sys::window() else { return out };
+                let Ok(Some(storage)) = window.local_storage() else { return out };
+                let len = storage.length().unwrap_or(0);
+                for i in 0..len {
+                    if let Ok(Some(key)) = storage.key(i) {
+                        if let Some(path) = key.strip_prefix("cadcraft.autosave.") {
+                            if let Some((title, _, _)) = cadcraft_engine::autosave::parse_file_name(path) {
+                                let bytes_len = storage.get_item(&key).ok().flatten().map(|s| s.len() as u64).unwrap_or(0);
+                                out.push(cadcraft_engine::autosave::Recoverable {
+                                    path: path.to_string(),
+                                    drawing: title.to_string(),
+                                    modified: 0,
+                                    bytes: bytes_len,
+                                });
+                            }
+                        }
+                    }
+                }
+                out
+            },
+        });
         // AutoLISP's entget, entmake and entmod see entities as DXF groups.
         cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
             groups: cadcraft_io::entity_groups,
@@ -127,6 +172,7 @@ mod web {
                         if let Some(prefs) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::PREFS_KEY)) {
                             app.load_prefs(&prefs);
                         }
+                        app.enable_autosave();
                         // `?cpu`: no render state for the app, so the canvas draws with egui shapes.
                         if !crate::wants_cpu(&query())
                             && let Some(rs) = &cc.wgpu_render_state

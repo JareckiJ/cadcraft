@@ -857,7 +857,14 @@ pub struct Ucs {
 
 impl Ucs {
     pub fn world() -> Self {
-        Self { name: String::new(), origin: Vec3::ZERO, x_axis: Vec3::new(1.0, 0.0, 0.0), y_axis: Vec3::new(0.0, 1.0, 0.0), elevation: 0.0, ortho_type: 0 }
+        Self {
+            name: String::new(),
+            origin: Vec3::ZERO,
+            x_axis: Vec3::new(1.0, 0.0, 0.0),
+            y_axis: Vec3::new(0.0, 1.0, 0.0),
+            elevation: 0.0,
+            ortho_type: 0,
+        }
     }
 
     pub fn is_world(&self) -> bool {

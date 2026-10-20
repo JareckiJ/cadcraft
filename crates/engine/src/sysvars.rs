@@ -64,6 +64,7 @@ const SESSION_VARS: &[&str] = &[
     "FONTFALLBACK",
     "SAVETIME",
     "SAVEFILEPATH",
+    "AUDITCTL",
 ];
 
 pub fn get(s: &Session, name: &str) -> Option<Value> {
@@ -137,6 +138,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         // Autosave (profile settings too).
         "SAVETIME" => json!(crate::autosave::savetime()),
         "SAVEFILEPATH" => json!(crate::autosave::savefilepath()),
+        "AUDITCTL" => json!(crate::audit::auditctl()),
         "CMDNAMES" => json!(s.running.as_ref().map(|r| r.id.to_ascii_uppercase()).unwrap_or_default()),
         "DWGNAME" => json!(s.state().map(|d| d.title.clone()).unwrap_or_default()),
         "DBMOD" => json!(s.state().map(|d| i32::from(d.is_dirty())).unwrap_or(0)),
@@ -340,6 +342,7 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             as_f64(v).filter(|m| *m >= 0.0 && *m <= f64::from(crate::autosave::MAX_SAVETIME)).ok_or_else(bad)?.round() as u32,
         ),
         "SAVEFILEPATH" => crate::autosave::set_savefilepath(v.as_str().ok_or_else(bad)?),
+        "AUDITCTL" => crate::audit::set_auditctl(as_i(v).filter(|b| (0..=1).contains(b)).ok_or_else(bad)? as i32),
         // A number is in degrees; text is an angle typed in AUNITS (SETVAR at the command line).
         "ANGBASE" => {
             let a = match v {

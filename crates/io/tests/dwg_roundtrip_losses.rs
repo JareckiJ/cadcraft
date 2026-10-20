@@ -259,5 +259,3 @@ fn unknown_entity_common_properties_follow_edits_on_dxf_write() {
     assert!(dxf.contains(" 60\r\n1") || dxf.contains("60\n1"));
     assert!(dxf.contains("440\r\n") || dxf.contains("440\n"));
 }
-
-

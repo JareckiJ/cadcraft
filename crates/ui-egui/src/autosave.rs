@@ -58,6 +58,14 @@ impl CadApp {
         self.autosave = Some(saver);
     }
 
+    /// Turn autosave on (web). Uses registered storage hooks (e.g. browser localStorage).
+    #[cfg(target_arch = "wasm32")]
+    pub fn enable_autosave(&mut self) {
+        let saver = autosave::Autosaver::new(autosave::instance_id());
+        self.recovery.items = autosave::recoverable(std::path::Path::new("web"), &saver.instance);
+        self.autosave = Some(saver);
+    }
+
     /// Open recovery item `i` as an unsaved copy. Its autosave file stays until that drawing is
     /// saved or closed, so a second crash doesn't lose it.
     pub fn recover_item(&mut self, i: usize) -> Result<(), String> {
@@ -75,9 +83,8 @@ impl CadApp {
     /// Delete recovery item `i`'s file.
     pub fn discard_item(&mut self, i: usize) {
         if i < self.recovery.items.len() {
-            let _item = self.recovery.items.remove(i);
-            #[cfg(not(target_arch = "wasm32"))]
-            autosave::discard(&_item.path);
+            let item = self.recovery.items.remove(i);
+            autosave::discard(&item.path);
         }
     }
 
@@ -87,16 +94,20 @@ impl CadApp {
         if let Some(wait) = self.autosave.as_mut().and_then(|s| s.tick(&self.session)) {
             _ctx.request_repaint_after(wait);
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let now = _ctx.input(|i| i.time);
+            if let Some(wait) = self.autosave.as_mut().and_then(|s| s.tick_at(&self.session, now)) {
+                _ctx.request_repaint_after(wait);
+            }
+        }
     }
 
     /// Every frame: after a GPU error or device loss, autosave unsaved drawings at once (the
     /// session may not survive it) and show [`gpu_notice`].
     pub fn gpu_fault_tick(&mut self, ctx: &egui::Context) {
         let Some(fault) = self.gpu_faults.take() else { return };
-        #[cfg(not(target_arch = "wasm32"))]
         let saved = self.autosave.as_mut().map_or(0, |a| a.save_now(&self.session));
-        #[cfg(target_arch = "wasm32")]
-        let saved = 0;
         let autosaved = self.gpu_notice.as_ref().map_or(0, |n| n.autosaved) + saved;
         self.gpu_notice = Some(GpuNotice { fault, autosaved });
         ctx.request_repaint();
@@ -104,7 +115,6 @@ impl CadApp {
 
     /// The app closes normally: this app's autosave files are not needed any more.
     pub fn shutdown_autosave(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(s) = &mut self.autosave {
             s.shutdown();
         }
