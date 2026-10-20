@@ -1347,6 +1347,9 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// The drawing area for one frame: lays out the model viewport tiles, handles the pointer and keys
+/// on the canvas (picks and windows, grips, right-click Enter and the shortcut menus, pan and zoom)
+/// and draws the drawing with its overlays.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
