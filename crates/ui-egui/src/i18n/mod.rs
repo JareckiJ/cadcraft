@@ -263,8 +263,33 @@ fn catalog(language: &str) -> Option<&'static Catalog<'static>> {
     LANGUAGES.iter().find(|l| l.code == language && !l.source.is_empty()).map(|l| l.catalog.get_or_init(|| parse(l.source).0))
 }
 
+static CADCRAFT_DISCORD_TRANSLATIONS: OnceLock<HashMap<&'static str, String>> = OnceLock::new();
+
+/// Keep the renamed CADCraft Discord item localized by reusing the legacy ArtCraft translation
+/// when a catalog has not added the new source key yet.
+fn cadcraft_discord_translation(language: &str) -> Option<&'static str> {
+    let translations = CADCRAFT_DISCORD_TRANSLATIONS.get_or_init(|| {
+        LANGUAGES
+            .iter()
+            .filter(|language| !language.source.is_empty())
+            .filter_map(|language| {
+                let legacy = catalog(language.code)?.get(&("", "Join the ArtCraft Discord…")).copied()?;
+                Some((language.code, legacy.replace("ArtCraft", "CADCraft")))
+            })
+            .collect()
+    });
+    translations.get(language).map(String::as_str)
+}
+
+/// Translate a source string, falling back to English when the selected catalog has no entry.
 pub fn tr<'a>(language: &str, source: &'a str) -> &'a str {
-    catalog(language).and_then(|c| c.get(&("", source))).copied().unwrap_or(source)
+    if let Some(translated) = catalog(language).and_then(|c| c.get(&("", source))).copied() {
+        return translated;
+    }
+    if source == "Join the CADCraft Discord..." {
+        return cadcraft_discord_translation(language).unwrap_or(source);
+    }
+    source
 }
 
 pub fn t(source: &str) -> &str {
@@ -373,6 +398,19 @@ macro_rules! tf {
     ($source:literal $(, $name:ident = $value:expr)* $(,)?) => {
         $crate::i18n::format($source, &[$((stringify!($name), ($value).to_string())),*])
     };
+}
+
+#[cfg(test)]
+mod renamed_discord_tests {
+    use super::tr;
+
+    #[test]
+    fn cadcraft_discord_label_preserves_existing_localizations() {
+        let source = "Join the CADCraft Discord...";
+        assert_eq!(tr("en", source), source);
+        assert_eq!(tr("uk", source), "Приєднатися до Discord CADCraft...");
+        assert_eq!(tr("de", source), "Dem CADCraft-Discord beitreten…");
+    }
 }
 
 #[cfg(test)]
