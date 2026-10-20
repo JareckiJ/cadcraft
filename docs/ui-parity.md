@@ -204,6 +204,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Properties: Text style and Justify rows for TEXT (and attribute definitions); TEXT's Style option asks for a style name (`?` lists them) and makes it current, as AutoCAD's does |
 | 2026-10-20 | minor | Attribute Definition dialog (ATTDEF typed, from the menu or the Tool Sets; -ATTDEF keeps the command line with Justify, Style, height and rotation prompts and the modes); Properties rows for attribute definitions (tag, prompt, default, style, justification, height, rotation, width factor, modes) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |

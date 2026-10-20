@@ -16,7 +16,7 @@ use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; dimensions: textOverride, dimStyle, textHeight, arrowSize, dimScale, precision (per-dimension overrides)}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; text and attribute definitions: style, justify (L|C|R|A|M|F|TL…BR), widthFactor, position; definitions: tag, prompt, invisible, constant, verify, preset, lockPosition; dimensions: textOverride, dimStyle, textHeight, arrowSize, dimScale, precision (per-dimension overrides)}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -204,7 +204,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|n| d.dim_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("dimension style `{n}` not found"))))
         .transpose()?;
     let dim_over = dim_overrides(p)?;
-    let attdef = attdef_fields(p, d)?;
+    let fields = text_fields(p, d)?;
     // Aligned and fit text get a baseline as long as the text is in its style's font.
     let styles = d.text_styles.clone();
     let anno_scale = d.current_anno_scale();
@@ -300,6 +300,13 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
                         t.width_factor = x;
                     }
+                    if let Some(st) = &fields.style {
+                        t.style.clone_from(st);
+                    }
+                    if let Some((h, v)) = fields.justify {
+                        let shown = t.value.clone();
+                        rejustify(t, h, v, &shown, &styles);
+                    }
                     // The position is the point the text is placed by: moving it moves the text.
                     if let Some(to) = p.get("position").and_then(point_value) {
                         let d = to - t.justify_point();
@@ -310,7 +317,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                 }
                 EntityKind::AttDef(a) => {
-                    if let Some(t) = &attdef.tag {
+                    if let Some(t) = &fields.tag {
                         a.tag.clone_from(t);
                     }
                     if let Some(v) = str_param(p, "prompt") {
@@ -328,10 +335,10 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
                         a.text.width_factor = x;
                     }
-                    if let Some(st) = &attdef.style {
+                    if let Some(st) = &fields.style {
                         a.text.style.clone_from(st);
                     }
-                    if let Some((h, v)) = attdef.justify {
+                    if let Some((h, v)) = fields.justify {
                         rejustify(&mut a.text, h, v, &a.tag, &styles);
                     }
                     if let Some(to) = p.get("position").and_then(point_value) {
@@ -1158,15 +1165,16 @@ fn rejustify(t: &mut cadcraft_doc::Text, h: HAlign, v: VAlign, shown: &str, styl
     };
 }
 
-/// `properties.set`'s attribute definition fields that can be wrong, checked before anything
-/// changes: `tag` (a word), `justify` (a TEXT justification code) and `style` (an existing text style).
-struct AttdefFields {
+/// `properties.set`'s text and attribute definition fields that can be wrong, checked before
+/// anything changes: `tag` (a word; definitions only), `justify` (a TEXT justification code) and
+/// `style` (an existing text style).
+struct TextFields {
     tag: Option<String>,
     justify: Option<(HAlign, VAlign)>,
     style: Option<String>,
 }
 
-fn attdef_fields(p: &Value, d: &Drawing) -> Result<AttdefFields> {
+fn text_fields(p: &Value, d: &Drawing) -> Result<TextFields> {
     let tag = str_param(p, "tag")
         .map(|t| {
             let t = t.trim();
@@ -1185,7 +1193,7 @@ fn attdef_fields(p: &Value, d: &Drawing) -> Result<AttdefFields> {
     let style = str_param(p, "style")
         .map(|n| d.text_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("text style `{n}` not found"))))
         .transpose()?;
-    Ok(AttdefFields { tag, justify, style })
+    Ok(TextFields { tag, justify, style })
 }
 
 #[cfg(test)]
