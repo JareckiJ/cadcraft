@@ -814,6 +814,8 @@ struct PlotState {
     /// Model-space placement; stays outside PageSetup so layouts keep their existing behavior.
     center: bool,
     offset_mm: [f64; 2],
+    /// Copies, when the device is a system printer.
+    copies: u32,
 }
 
 /// The page setup a plot of `target` starts from: the layout's, or model-space defaults (fitted
@@ -862,6 +864,9 @@ fn plot_params(st: &PlotState, preview_dpi: Option<f64>) -> Value {
             None if device => {
                 o.insert("device".into(), json!(page.device));
                 o.insert("paper".into(), json!(page.paper));
+                if st.copies > 1 && cadcraft_engine::cmd::printers::is_printer(&page.device) {
+                    o.insert("copies".into(), json!(st.copies));
+                }
             }
             None if cadcraft_render::paper_size(&page.paper).is_some() => {
                 o.insert("device".into(), json!("None"));
@@ -922,9 +927,12 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
             window: [ext.min.x, ext.min.y, ext.max.x, ext.max.y],
             center: true,
             offset_mm: [0.0, 0.0],
+            copies: 1,
         }
     });
     let model = st.target == "Model";
+    // A system printer takes the PDF: no file to ask for, copies to choose.
+    let to_printer = cadcraft_engine::cmd::printers::is_printer(&st.page.device);
     let choices = PageChoices::new(ctx, d);
     let offset_supported =
         choices.devices.iter().find(|dev| dev.name.eq_ignore_ascii_case(&st.page.device)).is_none_or(|dev| dev.output.as_str() != "svg");
@@ -978,6 +986,11 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                     pick = ui.button("Window <").on_hover_text("Pick the window's corners in the drawing").clicked();
                     ui.end_row();
                 }
+                if to_printer {
+                    ui.label("Copies");
+                    ui.add(egui::DragValue::new(&mut st.copies).range(1..=cadcraft_engine::cmd::printers::MAX_COPIES));
+                    ui.end_row();
+                }
             });
             sheet_sketch(ui, &st.page, &t);
         });
@@ -1000,7 +1013,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
             preview = ui.button("Preview").on_hover_text("The sheet as these settings plot it").clicked();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 cancel = ui.button("Cancel").clicked();
-                ok |= ui.button("OK").clicked();
+                ok |= ui.button(if to_printer { "Print" } else { "OK" }).clicked();
             });
         });
     });
@@ -1029,7 +1042,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     }
     if ok {
         let mut params = plot_params(&st, None);
-        if let Some(pick) = app.services.pick_save.as_ref() {
+        if let Some(pick) = app.services.pick_save.as_ref().filter(|_| !to_printer) {
             let title = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
             let stem = std::path::Path::new(&title).file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.is_empty());
             let suggested = format!("{}-{}.{ext}", stem.unwrap_or_else(|| "Drawing".into()), st.target);
@@ -1042,9 +1055,10 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         *open = false;
         match app.run("plot", params) {
             Ok(r) => {
-                let msg = match r.get("path").and_then(Value::as_str) {
-                    Some(path) => format!("Plotted {} to {path}", st.target),
-                    None => format!("Plotted {} ({} bytes of PDF; there is no file dialog here)", st.target, r["bytes"]),
+                let msg = match (r.get("message").and_then(Value::as_str), r.get("path").and_then(Value::as_str)) {
+                    (Some(m), _) => m.to_string(),
+                    (None, Some(path)) => format!("Plotted {} to {path}", st.target),
+                    (None, None) => format!("Plotted {} ({} bytes of PDF; there is no file dialog here)", st.target, r["bytes"]),
                 };
                 app.session.echo(msg);
             }
@@ -1153,7 +1167,33 @@ mod plot_dialog_tests {
             window: [0.0, 0.0, 10.0, 10.0],
             center: true,
             offset_mm: [0.0, 0.0],
+            copies: 1,
         }
+    }
+
+    #[test]
+    fn a_system_printer_is_a_device_and_the_plot_carries_copies() {
+        use cadcraft_engine::cmd::printers::{PrintJob, Printing, set_printing};
+        fn list() -> Result<Vec<String>, String> {
+            Ok(vec!["Office".into()])
+        }
+        fn print(job: &PrintJob) -> Result<String, String> {
+            Ok(format!("{}-1", job.printer))
+        }
+        set_printing(Printing { list, print });
+        let mut st = state("Model");
+        apply_page_change(&mut st.page, "device", &json!("Office"));
+        assert_eq!(st.page.device, "Office");
+        assert!(!st.page.landscape, "a printer starts portrait");
+        assert!(st.page.paper.contains("A4"), "{}", st.page.paper);
+        st.copies = 3;
+        let p = plot_params(&st, None);
+        assert_eq!((p["device"].as_str(), p["copies"].as_u64()), (Some("Office"), Some(3)));
+        st.copies = 1;
+        assert!(plot_params(&st, None).get("copies").is_none());
+        apply_page_change(&mut st.page, "device", &json!("CADCraft PDF"));
+        st.copies = 3;
+        assert!(plot_params(&st, None).get("copies").is_none(), "copies are for printers");
     }
 
     #[test]

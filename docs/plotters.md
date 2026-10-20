@@ -36,6 +36,31 @@ settings directory:
 session unless the host provides storage (`cmd::plotters::set_plotter_store`). Binary `.pc3`
 files are not read; we haven't found a public specification of that format.
 
+## System printers
+
+The computer's printers come after the plotter configurations in the Plot dialog's
+Printer/plotter list and in PLOT's `device` (`cmd/printers.rs`). Native builds ask the system's
+print queue: CUPS on Linux, macOS and the BSDs (`lpstat -e` lists the printers; `lp -d PRINTER
+-n COPIES -t TITLE -o media=A4 [-o landscape] -` takes the PDF on standard input), PowerShell on
+Windows (`Get-Printer`; `Start-Process -Verb PrintTo` hands a temporary PDF to the system's PDF
+handler, which decides copies and paper). The web has no queue.
+
+A printer offers the standard ISO, ANSI and ARCH papers with their margins, portrait by default
+(the queue picks the tray; other sizes go as `Custom.WIDTHxHEIGHTmm`). A plot to a printer
+renders the sheet to PDF exactly as a PDF plot does and sends it; nothing is written unless
+`path` is given too. The Plot dialog then shows **Copies** and its button reads **Print**; the
+command line reports the queue's job id ("Printed Layout1 on Office (job Office-12)").
+
+```
+printers.list                                → {printers: ["Office", "Plotter HP"]}
+plot {"device": "Office", "paper": "A3", "landscape": true, "copies": 2}
+                                             → {printer, job, copies, bytes, layout, pages, message}
+pagesetup {"layout": "Layout1", "device": "Office", "paper": "A4"}
+```
+
+EXPORTPDF never prints, whatever the layout's device. Hosts and tests install another queue with
+`cmd::printers::set_printing`.
+
 ## Files
 
 `<name>.plotter.json`, UTF-8 JSON with a format marker:
