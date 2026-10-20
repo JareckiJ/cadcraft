@@ -266,7 +266,9 @@ fn viewport_groups(tags: &[Tag]) -> &[Tag] {
 /// 346) are table handles, resolved once the UCS table is known ([`entity_extras`]).
 fn viewport_ucs(tags: &[Tag]) -> Option<ViewportUcs> {
     let g = viewport_groups(tags);
-    if !g.iter().any(|t| matches!(t.code, 110 | 111 | 112 | 345)) {
+    // Any UCS group, the base UCS handle (346) alone too: a viewport that only names its base
+    // UCS keeps it.
+    if !g.iter().any(|t| matches!(t.code, 110 | 111 | 112 | 345 | 346)) {
         return None;
     }
     let t = T(g);
@@ -302,7 +304,11 @@ fn viewport_extra(tags: &[Tag]) -> Vec<RawTag> {
         if out.len() >= MAX_VIEWPORT_EXTRA {
             break;
         }
-        if !VIEWPORT_NOT_EXTRA.contains(&code) && !crate::dxf_raw::is_pointer(code) && !out.iter().any(|t| t.code == code) {
+        // Only groups that can stand inside the AcDbViewport subclass, as `viewport_groups` reads
+        // them from the record: no record start (0), handle (5, 105), subclass (100), group
+        // brace (102) or xdata (1000 on), which written back would break the record or add to it.
+        let own_group = (1..1000).contains(&code) && !matches!(code, 5 | 100 | 102 | 105);
+        if own_group && !VIEWPORT_NOT_EXTRA.contains(&code) && !crate::dxf_raw::is_pointer(code) && !out.iter().any(|t| t.code == code) {
             out.push(RawTag { code, value });
         }
     }

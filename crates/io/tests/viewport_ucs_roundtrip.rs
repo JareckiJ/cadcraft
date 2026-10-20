@@ -305,6 +305,49 @@ fn a_deleted_named_ucs_is_not_pointed_at() {
     assert_eq!(group(&rec, "346"), Some(record_handle(&text, "UCS", "BASE").as_str()));
 }
 
+/// CADCraft's `VPEXTRA` copy of a viewport's unmodelled groups can't smuggle structure into the
+/// record: a record start, handles, a subclass, a group brace, an owner or xdata are dropped on
+/// read, so a save writes nothing the user didn't draw.
+#[test]
+fn vpextra_cannot_inject_records_or_handles() {
+    let (d, h) = base();
+    let text = cadcraft_io::write_dxf(&d);
+    let lines_before = d.model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
+    let mut g: Vec<(i32, String)> = vec![(1001, "CADCRAFT".into()), (1000, "VPEXTRA".into()), (1002, "{".into())];
+    for (code, value) in
+        [("0", "LINE"), ("5", "1F"), ("100", "AcDbLine"), ("102", "{ACAD_REACTORS"), ("105", "2A"), ("330", "1"), ("1001", "X"), ("13", "4.5")]
+    {
+        g.push((1000, code.into()));
+        g.push((1000, value.into()));
+    }
+    g.push((1002, "}".into()));
+    let back = cadcraft_io::read_dxf(inject(&text, h, &g).as_bytes()).unwrap();
+    let (_, v) = the_viewport(&back);
+    let codes: Vec<i32> = v.extra.iter().map(|t| t.code).collect();
+    assert!(codes.iter().all(|c| (1..1000).contains(c) && !matches!(c, 5 | 100 | 102 | 105 | 330)), "{codes:?}");
+    assert!(v.extra.iter().any(|t| t.code == 13 && t.value.trim() == "4.5"), "a viewport's own group is still kept: {:?}", v.extra);
+    // Saved and opened again: still one viewport, no LINE it never had, no stray subclass.
+    let saved = cadcraft_io::write_dxf(&back);
+    assert!(!saved.lines().any(|l| l.trim() == "AcDbLine"), "no injected subclass");
+    let again = cadcraft_io::read_dxf(saved.as_bytes()).unwrap();
+    assert_eq!(again.model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count(), lines_before, "no injected LINE");
+    assert!(the_viewport(&again).1.extra.iter().all(|t| (1..1000).contains(&t.code)));
+}
+
+/// A viewport whose only UCS group is its base UCS handle (346) keeps that base UCS.
+#[test]
+fn a_base_ucs_handle_alone_is_kept() {
+    let (d, h) = base();
+    let text = cadcraft_io::write_dxf(&d);
+    assert!(the_viewport(&d).1.ucs.is_none() && group(&viewport_record(&text, h), "110").is_none(), "no UCS groups of its own");
+    let handle = record_handle(&text, "UCS", "BASE");
+    let back = cadcraft_io::read_dxf(inject(&text, h, &[(346, handle)]).as_bytes()).unwrap();
+    let u = the_viewport(&back).1.ucs.expect("a UCS from 346 alone");
+    assert_eq!(u.base.as_deref(), Some("BASE"));
+    let again = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&back).as_bytes()).unwrap();
+    assert_eq!(the_viewport(&again).1.ucs.and_then(|u| u.base).as_deref(), Some("BASE"), "kept through a save");
+}
+
 #[test]
 fn hostile_viewport_ucs_groups_do_not_panic() {
     let (d, h) = base();
