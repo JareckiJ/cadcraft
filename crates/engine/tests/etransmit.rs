@@ -411,7 +411,7 @@ fn published_zip_uses_ordinary_save_permissions() {
     assert_eq!(fs::metadata(out).unwrap().permissions().mode() & 0o777, fs::metadata(control).unwrap().permissions().mode() & 0o777);
 }
 
-/// A supplied drawing cannot export even valid co-located assets or drawings without caller consent.
+/// Unapproved sources disclose neither their contents nor resolved paths in package diagnostics.
 #[test]
 fn unapproved_sources_are_not_exported_and_file_approval_does_not_cover_siblings() {
     let dir = tempfile::tempdir().unwrap();
@@ -430,8 +430,13 @@ fn unapproved_sources_are_not_exported_and_file_approval_does_not_cover_siblings
     let r = s.execute("etransmit", &json!({"path": out})).unwrap();
     assert_eq!(r["files"].as_array().unwrap().len(), 1);
     assert_eq!(r["missing"].as_array().unwrap().len(), 3);
-    assert!(r["missing"].as_array().unwrap().iter().all(|m| m["reason"].as_str().unwrap().contains("export not authorized")));
+    assert!(r["missing"].as_array().unwrap().iter().all(|m| m["reason"] == "export not authorized; approve the source file or folder with `allow`"));
     let mut zip = ZipArchive::new(fs::File::open(&out).unwrap()).unwrap();
+    let mut manifest_text = String::new();
+    zip.by_name("manifest.json").unwrap().read_to_string(&mut manifest_text).unwrap();
+    assert!(!manifest_text.contains(dir.path().to_str().unwrap()));
+    let manifest: Value = serde_json::from_str(&manifest_text).unwrap();
+    assert_eq!(manifest["missing"], r["missing"]);
     for i in 0..zip.len() {
         let mut bytes = Vec::new();
         zip.by_index(i).unwrap().read_to_end(&mut bytes).unwrap();

@@ -401,7 +401,7 @@ mod native {
                 return Ok((name.clone(), None));
             }
             if !self.allowed.iter().any(|a| if a.directory { key.0.starts_with(&a.path) } else { key.0 == a.path }) {
-                return Err(format!("export not authorized for {}; approve this file or folder with `allow`", key.0.display()));
+                return Err("export not authorized; approve the source file or folder with `allow`".into());
             }
             if self.names.len() >= MAX_FILES {
                 return Err("package exceeds 1000 dependency files".into());
