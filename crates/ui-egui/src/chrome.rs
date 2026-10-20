@@ -342,6 +342,7 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             (Icon::Transparency, s.transparency_display, "transparencydisplay", "Show/Hide Transparency"),
             (Icon::DynInput, s.dynmode, "dynmode", "Dynamic Input (F12)"),
             (Icon::QuickProps, s.qpmode, "qpmode", "Quick Properties"),
+            (Icon::SelectionCycling, s.selection_cycling, "selectioncycling", "Selection Cycling"),
             (Icon::IsolateObjects, isolated, "isolateobjects.toggle", "Isolate Objects"),
             (Icon::Annotation, anno_all, "annovisible.toggle", "Annotation Visibility"),
             (Icon::Workspace, false, "ui.noop", "Workspace Switching"),

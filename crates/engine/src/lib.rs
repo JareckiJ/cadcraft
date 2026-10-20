@@ -1152,12 +1152,22 @@ impl Session {
                     let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
-                match select::pick(self.doc()?, &space, p, ap) {
-                    Some(h) => Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h])))),
-                    None => {
-                        self.pending_window = Some(PendingWindow { corner: p, during_command: true });
-                        Ok(None)
-                    }
+                let cands = if self.settings.selection_cycling {
+                    select::pick_all(self.doc()?, &space, p, ap)
+                } else {
+                    select::pick(self.doc()?, &space, p, ap).into_iter().collect()
+                };
+                if !cands.is_empty() {
+                    let h = if self.settings.selection_cycling && cands.len() > 1 {
+                        let sel = self.selection();
+                        cands.iter().find(|cand| !sel.contains(cand)).copied().unwrap_or(cands[0])
+                    } else {
+                        cands[0]
+                    };
+                    Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h]))))
+                } else {
+                    self.pending_window = Some(PendingWindow { corner: p, during_command: true });
+                    Ok(None)
                 }
             }
             Input::Text(ref t) | Input::Keyword(ref t) => {
@@ -1720,20 +1730,38 @@ impl Session {
             return Ok(());
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        match select::pick(self.doc()?, &space, p, ap) {
-            Some(h) => {
-                // With group selection the object's selectable groups come (or go) with it.
-                let hs = cmd::groups::expand(self, vec![h]);
-                let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
-                let had = sel.contains(&h);
-                if shift && (pickadd || had) {
-                    sel.retain(|x| !hs.contains(x));
-                } else if !had {
-                    sel.extend(hs);
-                }
-                self.set_selection(sel);
+        let cands = if self.settings.selection_cycling {
+            select::pick_all(self.doc()?, &space, p, ap)
+        } else {
+            select::pick(self.doc()?, &space, p, ap).into_iter().collect()
+        };
+        if !cands.is_empty() {
+            let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
+            // If cycling is active and multiple objects overlap, cycle through the candidates:
+            // replacing any previously selected candidate from the overlapping group.
+            let h = if self.settings.selection_cycling && cands.len() > 1 {
+                let current_idx = cands.iter().position(|cand| sel.contains(cand));
+                let next_idx = match current_idx {
+                    Some(idx) => (idx + 1) % cands.len(),
+                    None => 0,
+                };
+                // Remove other candidates in the cycling group from the selection
+                sel.retain(|s_cand| !cands.contains(s_cand));
+                cands[next_idx]
+            } else {
+                cands[0]
+            };
+            // With group selection the object's selectable groups come (or go) with it.
+            let hs = cmd::groups::expand(self, vec![h]);
+            let had = sel.contains(&h);
+            if shift && (pickadd || had) {
+                sel.retain(|x| !hs.contains(x));
+            } else if !had {
+                sel.extend(hs);
             }
-            None => self.pending_window = Some(PendingWindow { corner: p, during_command: false }),
+            self.set_selection(sel);
+        } else {
+            self.pending_window = Some(PendingWindow { corner: p, during_command: false });
         }
         Ok(())
     }

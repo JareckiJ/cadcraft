@@ -209,6 +209,30 @@ pub(crate) fn pick_with(d: &Drawing, space: &Space, ix: &Option<std::sync::Arc<S
     best.map(|(_, h)| h)
 }
 
+/// All entities within `aperture` of `p`, ordered by proximity and draw order.
+/// Used for selection cycling (SELECTIONCYCLING).
+pub fn pick_all(d: &Drawing, space: &Space, p: Vec2, aperture: f64) -> Vec<Handle> {
+    let ix = spatial::index(d, space);
+    let probe = Bounds2::new(p, p).expand(aperture);
+    let mut hits = Vec::new();
+    let Some(cands) = candidates(d, space, &ix, &probe.expand(aperture), true, true) else { return Vec::new() };
+    for (e, known) in cands {
+        if !selectable(d, e) {
+            continue;
+        }
+        let infinite = is_infinite(e);
+        if !infinite && !bounds_of(d, e, known).expand(aperture).intersects(&probe) {
+            continue;
+        }
+        let dist = entity_distance(d, e, p, aperture / 4.0);
+        if dist <= aperture {
+            hits.push((dist, e.handle));
+        }
+    }
+    hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    hits.into_iter().map(|(_, h)| h).collect()
+}
+
 /// Whether PREVIEWFILTER keeps `e` from being highlighted under the cursor: bits 1 objects on
 /// locked layers, 2 xrefs, 4 tables, 8 multiline text, 16 hatches, 32 objects in groups.
 pub fn preview_filtered(d: &Drawing, e: &Entity, filter: u8) -> bool {

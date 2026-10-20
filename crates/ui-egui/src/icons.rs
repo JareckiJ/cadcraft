@@ -145,6 +145,7 @@ pub enum Icon {
     SelectObjects,
     QuickSelect,
     IsolateObjects,
+    SelectionCycling,
 }
 
 struct Pen<'a> {
@@ -917,6 +918,11 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.poly(&[(3.0, 21.0), (3.0, 19.0)], false, b);
             pen.poly(&[(21.0, 21.0), (19.0, 21.0)], false, b);
             pen.poly(&[(21.0, 21.0), (21.0, 19.0)], false, b);
+        }
+        SelectionCycling => {
+            // Two overlapping offset squares with a cycle badge
+            pen.rect(4.0, 4.0, 11.0, 11.0, b);
+            pen.rect(9.0, 9.0, 11.0, 11.0, a);
         }
     }
 }

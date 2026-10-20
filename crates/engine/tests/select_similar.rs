@@ -199,3 +199,30 @@ fn object_isolation_mode_persistence_roundtrip() {
 
     let _ = std::fs::remove_file(&tmp);
 }
+
+#[test]
+fn selection_cycling_toggles_and_cycles_overlapping_entities() {
+    let mut s = cadcraft_engine::Session::new();
+    // Draw two overlapping circles at 0,0
+    s.execute("circle", &json!({ "center": [0, 0], "radius": 5 })).unwrap();
+    s.execute("circle", &json!({ "center": [0, 0], "radius": 5 })).unwrap();
+    let hs = s.doc().unwrap().model.handles();
+    assert_eq!(hs.len(), 2);
+
+    // SELECTIONCYCLING is off by default
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "SELECTIONCYCLING"), Some(json!(0)));
+
+    // With cycling off, idle_click on the rim repeatedly picks the same topmost circle
+    s.idle_click(cadcraft_geom::Vec2::new(5.0, 0.0), false).unwrap();
+    assert_eq!(s.selection(), vec![hs[1]]);
+    s.idle_click(cadcraft_geom::Vec2::new(5.0, 0.0), false).unwrap();
+    assert_eq!(s.selection(), vec![hs[1]]);
+
+    // Turn SELECTIONCYCLING on (2 in AutoCAD)
+    s.execute("setvar", &json!({ "name": "SELECTIONCYCLING", "value": 2 })).unwrap();
+    assert_eq!(cadcraft_engine::sysvars::get(&s, "SELECTIONCYCLING"), Some(json!(2)));
+
+    // First pick gets one, next pick cycles to the other overlapping circle
+    s.idle_click(cadcraft_geom::Vec2::new(5.0, 0.0), false).unwrap();
+    assert_eq!(s.selection(), vec![hs[0]]);
+}

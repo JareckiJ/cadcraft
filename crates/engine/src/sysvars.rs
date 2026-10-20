@@ -104,6 +104,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "LWDISPLAY" => json!(i32::from(st.lwdisplay)),
         "PLOTTRANSPARENCYOVERRIDE" => json!(st.plot_transparency_override),
         "SELECTSIMILARMODE" => json!(st.selectsimilarmode),
+        "SELECTIONCYCLING" => json!(if st.selection_cycling { 2 } else { 0 }),
         "OBJECTISOLATIONMODE" => json!(st.objectisolationmode),
         "QPMODE" => json!(i32::from(st.qpmode)),
         "HIGHLIGHT" => json!(i32::from(st.highlight)),
@@ -308,6 +309,11 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             st.plot_transparency_override = as_i(v).filter(|i| (0..=2).contains(i)).and_then(|i| u8::try_from(i).ok()).ok_or_else(bad)?
         }
         "SELECTSIMILARMODE" => st.selectsimilarmode = as_i(v).filter(|b| (0..=255).contains(b)).ok_or_else(bad)? as u32,
+        "SELECTIONCYCLING" => match as_i(v) {
+            Some(0) => st.selection_cycling = false,
+            Some(1 | 2) => st.selection_cycling = true,
+            _ => st.selection_cycling = as_bool(v).ok_or_else(bad)?,
+        },
         "OBJECTISOLATIONMODE" => match as_i(v) {
             Some(m @ (0 | 1)) => st.objectisolationmode = m as u8,
             _ => return Err(bad()),
