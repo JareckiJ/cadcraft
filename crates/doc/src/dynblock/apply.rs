@@ -769,6 +769,47 @@ fn apply(
             }
             continue;
         }
+        if let ActionKind::PolarStretch { frame, vertices, rotate_only, multiplier, angle_offset } = &a.kind {
+            let Some((turn, v)) = polar_stretch(&m, values, set, a, *multiplier, *angle_offset) else { continue };
+            for h in &a.selection {
+                if let Some(node) = param_of.get(h) {
+                    // Its points turn, and the ones in the frame (where the dynamic block has them)
+                    // follow the distance.
+                    if set.contains_key(node) {
+                        continue;
+                    }
+                    let Some(cur) = new.get(node).cloned().or_else(|| current(&m, values, *node)) else { continue };
+                    let home = current(&m, &BTreeMap::new(), *node);
+                    let carry = |p: Vec3, at: Vec3| {
+                        let q = turn.apply(p.xy()).to3(p.z);
+                        if in_frame(frame, at.xy()) { q + v.to3(0.0) } else { q }
+                    };
+                    let moved = match (cur, home) {
+                        (Val::Point(p), Some(Val::Point(h))) => Val::Point(carry(p, h)),
+                        (Val::Point(p), _) => Val::Point(carry(p, p)),
+                        (Val::Points(b, e), Some(Val::Points(hb, he))) => Val::Points(carry(b, hb), carry(e, he)),
+                        (Val::Points(b, e), _) => Val::Points(carry(b, b), carry(e, e)),
+                        (Val::Flip(b, e, f), Some(Val::Flip(hb, he, _))) => Val::Flip(carry(b, hb), carry(e, he), f),
+                        (Val::Flip(b, e, f), _) => Val::Flip(carry(b, b), carry(e, e), f),
+                        (t, _) => t,
+                    };
+                    new.insert(*node, moved);
+                    continue;
+                }
+                let Some(c) = copy_of(h) else { continue };
+                let idx = vertices.iter().find(|(vh, _)| vh == h).map(|(_, i)| i.clone());
+                let ops = moves.entry(c).or_default();
+                ops.push(Op::Transform(turn));
+                ops.push(Op::Move(idx, v));
+            }
+            // Objects only turned (an object also in the selection is stretched, as AutoCAD does).
+            for h in rotate_only.iter().filter(|h| !a.selection.contains(h) && !param_of.contains_key(h)) {
+                if let Some(c) = copy_of(h) {
+                    moves.entry(c).or_default().push(Op::Transform(turn));
+                }
+            }
+            continue;
+        }
         let (mult, angle, frame, vertices): (f64, f64, &[Vec2], &[(Handle, Vec<i32>)]) = match &a.kind {
             ActionKind::Stretch { frame, vertices, multiplier, angle_offset } => (*multiplier, *angle_offset, frame, vertices),
             ActionKind::Move { multiplier, angle_offset } => (*multiplier, *angle_offset, &[], &[]),
@@ -1469,15 +1510,40 @@ fn transform_of(m: &DynamicBlock, values: &BTreeMap<i32, Value>, set: &BTreeMap<
     })
 }
 
+/// What polar stretch action `a` does with the changes `set`: the turn about its parameter's base
+/// point by the change of its angle, and how far the points in its frame move after it (the end
+/// point's move less the turn's, times the multiplier, turned by the angle offset). `None` when its
+/// parameter didn't change.
+fn polar_stretch(
+    m: &DynamicBlock,
+    values: &BTreeMap<i32, Value>,
+    set: &BTreeMap<i32, Val>,
+    a: &super::Action,
+    multiplier: f64,
+    angle_offset: f64,
+) -> Option<(Mat3, Vec2)> {
+    let (node, _) = a.connections.iter().find(|(n, _)| set.contains_key(n))?;
+    let (Some(Val::Points(nb, ne)), Some(Val::Points(ob, oe))) = (set.get(node), current(m, values, *node)) else { return None };
+    let (was, now) = ((oe - ob).xy(), (*ne - *nb).xy());
+    // A distance of 0 has no direction: nothing turns.
+    let delta = if was.len() > 1e-12 && now.len() > 1e-12 { now.angle() - was.angle() } else { 0.0 };
+    let turn = Mat3::rotate_about(ob.xy(), delta);
+    let mult = if multiplier == 0.0 { 1.0 } else { multiplier };
+    let v = (ne.xy() - turn.apply(oe.xy())).rotate(angle_offset) * mult;
+    let still = delta.abs() < 1e-12 && v.len() < 1e-12;
+    (delta.is_finite() && v.is_finite() && !still).then_some((turn, v))
+}
+
 /// The scale factors one change of a scale action may make: past them the objects would vanish
 /// or their sizes overflow.
 const MIN_SCALE: f64 = 1e-9;
 const MAX_SCALE: f64 = 1e9;
 
-/// A scale action's transform for the changes `set`: each axis scales by the ratio of the new
-/// distance it reads to the old one (a linear or polar parameter's distance; an XY parameter's
-/// horizontal distance for "XScale", vertical for "YScale", both for "Scale"), about the base point,
-/// which follows the parameter's base point when the action says so.
+/// A scale action's transform for the changes `set`: it scales uniformly by the ratio of the new
+/// distance from its parameter's base to its end to the old one (an XY parameter's diagonal, as
+/// AutoCAD scales by it), about the base point, which follows the parameter's base point when the
+/// action says so. (AutoCAD can scale by an XY parameter's X or Y distance alone, but keeps that
+/// choice only in DWG data that isn't read.)
 fn scale_of(
     m: &DynamicBlock,
     values: &BTreeMap<i32, Value>,
@@ -1485,54 +1551,31 @@ fn scale_of(
     a: &super::Action,
     base: &super::ActionBase,
 ) -> Result<Option<Mat3>, String> {
-    // The ratio connection `name` reads, when its parameter changed; `None` when it didn't.
-    let ratio = |name: &str| -> Result<Option<(f64, f64)>, String> {
-        let Some((node, _)) = a.connections.iter().find(|(n, c)| *n != 0 && c.eq_ignore_ascii_case(name)) else { return Ok(None) };
-        let (Some(Val::Points(nb, ne)), Some(Val::Points(ob, oe))) = (set.get(node), current(m, values, *node)) else { return Ok(None) };
-        let Some(p) = m.parameters.iter().find(|p| p.node == *node) else { return Ok(None) };
-        let (now, was) = ((*ne - *nb).xy(), (oe - ob).xy());
-        let r = |n: f64, w: f64| -> Result<f64, String> {
-            let r = n.abs() / w.abs();
-            if w.abs() < 1e-12 || !r.is_finite() {
-                // From nothing no ratio is known: AutoCAD can't scale back up from zero either.
-                return Err(format!("{} can't scale objects from a distance of 0.", a.name));
-            }
-            Ok(r)
-        };
-        Ok(Some(match (&p.kind, name.to_ascii_lowercase().as_str()) {
-            (ParameterKind::Xy { .. }, "xscale") => (r(now.x, was.x)?, 1.0),
-            (ParameterKind::Xy { .. }, "yscale") => (1.0, r(now.y, was.y)?),
-            (ParameterKind::Xy { .. }, _) => (r(now.x, was.x)?, r(now.y, was.y)?),
-            _ => {
-                let s = r(now.len(), was.len())?;
-                (s, s)
-            }
-        }))
+    let names = ["Scale", "XScale", "YScale"];
+    let Some((node, _)) = a.connections.iter().find(|(n, c)| set.contains_key(n) && names.iter().any(|x| c.eq_ignore_ascii_case(x))) else {
+        return Ok(None);
     };
-    // Independent axes when the X and Y connections read different values of an XY parameter;
-    // else the one factor.
-    let (x, y) = (ratio("XScale")?, ratio("YScale")?);
-    let (sx, sy) = match (x, y, ratio("Scale")?) {
-        (Some((sx, _)), Some((_, sy)), _) if x != y => (sx, sy),
-        (_, _, Some(s)) => s,
-        (Some(s), _, _) | (None, Some(s), _) => s,
-        (None, None, None) => return Ok(None),
-    };
-    if (sx - 1.0).abs() < 1e-12 && (sy - 1.0).abs() < 1e-12 {
+    let (Some(Val::Points(nb, ne)), Some(Val::Points(ob, oe))) = (set.get(node), current(m, values, *node)) else { return Ok(None) };
+    let (now, was) = ((*ne - *nb).xy().len(), (oe - ob).xy().len());
+    if was < 1e-12 {
+        // From nothing no ratio is known.
+        return Err(format!("{} can't scale objects from a distance of 0.", a.name));
+    }
+    let s = now / was;
+    if (s - 1.0).abs() < 1e-12 {
         return Ok(None);
     }
-    if !(sx >= MIN_SCALE && sy >= MIN_SCALE) {
+    if s.is_nan() || s < MIN_SCALE {
         return Err(format!("{} would scale objects to nothing.", a.name));
     }
-    if !(sx <= MAX_SCALE && sy <= MAX_SCALE) {
+    if s > MAX_SCALE {
         return Err(format!("{} would scale objects more than {MAX_SCALE} times.", a.name));
     }
     let pivot = match a.connections.first().and_then(|(n, _)| set.get(n).cloned().or_else(|| current(m, values, *n))) {
         Some(Val::Points(b, _)) if base.dependent => b + base.offset,
         _ => base.at,
     };
-    let p = pivot.xy();
-    Ok(Some(Mat3::translate(p * -1.0).then(Mat3::scale(sx, sy)).then(Mat3::translate(p))))
+    Ok(Some(Mat3::scale_about(pivot.xy(), s)))
 }
 
 /// One change to a copied object: a move (of the listed vertices, else all of it) or a turn or
