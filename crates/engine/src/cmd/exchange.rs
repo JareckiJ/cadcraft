@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("export", "Export...", run_export)
             .menu(&["File", "Export..."])
             .alias(&["exp"])
-            .params("{path? (else returns base64 `data`), format?: dxf|dwg|svg|png|pdf (default: the path's extension)} → {format, bytes, path? | data}")
+            .params("{path? (else returns base64 `data`), format?: dxf|dwg|svg|png|pdf (default: the path's extension), version?: R12|2000…2018, binary?, docfa?: bool (R12 DXF for DOCFA), scale?|unit?: m|cm|mm (R12, as SAVEAS)} → {format, bytes, path? | data, notes?}")
             .noundo(),
         CommandSpec::new("preview", "Plot Preview", run_preview)
             .menu(&["File", "Plot Preview"])
@@ -116,14 +116,39 @@ fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
     if !EXPORT_FORMATS.contains(&format.as_str()) {
         return Err(bad("export", "`format` must be dxf, dwg, svg, png or pdf (or give a `path` with one of those extensions)"));
     }
-    let bytes = (hooks.write)(s.doc()?, &format!("export.{format}")).map_err(|e| bad("export", e))?;
-    match path {
+    let name = format!("export.{format}");
+    let opts = super::file::save_options("export", p)?;
+    let drawing_file = matches!(format.as_str(), "dxf" | "dwg");
+    if opts != super::file::SaveAs::default() && !drawing_file {
+        return Err(bad("export", "`version`, `binary`, `docfa`, `scale` and `unit` apply to DXF and DWG exports"));
+    }
+    let bytes = if opts == super::file::SaveAs::default() {
+        (hooks.write)(s.doc()?, &name).map_err(|e| bad("export", e))?
+    } else {
+        let w = super::file::write_as().ok_or_else(|| bad("export", "exporting at a chosen version is not available in this build"))?;
+        w(s.doc()?, &name, &opts).map_err(|e| bad("export", e))?
+    };
+    // What an R12 file (a reduced copy) converts or leaves out.
+    let notes: Vec<String> = match (super::file::save_notes(), drawing_file) {
+        (Some(hook), true) => hook(s.doc()?, &name, &opts),
+        _ => Vec::new(),
+    };
+    let r12 = opts.docfa || opts.version == Some(super::file::Version::R12);
+    if r12 {
+        let what = if opts.docfa { "Exported for DOCFA (R12 DXF, a reduced copy)" } else { "Exported as R12 DXF, a reduced copy of the drawing" };
+        s.echo(if notes.is_empty() { what.to_string() } else { format!("{what}: {}", notes.join("; ")) });
+    }
+    let mut r = match path {
         Some(path) => {
             write_file("export", path, &bytes)?;
-            Ok(json!({ "path": path, "format": format, "bytes": bytes.len(), "message": format!("Exported to {path}") }))
+            json!({ "path": path, "format": format, "bytes": bytes.len(), "message": format!("Exported to {path}") })
         }
-        None => Ok(json!({ "data": base64_encode(&bytes), "format": format, "bytes": bytes.len() })),
+        None => json!({ "data": base64_encode(&bytes), "format": format, "bytes": bytes.len() }),
+    };
+    if r12 && let Some(o) = r.as_object_mut() {
+        o.insert("notes".into(), json!(notes));
     }
+    Ok(r)
 }
 
 // ---------- IMPORT ----------

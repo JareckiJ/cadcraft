@@ -76,7 +76,12 @@ fn dxf_keeps_the_data_store_and_drops_records_of_deleted_entities() {
 
     // An R2000 file has no data store (its solids would carry SAT text instead).
     let r2000 = String::from_utf8(
-        cadcraft_io::write_with(&d, "x.dxf", &cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2000), binary: false }).unwrap(),
+        cadcraft_io::write_with(
+            &d,
+            "x.dxf",
+            &cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2000), binary: false, ..Default::default() },
+        )
+        .unwrap(),
     )
     .unwrap();
     assert!(!r2000.contains("ACDSDATA"));

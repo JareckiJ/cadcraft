@@ -58,7 +58,7 @@ fn sched() -> TableStyle {
 }
 
 fn opts(version: Version, binary: bool) -> SaveOptions {
-    SaveOptions { version: Some(version), binary }
+    SaveOptions { version: Some(version), binary, ..Default::default() }
 }
 
 fn acadver(bytes: &[u8]) -> String {
@@ -74,13 +74,13 @@ fn first_table(d: &Drawing) -> Option<Table> {
     d.model.iter().find_map(|e| if let EntityKind::Table(t) = &e.kind { Some(t.clone()) } else { None })
 }
 
-/// ASCII and binary DXF at every version declare it, encode text the version's way and read
-/// back to the same drawing as the R2000 file.
+/// ASCII and binary DXF at every version from 2000 on declare it, encode text the version's way
+/// and read back to the same drawing as the R2000 file (R12 is a reduced copy: `dxf_r12`).
 #[test]
 fn dxf_at_every_version_reads_back_the_same() {
     let d = sample();
     let reference = write_dxf(&read(write_dxf(&d).as_bytes(), "x.dxf").unwrap());
-    for v in Version::ALL {
+    for v in Version::LOSSLESS {
         for binary in [false, true] {
             let bytes = write_with(&d, "x.dxf", &opts(v, binary)).unwrap();
             let what = format!("{v} binary={binary}");
@@ -112,7 +112,7 @@ fn r2000_ascii_is_unchanged() {
 fn default_version_is_the_drawings_own() {
     let d = sample();
     assert_eq!(acadver(&write(&d, "x.dxf").unwrap()), "AC1032");
-    for (file, saved) in [("AC1015", "AC1015"), ("AC1024", "AC1024"), ("AC1009", "AC1015"), ("AC1040", "AC1032")] {
+    for (file, saved) in [("AC1015", "AC1015"), ("AC1024", "AC1024"), ("AC1009", "AC1009"), ("AC1012", "AC1015"), ("AC1040", "AC1032")] {
         let mut d = sample();
         d.header.set_str("ACADVER", file);
         assert_eq!(acadver(&write(&d, "x.dxf").unwrap()), saved, "{file}");
@@ -124,7 +124,7 @@ fn default_version_is_the_drawings_own() {
 #[test]
 fn binary_is_for_dxf_only() {
     assert!(write_with(&sample(), "x.dwg", &opts(Version::R2018, true)).is_err());
-    assert!(write_with(&sample(), "x.svg", &SaveOptions { version: None, binary: true }).is_err());
+    assert!(write_with(&sample(), "x.svg", &SaveOptions { version: None, binary: true, ..Default::default() }).is_err());
 }
 
 /// DWG at every version is that version and keeps the drawing: merged table cells, and from
@@ -133,7 +133,7 @@ fn binary_is_for_dxf_only() {
 #[test]
 fn dwg_at_every_version_reads_back() {
     let d = sample();
-    for v in Version::ALL {
+    for v in Version::LOSSLESS {
         let dwg = write_with(&d, "x.dwg", &opts(v, false)).unwrap();
         assert_eq!(cadcraft_dwg::version(&dwg).as_deref(), Some(v.code()), "{v}");
         let back = read(&dwg, "x.dwg").unwrap();

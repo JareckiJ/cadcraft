@@ -188,7 +188,9 @@ fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
         }
         "saveVersion" => {
             let name = v.as_str().map_or_else(|| v.to_string(), str::to_string);
-            c.save_version = Some(crate::SaveVersion::parse(name.trim()).ok_or("saveVersion must be 2000, 2004, 2007, 2010, 2013 or 2018")?);
+            c.save_version = Some(
+                crate::SaveVersion::parse(name.trim()).filter(|v| v.lossless()).ok_or("saveVersion must be 2000, 2004, 2007, 2010, 2013 or 2018")?,
+            );
         }
         "timeSensitiveRightClick" => c.time_sensitive_right_click = Some(v.as_bool().ok_or("timeSensitiveRightClick must be true or false")?),
         k if k.eq_ignore_ascii_case("SAVETIME") => {

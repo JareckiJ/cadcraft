@@ -43,6 +43,7 @@ pub mod palettes;
 pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
+pub mod saveas;
 pub mod shortcut_menus;
 pub mod theme;
 pub mod viewcube;
@@ -258,6 +259,8 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// The Save As dialog's choices while it is open ([`saveas`]).
+    pub saveas: Option<saveas::SaveAsState>,
 }
 
 impl CadApp {
@@ -269,6 +272,7 @@ impl CadApp {
             ui: UiState::default(),
             options: options::UiOptions::default(),
             services,
+            saveas: None,
             canvas: canvas::CanvasState::default(),
             spacemouse: spacemouse::State::default(),
             cmd: cmdline::CmdLine::default(),

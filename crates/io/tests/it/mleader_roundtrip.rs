@@ -6,7 +6,7 @@ use cadcraft_geom::Vec3;
 
 /// Saved as 2007 DXF: older versions have no MULTILEADER (they get LEADER + MTEXT / INSERT).
 fn roundtrip(d: &Drawing) -> (String, Drawing) {
-    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2007), binary: false };
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2007), binary: false, ..Default::default() };
     let text = String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &opts).unwrap()).unwrap();
     let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
     (text, back)

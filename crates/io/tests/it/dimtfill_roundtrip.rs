@@ -18,7 +18,7 @@ fn drawing() -> Drawing {
 }
 
 fn dxf(d: &Drawing, v: Version) -> String {
-    String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &SaveOptions { version: Some(v), binary: false }).unwrap()).unwrap()
+    String::from_utf8(cadcraft_io::write_with(d, "x.dxf", &SaveOptions { version: Some(v), binary: false, ..Default::default() }).unwrap()).unwrap()
 }
 
 /// The DIMSTYLE record named `name`, as trimmed lines.

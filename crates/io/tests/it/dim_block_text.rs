@@ -110,9 +110,12 @@ fn dwg_angular_block_text_keeps_the_decimal_separator() {
     use cadcraft_io::{SaveOptions, Version};
 
     for (separator_override, expected) in [(None, "39,4°"), (Some("."), "39.4°")] {
-        let dwg =
-            cadcraft_io::write_with(&angular_drawing(separator_override), "angle.dwg", &SaveOptions { version: Some(Version::R2018), binary: false })
-                .unwrap();
+        let dwg = cadcraft_io::write_with(
+            &angular_drawing(separator_override),
+            "angle.dwg",
+            &SaveOptions { version: Some(Version::R2018), binary: false, ..Default::default() },
+        )
+        .unwrap();
         // DWG consumers use the stored *D geometry: read it directly, without CADCraft rendering it.
         let stored = acadrust::DwgReader::from_stream(Cursor::new(dwg)).read().unwrap();
         let texts: Vec<&str> = stored

@@ -312,8 +312,10 @@ fn an_edited_value_replaces_the_multiline_text() {
 #[test]
 fn files_before_2007_get_single_line_attributes() {
     let d = read_dxf(dxf(FIXTURE).as_bytes()).unwrap();
-    let out =
-        String::from_utf8(cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(Version::R2004), binary: false }).unwrap()).unwrap();
+    let out = String::from_utf8(
+        cadcraft_io::write_with(&d, "x.dxf", &SaveOptions { version: Some(Version::R2004), binary: false, ..Default::default() }).unwrap(),
+    )
+    .unwrap();
     assert!(!out.contains("Embedded Object"));
     let again = read_dxf(out.as_bytes()).unwrap();
     let a = &reference(&again).attribs[0];

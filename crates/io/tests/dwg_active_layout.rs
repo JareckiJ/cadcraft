@@ -32,7 +32,7 @@ fn dwg_active_layout(dwg: &[u8]) -> String {
 }
 
 fn dwg(d: &Drawing) -> Vec<u8> {
-    write_with(d, "case.dwg", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap()
+    write_with(d, "case.dwg", &SaveOptions { version: Some(Version::R2018), binary: false, ..Default::default() }).unwrap()
 }
 
 #[test]

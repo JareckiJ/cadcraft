@@ -65,11 +65,11 @@ fn value<'a>(vars: &'a [(String, String)], name: &str) -> Option<&'a str> {
 #[test]
 fn an_ac1018_dwg_gets_the_variable_dictionary_autocad_always_writes() {
     let d = rectangle();
-    let dxf = write_with(&d, "rect.dxf", &SaveOptions { version: Some(Version::R2000), binary: false }).expect("write the DXF");
+    let dxf = write_with(&d, "rect.dxf", &SaveOptions { version: Some(Version::R2000), binary: false, ..Default::default() }).expect("write the DXF");
     let text = String::from_utf8_lossy(&dxf).to_ascii_lowercase();
     assert!(!text.contains("acdbvariabledictionary"), "this DXF is one without the dictionary, like ezdxf's");
 
-    let dwg = write_with(&d, "rect.dwg", &SaveOptions { version: Some(Version::R2004), binary: false }).expect("write the DWG");
+    let dwg = write_with(&d, "rect.dwg", &SaveOptions { version: Some(Version::R2004), binary: false, ..Default::default() }).expect("write the DWG");
     assert!(dwg.starts_with(b"AC1018"), "the DWG is AutoCAD 2004");
     let doc = read_dwg(&dwg);
     let vars = variable_dictionary(&doc).expect("AC1018 DWG: the named object dictionary has an AcDbVariableDictionary");
@@ -120,7 +120,7 @@ fn impossible_header_values_fall_back_to_the_defaults() {
 fn an_ac1032_dwg_stays_as_it_was() {
     // 2018 DWGs read fine in Aspire without the dictionary, so the latest format is unchanged.
     let d = rectangle();
-    let dwg = write_with(&d, "rect.dwg", &SaveOptions { version: Some(Version::R2018), binary: false }).expect("write the DWG");
+    let dwg = write_with(&d, "rect.dwg", &SaveOptions { version: Some(Version::R2018), binary: false, ..Default::default() }).expect("write the DWG");
     assert!(dwg.starts_with(b"AC1032"));
     let doc = read_dwg(&dwg);
     assert_eq!(variable_dictionary(&doc), None, "no dictionary is added to a 2018 DWG");

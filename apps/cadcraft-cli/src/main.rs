@@ -3,7 +3,7 @@
 //! ```text
 //! cadcraft-cli info FILE.dxf                       summary as JSON
 //! cadcraft-cli convert IN.dxf OUT.(dxf|svg|png) [--window x0,y0,x1,y1 | --view extents|current]
-//! cadcraft-cli run [FILE|--sample|--metric] [--script TEXT|--script-file F.scr] [--cmd 'id {json}']... [--save OUT] [--export OUT.png] [--window ... | --view ...]
+//! cadcraft-cli run [FILE|--sample|--metric] [--script TEXT|--script-file F.scr] [--cmd 'id {json}']... [--save OUT [--save-version V] [--docfa [--unit m|cm|mm]]] [--export OUT.png] [--window ... | --view ...]
 //! cadcraft-cli commands [FILTER]                   command catalog (JSON)
 //! cadcraft-cli mcp [--connect HOST:PORT [--lazy] [--launch]]  MCP server on stdio (headless or bridged to the app)
 //! cadcraft-cli perf [N]                            timing table on a synthetic N-entity drawing
@@ -58,12 +58,20 @@ fn stdout_failed(e: std::io::Error) {
 const USAGE: &str = "usage:
   cadcraft-cli info FILE.dxf
   cadcraft-cli convert IN.dxf OUT.(dxf|dwg|svg|png|pdf) [FRAMING]
-  cadcraft-cli run [FILE | --sample | --metric] [--script TEXT] [--script-file F.scr] [--cmd 'id {json}']... [--save OUT.dxf] [--export OUT.(png|svg|pdf)] [FRAMING]
+  cadcraft-cli run [FILE | --sample | --metric] [--script TEXT] [--script-file F.scr] [--cmd 'id {json}']... [--save OUT.dxf [SAVING]] [--export OUT.(png|svg|pdf)] [FRAMING]
   cadcraft-cli commands [FILTER]
   cadcraft-cli mcp [--connect HOST:PORT [--lazy] [--launch]]
   cadcraft-cli perf [N | FILE]
   cadcraft-cli sample (bracket|floorplan) OUT.(dxf|dwg|svg|png)
   cadcraft-cli --version
+
+saving (--save OUT.dxf|OUT.dwg):
+  --save-version V         the file version: R12, 2000, 2004, 2007, 2010, 2013 or 2018
+                           (default: the drawing's own). R12 is a reduced copy: the notes say
+                           what became what.
+  --docfa                  R12 DXF for the Italian cadastre's DOCFA (model space, blocks
+                           exploded, no hatches, colours on DOCFA_POLIGONI polygons, ASCII).
+  --unit m|cm|mm           with --docfa: the drawing's unit (the file is in metres).
 
 image framing (png 2400x1600, svg, pdf; always model space):
   default                  convert: fit the drawing extents.
@@ -171,15 +179,19 @@ fn export_window(s: &Session, framing: Framing, before: Option<&[(u64, Option<Vi
     }
 }
 
+/// The io crate's save options for the engine's.
+fn save_options(o: &cadcraft_engine::cmd::file::SaveAs) -> cadcraft_io::SaveOptions {
+    cadcraft_io::SaveOptions { version: o.version, binary: o.binary, docfa: o.docfa, scale: o.scale }
+}
+
 fn install_io() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
         plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
     });
-    cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
-        cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
-    });
+    cadcraft_engine::cmd::file::set_write_as(|d, name, o| cadcraft_io::write_with(d, name, &save_options(o)).map_err(|e| e.to_string()));
+    cadcraft_engine::cmd::file::set_save_notes(|d, name, o| cadcraft_io::save_notes(d, name, &save_options(o)));
     // AutoLISP's entget, entmake and entmod see entities as DXF groups.
     cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
         groups: cadcraft_io::entity_groups,
@@ -240,6 +252,22 @@ fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), 
         if let Some(m) = cadcraft_engine::cmd::file::not_saved_message(&lost) {
             eprintln!("{m}");
         }
+    }
+    Ok(())
+}
+
+/// `--save` with a version, the DOCFA profile or a unit: the file as `saveas` writes it, with
+/// the notes of what an R12 file (a reduced copy) converts or leaves out.
+fn save_with(s: &Session, out: &str, opts: &cadcraft_io::SaveOptions) -> Result<(), String> {
+    if (opts.docfa || opts.scale.is_some()) && !out.to_ascii_lowercase().ends_with(".dxf") {
+        return Err("--docfa and --unit write an R12 DXF file: --save OUT.dxf".into());
+    }
+    let d = s.doc().map_err(|e| e.to_string())?;
+    let bytes = cadcraft_io::write_with(d, out, opts).map_err(|e| e.to_string())?;
+    std::fs::write(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
+    eprintln!("wrote {out} ({} bytes)", bytes.len());
+    for note in cadcraft_io::save_notes(d, out, opts) {
+        eprintln!("{note}");
     }
     Ok(())
 }
@@ -453,6 +481,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut s = Session::empty();
     let mut it = args.iter();
     let mut save = None;
+    let mut saving = cadcraft_io::SaveOptions::default();
     let mut exp: Option<String> = None;
     let mut framing = Framing::Auto;
     let mut steps: Vec<(String, String)> = Vec::new();
@@ -474,6 +503,21 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             "--cmd" => steps.push(("cmd".into(), it.next().ok_or("--cmd needs `id {json}`")?.clone())),
             "--save" => save = Some(it.next().ok_or("--save needs a path")?.clone()),
+            "--save-version" => {
+                let v = it.next().ok_or("--save-version needs a version (R12, 2000, 2004, 2007, 2010, 2013, 2018)")?;
+                saving.version =
+                    Some(cadcraft_io::Version::parse(v).ok_or_else(|| format!("unknown version `{v}` (R12, 2000, 2004, 2007, 2010, 2013, 2018)"))?);
+            }
+            "--docfa" => saving.docfa = true,
+            "--unit" => {
+                let u = it.next().ok_or("--unit needs m, cm or mm")?;
+                saving.scale = Some(match u.trim().to_ascii_lowercase().as_str() {
+                    "m" => 1.0,
+                    "cm" => 0.01,
+                    "mm" => 0.001,
+                    _ => return Err(format!("unknown unit `{u}` (m, cm or mm)")),
+                });
+            }
             "--export" => exp = Some(it.next().ok_or("--export needs a path")?.clone()),
             f if !f.starts_with("--") => open(&mut s, f)?,
             other => return Err(format!("unknown option {other}")),
@@ -519,7 +563,11 @@ fn run(args: &[String]) -> Result<(), String> {
         eprintln!("{l}");
     }
     if let Some(p) = save {
-        export(&s, &p)?;
+        if saving == cadcraft_io::SaveOptions::default() {
+            export(&s, &p)?;
+        } else {
+            save_with(&s, &p, &saving)?;
+        }
     }
     if let Some(p) = exp {
         let window = if cadcraft_io::is_image(&p) { export_window(&s, framing, Some(&before))? } else { None };

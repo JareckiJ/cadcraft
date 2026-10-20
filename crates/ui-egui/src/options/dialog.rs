@@ -224,7 +224,8 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
         let current = crate::SaveVersion::parse(&app.ui.save_version).unwrap_or_default();
         let mut version = current;
         egui::ComboBox::from_id_salt("options_save_version").selected_text(version.year()).show_ui(ui, |ui| {
-            for v in crate::SaveVersion::ALL {
+            // R12 is a reduced copy of a drawing: a choice per file (Save As), never the default.
+            for v in crate::SaveVersion::LOSSLESS {
                 ui.selectable_value(&mut version, v, v.year());
             }
         });

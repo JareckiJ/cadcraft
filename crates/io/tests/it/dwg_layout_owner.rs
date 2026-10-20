@@ -19,7 +19,7 @@ fn entities_of_a_second_layout_are_owned_by_its_block() {
     d.add(&Space::Paper(first.clone()), Common::default(), line(0.0)).unwrap();
     d.add(&Space::Paper("SHEET_A".into()), Common::default(), line(20.0)).unwrap();
     d.add(&Space::Paper("SHEET_A".into()), Common::default(), line(40.0)).unwrap();
-    let dwg = write_with(&d, "case.dwg", &SaveOptions { version: Some(Version::R2018), binary: false }).unwrap();
+    let dwg = write_with(&d, "case.dwg", &SaveOptions { version: Some(Version::R2018), binary: false, ..Default::default() }).unwrap();
 
     // As written: entity mode and owner of each entity.
     let doc = acadrust::DwgReader::from_stream(Cursor::new(dwg.clone())).read().unwrap();

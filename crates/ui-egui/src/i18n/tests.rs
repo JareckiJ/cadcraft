@@ -104,6 +104,7 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
         include_str!("../quick.rs"),
         include_str!("../vpscale.rs"),
         include_str!("../options/dialog.rs"),
+        include_str!("../saveas.rs"),
     ];
     let mut missing = BTreeSet::new();
     for source in sources {
@@ -367,6 +368,7 @@ fn dialogs_render_in_every_language_and_keep_their_source_ids() {
             ("language", "Interface Language"),
             ("hatch", "Hatch and Gradient"),
             ("options:preferences", "User Preferences"),
+            ("saveas", "Save As"),
         ] {
             let mut app = CadApp::new(Session::new(), Services::default());
             app.ui.interface_language = Preference::parse(language.code).unwrap();

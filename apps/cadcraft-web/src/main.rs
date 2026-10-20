@@ -89,6 +89,11 @@ mod web {
         web_sys::UrlSearchParams::new_with_str(&query()).ok()?.get(key)
     }
 
+    /// The io crate's save options for the engine's.
+    fn save_options(o: &cadcraft_engine::cmd::file::SaveAs) -> cadcraft_io::SaveOptions {
+        cadcraft_io::SaveOptions { version: o.version, binary: o.binary, docfa: o.docfa, scale: o.scale }
+    }
+
     /// No file picker on the web: Save / Save As from the menu (and the close prompt) download the
     /// drawing under its current name; `saveas {"path": "name.dxf"}` picks another name. There is
     /// no file system either, so a dropped file is opened from its contents and APPLOAD says to
@@ -104,9 +109,8 @@ mod web {
             write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
             plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
         });
-        cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
-            cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
-        });
+        cadcraft_engine::cmd::file::set_write_as(|d, name, o| cadcraft_io::write_with(d, name, &save_options(o)).map_err(|e| e.to_string()));
+        cadcraft_engine::cmd::file::set_save_notes(|d, name, o| cadcraft_io::save_notes(d, name, &save_options(o)));
         // AutoLISP's entget, entmake and entmod see entities as DXF groups.
         cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
             groups: cadcraft_io::entity_groups,

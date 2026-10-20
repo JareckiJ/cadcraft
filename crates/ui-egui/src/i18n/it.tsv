@@ -1362,3 +1362,17 @@ menu	Modify	Edita
 	Click the ruler to add a tab stop, right-click to remove one	Fare clic sul righello per aggiungere una tabulazione, clic destro per rimuoverla
 	Select using two clicks only	Seleziona solo con due clic
 	Define each corner of the selection window with a separate click.	Definire ogni angolo della finestra di selezione con un clic separato.
+# Save As dialog (file type, version, R12 and DOCFA options).
+	SVG	SVG
+	PNG	PNG
+	PDF	PDF
+	File type	Tipo di file
+	Drawing unit	Unità del disegno
+	Binary DXF	DXF binario
+	DOCFA profile (Italian cadastre)	Profilo DOCFA (catasto italiano)
+	R12 DXF as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF R12 come lo importa DOCFA: solo spazio modello, riferimenti a blocco esplosi, senza tratteggi, colori solo sui poligoni del layer DOCFA_POLIGONI, testo ASCII, in metri. Il disegno mantiene il proprio file.
+	An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class.	Un'esportazione per DOCFA: una copia ridotta del disegno, che mantiene il proprio file. Le polilinee chiuse sul layer DOCFA_POLIGONI sono i poligoni delle superfici; il loro colore (1–8) è la classe di ambiente.
+	R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text.	R12 è una copia ridotta del disegno: curve, tratteggi, testo multilinea, quote e layout diventano linee, polilinee e testo.
+	AutoCAD Release 12	AutoCAD Release 12
+	Save...	Salva...
+	Save As (file picker)	Salva con nome (selettore file)

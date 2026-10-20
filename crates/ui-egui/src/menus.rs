@@ -23,6 +23,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.open", "Open...", &[], Some("Cmd+O")),
     ("ui.newtemplate", "New from Template...", &["File", "New from Template..."], None),
     ("ui.saveas", "Save As...", &[], None),
+    ("ui.saveas.pick", "Save As (file picker)", &[], None),
     ("ui.sample", "Open Sample Drawing", &["Help", "Open Sample Drawing"], None),
     ("ui.toggle.toolsets", "Tool Sets", &["Window", "Tool Sets"], Some("Cmd+3")),
     ("ui.panel.properties", "Properties Inspector", &["Window", "Properties Inspector"], Some("Cmd+1")),
@@ -195,7 +196,15 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        // Save As from the menu, toolbar, shortcut or typed: the Save As dialog (file type,
+        // version, R12 options) before the host's file picker.
         "ui.saveas" | "saveas" if no_path => {
+            crate::saveas::open(app);
+            Ok(Value::Null)
+        }
+        // The picker alone, in the default format and version (QSAVE of an untitled drawing and
+        // the close prompt's Save, which must finish in this call).
+        "ui.saveas.pick" if no_path => {
             let title = app.session.state().map(|s| s.title.clone()).ok();
             let name = app.ui.save_format.suggested_name(title.as_deref());
             if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name)) {
@@ -203,7 +212,7 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
-        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
+        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas.pick", &Value::Null),
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
         // params, never get here and never open a dialog.
@@ -318,7 +327,7 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 .map(str::to_string)
                 .or_else(|| params.get("version").map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)));
             match name {
-                Some(name) => match crate::SaveVersion::parse(&name) {
+                Some(name) => match crate::SaveVersion::parse(&name).filter(|v| v.lossless()) {
                     Some(v) => {
                         app.ui.save_version = v.year().to_string();
                         app.session.echo(format!("New drawings will be saved as version {v}"));

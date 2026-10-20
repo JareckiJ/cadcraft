@@ -62,7 +62,7 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 
 | DXF version | AutoCAD 2027 | CADCraft read | CADCraft write |
 |---|---|---|---|
-| R12 (AC1009), ASCII | read, write | yes: no version gating; old-style POLYLINE/VERTEX read (polyface meshes flattened to 3D polylines) | **no** |
+| R12 (AC1009), ASCII | read, write | yes: no version gating; old-style POLYLINE/VERTEX read (polyface meshes flattened to 3D polylines) | yes, as a reduced copy (`io/src/dxf_r12.rs`; SAVEAS `version: R12`, the Save As dialog, `cadcraft-cli --save-version R12`): POLYLINE/VERTEX/SEQEND, TEXT lines for MTEXT, curves tessellated, dimensions/tables/multilines/leaders as lines and text, hatch pattern lines, INSERT + ATTRIB kept, model space only, no handles; the save reports what became what. **DOCFA profile** for the Italian cadastre ([docfa.md](docfa.md)): blocks exploded, hatches left out, colours only on DOCFA_POLIGONI polygons, ASCII text, scaled to metres |
 | R12 binary | read, write | **no** (binary parser expects R13+ 2-byte group codes) | no |
 | R13–R2018, ASCII | read, write each of 2000/2004/2007/2010/2013/2018 | yes, one reader for all versions | yes, each of 2000–2018 (#421): R2000 structure (later versions add only optional groups) with that `$ACADVER`; UTF-8 text from 2007; no CLASS instance counts (91) |
 | R13–R2018, binary | read, write | yes | yes, each of 2000–2018 (SAVEAS `binary`; a binary file stays binary on QSAVE) |
@@ -147,6 +147,7 @@ our output in AutoCAD black-box.
 | 2026-10-21 | minor | Proxy objects and entities keep their class through a save: group 91 renumbered to the written CLASSES (the class it names is kept), a proxy whose number names no class dropped (#1812) |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
+| 2026-10-20 | minor | R12 DXF written as a reduced copy of the drawing, with a DOCFA profile (`dxf_r12`); SAVEAS `version: R12`, `docfa`, `scale`/`unit`; the Save As dialog picks the file type, version and R12 options per file |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |
 | 2026-10-12 | minor | VIEWPORT frozen layers also written and read as AutoCAD's group 341 layer handles, so third-party viewers honour per-viewport freezing in DXF (DWG converter gap noted) |
 | 2026-10-12 | minor | HATCH: associative hatches inside blocks keep their source objects; boundaries carry `{ACAD_REACTORS}` |

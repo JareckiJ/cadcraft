@@ -1368,3 +1368,17 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+# Save As dialog (file type, version, R12 and DOCFA options).
+	SVG	SVG
+	PNG	PNG
+	PDF	PDF
+	File type	Тип файлу
+	Drawing unit	Одиниця креслення
+	Binary DXF	Двійковий DXF
+	DOCFA profile (Italian cadastre)	Профіль DOCFA (італійський кадастр)
+	R12 DXF as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF R12 так, як його імпортує DOCFA: лише простір моделі, посилання на блоки розбиті, без штрихувань, кольори лише на полігонах шару DOCFA_POLIGONI, текст ASCII, у метрах. Креслення зберігає власний файл.
+	An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class.	Експорт для DOCFA: спрощена копія креслення, яке зберігає власний файл. Замкнені полілінії на шарі DOCFA_POLIGONI — полігони площ; їхній колір (1–8) — клас площі.
+	R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text.	R12 — спрощена копія креслення: криві, штрихування, багаторядковий текст, розміри та аркуші стають лініями, полілініями та текстом.
+	AutoCAD Release 12	AutoCAD Release 12
+	Save...	Зберегти...
+	Save As (file picker)	Зберегти як (вибір файлу)

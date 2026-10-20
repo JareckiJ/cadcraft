@@ -8,6 +8,7 @@ mod dxf_raw;
 mod dxf_ext;
 mod dxf_image;
 mod dxf_mleader;
+pub mod dxf_r12;
 mod dxf_read;
 mod dxf_table;
 mod dxf_write;
@@ -29,12 +30,38 @@ pub use dxf_write::entity_groups;
 pub use pdf::{PdfOptions, pdf, plot};
 
 /// How a drawing is saved as DXF or DWG.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SaveOptions {
     /// The file version; `None` saves in the drawing's own version ([`save_version`]).
     pub version: Option<Version>,
     /// Binary instead of ASCII DXF (DXF only; DWG is always binary).
     pub binary: bool,
+    /// The DOCFA profile of R12 DXF ([`dxf_r12::R12Options::docfa`]): implies R12.
+    pub docfa: bool,
+    /// R12 DXF: every coordinate and size multiplied by this (`None`: 1, the drawing's units);
+    /// the DOCFA profile takes metres.
+    pub scale: Option<f64>,
+}
+
+impl SaveOptions {
+    /// The R12 writer's options for these (the version decides nothing here: R12 is implied
+    /// by `docfa` or chosen as `version`).
+    pub fn r12(&self) -> dxf_r12::R12Options {
+        dxf_r12::R12Options { docfa: self.docfa, scale: self.scale.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(1.0) }
+    }
+    /// The version the drawing is written in with these options: R12 for the DOCFA profile.
+    pub fn version_for(&self, d: &Drawing) -> Version {
+        if self.docfa { Version::R12 } else { self.version.unwrap_or_else(|| save_version(d)) }
+    }
+}
+
+/// What writing `d` with `opts` leaves out or converts, one sentence each; empty when the file
+/// keeps the whole drawing (every version from 2000 on, and every DWG).
+pub fn save_notes(d: &Drawing, name: &str, opts: &SaveOptions) -> Vec<String> {
+    match ext(name).as_str() {
+        "dxf" | "" if opts.version_for(d) == Version::R12 => dxf_r12::notes(d, &opts.r12()),
+        _ => Vec::new(),
+    }
 }
 
 /// The version a drawing is saved in when none is asked for: the version of the file it was
@@ -84,8 +111,22 @@ pub fn write(d: &Drawing, name: &str) -> Result<Vec<u8>> {
 /// Like [`write`], with the DXF/DWG version and binary DXF chosen by `opts`. Binary applies to
 /// DXF only; asking for it with another format is an error.
 pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>> {
-    let version = opts.version.unwrap_or_else(|| save_version(d));
+    if opts.docfa && opts.version.is_some_and(|v| v != Version::R12) {
+        return Err(IoError::Format("the DOCFA profile is an R12 DXF file: choose version R12 or none".into()));
+    }
+    if opts.docfa && ext(name).as_str() != "dxf" && !ext(name).is_empty() {
+        return Err(IoError::Format("the DOCFA profile is for DXF files".into()));
+    }
+    let version = opts.version_for(d);
     match ext(name).as_str() {
+        // Release 12: a reduced copy of the drawing (`dxf_r12`), ASCII only (R12's binary
+        // layout differs from R13+'s and few readers take it).
+        "dxf" | "" if version == Version::R12 => {
+            if opts.binary {
+                return Err(IoError::Format("R12 DXF is written as ASCII only; choose 2000 or later for binary DXF".into()));
+            }
+            Ok(dxf_r12::write(d, &opts.r12()).into_bytes())
+        }
         "dxf" | "" => {
             let tags = dxf_write::tags(d, version);
             Ok(if opts.binary {
@@ -97,6 +138,7 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
         // The DWG bridge reads our R2000 DXF and writes the DWG at the version asked for. Without
         // one, at least 2004: R2000 DWG has no true colours, transparency, table styles or
         // gradients, so a drawing from an R2000 DXF doesn't lose them by default.
+        "dwg" if opts.version == Some(Version::R12) => Err(IoError::Format("R12 DWG is not available; save as R12 DXF instead".into())),
         "dwg" if !opts.binary => {
             let version = opts.version.unwrap_or_else(|| version.max(Version::R2004));
             cadcraft_dwg::dxf_to_dwg_as(dxf_write::dwg_bridge(d, version).as_bytes(), version.code()).map_err(IoError::Format)

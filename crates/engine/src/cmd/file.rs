@@ -84,12 +84,33 @@ pub fn deliver() -> Option<DeliverHook> {
     DELIVER.get().copied()
 }
 
-/// How a drawing file is written: its version (`None`: the drawing's own, `$ACADVER`) and
-/// binary instead of ASCII DXF.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// How a drawing file is written: its version (`None`: the drawing's own, `$ACADVER`), binary
+/// instead of ASCII DXF, and for R12 DXF the DOCFA profile and the scale.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SaveAs {
     pub version: Option<Version>,
     pub binary: bool,
+    /// R12 DXF as the Italian cadastre's DOCFA imports it (`docs/docfa.md`): model space only,
+    /// block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons,
+    /// ASCII text. An export: the drawing keeps its own file name and version.
+    pub docfa: bool,
+    /// R12 DXF: every coordinate and size multiplied by this (DOCFA takes metres: 0.001 for a
+    /// drawing in millimetres).
+    pub scale: Option<f64>,
+}
+
+/// What writing a drawing with [`SaveAs`] options converts or leaves out, one sentence each
+/// (R12 DXF is a reduced copy of the drawing); empty for files that keep everything.
+pub type SaveNotesHook = fn(&Drawing, &str, &SaveAs) -> Vec<String>;
+
+static SAVE_NOTES: OnceLock<SaveNotesHook> = OnceLock::new();
+
+/// Install the host's save report (with [`set_write_as`]).
+pub fn set_save_notes(h: SaveNotesHook) {
+    let _ = SAVE_NOTES.set(h);
+}
+pub fn save_notes() -> Option<SaveNotesHook> {
+    SAVE_NOTES.get().copied()
 }
 
 /// Write a drawing with [`SaveAs`] options (installed by hosts whose writer supports them).
@@ -110,9 +131,10 @@ fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")
 }
 
-/// The `version` and `binary` parameters of a save: a version is a year (2018 or "2018"), "R2018"
-/// or an `$ACADVER` code ("AC1032").
-fn save_options(cmd: &str, p: &Value) -> Result<SaveAs> {
+/// The `version`, `binary`, `docfa`, `scale` and `unit` parameters of a save: a version is a year
+/// (2018 or "2018"), "R2018", "R12" or an `$ACADVER` code ("AC1032"); `docfa` implies R12;
+/// `scale` is a positive number, or `unit` (the drawing's: "m", "cm" or "mm") the scale to metres.
+pub(crate) fn save_options(cmd: &str, p: &Value) -> Result<SaveAs> {
     let version = match p.get("version") {
         None | Some(Value::Null) => None,
         Some(v) => {
@@ -125,12 +147,43 @@ fn save_options(cmd: &str, p: &Value) -> Result<SaveAs> {
             Some(Version::parse(&text).ok_or_else(|| bad(cmd, format!("unknown version `{name}` (use {})", version_list())))?)
         }
     };
-    let binary = match p.get("binary") {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(_) => return Err(bad(cmd, "`binary` must be true or false")),
+    let flag = |key: &str| match p.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
     };
-    Ok(SaveAs { version, binary })
+    let binary = flag("binary")?;
+    let docfa = flag("docfa")?;
+    let mut scale = match p.get("scale") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_f64() {
+            Some(k) if k.is_finite() && k > 0.0 && k <= 1e9 => Some(k),
+            _ => return Err(bad(cmd, "`scale` must be a positive number (drawing units × scale = file units)")),
+        },
+    };
+    if let Some(u) = p.get("unit").filter(|u| !u.is_null()) {
+        let unit = u.as_str().map(|u| u.trim().to_ascii_lowercase()).unwrap_or_default();
+        let k = match unit.as_str() {
+            "m" => 1.0,
+            "cm" => 0.01,
+            "mm" => 0.001,
+            _ => return Err(bad(cmd, "`unit` is the drawing's unit: m, cm or mm (the file is in metres)")),
+        };
+        if scale.is_some_and(|s| (s - k).abs() > 1e-12) {
+            return Err(bad(cmd, "give `scale` or `unit`, not both"));
+        }
+        scale = Some(k);
+    }
+    if docfa && version.is_some_and(|v| v != Version::R12) {
+        return Err(bad(cmd, "the DOCFA profile is an R12 DXF file: leave `version` out or set it to R12"));
+    }
+    if (docfa || scale.is_some()) && binary {
+        return Err(bad(cmd, "R12 DXF (DOCFA, scale) is ASCII only: `binary` does not apply"));
+    }
+    if scale.is_some() && !docfa && version != Some(Version::R12) {
+        return Err(bad(cmd, "`scale` and `unit` apply to R12 DXF: set `version` to R12 or `docfa` to true"));
+    }
+    Ok(SaveAs { version: if docfa { Some(Version::R12) } else { version }, binary, docfa, scale })
 }
 
 /// Whether `path` names a DXF file (or has no extension, which saves as DXF).
@@ -145,6 +198,9 @@ fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<
     let hooks = io().ok_or_else(|| bad(cmd, "file formats are not available in this build"))?;
     if opts.binary && !is_dxf(path) {
         return Err(bad(cmd, "binary applies to DXF files only"));
+    }
+    if opts.version == Some(Version::R12) && !is_dxf(path) {
+        return Err(bad(cmd, "R12 is a DXF version: name a .dxf file (R12 DWG is not available)"));
     }
     // A drawing file is the drawing outside the Block Editor; an image is what is shown.
     let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
@@ -178,11 +234,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("saveas", "Save As...", run_saveas_reporting)
             .menu(&["File", "Save As..."])
             .key("Cmd+Shift+S")
-            .params("{path, version?: 2000|2004|2007|2010|2013|2018, binary?: bool}")
+            .params("{path, version?: R12|2000|2004|2007|2010|2013|2018, binary?: bool, docfa?: bool (R12 DXF for the Italian cadastre's DOCFA: an export, the drawing keeps its name), scale?: number | unit?: m|cm|mm (R12: drawing units to metres)} → {path, bytes, version, binary, notes?: what an R12 file converts or leaves out}")
             .noundo(),
         CommandSpec::new("document.switch", "Switch Drawing", run_switch).params("{index}").enabled(always).noundo(),
         CommandSpec::new("document.bytes", "Drawing as bytes", run_bytes)
-            .params("{format?: dxf, version?: 2000…2018, binary?: bool} → {data: base64}")
+            .params("{format?: dxf, version?: R12|2000…2018, binary?: bool, docfa?: bool, scale?|unit?} → {data: base64, notes?}")
             .noundo(),
         CommandSpec::new("script", "Run Script...", run_script)
             .menu(&["Tools", "Run Script..."])
@@ -387,19 +443,27 @@ fn run_closeall(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 pub(crate) fn save_to(s: &mut Session, path: &str) -> Result<usize> {
-    let opts = SaveAs { version: None, binary: s.state()?.binary_dxf && is_dxf(path) };
-    save_as(s, "save", path, &opts)
+    let opts = SaveAs { version: None, binary: s.state()?.binary_dxf && is_dxf(path), ..SaveAs::default() };
+    Ok(save_as(s, "save", path, &opts)?.0)
 }
 
-/// Save to `path` with `opts`. A drawing file then keeps the version and binary choice: the
-/// version goes into the drawing's `$ACADVER`, so later saves (QSAVE) write it again.
-fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usize> {
+/// Whether saving to `path` with `opts` makes the file the drawing's own (name, title, saved
+/// state): a drawing file, except the DOCFA export (a reduced copy kept beside the drawing).
+fn adopts(path: &str, opts: &SaveAs) -> bool {
+    is_drawing_file(path) && !opts.docfa
+}
+
+/// Save to `path` with `opts`: the bytes written and the save notes (what an R12 file converts
+/// or leaves out). A drawing file then keeps the version and binary choice: the version goes
+/// into the drawing's `$ACADVER`, so later saves (QSAVE) write it again.
+fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<(usize, Vec<String>)> {
     if s.doc()?.refedit.is_some() {
         return Err(bad(cmd, "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
     }
     let bytes = write_bytes(s, cmd, path, opts)?;
-    let n = commit_save(s, path, &bytes, store)?;
-    if is_drawing_file(path) {
+    let notes = notes_for(s, path, opts);
+    let n = commit_save(s, path, &bytes, adopts(path, opts), store)?;
+    if adopts(path, opts) {
         let st = s.state_mut()?;
         st.binary_dxf = opts.binary;
         if let Some(v) = opts.version
@@ -409,7 +473,13 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
             st.saved = st.drawing().clone();
         }
     }
-    Ok(n)
+    Ok((n, notes))
+}
+
+/// The host's save notes for writing the drawing to `path` with `opts` (none without the hook).
+fn notes_for(s: &Session, path: &str, opts: &SaveAs) -> Vec<String> {
+    let (Some(hook), Ok(d)) = (save_notes(), s.doc()) else { return Vec::new() };
+    if !is_drawing_file(path) { Vec::new() } else { hook(d, path, opts) }
 }
 
 /// Put saved bytes where the user gets them: natively the file at `path` (written atomically); on
@@ -434,10 +504,10 @@ fn store(path: &str, bytes: &[u8]) -> Result<()> {
 /// browser owns the file from there (we can't see whether the user keeps it), and the name stays so
 /// a later QSAVE downloads the drawing again under it. An image or PDF export (SVG, PNG, PDF) only
 /// stores the file: the drawing keeps its name, title and unsaved changes, so closing still asks.
-fn commit_save(s: &mut Session, path: &str, bytes: &[u8], store: impl FnOnce(&str, &[u8]) -> Result<()>) -> Result<usize> {
+fn commit_save(s: &mut Session, path: &str, bytes: &[u8], adopt: bool, store: impl FnOnce(&str, &[u8]) -> Result<()>) -> Result<usize> {
     s.state()?;
     store(path, bytes)?;
-    if !is_drawing_file(path) {
+    if !adopt {
         return Ok(bytes.len());
     }
     let st = s.state_mut()?;
@@ -470,13 +540,37 @@ fn run_save(s: &mut Session, p: &Value) -> Result<Value> {
 fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("saveas", "`path` is required"))?.to_string();
     let opts = save_options("saveas", p)?;
-    let n = save_as(s, "saveas", &path, &opts)?;
+    let (n, notes) = save_as(s, "saveas", &path, &opts)?;
     let mut r = saved(&path, n);
     if is_drawing_file(&path) {
-        r["version"] = json!(opts.version.unwrap_or_else(|| drawing_version(s, &path)).year());
+        let version = opts.version.unwrap_or_else(|| drawing_version(s, &path));
+        r["version"] = json!(version.year());
         r["binary"] = json!(opts.binary);
+        if opts.docfa {
+            r["docfa"] = json!(true);
+        }
+        report_notes(s, &mut r, &path, &opts, &notes);
     }
     Ok(r)
+}
+
+/// Say on the command line what an R12 file (a reduced copy) did to the drawing, and list it in
+/// the result's `notes`.
+fn report_notes(s: &mut Session, r: &mut Value, path: &str, opts: &SaveAs, notes: &[String]) {
+    let r12 = opts.docfa || opts.version == Some(Version::R12) || drawing_version(s, path) == Version::R12;
+    if !r12 {
+        return;
+    }
+    let what = if opts.docfa {
+        "Exported for DOCFA (R12 DXF, a reduced copy; the drawing keeps its own file)"
+    } else {
+        "Saved as R12 DXF, a reduced copy of the drawing"
+    };
+    let msg = if notes.is_empty() { format!("{what}: {path}") } else { format!("{what}: {}", notes.join("; ")) };
+    s.echo(msg);
+    if let Some(o) = r.as_object_mut() {
+        o.insert("notes".into(), json!(notes));
+    }
 }
 
 /// The version a drawing is saved in at `path` when none is asked for: its `$ACADVER` (2018 by
@@ -502,11 +596,14 @@ fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let opts = save_options("document.bytes", p)?;
     let version = opts.version.unwrap_or_else(|| drawing_version(s, &format!("drawing.{fmt}")));
     let lost = not_saved_as(s.doc()?, version);
-    let bytes = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
+    let name = format!("drawing.{fmt}");
+    let bytes = write_bytes(s, "document.bytes", &name, &opts)?;
     let mut r = json!({ "data": base64_encode(&bytes), "bytes": bytes.len() });
-    if drops_unknown(&format!("drawing.{fmt}")) {
+    if drops_unknown(&name) {
         report_not_saved(s, &mut r, &lost);
     }
+    let notes = notes_for(s, &name, &opts);
+    report_notes(s, &mut r, &name, &opts, &notes);
     Ok(r)
 }
 
@@ -731,7 +828,7 @@ mod pr193_tests {
         assert!(st.is_dirty() && st.path.is_none());
 
         // The file route is unavailable or fails (the web without a download): no success, still dirty.
-        let failed = commit_save(&mut s, "a/Owned.dxf", b"0\nEOF\n", |_, _| Err(bad("save", "no download")));
+        let failed = commit_save(&mut s, "a/Owned.dxf", b"0\nEOF\n", true, |_, _| Err(bad("save", "no download")));
         assert!(failed.is_err());
         let st = s.state().unwrap();
         assert!(st.is_dirty(), "a save that delivered nothing must keep the unsaved state");
@@ -739,7 +836,7 @@ mod pr193_tests {
 
         // The file route took the bytes (written, or a download started): saved under that name.
         let mut got = None;
-        let n = commit_save(&mut s, "a/Owned.dxf", b"0\nEOF\n", |p, b| {
+        let n = commit_save(&mut s, "a/Owned.dxf", b"0\nEOF\n", true, |p, b| {
             got = Some((p.to_string(), b.len()));
             Ok(())
         })

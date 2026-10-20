@@ -1027,7 +1027,8 @@ fn damaged_dwg_opens_partially_and_says_what_it_left_out() {
     }
     dxf += "0\nENDSEC\n0\nEOF\n";
     let d = read(dxf.as_bytes(), "lines.dxf").unwrap();
-    let dwg = crate::write_with(&d, "lines.dwg", &crate::SaveOptions { version: Some(crate::Version::R2000), binary: false }).unwrap();
+    let dwg = crate::write_with(&d, "lines.dwg", &crate::SaveOptions { version: Some(crate::Version::R2000), binary: false, ..Default::default() })
+        .unwrap();
     let whole = read(&dwg, "lines.dwg").unwrap();
     assert_eq!((whole.entity_count(), whole.read_notes.len()), (200, 0));
 
@@ -1721,9 +1722,11 @@ fn mleader_is_written_as_multileader() {
     };
     d.add(&Space::Model, Default::default(), EntityKind::MLeader(m.clone())).unwrap();
     // MULTILEADER is a 2007 entity (R2000/2004 files get LEADER + MTEXT).
-    let back =
-        crate::read(&crate::write_with(&d, "x.dxf", &crate::SaveOptions { version: Some(crate::Version::R2007), binary: false }).unwrap(), "x.dxf")
-            .unwrap();
+    let back = crate::read(
+        &crate::write_with(&d, "x.dxf", &crate::SaveOptions { version: Some(crate::Version::R2007), binary: false, ..Default::default() }).unwrap(),
+        "x.dxf",
+    )
+    .unwrap();
     assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::MLeader(x) if *x == m)));
     assert!(!back.model.iter().any(|e| matches!(e.kind, EntityKind::Leader(_) | EntityKind::MText(_))));
 }
