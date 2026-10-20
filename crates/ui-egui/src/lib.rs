@@ -851,6 +851,15 @@ mod tests {
         let scanned = a.font_names;
         frame(&mut a, &ctx, None);
         assert_eq!(a.font_names, scanned, "no change, no new scan");
+        // Installing again for a name's script (and when its face arrives) reuses the language's
+        // fonts read before: the UI and CJK font files aren't read on the UI thread again.
+        let reads = theme::LANGUAGE_FONT_READS.with(std::cell::Cell::get);
+        rename(&mut a, "แผนผัง");
+        frame(&mut a, &ctx, None);
+        frame(&mut a, &ctx, None);
+        assert_eq!(theme::LANGUAGE_FONT_READS.with(std::cell::Cell::get), reads, "the language's fonts are reused");
+        rename(&mut a, "도면 레이어");
+        frame(&mut a, &ctx, None);
         rename(&mut a, "Walls");
         frame(&mut a, &ctx, None);
         assert_eq!(a.fonts_names.map(|f| f.0), Some(theme::Scripts::NONE));

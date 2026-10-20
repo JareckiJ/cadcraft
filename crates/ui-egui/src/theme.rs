@@ -317,6 +317,8 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
 
 /// The fonts [`install_fonts`] installs for `language`.
 fn language_fonts(language: &str) -> egui::FontDefinitions {
+    #[cfg(test)]
+    LANGUAGE_FONT_READS.with(|n| n.set(n.get() + 1));
     let mut fonts = egui::FontDefinitions::default();
     let mut added: Vec<(String, std::sync::Arc<egui::FontData>)> = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
@@ -486,7 +488,7 @@ pub fn fonts_generation() -> u64 {
 /// are ready, and installing again shows them.
 pub fn install_fonts_for(ctx: &egui::Context, language: &str, names: Scripts) {
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
-    let mut fonts = language_fonts(language);
+    let mut fonts = cached_language_fonts(language);
     #[cfg(not(target_arch = "wasm32"))]
     {
         let primary = fonts.font_data.get("system-ui").cloned();
@@ -502,6 +504,22 @@ pub fn install_fonts_for(ctx: &egui::Context, language: &str, names: Scripts) {
     #[cfg(target_arch = "wasm32")]
     let _ = names;
     ctx.set_fonts(fonts);
+}
+
+/// [`language_fonts`] for `language`, read once: installing again for another name's script or
+/// when faces finish loading reuses them (a clone shares their `Arc`s) instead of reading the UI
+/// and CJK font files on the UI thread again. A new language reads its own.
+fn cached_language_fonts(language: &str) -> egui::FontDefinitions {
+    static READ: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, egui::FontDefinitions>>> = std::sync::OnceLock::new();
+    let mut read = READ.get_or_init(Default::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    read.entry(language.to_string()).or_insert_with(|| language_fonts(language)).clone()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times [`language_fonts`] read the fonts on this thread (a test checks that a
+    /// name's script reuses them).
+    pub(crate) static LANGUAGE_FONT_READS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The faces for `names` already read, as (font name, data); scripts not looked for yet start
