@@ -1130,12 +1130,12 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             }
             mtext(b, ctx, t, rgb, lw);
         }
-        EntityKind::Insert(ins) => insert(b, ctx, e, ins, rgb),
+        EntityKind::Insert(ins) => insert(b, ctx, e, ins, rgb, own),
         EntityKind::Dimension(dm) => {
             if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))
                 && ctx.depth < cadcraft_doc::MAX_BLOCK_DEPTH
             {
-                let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::IDENTITY) };
+                let sub = Ctx { block_pstyle: b.named, block_transparency: own, ..sub_ctx(ctx, e, Mat3::IDENTITY) };
                 for be in blk.entities.iter() {
                     if !b.expand() {
                         break;
@@ -1280,7 +1280,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                     let dir = if ins.insert.x >= land.x { 1.0 } else { -1.0 };
                     b.polyline(ctx, rgb, lw, &[land, land + Vec2::new(m.dogleg * dir, 0.0)]);
                 }
-                insert(b, ctx, e, ins, rgb);
+                insert(b, ctx, e, ins, rgb, own);
             }
         }
         EntityKind::Point(p) => {
@@ -1549,7 +1549,9 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     }
 }
 
-fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) {
+/// `own` is the reference's resolved transparency without its locked-layer fade: what ByBlock
+/// children inherit (a child fades only for its own layer).
+fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink, own: u8) {
     if ctx.depth >= cadcraft_doc::MAX_BLOCK_DEPTH {
         return;
     }
@@ -1563,7 +1565,7 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 }
                 let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
                 let m = Mat3::translate(off).then_before(ins.transform(blk.base.xy()));
-                let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, m) };
+                let sub = Ctx { block_pstyle: b.named, block_transparency: own, ..sub_ctx(ctx, e, m) };
                 for be in blk.entities.iter() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {
