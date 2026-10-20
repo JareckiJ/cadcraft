@@ -827,6 +827,16 @@ fn offset_gap_type_leaves_inside_corners_and_arc_joints_alone() {
 }
 
 #[test]
+fn offset_gap_type_leaves_lines_around_a_collapsed_arc_joined() {
+    // Offset 1 towards the centre of the radius-0.5 arc collapses it; the lines either side of
+    // it never met, so no gap type fills a corner between them.
+    let pts = json!([[-2, 0], {"p": [0, 0], "bulge": 1}, [0, -1], [1, -4]]);
+    let joined: Vec<_> = (0..3).map(|g| offset_with_gap(pts.clone(), false, [-0.3, -0.5], g).vertices).collect();
+    assert!(joined[0].iter().all(|v| v.bulge == 0.0), "arc collapsed: {:?}", joined[0]);
+    assert!(joined.iter().all(|v| *v == joined[0]), "{joined:?}");
+}
+
+#[test]
 fn offset_echoes_the_gap_type() {
     let mut s = Session::new();
     s.execute("setvar", &json!({"name": "OFFSETGAPTYPE", "value": 1})).unwrap();
