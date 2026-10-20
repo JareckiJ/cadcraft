@@ -107,7 +107,6 @@ mod native {
         current_style_names(&mut doc);
         table_merges(&mut doc);
         table_style_rows(&mut doc, false);
-        dimension_flags(&mut doc, false);
         let orphans = drop_orphaned_dgn_components(&mut doc);
         if orphans > 0 {
             let (s, were) = if orphans == 1 { ("", "was") } else { ("s", "were") };
@@ -293,22 +292,13 @@ mod native {
 
     /// The DWG dimension flags byte. Its bit 0 is the opposite of DXF group 70's bit 128 (set: the
     /// text is at its default position) and its bit 1 is group 70's bit 32 (ODA DWG
-    /// specification, common dimension data), while acadrust 0.6.4 reads and writes bit 0 as
-    /// `text_user_positioned` itself and keeps no bit 32 from DXF. Without this, every dimension
-    /// of a DWG CADCraft writes is user-positioned for AutoCAD (#1094), and every dimension of an
-    /// AutoCAD DWG is read as user-positioned. `to_dwg` sets the fields up for the writer:
-    /// bit 32 as CADCraft's DXF writer always sets it, and bit 0 through the inverted field;
-    /// otherwise the field is read from bit 0 after a DWG is read.
-    fn dimension_flags(doc: &mut acadrust::CadDocument, to_dwg: bool) {
+    /// specification, common dimension data). acadrust 0.6.5 maps bit 0 both ways (0.6.4 wrote
+    /// `text_user_positioned` into it as is, #1094) but keeps no bit 32 from DXF, so it is set
+    /// here before a DWG is written, as CADCraft's DXF writer always sets it.
+    fn dimension_flags(doc: &mut acadrust::CadDocument) {
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::Dimension(d) = e else { continue };
-            let b = d.base_mut();
-            if to_dwg {
-                b.dwg_flags_byte |= 0x02;
-                b.text_user_positioned = !b.text_user_positioned;
-            } else {
-                b.text_user_positioned = b.dwg_flags_byte & 0x01 == 0;
-            }
+            d.base_mut().dwg_flags_byte |= 0x02;
         }
     }
 
@@ -549,7 +539,7 @@ mod native {
         }
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
-        dimension_flags(&mut doc, true);
+        dimension_flags(&mut doc);
         drop_unwritable(&mut doc);
         current_dimstyle(&mut doc);
         current_text_style(&mut doc);
@@ -853,5 +843,51 @@ mod tests {
         assert_eq!(ls.iter().filter(|t| t.ends_with("COMPONENT")).count(), 5, "{ls:?}");
         assert!(ls.contains(&"LSDEFINITION") && !ls.contains(&"LSINTERNALCOMPONENT"), "{ls:?}");
         assert_eq!(notes, ["DWG: 3 DGN line style components that no line style definition uses were left out"]);
+    }
+
+    /// AutoCAD's DWG scale action (BLOCKSCALEACTION) ends with a byte after its three
+    /// connections that DXF doesn't carry. acadrust 0.6.4 neither read nor wrote it, so AutoCAD
+    /// read past the object and refused every DWG CADCraft wrote with a dynamic block that scales
+    /// ("Error Decrypting Data"); 0.6.5 keeps it. The byte reaches the DWG, and a scale action
+    /// from DXF is written whole, with the byte AutoCAD writes (0).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn scale_actions_keep_the_byte_autocad_reads_after_their_connections() {
+        use acadrust::objects::*;
+        let scale_action = |doc: &acadrust::CadDocument| {
+            doc.objects.values().find_map(|o| match o {
+                ObjectType::DynamicBlock(DynamicBlockObject { data: DynamicBlockData::ScaleAction(s), .. }) => Some(s.clone()),
+                _ => None,
+            })
+        };
+        let mut doc = acadrust::CadDocument::new();
+        let h = doc.allocate_handle();
+        let conn = |code, name: &str| BlockConnection { code, name: name.into() };
+        let mut action = DynamicBlockObject::new("BLOCKSCALEACTION", "AcDbBlockScaleAction");
+        action.handle = h;
+        action.owner = doc.header.named_objects_dict_handle;
+        let mut a = BlockBasePointAction::default();
+        a.action.action.element.name = "Scale".into();
+        a.action.connections = vec![conn(2, "UpdatedBaseX"), conn(2, "UpdatedBaseY")];
+        a.action.dependent = true;
+        a.connections = vec![conn(2, "Scale"), conn(2, "XScale"), conn(2, "YScale")];
+        a.dwg_tail_byte = 7;
+        action.data = DynamicBlockData::ScaleAction(a.clone());
+        doc.objects.insert(h, ObjectType::DynamicBlock(action));
+
+        let dwg = acadrust::DwgWriter::write_to_vec(&doc).unwrap();
+        let back = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+        assert_eq!(scale_action(&back).map(|s| s.dwg_tail_byte), Some(7), "the byte isn't written");
+
+        let mut dxf = Vec::new();
+        acadrust::DxfWriter::new(&doc).write_to_writer(&mut dxf).unwrap();
+        for version in ["AC1018", "AC1032"] {
+            let dwg = dxf_to_dwg_as(&dxf, version).unwrap();
+            let back = acadrust::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+            let read = scale_action(&back).unwrap_or_else(|| panic!("{version}: the scale action wasn't written"));
+            assert_eq!(read.connections, a.connections, "{version}");
+            assert_eq!(read.action.connections, a.action.connections, "{version}");
+            assert_eq!(read.dwg_tail_byte, 0, "{version}");
+        }
     }
 }
