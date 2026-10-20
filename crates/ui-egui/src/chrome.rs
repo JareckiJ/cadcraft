@@ -417,19 +417,45 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             let w = g.size().x + 26.0;
             let tr = Rect::from_min_size(pos2(x, r.top() + 1.0), vec2(w, r.height() - 2.0)).intersect(clip);
             let active = active_tab == Some(i);
-            let resp = ui.interact(tr, ui.id().with(("lt", i)), Sense::click());
-            if active {
-                tp.rect_filled(tr, 2.0, t.tab_active);
-            } else if resp.hovered() {
-                tp.rect_filled(tr, 2.0, t.control.gamma_multiply(0.5));
+            let rename_id = ui.id().with("layout_tab_renaming");
+            let renaming: Option<(usize, String)> = ui.ctx().data(|d| d.get_temp(rename_id));
+
+            if i > 0 && renaming.as_ref().is_some_and(|(tab_i, _)| *tab_i == i) {
+                let (_, mut buf) = renaming.clone().unwrap_or((i, name.clone()));
+                let r_edit = ui.put(
+                    tr,
+                    egui::TextEdit::singleline(&mut buf).font(crate::theme::body()).margin(egui::Margin::symmetric(4, 2)).desired_width(w.max(60.0)),
+                );
+                if !r_edit.has_focus() && !r_edit.lost_focus() {
+                    r_edit.request_focus();
+                }
+                if r_edit.lost_focus() {
+                    let cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    let trimmed = buf.trim();
+                    if !cancel && !trimmed.is_empty() && trimmed != name {
+                        let _ = app.run("layout.rename", json!({ "from": name, "to": trimmed }));
+                    }
+                    ui.ctx().data_mut(|d| d.remove::<Option<(usize, String)>>(rename_id));
+                } else {
+                    ui.ctx().data_mut(|d| d.insert_temp(rename_id, Some((i, buf))));
+                }
+            } else {
+                let resp = ui.interact(tr, ui.id().with(("lt", i)), Sense::click());
+                if active {
+                    tp.rect_filled(tr, 2.0, t.tab_active);
+                } else if resp.hovered() {
+                    tp.rect_filled(tr, 2.0, t.control.gamma_multiply(0.5));
+                }
+                tp.galley(pos2(tr.left() + 13.0, tr.center().y - g.size().y / 2.0), g, if active { t.text } else { t.text_dim });
+                icons::describe_control(ui, &resp, name, Some(active), true);
+                let resp = if cut { resp.on_hover_text(shown_name(i, name)) } else { resp };
+                if i > 0 && resp.double_clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(rename_id, Some((i, name.clone()))));
+                } else if resp.clicked() {
+                    switch = Some(name.clone());
+                }
+                crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
             }
-            tp.galley(pos2(tr.left() + 13.0, tr.center().y - g.size().y / 2.0), g, if active { t.text } else { t.text_dim });
-            icons::describe_control(ui, &resp, name, Some(active), true);
-            let resp = if cut { resp.on_hover_text(shown_name(i, name)) } else { resp };
-            if resp.clicked() {
-                switch = Some(name.clone());
-            }
-            crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
             x += w + 2.0;
             if i == 0 {
                 let pr = Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(16.0, 16.0));

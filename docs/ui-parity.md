@@ -195,13 +195,14 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
   Clipboard ▸, Isolate ▸, the selection's editing commands, Draw Order ▸, Group, the selected
   object type's edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom; #325, #512).
   The command line, drawing tabs, layout tabs, Layers palette rows and the Properties palette
-  have menus too (#512). Still missing: in-place layout tab rename, Move or Copy, Select All
-  Layouts.
+  have menus too (#512). In-place layout tab rename, Move or Copy layout dialog, Select All
+  Layouts, and Paste to command line landed (U7 closed).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Right-click menus & layout management (U7 closed): layout tab in-place rename, Move or Copy dialog with before/end placement and copy creation, Select All Layouts action, Paste to Command Line action |
 | 2026-10-19 | minor | Tab snap cycling candidates gather all candidate snaps under the aperture (`pointmod::snap_candidates`, `snap::osnap_all`; U4 closed); precision input and snap parity audits updated |
 | 2026-10-12 | minor | Selected and hovered objects redrawn in the selection colour (text and arrowheads included); Options ▸ Selection laid out as AutoCAD's: Object grouping, Show grips, grip object limit, selection preview, Visual Effect Settings (selection area, preview filter) |
 | 2026-10-12 | minor | Animation effects (dialog and menu fades, smoothed wheel scrolling and ⌘/Ctrl+wheel zoom) follow the operating system's setting; View ▸ Accessibility ▸ Animation Effects chooses System, On or Off |

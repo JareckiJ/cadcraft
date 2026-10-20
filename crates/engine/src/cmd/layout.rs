@@ -29,7 +29,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(NewLayoutM))),
         CommandSpec::new("layout.delete", "Delete Layout", run_delete).params("{name}"),
         CommandSpec::new("layout.rename", "Rename Layout", run_rename).params("{from?: current layout, to}"),
-        CommandSpec::new("layout.copy", "Copy Layout", run_copy).params("{from, to?}"),
+        CommandSpec::new("layout.copy", "Copy Layout", run_copy).params("{from, to?, before?}"),
+        CommandSpec::new("layout.reorder", "Reorder Layout", run_reorder).params("{name, before?}"),
         CommandSpec::new("layout.list", "List Layouts", run_list).params("→ [{name, tabOrder, page, viewports}]").noundo(),
         CommandSpec::new("mview", "Viewports", run_mview)
             .alias(&["mv"])
@@ -297,16 +298,48 @@ fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
             (2..=10_000).map(|i| format!("{from} ({i})")).find(|n| d.layout(n).is_none()).ok_or_else(|| bad("layout.copy", "no free name"))?
         }
     };
+    let before = str_param(p, "before");
     let d = s.doc_mut()?;
     let Some(src) = d.layouts.iter().find(|l| l.name == from).cloned() else { return Err(bad("layout.copy", "no such layout")) };
-    let order = d.layouts.iter().map(|l| l.tab_order).max().unwrap_or(0).saturating_add(1);
     let mut store = EntityStore::new();
     for e in src.entities.iter() {
         let h = d.new_handle();
         store.push(Entity { handle: h, ..Entity::clone(e) });
     }
-    d.layouts.push(Layout { name: to.clone(), tab_order: order, page: src.page, entities: store, view: src.view });
+    let new_layout = Layout { name: to.clone(), tab_order: 0, page: src.page, entities: store, view: src.view };
+    if let Some(target) = before {
+        let insert_idx = d.layouts.iter().position(|l| l.name.eq_ignore_ascii_case(target)).unwrap_or(d.layouts.len());
+        d.layouts.insert(insert_idx, new_layout);
+    } else {
+        d.layouts.push(new_layout);
+    }
+    for (i, l) in d.layouts.iter_mut().enumerate() {
+        l.tab_order = (i + 1) as u32;
+    }
+    s.touch();
     Ok(json!({ "name": to }))
+}
+
+fn run_reorder(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = str_param(p, "name").ok_or_else(|| bad("layout.reorder", "`name` is required"))?;
+    let name = layout_name("layout.reorder", s.doc()?, name)?;
+    let before = str_param(p, "before");
+    let d = s.doc_mut()?;
+    let Some(idx) = d.layouts.iter().position(|l| l.name == name) else {
+        return Err(bad("layout.reorder", "no such layout"));
+    };
+    let layout = d.layouts.remove(idx);
+    if let Some(target) = before {
+        let insert_idx = d.layouts.iter().position(|l| l.name.eq_ignore_ascii_case(target)).unwrap_or(d.layouts.len());
+        d.layouts.insert(insert_idx, layout);
+    } else {
+        d.layouts.push(layout);
+    }
+    for (i, l) in d.layouts.iter_mut().enumerate() {
+        l.tab_order = (i + 1) as u32;
+    }
+    s.touch();
+    Ok(json!({ "reordered": name }))
 }
 
 fn run_list(s: &mut Session, _p: &Value) -> Result<Value> {

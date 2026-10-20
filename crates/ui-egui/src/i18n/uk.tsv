@@ -5,8 +5,10 @@
 # Empty context = ordinary label; @plural = one|few|many forms with {n}.
 # Keep command IDs, keywords, technology/product names and user data unchanged.
 # External References palette (#525).
+	(move to end)	(перемістити в кінець)
 	Apply	Застосувати
 	Attach DWG...	Приєднати DWG...
+	Before layout:	Перед аркушем:
 	Bind	Вбудувати
 	Detach	Від'єднати
 	Loaded	Завантажено
@@ -185,6 +187,7 @@
 	Count List	Список підрахунку
 	Count Table	Таблиця підрахунку
 	Create Block	Створити блок
+	Create a copy	Створити копію
 	Creates a user parameter	Створює параметр користувача
 	Ctrl+Enter to finish	Ctrl+Enter для завершення
 	Current layer	Поточний шар
@@ -539,6 +542,8 @@
 	Models	Моделі
 	Modify	Модифікація
 	Move	Перемістити
+	Move or Copy	Перемістити або копіювати
+	Move or Copy...	Перемістити або копіювати...
 	Multileader	Мультивиноска
 	Multileader Style...	Стиль мультивиносок...
 	Multileader style	Стиль мультивиносок
@@ -747,6 +752,7 @@
 	Rename Layer	Перейменувати шар
 	Rename Layer State	Перейменувати стан шарів
 	Rename Layout	Перейменувати аркуш
+	Reorder Layout	Змінити порядок аркушів
 	Rename Text Style	Перейменувати текстовий стиль
 	Rename...	Перейменувати...
 	Repeat {command}	Повторити {command}
@@ -775,6 +781,7 @@
 	Select	Вибрати
 	Select 2D polyline	Виберіть 2D-полілінію
 	Select All	Вибрати все
+	Select All Layouts	Вибрати всі аркуші
 	Select Objects	Вибрати об'єкти
 	Select Similar	Вибрати подібні
 	Select a 2D polyline.	Виберіть 2D-полілінію.

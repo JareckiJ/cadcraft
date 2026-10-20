@@ -31,6 +31,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "bedit" => crate::bedit::dialog(app, ctx, &mut open),
         "authoring" => crate::bedit::authoring_dialog(app, ctx, &mut open),
         "stylesmanager" => crate::plotstyles::dialog(app, ctx, &mut open),
+        d if d.starts_with("move_copy_layout:") => move_copy_layout(app, ctx, d, &mut open),
         o if o == "options" || o.starts_with("options:") => crate::options::dialog(app, ctx, o, &mut open),
         other => crate::managers::dialog(app, ctx, other, &mut open),
     }
@@ -418,6 +419,77 @@ fn language(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             }
         });
     });
+}
+
+fn move_copy_layout(app: &mut CadApp, ctx: &egui::Context, id_str: &str, open: &mut bool) {
+    let source = id_str.strip_prefix("move_copy_layout:").unwrap_or_default().to_string();
+    let Ok(d) = app.session.doc() else {
+        *open = false;
+        return;
+    };
+    let mut layouts: Vec<_> = d.layouts.iter().map(|l| (l.tab_order, l.name.clone())).collect();
+    layouts.sort_by_key(|l| l.0);
+
+    let sel_id = egui::Id::new("move_copy_layout_sel");
+    let copy_id = egui::Id::new("move_copy_layout_copy");
+    let mut selected: String = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_else(|| source.clone());
+    let mut make_copy: bool = ctx.data(|d| d.get_temp(copy_id)).unwrap_or(false);
+
+    let mut action_taken = false;
+    egui::Window::new(crate::tl!("Move or Copy")).id(egui::Id::new("move_copy_layout_window")).open(open).resizable(false).default_width(280.0).show(
+        ctx,
+        |ui| {
+            ui.label(crate::tl!("Before layout:"));
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                    for (_, name) in &layouts {
+                        if ui.selectable_label(selected == *name, name).clicked() {
+                            selected = name.clone();
+                        }
+                    }
+                    let move_to_end = crate::tl!("(move to end)").to_string();
+                    if ui.selectable_label(selected == move_to_end, &move_to_end).clicked() {
+                        selected = move_to_end;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            ui.checkbox(&mut make_copy, crate::tl!("Create a copy"));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button(crate::tl!("OK")).clicked() {
+                    let move_to_end = crate::tl!("(move to end)");
+                    let before_param = if selected == move_to_end { None } else { Some(selected.as_str()) };
+                    if make_copy {
+                        let mut params = json!({ "from": source });
+                        if let Some(b) = before_param {
+                            params["before"] = json!(b);
+                        }
+                        let _ = app.run("layout.copy", params);
+                    } else {
+                        let mut params = json!({ "name": source });
+                        if let Some(b) = before_param {
+                            params["before"] = json!(b);
+                        }
+                        let _ = app.run("layout.reorder", params);
+                    }
+                    action_taken = true;
+                }
+                if ui.button(crate::tl!("Cancel")).clicked() {
+                    action_taken = true;
+                }
+            });
+        },
+    );
+
+    if action_taken {
+        *open = false;
+    } else {
+        ctx.data_mut(|d| {
+            d.insert_temp(sel_id, selected);
+            d.insert_temp(copy_id, make_copy);
+        });
+    }
 }
 
 #[cfg(test)]

@@ -34,7 +34,10 @@ pub fn mirror(app: &CadApp, ctx: &egui::Context) {
     }
     ctx.data_mut(|d| d.insert_temp(serial_id(), src.serial));
     if let Some(text) = clipboard::system_text(&app.session) {
-        ctx.data_mut(|d| d.insert_temp(text_id(), hash(&text)));
+        ctx.data_mut(|d| {
+            d.insert_temp(text_id(), hash(&text));
+            d.insert_temp(egui::Id::new("cc_last_copied_text"), text.clone());
+        });
         ctx.copy_text(text);
     }
 }
