@@ -139,6 +139,10 @@ zoom e                          zoom to extents
 
 The web build: `cd apps/cadcraft-web && trunk serve` (needs [trunk](https://trunkrs.dev)).
 
+To share a native drawing with its xrefs, images and linked CSV files, use **File ▸ eTransmit...**
+or `ETRANSMIT`. It creates a portable ZIP with relative reference paths and a missing-file
+manifest; see [drawing packages](docs/etransmit.md) for JSON automation and remaining limits.
+
 ### Fonts
 
 CADCraft has no fonts in its repository; it uses the TrueType/OpenType fonts installed on your
