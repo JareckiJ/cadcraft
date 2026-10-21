@@ -7,7 +7,7 @@
 
 use cadcraft_doc::{Common, Drawing, Entity, EntityKind, Face3d, Handle};
 use cadcraft_geom::mesh::{self, Face, MAX_PROFILE};
-use cadcraft_geom::{Polyline, TAU, Vec2, Vec3};
+use cadcraft_geom::{Polyline, TAU, Vec2, Vec3, point_in_polygon};
 use serde_json::{Value, json};
 
 use super::helpers::*;
@@ -30,8 +30,13 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(CylinderM::default()))),
         CommandSpec::new("extrude", "Extrude", run_extrude)
             .menu(&["Draw", "3D Modeling", "Extrude"])
-            .params("{handles? (default the selection: closed polylines and circles), height, tolerance? (chord error for arcs, default 1/1000 of the profile), erase?: bool (default false)} → {handles, groups, faces}. Extrudes along +Z from the profile's elevation, as one group of 3D faces per profile.")
+            .params("{handles? (default the selection: closed polylines and circles), holes? [handles] (closed polylines and circles fully inside one profile, cut through it; touching, overlapping or nested holes are refused), height, tolerance? (chord error for arcs, default 1/1000 of the profile), erase?: bool (default false; also erases the holes)} → {handles, groups, faces}. Extrudes along +Z from the profile's elevation, as one group of 3D faces per profile.")
             .interactive(|_| Ok(Box::new(ExtrudeM::default()))),
+        CommandSpec::new("3dface", "3D Face", run_3dface)
+            .menu(&["Draw", "3D Modeling", "Meshes", "3D Face"])
+            .alias(&["3f"])
+            .params("{points: [[x,y,z?], 3 or 4 points], invisible?: [edge numbers 1..4]} → {handle}. Edge 1 runs from the first point to the second; edge 4 closes a quad, and a triangle's closing edge is 3 or 4. The points need not be coplanar, but not all collinear.")
+            .interactive(|_| Ok(Box::new(FaceM::default()))),
     ]
 }
 
@@ -225,6 +230,129 @@ impl Interactive for CylinderM {
     }
 }
 
+// ---------------------------------------------------------------------------------- 3DFACE
+
+/// A 3DFACE from 3 or 4 points; `invisible` has the edge bits (1 = first point to second … 8 =
+/// fourth back to first). Refuses a face with no area.
+fn face_from(pts: &[Vec3], invisible: u8) -> Result<Face3d> {
+    // A triangle repeats its third point; its closing edge (third back to first) is bit 8, and
+    // asking for its "third edge" hides that one.
+    let tri = |inv: u8| (inv & 3) | if inv & 12 != 0 { 8 } else { 0 };
+    let (corners, hidden) = match pts {
+        [a, b, c] => ([*a, *b, *c, *c], tri(invisible)),
+        [a, b, c, d] if d == c => ([*a, *b, *c, *c], tri(invisible)),
+        [a, b, c, d] => ([*a, *b, *c, *d], invisible),
+        _ => return Err(err("3dface", "a 3D face needs 3 or 4 points")),
+    };
+    if corners.iter().any(|c| !c.is_finite()) {
+        return Err(err("3dface", "the points must be numbers"));
+    }
+    let diag = corners.iter().flat_map(|a| corners.iter().map(move |b| (*a - *b).len())).fold(0.0, f64::max);
+    let eps = 1e-12 * diag * diag;
+    let [a, b, c, d] = corners;
+    if (b - a).cross(c - a).len() <= eps && (c - a).cross(d - a).len() <= eps {
+        return Err(err("3dface", "the points are collinear: the face has no area"));
+    }
+    Ok(Face3d { corners, hidden_edges: hidden })
+}
+
+fn run_3dface(s: &mut Session, p: &Value) -> Result<Value> {
+    let pts: Vec<Vec3> = p
+        .get("points")
+        .and_then(Value::as_array)
+        .ok_or_else(|| err("3dface", "`points` ([[x,y,z?], 3 or 4 points]) is required"))?
+        .iter()
+        .map(|v| {
+            let a = v.as_array()?;
+            let q = Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2).and_then(Value::as_f64).unwrap_or(0.0));
+            q.is_finite().then_some(q)
+        })
+        .collect::<Option<_>>()
+        .ok_or_else(|| err("3dface", "each point must be [x, y, z?] numbers"))?;
+    let mut hidden = 0u8;
+    match p.get("invisible") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(a)) => {
+            for v in a {
+                let n = v.as_u64().filter(|n| (1..=4).contains(n)).ok_or_else(|| err("3dface", "`invisible` lists edge numbers from 1 to 4"))?;
+                hidden |= 1u8 << (n - 1);
+            }
+        }
+        Some(_) => return Err(err("3dface", "`invisible` must be an array of edge numbers from 1 to 4")),
+    }
+    let f = face_from(&pts, hidden)?;
+    let h = s.add_entity(EntityKind::Face3d(f))?;
+    Ok(json!({ "handle": h.hex() }))
+}
+
+#[derive(Default)]
+struct FaceM {
+    pts: Vec<Vec3>,
+    hidden: u8,
+    next_hidden: bool,
+}
+
+impl FaceM {
+    fn finish(&mut self, s: &mut Session) -> Result<Step> {
+        let f = face_from(&self.pts, self.hidden)?;
+        s.add_entity(EntityKind::Face3d(f))?;
+        Ok(Step::Done)
+    }
+}
+
+impl Interactive for FaceM {
+    fn name(&self) -> &'static str {
+        "3DFACE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        let base = self.pts.last().map(|p| p.xy());
+        let (msg, kw): (&str, &[&str]) = match self.pts.len() {
+            0 => ("Specify first point or", &["Invisible"]),
+            1 => ("Specify second point or", &["Invisible"]),
+            2 => ("Specify third point or", &["Invisible"]),
+            _ => ("Specify fourth point or", &["Invisible"]),
+        };
+        let p = Prompt::new(msg, Accept::POINT).kw(kw);
+        let p = if self.pts.len() == 3 { p.default("create three-sided face") } else { p };
+        match base {
+            Some(b) => p.base(b),
+            None => p,
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Keyword(k) if k == "Invisible" => {
+                self.next_hidden = true;
+                Ok(Step::Continue)
+            }
+            Input::Point(p) => {
+                if self.next_hidden {
+                    // The edge that starts at this point is the invisible one.
+                    self.hidden |= 1u8 << self.pts.len();
+                    self.next_hidden = false;
+                }
+                self.pts.push(p.to3(0.0));
+                if self.pts.len() == 4 { self.finish(s) } else { Ok(Step::Continue) }
+            }
+            Input::Enter if self.pts.len() == 3 => self.finish(s),
+            Input::Enter => Ok(Step::Done),
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+        let mut pts: Vec<Vec2> = self.pts.iter().map(|p| p.xy()).collect();
+        if pts.is_empty() {
+            return Vec::new();
+        }
+        pts.push(c);
+        vec![lwpoly(pts.into_iter().map(cadcraft_geom::PolyVertex::new).collect(), pts_closed(self.pts.len()))]
+    }
+}
+
+fn pts_closed(placed: usize) -> bool {
+    placed >= 2
+}
+
 // ---------------------------------------------------------------------------------- EXTRUDE
 
 /// A closed profile ready to extrude: its points, elevation and properties.
@@ -278,29 +406,58 @@ fn profile_of(e: &Entity, tol: Option<f64>) -> std::result::Result<Profile, Stri
     }
 }
 
-fn extrude_handles(s: &mut Session, hs: &[Handle], height: f64, tol: Option<f64>, erase: bool) -> Result<Value> {
+fn extrude_handles(s: &mut Session, hs: &[Handle], holes: &[Handle], height: f64, tol: Option<f64>, erase: bool) -> Result<Value> {
     if !height.is_finite() || height == 0.0 {
         return Err(err("extrude", "`height` must be a non-zero number"));
     }
     if hs.is_empty() {
         return Err(err("extrude", "nothing to extrude: select closed polylines or circles, or pass `handles`"));
     }
+    if holes.len() > mesh::MAX_HOLES {
+        return Err(err("extrude", "too many holes"));
+    }
+    if let Some(h) = holes.iter().find(|h| hs.contains(h)) {
+        return Err(err("extrude", format!("{} is both a profile and a hole", h.hex())));
+    }
     // Build every solid before changing the drawing, so a bad profile leaves it untouched.
+    let load = |list: &[Handle]| -> Result<Vec<(Handle, Profile)>> {
+        let mut out = Vec::with_capacity(list.len());
+        for h in list {
+            if erase && super::curves::is_locked(s, *h) {
+                return Err(err("extrude", "a profile is locked"));
+            }
+            let d: &Drawing = s.doc()?;
+            let e = d.entity(*h).ok_or_else(|| err("extrude", format!("{} is not an object in this drawing", h.hex())))?;
+            out.push((*h, profile_of(e, tol).map_err(|m| err("extrude", format!("{}: {m}", h.hex())))?));
+        }
+        Ok(out)
+    };
+    let outers = load(hs)?;
+    let cutouts = load(holes)?;
+    let mut assigned: Vec<Vec<usize>> = vec![Vec::new(); outers.len()];
+    for (k, (h, hp)) in cutouts.iter().enumerate() {
+        let first = hp.pts.first().copied().ok_or_else(|| err("extrude", format!("{}: the hole has no points", h.hex())))?;
+        let owners: Vec<usize> = outers.iter().enumerate().filter(|(_, (_, op))| point_in_polygon(&op.pts, first)).map(|(i, _)| i).collect();
+        match owners.as_slice() {
+            [i] => {
+                if let Some(list) = assigned.get_mut(*i) {
+                    list.push(k);
+                }
+            }
+            [] => return Err(err("extrude", format!("{}: the hole is not inside any profile", h.hex()))),
+            _ => return Err(err("extrude", format!("{}: the hole is inside more than one profile", h.hex()))),
+        }
+    }
     let mut built: Vec<(Handle, Common, Vec<Face>)> = Vec::new();
     let mut total = 0usize;
-    for h in hs {
-        if erase && super::curves::is_locked(s, *h) {
-            return Err(err("extrude", "a profile is locked"));
-        }
-        let d: &Drawing = s.doc()?;
-        let e = d.entity(*h).ok_or_else(|| err("extrude", format!("{} is not an object in this drawing", h.hex())))?;
-        let prof = profile_of(e, tol).map_err(|m| err("extrude", format!("{}: {m}", h.hex())))?;
-        let faces = mesh::extrude(&prof.pts, prof.z, height).map_err(|m| err("extrude", format!("{}: {m}", h.hex())))?;
+    for (i, (h, prof)) in outers.iter().enumerate() {
+        let cuts: Vec<Vec<Vec2>> = assigned.get(i).into_iter().flatten().filter_map(|k| cutouts.get(*k)).map(|(_, p)| p.pts.clone()).collect();
+        let faces = mesh::extrude_with_holes(&prof.pts, &cuts, prof.z, height).map_err(|m| err("extrude", format!("{}: {m}", h.hex())))?;
         total += faces.len();
         if total > MAX_FACES {
             return Err(err("extrude", "the solids would have too many faces"));
         }
-        built.push((*h, prof.common, faces));
+        built.push((*h, prof.common.clone(), faces));
     }
     let mut all = Vec::new();
     let mut groups = Vec::new();
@@ -312,6 +469,11 @@ fn extrude_handles(s: &mut Session, hs: &[Handle], height: f64, tol: Option<f64>
             s.doc_mut()?.remove_entity(*src);
         }
     }
+    if erase {
+        for (h, _) in &cutouts {
+            s.doc_mut()?.remove_entity(*h);
+        }
+    }
     Ok(json!({
         "handles": hexes(&all),
         "groups": groups,
@@ -320,32 +482,58 @@ fn extrude_handles(s: &mut Session, hs: &[Handle], height: f64, tol: Option<f64>
     }))
 }
 
+/// `holes`: an array of object handles (hex strings or numbers), absent or null for none.
+fn holes_param(p: &Value) -> Result<Vec<Handle>> {
+    match p.get("holes") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .and_then(Handle::parse_hex)
+                    .or_else(|| v.as_u64().map(Handle))
+                    .ok_or_else(|| err("extrude", format!("`holes`: {v} is not an object handle")))
+            })
+            .collect(),
+        Some(v) => Err(err("extrude", format!("`holes` must be an array of object handles, got {v}"))),
+    }
+}
+
 fn run_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let height = number_req("extrude", p, "height")?;
     let tol = size_param("extrude", p, "tolerance", false)?;
+    let holes = holes_param(p)?;
     let hs = targets(s, p)?;
-    extrude_handles(s, &hs, height, tol, bool_or(p, "erase", false))
+    extrude_handles(s, &hs, &holes, height, tol, bool_or(p, "erase", false))
 }
 
 #[derive(Default)]
 struct ExtrudeM {
     sel: SelectPhase,
     picked: Vec<Handle>,
+    holes: Vec<Handle>,
+    hole_sel: SelectPhase,
+    picking_holes: bool,
+}
+
+/// The objects of `hs` that have a usable profile, with a note when some were left out.
+fn usable(s: &mut Session, hs: Vec<Handle>) -> Vec<Handle> {
+    let total = hs.len();
+    let keep: Vec<Handle> = match s.doc() {
+        Ok(d) => hs.into_iter().filter(|h| d.entity(*h).is_some_and(|e| profile_of(e, None).is_ok())).collect(),
+        Err(_) => Vec::new(),
+    };
+    let ignored = total.saturating_sub(keep.len());
+    if ignored > 0 {
+        s.echo(format!("{ignored} object(s) cannot be extruded and were ignored."));
+    }
+    keep
 }
 
 impl ExtrudeM {
-    /// Keep the picked objects that have a usable profile; say how many were left out. Ends the
-    /// command when none remain.
+    /// Keep the picked objects that have a usable profile. Ends the command when none remain.
     fn take(&mut self, s: &mut Session, hs: Vec<Handle>) -> Step {
-        let total = hs.len();
-        self.picked = match s.doc() {
-            Ok(d) => hs.into_iter().filter(|h| d.entity(*h).is_some_and(|e| profile_of(e, None).is_ok())).collect(),
-            Err(_) => Vec::new(),
-        };
-        let ignored = total.saturating_sub(self.picked.len());
-        if ignored > 0 {
-            s.echo(format!("{ignored} object(s) cannot be extruded and were ignored."));
-        }
+        self.picked = usable(s, hs);
         if self.picked.is_empty() { Step::Done } else { Step::Continue }
     }
 }
@@ -363,7 +551,13 @@ impl Interactive for ExtrudeM {
         Ok(Step::Continue)
     }
     fn prompt(&self, _s: &Session) -> Prompt {
-        if self.picked.is_empty() { self.sel.prompt() } else { Prompt::new("Specify height of extrusion", Accept::NUMBER) }
+        if self.picked.is_empty() {
+            self.sel.prompt()
+        } else if self.picking_holes {
+            self.hole_sel.prompt()
+        } else {
+            Prompt::new("Specify height of extrusion or", Accept::NUMBER).kw(&["Holes"])
+        }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if self.picked.is_empty() {
@@ -373,13 +567,35 @@ impl Interactive for ExtrudeM {
                 SelOutcome::Done(hs) => self.take(s, hs),
             });
         }
+        if self.picking_holes {
+            match self.hole_sel.feed(s, &i)? {
+                SelOutcome::More => {}
+                SelOutcome::Empty => self.picking_holes = false,
+                SelOutcome::Done(hs) => {
+                    let picked = self.picked.clone();
+                    let mut keep = usable(s, hs);
+                    keep.retain(|h| !picked.contains(h));
+                    self.holes = keep;
+                    self.picking_holes = false;
+                }
+            }
+            return Ok(Step::Continue);
+        }
+        if let Input::Keyword(k) = &i
+            && k == "Holes"
+        {
+            self.picking_holes = true;
+            self.hole_sel = SelectPhase::default();
+            s.echo("Select the closed polylines and circles that are holes.");
+            return Ok(Step::Continue);
+        }
         let h = match &i {
             Input::Text(t) => number(t),
             _ => None,
         }
         .filter(|h| h.is_finite() && *h != 0.0)
         .ok_or_else(|| EngineError::Other("Requires a non-zero height.".into()))?;
-        let r = extrude_handles(s, &self.picked.clone(), h, None, false)?;
+        let r = extrude_handles(s, &self.picked.clone(), &self.holes.clone(), h, None, false)?;
         if let Some(m) = r.get("message").and_then(Value::as_str) {
             s.echo(m.to_string());
         }

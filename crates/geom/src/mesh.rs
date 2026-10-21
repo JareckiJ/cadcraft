@@ -144,6 +144,7 @@ fn triangulate(poly: &[Vec2]) -> Option<Vec<[usize; 3]>> {
     let eps = 1e-12 * diag * diag;
     let mut idx: Vec<usize> = (0..n).collect();
     let mut tris: Vec<[usize; 3]> = Vec::with_capacity(n.saturating_sub(2));
+    let mut budget: u64 = 40_000_000;
     while idx.len() > 3 {
         let m = idx.len();
         let mut clipped = false;
@@ -154,12 +155,19 @@ fn triangulate(poly: &[Vec2]) -> Option<Vec<[usize; 3]>> {
             if turn <= eps {
                 continue;
             }
-            let blocked = idx.iter().any(|&o| {
-                o != ip
+            let mut blocked = false;
+            for &o in &idx {
+                // A hostile polygon must not keep the cutter busy for long.
+                budget = budget.checked_sub(1)?;
+                if o != ip
                     && o != ic
                     && o != inx
                     && poly.get(o).is_some_and(|&po| !po.near(p, EPS) && !po.near(q, EPS) && !po.near(c, EPS) && inside_or_on(p, c, q, po, eps))
-            });
+                {
+                    blocked = true;
+                    break;
+                }
+            }
             if !blocked {
                 tris.push([ip, ic, inx]);
                 idx.remove(k);
@@ -240,6 +248,207 @@ fn prism(poly: &[Vec2], lo: f64, hi: f64, fan: Option<Vec2>) -> Result<Vec<Face>
     Ok(faces)
 }
 
+/// Most holes a profile takes.
+pub const MAX_HOLES: usize = 256;
+
+/// True when no edge of loop `a` meets an edge of loop `b`.
+fn loops_clear(a: &[Vec2], b: &[Vec2], eps: f64, tol: f64) -> bool {
+    let (na, nb) = (a.len(), b.len());
+    for i in 0..na {
+        let (Some(&p), Some(&q)) = (a.get(i), a.get((i + 1) % na)) else { continue };
+        for j in 0..nb {
+            let (Some(&r), Some(&s)) = (b.get(j), b.get((j + 1) % nb)) else { continue };
+            if segments_meet(p, q, r, s, eps, tol) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// The outline as a simple counter-clockwise polygon and the holes as simple clockwise ones.
+/// Every hole must lie fully inside the outline and clear of the other holes; touching,
+/// overlapping, nested and outside holes are refused.
+pub fn profile_with_holes(outline: &[Vec2], holes: &[Vec<Vec2>]) -> Result<(Vec<Vec2>, Vec<Vec<Vec2>>), MeshError> {
+    if holes.len() > MAX_HOLES {
+        return Err(MeshError::Profile("the profile has too many holes"));
+    }
+    let total = holes.iter().map(Vec::len).fold(outline.len(), usize::saturating_add);
+    if total > MAX_PROFILE {
+        return Err(MeshError::Profile("the profile and its holes have too many points"));
+    }
+    let outer = simple_profile(outline)?;
+    let mut hs: Vec<Vec<Vec2>> = Vec::with_capacity(holes.len());
+    for h in holes {
+        let mut p = simple_profile(h)?;
+        p.reverse();
+        hs.push(p);
+    }
+    let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+    for p in &outer {
+        lo = lo.min(*p);
+        hi = hi.max(*p);
+    }
+    let diag = (hi - lo).len();
+    let (eps, tol) = (1e-12 * diag * diag, 1e-9 * (1.0 + diag));
+    for (i, h) in hs.iter().enumerate() {
+        if !loops_clear(&outer, h, eps, tol) {
+            return Err(MeshError::Profile("a hole touches or crosses the outline"));
+        }
+        let first = h.first().copied().ok_or(MeshError::Profile("a hole has no points"))?;
+        if !crate::point_in_polygon(&outer, first) {
+            return Err(MeshError::Profile("a hole is not inside the outline"));
+        }
+        for g in hs.iter().take(i) {
+            if !loops_clear(h, g, eps, tol) {
+                return Err(MeshError::Profile("two holes touch or overlap"));
+            }
+            let other = g.first().copied().ok_or(MeshError::Profile("a hole has no points"))?;
+            if crate::point_in_polygon(g, first) || crate::point_in_polygon(h, other) {
+                return Err(MeshError::Profile("a hole lies inside another hole"));
+            }
+        }
+    }
+    Ok((outer, hs))
+}
+
+/// Is `target` inside the interior angle at `cur` of a counter-clockwise polygon?
+fn in_wedge(prev: Vec2, cur: Vec2, next: Vec2, target: Vec2) -> bool {
+    let left_in = orient(prev, cur, target) >= 0.0;
+    let left_out = orient(cur, next, target) >= 0.0;
+    if orient(prev, cur, next) >= 0.0 { left_in && left_out } else { left_in || left_out }
+}
+
+fn in_triangle(a: Vec2, b: Vec2, c: Vec2, p: Vec2) -> bool {
+    let (d1, d2, d3) = (orient(a, b, p), orient(b, c, p), orient(c, a, p));
+    !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+}
+
+/// The vertex of polygon `mv` (counter-clockwise, maybe with earlier bridges) that `m` sees: the
+/// end of the nearest edge hit by a ray towards +X, or a reflex vertex inside the triangle that
+/// ray makes (Eberly's bridge rule).
+fn visible_vertex(mv: &[Vec2], m: Vec2) -> Option<usize> {
+    let n = mv.len();
+    let mut best: Option<(f64, usize, Vec2)> = None;
+    for i in 0..n {
+        let (a, b) = (*mv.get(i)?, *mv.get((i + 1) % n)?);
+        let hit = if a.y == b.y {
+            if a.y != m.y {
+                continue;
+            }
+            // Collinear with the ray: the nearer end ahead of it.
+            let ends = [(a.x, i, a), (b.x, (i + 1) % n, b)];
+            let Some(&(x, j, p)) = ends.iter().filter(|e| e.0 >= m.x).min_by(|u, v| u.0.total_cmp(&v.0)) else { continue };
+            (x, j, p)
+        } else {
+            let t = (m.y - a.y) / (b.y - a.y);
+            if !(0.0..=1.0).contains(&t) {
+                continue;
+            }
+            let x = a.x + t * (b.x - a.x);
+            if x < m.x {
+                continue;
+            }
+            (x, if a.x > b.x { i } else { (i + 1) % n }, Vec2::new(x, m.y))
+        };
+        if best.is_none_or(|(bx, ..)| hit.0 < bx) {
+            best = Some(hit);
+        }
+    }
+    let (_, mut pick, ipt) = best?;
+    let p = *mv.get(pick)?;
+    if !ipt.near(p, 1e-12) {
+        // A reflex vertex inside the triangle (m, hit, p) hides p: take the one nearest the ray.
+        let mut found: Option<(f64, f64, usize)> = None;
+        for k in 0..n {
+            let (Some(&prev), Some(&cur), Some(&next)) = (mv.get((k + n - 1) % n), mv.get(k), mv.get((k + 1) % n)) else { continue };
+            if k == pick || cur.near(p, 1e-12) || orient(prev, cur, next) >= 0.0 || !in_triangle(m, ipt, p, cur) {
+                continue;
+            }
+            let dx = cur.x - m.x;
+            if dx <= 0.0 {
+                continue;
+            }
+            let key = ((cur.y - m.y).abs() / dx, (cur - m).len2());
+            if found.is_none_or(|(a, b, _)| key.0 < a || (key.0 == a && key.1 < b)) {
+                found = Some((key.0, key.1, k));
+            }
+        }
+        if let Some((_, _, k)) = found {
+            pick = k;
+        }
+    }
+    // The same point can appear twice (an earlier bridge): use the copy whose corner faces m.
+    let at_pick = *mv.get(pick)?;
+    let copies: Vec<usize> = (0..n).filter(|&k| mv.get(k).is_some_and(|v| v.near(at_pick, 1e-12))).collect();
+    copies
+        .iter()
+        .copied()
+        .find(|&k| match (mv.get((k + n - 1) % n), mv.get(k), mv.get((k + 1) % n)) {
+            (Some(&prev), Some(&cur), Some(&next)) => in_wedge(prev, cur, next, m),
+            _ => false,
+        })
+        .or(copies.first().copied())
+}
+
+/// The outline and holes as one polygon: each hole is joined to the polygon by a two-way bridge
+/// (holes from the right-most to the left-most). Returns the vertices and, per edge `i -> i + 1`,
+/// whether it is a bridge (not a real boundary).
+fn merge_holes(outer: &[Vec2], holes: &[Vec<Vec2>]) -> Option<(Vec<Vec2>, Vec<bool>)> {
+    let mut mv: Vec<Vec2> = outer.to_vec();
+    let mut bridge: Vec<bool> = vec![false; mv.len()];
+    let max_x = |h: &Vec<Vec2>| h.iter().fold(f64::MIN, |m, p| m.max(p.x));
+    let mut order: Vec<&Vec<Vec2>> = holes.iter().collect();
+    order.sort_by(|a, b| max_x(b).total_cmp(&max_x(a)));
+    for hole in order {
+        let (mi, m) = hole.iter().copied().enumerate().max_by(|a, b| a.1.x.total_cmp(&b.1.x))?;
+        let p = visible_vertex(&mv, m)?;
+        let pp = *mv.get(p)?;
+        let flag = *bridge.get(p)?;
+        let k = hole.len();
+        let mut nv: Vec<Vec2> = mv.get(..=p)?.to_vec();
+        let mut nb: Vec<bool> = bridge.get(..p)?.to_vec();
+        nb.push(true);
+        for s in 0..=k {
+            nv.push(*hole.get((mi + s) % k)?);
+        }
+        nb.extend(std::iter::repeat_n(false, k));
+        nb.push(true);
+        nv.push(pp);
+        nb.push(flag);
+        nv.extend_from_slice(mv.get(p + 1..)?);
+        nb.extend_from_slice(bridge.get(p + 1..)?);
+        mv = nv;
+        bridge = nb;
+    }
+    (mv.len() == bridge.len()).then_some((mv, bridge))
+}
+
+/// A prism of `outer` (counter-clockwise) with `holes` (clockwise) between `lo` and `hi`.
+fn prism_holes(outer: &[Vec2], holes: &[Vec<Vec2>], lo: f64, hi: f64) -> Result<Vec<Face>, MeshError> {
+    let mut faces: Vec<Face> = Vec::new();
+    for l in std::iter::once(outer).chain(holes.iter().map(Vec::as_slice)) {
+        let n = l.len();
+        for i in 0..n {
+            let (Some(&a), Some(&b)) = (l.get(i), l.get((i + 1) % n)) else { continue };
+            faces.push(Face { corners: [at(a, lo), at(b, lo), at(b, hi), at(a, hi)], hidden: 0 });
+        }
+    }
+    let (mv, bridge) = merge_holes(outer, holes).ok_or(MeshError::Profile("the holes cannot be joined to the outline"))?;
+    let tris = triangulate(&mv).ok_or(MeshError::Profile("the profile cannot be split into faces"))?;
+    let n = mv.len();
+    let real = |u: usize, v: usize| {
+        (v == (u + 1) % n && !bridge.get(u).copied().unwrap_or(true)) || (u == (v + 1) % n && !bridge.get(v).copied().unwrap_or(true))
+    };
+    let bit = |u: usize, v: usize, b: u8| if real(u, v) { 0 } else { b };
+    for [i, j, k] in tris {
+        let (Some(&pi), Some(&pj), Some(&pk)) = (mv.get(i), mv.get(j), mv.get(k)) else { continue };
+        faces.push(Face { corners: [at(pi, hi), at(pj, hi), at(pk, hi), at(pk, hi)], hidden: bit(i, j, 1) | bit(j, k, 2) | 4 | bit(k, i, 8) });
+        faces.push(Face { corners: [at(pi, lo), at(pk, lo), at(pj, lo), at(pj, lo)], hidden: bit(i, k, 1) | bit(k, j, 2) | 4 | bit(j, i, 8) });
+    }
+    Ok(faces)
+}
+
 fn z_range(z: f64, height: f64) -> Result<(f64, f64), MeshError> {
     if !z.is_finite() || !height.is_finite() {
         return Err(MeshError::Size("the height and position must be numbers"));
@@ -255,6 +464,17 @@ pub fn extrude(profile: &[Vec2], z: f64, height: f64) -> Result<Vec<Face>, MeshE
     let (lo, hi) = z_range(z, height)?;
     let poly = simple_profile(profile)?;
     prism(&poly, lo, hi, None)
+}
+
+/// Like [`extrude`], with holes cut through the solid. Each hole must lie fully inside the
+/// profile and clear of the others (see [`profile_with_holes`]); without holes it is `extrude`.
+pub fn extrude_with_holes(profile: &[Vec2], holes: &[Vec<Vec2>], z: f64, height: f64) -> Result<Vec<Face>, MeshError> {
+    if holes.is_empty() {
+        return extrude(profile, z, height);
+    }
+    let (lo, hi) = z_range(z, height)?;
+    let (outer, hs) = profile_with_holes(profile, holes)?;
+    prism_holes(&outer, &hs, lo, hi)
 }
 
 /// The faces of an axis-aligned box from `corner` by `size` (each side may be negative, none zero).
@@ -417,5 +637,90 @@ mod tests {
         let p = [v(0.0, 0.0), v(2.0, 0.0), v(4.0, 0.0), v(4.0, 4.0), v(2.0, 2.0), v(0.0, 4.0)];
         let f = extrude(&p, 0.0, 1.0).unwrap();
         assert!((volume(&f) - 12.0).abs() < 1e-9, "{}", volume(&f));
+    }
+
+    fn square(x: f64, y: f64, s: f64) -> Vec<Vec2> {
+        vec![v(x, y), v(x + s, y), v(x + s, y + s), v(x, y + s)]
+    }
+
+    #[test]
+    fn a_square_with_a_square_hole_has_the_right_volume_and_visible_edges_only_on_the_boundary() {
+        let f = extrude_with_holes(&square(0.0, 0.0, 10.0), &[square(4.0, 4.0, 2.0)], 0.0, 3.0).unwrap();
+        assert!((volume(&f) - 96.0 * 3.0).abs() < 1e-9, "{}", volume(&f));
+        // 4 + 4 sides, caps of 8 triangles each; bridges and diagonals are hidden, so the visible
+        // cap edges are exactly the 8 boundary edges per cap.
+        assert_eq!(f.len(), 8 + 16);
+        let visible: usize = f.iter().skip(8).map(|t| [1u8, 2, 8].iter().filter(|b| t.hidden & **b == 0).count()).sum();
+        assert_eq!(visible, 16, "8 boundary edges on each cap");
+    }
+
+    #[test]
+    fn several_holes_and_a_concave_outline() {
+        let outline = [v(0.0, 0.0), v(20.0, 0.0), v(20.0, 6.0), v(8.0, 6.0), v(8.0, 14.0), v(20.0, 14.0), v(20.0, 20.0), v(0.0, 20.0)];
+        let holes = [square(1.0, 1.0, 2.0), square(1.0, 16.0, 2.0), square(1.0, 8.0, 3.0), vec![v(12.0, 16.0), v(16.0, 16.0), v(14.0, 19.0)]];
+        let f = extrude_with_holes(&outline, &holes, 1.0, 2.0).unwrap();
+        let area = 20.0 * 20.0 - 12.0 * 8.0 - 4.0 - 4.0 - 9.0 - 6.0;
+        assert!((volume(&f) - area * 2.0).abs() < 1e-9, "{} vs {}", volume(&f), area * 2.0);
+    }
+
+    #[test]
+    fn a_ring_from_two_circles_and_a_clockwise_hole_input() {
+        let ring = |r: f64, n: usize| (0..n).map(|i| Vec2::polar(Vec2::ZERO, r, TAU * i as f64 / n as f64)).collect::<Vec<_>>();
+        let mut inner = ring(2.0, 64);
+        let f = extrude_with_holes(&ring(5.0, 64), &[inner.clone()], 0.0, 1.0).unwrap();
+        let want = 0.5 * 64.0 * (TAU / 64.0).sin() * (25.0 - 4.0);
+        assert!((volume(&f) - want).abs() < 1e-9, "{} vs {want}", volume(&f));
+        inner.reverse();
+        let g = extrude_with_holes(&ring(5.0, 64), &[inner], 0.0, 1.0).unwrap();
+        assert!((volume(&g) - want).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_hole_may_sit_right_of_the_bridge_obstacles() {
+        // A reflex corner between the hole and the nearest outline edge forces the bridge to bend.
+        let outline = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(6.0, 10.0), v(6.0, 4.0), v(4.0, 4.0), v(4.0, 10.0), v(0.0, 10.0)];
+        let f = extrude_with_holes(&outline, &[square(1.0, 1.0, 2.0), square(7.0, 1.0, 2.0)], 0.0, 1.0).unwrap();
+        let area = 100.0 - 12.0 - 8.0;
+        assert!((volume(&f) - area).abs() < 1e-9, "{} vs {area}", volume(&f));
+    }
+
+    #[test]
+    fn bad_holes_are_refused_with_a_reason() {
+        let outer = square(0.0, 0.0, 10.0);
+        let msg = |h: Vec<Vec<Vec2>>| extrude_with_holes(&outer, &h, 0.0, 1.0).unwrap_err().to_string();
+        assert!(msg(vec![square(20.0, 20.0, 2.0)]).contains("not inside"));
+        assert!(msg(vec![square(8.0, 4.0, 4.0)]).contains("touches or crosses"));
+        assert!(msg(vec![square(0.0, 4.0, 2.0)]).contains("touches or crosses"));
+        assert!(msg(vec![square(2.0, 2.0, 3.0), square(4.0, 4.0, 3.0)]).contains("touch or overlap"));
+        assert!(msg(vec![square(2.0, 2.0, 5.0), square(3.0, 3.0, 1.0)]).contains("inside another hole"));
+        assert!(msg(vec![vec![v(2.0, 2.0), v(3.0, 3.0)]]).contains("at least 3"));
+        assert!(msg(vec![vec![v(2.0, 2.0), v(6.0, 3.0), v(6.0, 2.0), v(2.0, 5.0)]]).contains("crosses or touches itself"));
+        let many: Vec<Vec<Vec2>> = (0..=MAX_HOLES).map(|i| square(1.0 + i as f64 * 0.01, 1.0, 0.001)).collect();
+        assert!(msg(many).contains("too many holes"));
+        assert!(extrude_with_holes(&outer, &[square(4.0, 4.0, 2.0)], 0.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn a_grid_of_holes_cuts_cleanly() {
+        let holes: Vec<Vec<Vec2>> = (0..10).flat_map(|i| (0..10).map(move |j| square(5.0 + i as f64 * 9.0, 5.0 + j as f64 * 9.0, 4.0))).collect();
+        let f = extrude_with_holes(&square(0.0, 0.0, 100.0), &holes, 0.0, 1.0).unwrap();
+        assert!((volume(&f) - (10_000.0 - 100.0 * 16.0)).abs() < 1e-6, "{}", volume(&f));
+    }
+
+    #[test]
+    fn a_comb_of_thousands_of_points_finishes_quickly() {
+        let teeth = 900;
+        let mut pts = vec![v(0.0, 0.0)];
+        for i in 0..teeth {
+            let x = i as f64 * 2.0;
+            pts.extend([v(x + 1.0, 0.0), v(x + 1.0, 5.0), v(x + 2.0, 5.0), v(x + 2.0, 0.0)]);
+        }
+        pts.pop();
+        pts.push(v(teeth as f64 * 2.0, -1.0));
+        pts.push(v(0.0, -1.0));
+        let t = std::time::Instant::now();
+        let r = extrude(&pts, 0.0, 1.0);
+        assert!(t.elapsed().as_secs() < 20, "took {:?}", t.elapsed());
+        assert!(r.is_ok(), "{:?}", r.err());
     }
 }

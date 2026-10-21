@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (BOX, CYLINDER and EXTRUDE as groups of 3D faces: F24 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (EXTRUDE with holes and 3DFACE: F24 narrowed) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -45,7 +45,7 @@ do them first.
 | F21 | MLINE, REGION and HELIX are objects since #510, with gaps: MLEDIT tees trim square; UNION/SUBTRACT/INTERSECT only combine regions whose boundaries don't meet; regions are saved as closed polylines (no ACIS data); PURGE skips multiline styles | `draw2/mline.rs`, `inquiry/regions.rs`, `dxf_region.rs` | Low | 6–10 |
 | F22 | Inquiry leftovers (COUNT across spaces and nested blocks, the QuickCalc palette and COMPARE landed, #563; MASSPROP on regions, #510): COMPARE compares the tab shown, not every layout at once, and has no COMPAREEXPORT report; QuickCalc keeps its history and variables for the session only | `file/compare.rs`, `palettes/quickcalc.rs` | Low | 3–5 |
 | F23 | No Sheet Set Manager, eTransmit, Share, Traces, Markup Import, Activity Insights | menu items uncovered | Low-medium (team workflows) | 40–70 |
-| F24 | 3D is barely started: BOX, CYLINDER and EXTRUDE (closed polylines and circles, +Z) build solids as groups of 3DFACE objects (#1783), with no true solid or mesh object, booleans, tapered or path extrusions. Left: UCS, 3D views, orbit, solids, surfaces, meshes, sections, visual styles, materials, lights, rendering (150 menu items) | [parity-checklist](parity-checklist.md), `geom/src/mesh.rs`, `cmd/modeling.rs` | Medium (3D users) | 290–440 |
+| F24 | 3D is barely started: BOX, CYLINDER and EXTRUDE (closed polylines and circles, +Z, with holes) and 3DFACE build solids as groups of 3DFACE objects (#1783, #1793), with no true solid or mesh object, booleans, tapered or path extrusions. Left: UCS, 3D views, orbit, solids, surfaces, meshes, sections, visual styles, materials, lights, rendering (150 menu items) | [parity-checklist](parity-checklist.md), `geom/src/mesh.rs`, `cmd/modeling.rs` | Medium (3D users) | 290–440 |
 
 ## UI/UX
 
@@ -150,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | EXTRUDE cuts holes (inner closed polylines and circles, bridged ear clipping for the caps) and 3DFACE draws one face with invisible edges, #1793: F24 narrowed |
 | 2026-10-21 | minor | BOX, CYLINDER and EXTRUDE (Draw ▸ 3D Modeling): solids as one group of 3DFACE objects per solid, one undo step, DXF round trip, #1783: F24 narrowed |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |

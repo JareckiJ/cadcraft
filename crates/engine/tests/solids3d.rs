@@ -291,3 +291,196 @@ fn typed_extrude_ignores_what_it_cannot_extrude() {
     assert!(s.execute("extrude", &json!({ "handles": [c.hex(), l.hex()], "height": 1 })).is_err());
     assert_eq!(count(&s), before);
 }
+
+fn rect(x: f64, y: f64, w: f64, h: f64) -> EntityKind {
+    pline(&[(x, y, 0.0), (x + w, y, 0.0), (x + w, y + h, 0.0), (x, y + h, 0.0)], true, 0.0)
+}
+
+#[test]
+fn extrude_cuts_holes_through_the_profile() {
+    let mut s = Session::new();
+    let outer = s.add_entity(rect(0.0, 0.0, 20.0, 10.0)).unwrap();
+    let a = s.add_entity(rect(2.0, 2.0, 3.0, 3.0)).unwrap();
+    let b = s.add_entity(rect(8.0, 3.0, 4.0, 2.0)).unwrap();
+    let r = s.execute("extrude", &json!({ "handles": [outer.hex()], "holes": [a.hex(), b.hex()], "height": 4 })).unwrap();
+    assert_eq!(r["groups"].as_array().unwrap().len(), 1, "one solid");
+    let want = (200.0 - 9.0 - 8.0) * 4.0;
+    assert!((volume(&faces(&s)) - want).abs() < 1e-9, "{} vs {want}", volume(&faces(&s)));
+    let d = s.doc().unwrap();
+    assert_eq!(d.groups.len(), 1);
+    assert_eq!(d.groups[0].members.len() as u64, r["faces"].as_u64().unwrap());
+    assert!(d.model.iter().any(|e| e.handle == a), "the holes stay unless erased");
+
+    s.execute("extrude", &json!({ "handles": [outer.hex()], "holes": [a.hex(), b.hex()], "height": 1, "erase": true })).unwrap();
+    for h in [outer, a, b] {
+        assert!(!s.doc().unwrap().model.iter().any(|e| e.handle == h), "erase removes the profile and its holes");
+    }
+}
+
+#[test]
+fn each_hole_goes_to_the_profile_that_contains_it() {
+    let mut s = Session::new();
+    let left = s.add_entity(rect(0.0, 0.0, 10.0, 10.0)).unwrap();
+    let right = s.add_entity(rect(20.0, 0.0, 10.0, 10.0)).unwrap();
+    let h1 = s.add_entity(rect(2.0, 2.0, 2.0, 2.0)).unwrap();
+    let h2 = s.add_entity(rect(22.0, 2.0, 2.0, 2.0)).unwrap();
+    let h3 = s.add_entity(rect(26.0, 6.0, 2.0, 2.0)).unwrap();
+    let r = s.execute("extrude", &json!({ "handles": [left.hex(), right.hex()], "holes": [h1.hex(), h2.hex(), h3.hex()], "height": 1 })).unwrap();
+    assert_eq!(r["groups"].as_array().unwrap().len(), 2);
+    assert!((volume(&faces(&s)) - (100.0 - 4.0 + 100.0 - 8.0)).abs() < 1e-9);
+}
+
+#[test]
+fn bad_holes_leave_the_drawing_untouched() {
+    let mut s = Session::new();
+    let outer = s.add_entity(rect(0.0, 0.0, 10.0, 10.0)).unwrap();
+    let nested = s.add_entity(rect(1.0, 1.0, 8.0, 8.0)).unwrap();
+    let outside = s.add_entity(rect(20.0, 20.0, 2.0, 2.0)).unwrap();
+    let touching = s.add_entity(rect(8.0, 4.0, 2.0, 2.0)).unwrap();
+    let crossing = s.add_entity(rect(8.0, 4.0, 4.0, 2.0)).unwrap();
+    let ok1 = s.add_entity(rect(2.0, 2.0, 3.0, 3.0)).unwrap();
+    let ok2 = s.add_entity(rect(4.0, 4.0, 3.0, 3.0)).unwrap();
+    let open = s.add_entity(pline(&[(2.0, 7.0, 0.0), (3.0, 7.0, 0.0), (3.0, 8.0, 0.0)], false, 0.0)).unwrap();
+    let before = count(&s);
+    let cases: Vec<(Value, &str)> = vec![
+        (json!({ "handles": [outer.hex()], "holes": [outside.hex()], "height": 1 }), "not inside any profile"),
+        (json!({ "handles": [outer.hex()], "holes": [touching.hex()], "height": 1 }), "touches or crosses"),
+        (json!({ "handles": [outer.hex()], "holes": [crossing.hex()], "height": 1 }), "touches or crosses"),
+        (json!({ "handles": [outer.hex()], "holes": [ok1.hex(), ok2.hex()], "height": 1 }), "touch or overlap"),
+        (json!({ "handles": [outer.hex()], "holes": [outer.hex()], "height": 1 }), "both a profile and a hole"),
+        (json!({ "handles": [outer.hex(), nested.hex()], "holes": [ok1.hex()], "height": 1 }), "more than one profile"),
+        (json!({ "handles": [outer.hex()], "holes": [open.hex()], "height": 1 }), "open polyline"),
+        (json!({ "handles": [outer.hex()], "holes": "all", "height": 1 }), "array"),
+        (json!({ "handles": [outer.hex()], "holes": ["zz"], "height": 1 }), "not an object handle"),
+    ];
+    for (p, why) in cases {
+        let e = s.execute("extrude", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+        assert_eq!(count(&s), before, "{p}: nothing was added or removed");
+    }
+}
+
+#[test]
+fn a_solid_with_holes_survives_a_dxf_round_trip() {
+    let mut s = Session::new();
+    let outer = s.add_entity(rect(0.0, 0.0, 20.0, 10.0)).unwrap();
+    let hole = s.add_entity(rect(5.0, 3.0, 4.0, 4.0)).unwrap();
+    s.execute("extrude", &json!({ "handles": [outer.hex()], "holes": [hole.hex()], "height": 2 })).unwrap();
+    let before = faces(&s);
+    let text = cadcraft_io::write_dxf(s.doc().unwrap());
+    let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    let (after, hidden_after): (Vec<[[f64; 3]; 4]>, Vec<u8>) = back
+        .model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntityKind::Face3d(f) => Some((f.corners.map(|c| [c.x, c.y, c.z]), f.hidden_edges)),
+            _ => None,
+        })
+        .unzip();
+    assert_eq!(before.len(), after.len());
+    assert!((volume(&before) - volume(&after)).abs() < 1e-9);
+    let hidden_before: Vec<u8> = s
+        .doc()
+        .unwrap()
+        .model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntityKind::Face3d(f) => Some(f.hidden_edges),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hidden_before, hidden_after, "the invisible edges of the caps are saved too");
+    assert!(hidden_after.iter().any(|h| h & 1 != 0 || h & 2 != 0 || h & 8 != 0));
+}
+
+#[test]
+fn typed_extrude_takes_holes_from_a_second_selection() {
+    let mut s = Session::new();
+    let outer = s.add_entity(rect(0.0, 0.0, 10.0, 10.0)).unwrap();
+    let hole = s.add_entity(rect(3.0, 3.0, 4.0, 4.0)).unwrap();
+    s.start("extrude").unwrap();
+    s.input(Input::Pick(vec![outer])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.prompt_text().contains("height of extrusion"), "{}", s.prompt_text());
+    s.input(Input::Keyword("Holes".into())).unwrap();
+    assert!(s.prompt_text().contains("Select"), "{}", s.prompt_text());
+    s.input(Input::Pick(vec![hole, outer])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.prompt_text().contains("height of extrusion"), "{}", s.prompt_text());
+    s.input(Input::Text("2".into())).unwrap();
+    assert!(s.running.is_none());
+    assert!((volume(&faces(&s)) - (100.0 - 16.0) * 2.0).abs() < 1e-9, "{}", volume(&faces(&s)));
+}
+
+fn face_of(s: &Session, r: &Value) -> ([Vec3; 4], u8) {
+    let h = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+    match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::Face3d(f) => (f.corners, f.hidden_edges),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_3d_face_from_three_or_four_points() {
+    let mut s = Session::new();
+    let quad = s.execute("3dface", &json!({ "points": [[0, 0, 0], [4, 0, 1], [4, 3, 2], [0, 3, 3]], "invisible": [2, 4] })).unwrap();
+    let tri = s.execute("3dface", &json!({ "points": [[0, 0], [1, 0], [0, 1]], "invisible": [3] })).unwrap();
+    let (qc, qh) = face_of(&s, &quad);
+    assert_eq!(qc[3], Vec3::new(0.0, 3.0, 3.0), "a face need not be planar");
+    assert_eq!(qh, 2 | 8);
+    let (tc, th) = face_of(&s, &tri);
+    assert_eq!(tc[2], tc[3], "a triangle repeats its third point");
+    assert_eq!(th, 8, "the closing edge");
+    // Four points with the last equal to the third is a triangle too.
+    let t2 = s.execute("3dface", &json!({ "points": [[0, 0], [1, 0], [0, 1], [0, 1]] })).unwrap();
+    assert_eq!(face_of(&s, &t2).1, 0);
+}
+
+#[test]
+fn bad_3d_faces_are_refused() {
+    let mut s = Session::new();
+    let bad = [
+        json!({}),
+        json!({ "points": "x" }),
+        json!({ "points": [[0, 0], [1, 1]] }),
+        json!({ "points": [[0, 0], [1, 1], [2, 2]] }),
+        json!({ "points": [[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]] }),
+        json!({ "points": [[0, 0], [1, 0], [0, 1], [1, 1], [2, 2]] }),
+        json!({ "points": [[0, 0], [1, 0], ["a", 1]] }),
+        json!({ "points": [[0, 0], [1, 0], [0, 1]], "invisible": [5] }),
+        json!({ "points": [[0, 0], [1, 0], [0, 1]], "invisible": ["x"] }),
+        json!({ "points": [[0, 0], [1, 0], [0, 1]], "invisible": 3 }),
+        json!({ "points": [[0, 0], [1e308, 0], [0, 1e308]] }),
+        json!({ "points": [[0, 0], [1, 0], [0, 1]], "invisible": [0] }),
+    ];
+    for p in bad {
+        assert!(s.execute("3dface", &p).is_err(), "{p} must be refused");
+    }
+    assert_eq!(count(&s), 0, "nothing was added");
+}
+
+#[test]
+fn the_typed_3dface_honours_invisible_and_three_sided_faces() {
+    let mut s = Session::new();
+    s.start("3dface").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Keyword("Invisible".into())).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    assert!(s.prompt_text().contains("fourth point"), "{}", s.prompt_text());
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none());
+    let f = match &s.doc().unwrap().model.iter().last().unwrap().kind {
+        EntityKind::Face3d(f) => (f.corners, f.hidden_edges),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(f.0[2], f.0[3]);
+    assert_eq!(f.1, 2, "the edge that starts at the second point is invisible");
+
+    s.start("3dface").unwrap();
+    for p in [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)] {
+        s.input(Input::Point(Vec2::new(p.0, p.1))).unwrap();
+    }
+    assert!(s.running.is_none(), "the fourth point finishes the face");
+    assert_eq!(count(&s), 2);
+}
