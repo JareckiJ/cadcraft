@@ -733,13 +733,15 @@ mod ttf_tests {
         assert!((maxy - 1.0).abs() < 0.1, "cap height ~ text height, got {maxy}");
     }
 
-    /// #1608: `%%c` in a text style whose TrueType font has no U+2300 (Arial, Liberation Sans,
-    /// Times...) is that font's Ø, not its missing-glyph box; so is U+2205, which some files
-    /// store the symbol as. Skips cleanly when no such font is installed.
+    /// #1608: `%%c` in a text style whose TrueType font has neither U+2300 nor U+2205 (Arial,
+    /// Liberation Sans, Times...) is that font's Ø, not its missing-glyph box; so is U+2205,
+    /// which some files store the symbol as. Skips cleanly when no such font is installed.
     #[test]
     fn diameter_sign_in_a_font_without_it_is_its_o_slash() {
         let fonts = ["LiberationSans-Regular", "Arial", "Helvetica", "Verdana", "Times New Roman", "LiberationSerif-Regular"];
-        let Some(face) = fonts.iter().filter_map(|n| crate::ttf::find(n)).find(|f| !f.has_glyph('\u{2300}') && f.has_glyph('Ø')) else {
+        let Some(face) =
+            fonts.iter().filter_map(|n| crate::ttf::find(n)).find(|f| !f.has_glyph('\u{2300}') && !f.has_glyph('\u{2205}') && f.has_glyph('Ø'))
+        else {
             return;
         };
         let o_slash = crate::ttf::shape(&face, "Ø50", 1.0, 1.0, 0.0).unwrap();
