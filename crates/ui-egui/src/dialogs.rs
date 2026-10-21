@@ -379,7 +379,10 @@ fn commands(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 /// Start INSERT with `name` already given at its block name prompt, so the next prompt asks for
 /// the insertion point.
 pub(crate) fn insert_block(app: &mut CadApp, name: &str) {
-    app.start("insert");
+    // The engine's INSERT itself (the UI's INSERT opens the Block Manager).
+    if let Err(e) = app.session.start("insert") {
+        app.session.echo(e.to_string());
+    }
     if app.session.running.as_ref().is_none_or(|r| r.id != "insert") {
         return;
     }

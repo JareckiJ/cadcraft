@@ -415,8 +415,9 @@ struct SheetPage {
 /// Plot one space.
 fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String)]) -> Result<SheetPage> {
     let page = page_for(d, space, o)?;
-    let unit_mm = paper::paper_unit_mm(d);
-    let sheet = Sheet::from_page(&page, unit_mm);
+    // The layout's own paper units (millimetres in an inch drawing, say) size the page.
+    let sheet = Sheet::from_page(&page, paper::paper_unit_mm(d));
+    let unit_mm = sheet.unit_mm;
     let lineweights = o.lineweights.unwrap_or(if space.is_paper() { page.lineweights } else { true });
     let plot_style_table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(std::sync::Arc::new);
     let ropts = cadcraft_render::Options {

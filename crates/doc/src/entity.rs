@@ -728,6 +728,62 @@ pub struct MLeader {
 }
 
 impl MLeader {
+    /// The grip index of the text (after the leader points and the landing), when it has text.
+    pub fn text_grip(&self) -> Option<usize> {
+        self.text.as_ref().map(|_| self.leaders.iter().map(Vec::len).sum::<usize>() + 1)
+    }
+
+    /// The gap between the end of the landing and the text, as placed now (never negative).
+    fn text_gap(&self) -> f64 {
+        self.text.as_ref().map_or(0.0, |t| ((t.insert.x - self.landing.x).abs() - self.dogleg).max(0.0))
+    }
+
+    /// The side of the landing the text is on: 1 to the right, -1 to the left.
+    fn text_side(&self) -> f64 {
+        match &self.text {
+            Some(t) if t.insert.x < self.landing.x => -1.0,
+            _ => 1.0,
+        }
+    }
+
+    /// Move with Leader: the text goes to `to` and the landing follows it (next to the text,
+    /// at its height), so the leader runs from its last point to the new landing.
+    pub fn move_with_leader(&mut self, to: Vec2) {
+        let gap = self.text_gap();
+        let last = self.leaders.iter().filter_map(|l| l.last()).map(|v| v.xy()).next().unwrap_or(self.landing.xy());
+        let side = if to.x >= last.x { 1.0 } else { -1.0 };
+        let old = self.landing.xy();
+        self.landing.x = to.x - side * (self.dogleg + gap);
+        self.landing.y = to.y;
+        if let Some(t) = &mut self.text {
+            t.insert.x = to.x;
+            t.insert.y = to.y;
+            // Attached at its left edge on the right of the landing, its right edge on the left.
+            let row = (t.attach.clamp(1, 9) - 1) / 3;
+            t.attach = row * 3 + if side > 0.0 { 1 } else { 3 };
+        }
+        if let Some(b) = &mut self.block {
+            let d = self.landing.xy() - old;
+            b.insert.x += d.x;
+            b.insert.y += d.y;
+        }
+    }
+
+    /// Reset Text Position: the text back beside the landing, on the side it is on.
+    pub fn reset_text(&mut self) {
+        let side = self.text_side();
+        let (lx, ly) = (self.landing.x, self.landing.y);
+        let dogleg = self.dogleg;
+        if let Some(t) = &mut self.text {
+            // The usual landing gap: half the text height.
+            let gap = t.height.abs() * 0.5;
+            t.insert.x = lx + side * (dogleg + gap);
+            t.insert.y = ly;
+            let row = (t.attach.clamp(1, 9) - 1) / 3;
+            t.attach = row * 3 + if side > 0.0 { 1 } else { 3 };
+        }
+    }
+
     /// It draws no leader line (leader type None).
     pub fn leaderless(&self) -> bool {
         self.no_leader || self.leaders.is_empty()
@@ -1458,7 +1514,14 @@ impl EntityKind {
             EntityKind::Dimension(d) => vec![d.p13.xy(), d.p14.xy(), d.defpt.xy(), d.text_mid.xy()],
             EntityKind::MLine(m) => m.points(),
             EntityKind::Leader(l) => l.vertices.iter().map(|v| v.xy()).collect(),
-            EntityKind::MLeader(m) => m.leaders.iter().flat_map(|l| l.iter().map(|v| v.xy())).chain(std::iter::once(m.landing.xy())).collect(),
+            // Leader points, the landing, then the text.
+            EntityKind::MLeader(m) => m
+                .leaders
+                .iter()
+                .flat_map(|l| l.iter().map(|v| v.xy()))
+                .chain(std::iter::once(m.landing.xy()))
+                .chain(m.text.as_ref().map(|t| t.insert.xy()))
+                .collect(),
             EntityKind::Hatch(h) => {
                 let b = Bounds2::from_points(h.loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)));
                 vec![b.center()]

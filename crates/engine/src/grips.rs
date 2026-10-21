@@ -288,7 +288,12 @@ pub fn stretch_grip(kind: &EntityKind, index: usize, to: Vec2) -> Option<EntityK
                     idx += 1;
                 }
             }
-            if !done {
+            if !done && m.text_grip() == Some(index) {
+                // The text grip moves the text alone (Move with Leader takes the landing along).
+                if let Some(t) = &mut m.text {
+                    set_xy(&mut t.insert, to);
+                }
+            } else if !done {
                 // The landing grip moves the landing and its content.
                 let ld = m.landing.xy() + delta;
                 set_xy(&mut m.landing, ld);
@@ -468,6 +473,7 @@ pub enum GripAction {
     /// Dimension text: move the text alone (DIMTMOVE 2 for this dimension).
     MoveTextOnly,
     /// Dimension text: move the text with a leader to the dimension line (DIMTMOVE 1).
+    /// Multileader text: the landing follows the text.
     MoveWithLeader,
     /// Dimension text: above the dimension line (DIMTAD 1), in its default place.
     AboveDimLine,
@@ -569,6 +575,10 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
                 GripAction::ResetTextPosition,
             ]);
             v
+        }
+        // The text grip of a multileader.
+        EntityKind::MLeader(m) if m.text_grip() == Some(index) => {
+            vec![GripAction::MoveWithLeader, GripAction::MoveTextOnly, GripAction::ResetTextPosition]
         }
         _ => Vec::new(),
     }
@@ -677,6 +687,14 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             d.user_text_pos = false;
             d.block = None;
         }
+        (EntityKind::MLeader(m), GripAction::MoveWithLeader) => m.move_with_leader(to?),
+        (EntityKind::MLeader(m), GripAction::MoveTextOnly) => {
+            let to = to?;
+            if let Some(t) = &mut m.text {
+                set_xy(&mut t.insert, to);
+            }
+        }
+        (EntityKind::MLeader(m), GripAction::ResetTextPosition) => m.reset_text(),
         (EntityKind::Arc(a), GripAction::Lengthen) => {
             let c = a.center.xy();
             let ang = match (value, to) {

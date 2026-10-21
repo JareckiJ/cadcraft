@@ -1007,6 +1007,29 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             });
         });
     });
+    // Text style: for text, multiline text and multileaders with text, one or many at once.
+    let style_of = |e: &cadcraft_doc::Entity| -> Option<String> {
+        match &e.kind {
+            EntityKind::Text(t) => Some(t.style.clone()),
+            EntityKind::MText(t) => Some(t.style.clone()),
+            EntityKind::AttDef(a) => Some(a.text.style.clone()),
+            EntityKind::MLeader(m) => m.text.as_ref().map(|t| t.style.clone()),
+            _ => None,
+        }
+    };
+    let text_styles: Option<Vec<String>> = sel.iter().map(|h| d.entity(*h).and_then(|e| style_of(e))).collect();
+    // One multileader shows it in its own Text group, below the leader properties.
+    let one_mleader = sel.len() == 1 && matches!(e.kind, EntityKind::MLeader(_));
+    if let Some(styles) = text_styles.filter(|v| !v.is_empty() && !one_mleader) {
+        let cur = if styles.iter().all(|s| s.eq_ignore_ascii_case(&styles[0])) { styles[0].clone() } else { "*VARIES*".to_string() };
+        group(ui, "Text");
+        prop_row(ui, "Style", |ui| {
+            let names = d.text_styles.iter().map(|s| s.name.clone());
+            if let Some(n) = pick_menu(ui, if cur == "*VARIES*" { crate::i18n::t(&cur) } else { &cur }, names) {
+                set = Some(json!({ "handles": ids, "textStyle": n }));
+            }
+        });
+    }
     if sel.len() == 1 {
         group(ui, "Geometry");
         let real = |v: f64| format!("{v:.4}");
@@ -1193,6 +1216,11 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 num(ui, "Landing distance", "dogleg", real(ml.dogleg), &mut set, &mut bad, &ids);
                 if let Some(t) = &ml.text {
                     group(ui, "Text");
+                    prop_row(ui, "Style", |ui| {
+                        if let Some(n) = pick_menu(ui, &t.style, d.text_styles.iter().map(|s| s.name.clone())) {
+                            set = Some(json!({ "handles": ids, "textStyle": n }));
+                        }
+                    });
                     num(ui, "Text height", "textHeight", real(t.height), &mut set, &mut bad, &ids);
                 }
             }

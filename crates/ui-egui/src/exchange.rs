@@ -159,7 +159,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 if crate::icons::button(ui, crate::icons::Icon::ZoomOut, 22.0, crate::tl!("Zoom Out"), false).clicked() {
                     zoom_by = Some(0.8);
                 }
-                if crate::icons::button(ui, crate::icons::Icon::ZoomExtents, 22.0, crate::tl!("Zoom to Fit"), false).clicked() {
+                if crate::icons::button(ui, crate::icons::Icon::ZoomFit, 22.0, crate::tl!("Zoom to Fit"), false).clicked() {
                     view.zoom = 1.0;
                     view.offset = Some(egui::Vec2::ZERO);
                 }

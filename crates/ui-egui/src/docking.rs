@@ -16,6 +16,8 @@ pub enum Panel {
     Properties,
     #[serde(rename = "externalReferences")]
     ExternalRefs,
+    /// The Block Manager as a panel.
+    Blocks,
 }
 
 impl Panel {
@@ -28,6 +30,7 @@ impl Panel {
             Self::Layers => "layers",
             Self::Properties => "properties",
             Self::ExternalRefs => "externalReferences",
+            Self::Blocks => "blocks",
         }
     }
     pub fn label(self) -> &'static str {
@@ -38,6 +41,7 @@ impl Panel {
             Self::Layers => "Layers",
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
+            Self::Blocks => "Blocks",
         }
     }
     fn default_side(self) -> Zone {
@@ -48,10 +52,11 @@ impl Panel {
             Self::Layers => Zone::Right,
             Self::Properties => Zone::Right,
             Self::ExternalRefs => Zone::Right,
+            Self::Blocks => Zone::Right,
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
-    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc];
+    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Blocks];
     fn parse(id: &str) -> Result<Self, String> {
         Self::ALL.iter().chain(Self::ON_DEMAND).copied().find(|panel| panel.id() == id).ok_or_else(|| format!("Unknown panel: {id}"))
     }
@@ -353,6 +358,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             }
             Panel::ToolSets => crate::palettes::toolsets(app, ui),
             Panel::QuickCalc => crate::palettes::quickcalc::show(app, ui),
+            Panel::Blocks => crate::blockmgr::panel(app, ui),
             Panel::Layers => {
                 egui::ScrollArea::vertical()
                     .id_salt("dock-layers")
@@ -402,6 +408,7 @@ fn panel_limits(panel: &Panel) -> PanelLimits {
     let (min, max_width) = match panel {
         Panel::Canvas => (egui::vec2(300.0, 180.0), 1_000_000.0),
         Panel::QuickCalc => (egui::vec2(240.0, 160.0), 600.0),
+        Panel::Blocks => (egui::vec2(240.0, 200.0), 600.0),
         Panel::ToolSets => (egui::vec2(220.0, 150.0), 480.0),
         Panel::Layers | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
     };

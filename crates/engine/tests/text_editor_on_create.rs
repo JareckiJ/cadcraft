@@ -80,3 +80,27 @@ fn leader_type_none_hides_the_leader_and_straight_brings_it_back() {
     s.execute("properties.set", &serde_json::json!({ "handles": [h], "leaderType": "straight" })).unwrap();
     assert!(!get(&s).leaderless());
 }
+
+#[test]
+fn multileader_text_grip_moves_with_its_leader_and_resets() {
+    use cadcraft_engine::grips::{GripAction, grip_action, grip_actions};
+    let mut s = Session::new();
+    s.execute("mleader", &serde_json::json!({ "points": [[0, 0], [5, 5]], "text": "A" })).unwrap();
+    let k = s.doc().unwrap().model.iter().next().unwrap().kind.clone();
+    let EntityKind::MLeader(m) = &k else { panic!("not a multileader") };
+    let i = m.text_grip().expect("a text grip");
+    assert_eq!(k.grips().len(), i + 1);
+    assert!(grip_actions(&k, i).contains(&GripAction::MoveWithLeader));
+    let moved = grip_action(&k, i, GripAction::MoveWithLeader, Some(Vec2::new(20.0, 12.0)), None).unwrap();
+    let EntityKind::MLeader(m2) = &moved else { panic!() };
+    let t = m2.text.as_ref().unwrap();
+    assert!((t.insert.x - 20.0).abs() < 1e-9 && (t.insert.y - 12.0).abs() < 1e-9);
+    assert!((m2.landing.y - 12.0).abs() < 1e-9 && m2.landing.x < 20.0, "the landing follows the text");
+    assert_eq!(m2.leaders, m.leaders, "the leader points stay");
+    // Text moved alone, then put back beside the landing.
+    let alone = grip_action(&k, i, GripAction::MoveTextOnly, Some(Vec2::new(30.0, -4.0)), None).unwrap();
+    let back = grip_action(&alone, i, GripAction::ResetTextPosition, None, None).unwrap();
+    let EntityKind::MLeader(m3) = &back else { panic!() };
+    let t3 = m3.text.as_ref().unwrap();
+    assert!((t3.insert.y - m3.landing.y).abs() < 1e-9 && t3.insert.x > m3.landing.x);
+}

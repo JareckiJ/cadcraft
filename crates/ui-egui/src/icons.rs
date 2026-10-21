@@ -150,6 +150,9 @@ pub enum Icon {
     MoveUp,
     MoveDown,
     MoveBottom,
+    ZoomFit,
+    TextStyle,
+    DimStyle,
 }
 
 struct Pen<'a> {
@@ -264,13 +267,27 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                 pen.tri([(12.6, 19.4), (15.6, 22.4), (10.8, 24.0)], a);
             }
         }
-        Undo => {
-            pen.arc(12.0, 13.0, 7.0, 150.0, -40.0, b);
-            pen.arrow_tip(5.0, 9.0, -1.0, 2.5, b);
-        }
-        Redo => {
-            pen.arc(12.0, 13.0, 7.0, 30.0, 220.0, b);
-            pen.arrow_tip(19.0, 9.0, 1.0, 2.5, b);
+        Undo | Redo => {
+            // A thick arc with a large arrowhead at its upper end: pointing left for Undo, right
+            // for Redo (the same picture mirrored).
+            let m = |x: f32| if icon == Undo { x } else { 24.0 - x };
+            let (cx, cy, r) = (13.0_f32, 14.0_f32, 6.5_f32);
+            let a0 = 155.0_f32;
+            let pts: Vec<egui::Pos2> = (0..=24)
+                .map(|i| {
+                    let a = (a0 - (a0 + 60.0) * i as f32 / 24.0).to_radians();
+                    pen.at(m(cx + r * a.cos()), cy - r * a.sin())
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, Stroke::new(pen.w * 1.8, b)));
+            let a = a0.to_radians();
+            let (sx, sy) = (cx + r * a.cos(), cy - r * a.sin());
+            // Opposite to the arc's way round: down and out at its start.
+            let (dx, dy) = (-a.sin(), -a.cos());
+            let (dx, dy) = (-dx, -dy);
+            let (tx, ty) = (sx + dx * 3.6, sy + dy * 3.6);
+            let ddx = if icon == Undo { dx } else { -dx };
+            pen.big_arrow(m(tx), ty, ddx, dy, 6.5, 4.3, b);
         }
         Plot | Preview => {
             pen.rect(4.0, 9.0, 16.0, 8.0, b);
@@ -815,15 +832,20 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             pen.l(17.0, 13.0, 17.0, 21.0);
         }
         Gear => {
-            pen.c(12.0, 12.0, 4.0, b);
+            // A gear wheel: eight square teeth on a rim, and the hole in the middle.
+            let mut outline = Vec::new();
             for i in 0..8 {
-                let ang = (i as f32 * 45.0).to_radians();
-                p.line_segment(
-                    [pen.at(12.0 + 6.0 * ang.cos(), 12.0 + 6.0 * ang.sin()), pen.at(12.0 + 9.0 * ang.cos(), 12.0 + 9.0 * ang.sin())],
-                    Stroke::new(2.2 * pen.sc(), b),
-                );
+                let c = i as f32 * 45.0;
+                for (da, rr) in [(-17.0, 7.0), (-11.0, 9.6), (11.0, 9.6), (17.0, 7.0)] {
+                    let a = (c + da).to_radians();
+                    outline.push(pen.at(12.0 + rr * a.cos(), 12.0 + rr * a.sin()));
+                }
             }
-            pen.c(12.0, 12.0, 6.5, b);
+            if let Some(f) = outline.first().copied() {
+                outline.push(f);
+            }
+            p.add(egui::Shape::line(outline, Stroke::new(pen.w * 1.2, b)));
+            pen.c(12.0, 12.0, 3.2, b);
         }
         Annotation => {
             pen.poly(&[(12.0, 3.0), (21.0, 20.0), (3.0, 20.0)], true, b);
@@ -867,6 +889,39 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             let dir = if icon == MoveUp { -1.0 } else { 1.0 };
             pen.l(12.0, 12.0 - 8.0 * dir, 12.0, 12.0 + 2.0 * dir);
             pen.big_arrow(12.0, 12.0 + 8.0 * dir, 0.0, dir, 7.0, 5.0, b);
+        }
+        ZoomFit => {
+            // Four right-angle corners framing a rectangle.
+            let s = Stroke::new(pen.w * 1.6, b);
+            for (x, y, dx, dy) in [(3.0, 5.0, 1.0, 1.0), (21.0, 5.0, -1.0, 1.0), (3.0, 19.0, 1.0, -1.0), (21.0, 19.0, -1.0, -1.0)] {
+                p.line(vec![pen.at(x + dx * 5.0, y), pen.at(x, y), pen.at(x, y + dy * 4.5)], s);
+            }
+            pen.rect(8.0, 9.0, 8.0, 6.0, a);
+        }
+        TextStyle | DimStyle => {
+            if icon == TextStyle {
+                pen.text(9.5, 10.5, "A", 15.0, b);
+            } else {
+                pen.l(2.0, 4.0, 2.0, 12.0);
+                pen.l(15.0, 4.0, 15.0, 12.0);
+                pen.l(2.0, 8.0, 15.0, 8.0);
+                pen.arrow_tip(2.0, 8.0, -1.0, 0.0, b);
+                pen.arrow_tip(15.0, 8.0, 1.0, 0.0, b);
+            }
+            // A small gear: the style's settings.
+            let mut outline = Vec::new();
+            for i in 0..6 {
+                let c = i as f32 * 60.0;
+                for (da, rr) in [(-20.0, 3.6), (-12.0, 5.0), (12.0, 5.0), (20.0, 3.6)] {
+                    let ang = (c + da).to_radians();
+                    outline.push(pen.at(17.5 + rr * ang.cos(), 17.5 + rr * ang.sin()));
+                }
+            }
+            if let Some(f) = outline.first().copied() {
+                outline.push(f);
+            }
+            p.add(egui::Shape::line(outline, Stroke::new(pen.w, a)));
+            pen.c(17.5, 17.5, 1.5, a);
         }
         Close => {
             pen.l(6.0, 6.0, 18.0, 18.0);

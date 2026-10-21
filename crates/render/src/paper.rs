@@ -81,6 +81,23 @@ pub fn paper_unit_mm(d: &Drawing) -> f64 {
     if d.header.i64("MEASUREMENT", 0) == 1 { 1.0 } else { 25.4 }
 }
 
+/// Millimetres per paper unit of `space`: a layout's own paper units when its page setup names
+/// them (a drawing in inches may have layouts set up in millimetres), else the drawing's.
+pub fn space_unit_mm(d: &Drawing, space: &cadcraft_doc::Space) -> f64 {
+    match space.layout().and_then(|n| d.layout(n)) {
+        Some(l) => Sheet::from_page(&l.page, paper_unit_mm(d)).unit_mm,
+        None => paper_unit_mm(d),
+    }
+}
+
+/// Millimetres per paper unit of the layout holding object `h` (the drawing's when none does).
+pub fn unit_mm_of(d: &Drawing, h: cadcraft_doc::Handle) -> f64 {
+    match d.layouts.iter().find(|l| l.entities.get(h).is_some()) {
+        Some(l) => Sheet::from_page(&l.page, paper_unit_mm(d)).unit_mm,
+        None => paper_unit_mm(d),
+    }
+}
+
 /// The paper sheet of a layout, in paper-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sheet {

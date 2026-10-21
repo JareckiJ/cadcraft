@@ -362,6 +362,8 @@ pub struct Names {
     pub text_styles: Vec<String>,
     /// User arrowhead blocks the drawing's dimension styles use.
     pub arrow_blocks: Vec<String>,
+    /// Their shapes for the list's icons: the tip at the origin, pointing along -x, unit size.
+    pub arrow_shapes: Vec<(String, cadcraft_render::ArrowGeom)>,
 }
 
 impl Names {
@@ -374,10 +376,15 @@ impl Names {
                 arrow_blocks.push(n.trim().to_string());
             }
         }
+        let arrow_shapes = arrow_blocks
+            .iter()
+            .map(|n| (n.clone(), cadcraft_render::named_arrow(d, n, cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(-1.0, 0.0), 1.0)))
+            .collect();
         Names {
             linetypes: d.linetypes.iter().map(|l| l.name.clone()).collect(),
             text_styles: d.text_styles.iter().map(|s| s.name.clone()).collect(),
             arrow_blocks,
+            arrow_shapes,
         }
     }
 }
@@ -442,7 +449,67 @@ fn shown_arrow(names: &Names, cur: &str) -> String {
 /// An arrowhead drop-down (built-in arrowheads and the drawing's user arrowhead blocks) showing
 /// `cur`; the name picked.
 pub fn arrow_combo(ui: &mut egui::Ui, id: egui::Id, names: &Names, cur: &str) -> Option<String> {
-    combo(ui, id, &shown_arrow(names, cur), &arrow_items(names, cur))
+    let current = shown_arrow(names, cur);
+    let items = arrow_items(names, cur);
+    let shown = items.iter().find(|(v, _)| *v == current).map_or_else(String::new, |(_, l)| l.clone());
+    let mut picked = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (r, _) = ui.allocate_exact_size(vec2(34.0, 18.0), egui::Sense::hover());
+        paint_arrow(ui.painter(), r, names, &current);
+        egui::ComboBox::from_id_salt(id)
+            .width((ui.available_width() - 14.0).clamp(80.0, 170.0))
+            .selected_text(crate::i18n::widget(ui, &shown, egui::TextStyle::Button))
+            .height(360.0)
+            .show_ui(ui, |ui| {
+                for (v, l) in &items {
+                    ui.horizontal(|ui| {
+                        let (r, _) = ui.allocate_exact_size(vec2(34.0, 18.0), egui::Sense::hover());
+                        paint_arrow(ui.painter(), r, names, v);
+                        if ui.selectable_label(*v == current, crate::i18n::widget(ui, l, egui::TextStyle::Button)).clicked() && *v != current {
+                            picked = Some(v.clone());
+                        }
+                    });
+                }
+            });
+    });
+    picked
+}
+
+/// The arrowhead `name` as a small picture: a short line ending in the arrowhead at the left.
+pub fn paint_arrow(p: &egui::Painter, r: egui::Rect, names: &Names, name: &str) {
+    use cadcraft_geom::Vec2;
+    thread_local! {
+        static BLANK: cadcraft_doc::Drawing = cadcraft_doc::Drawing::default();
+    }
+    let g = match names.arrow_shapes.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())) {
+        Some((_, g)) => g.clone(),
+        None => BLANK.with(|d| cadcraft_render::named_arrow(d, name, Vec2::ZERO, Vec2::new(-1.0, 0.0), 1.0)),
+    };
+    let col = crate::theme::Tokens::get().text;
+    // The arrowhead is one unit long: fit about 1.9 units (arrow and line) across the box.
+    let k = f64::from(r.width()) / 2.0;
+    let left = f64::from(r.left()) + 0.1 * k;
+    let at = |v: &Vec2| egui::pos2((left + v.x * k) as f32, (f64::from(r.center().y) - v.y * k) as f32);
+    let clip = p.with_clip_rect(r.expand(1.0));
+    let stroke = egui::Stroke::new(1.2, col);
+    clip.line_segment([at(&Vec2::ZERO), at(&Vec2::new(1.85, 0.0))], stroke);
+    for l in &g.lines {
+        if l.len() >= 2 {
+            clip.add(egui::Shape::line(l.iter().map(at).collect(), stroke));
+        }
+    }
+    let mut mesh = egui::Mesh::default();
+    for t in g.tris.chunks_exact(3) {
+        let base = u32::try_from(mesh.vertices.len()).unwrap_or(u32::MAX);
+        for v in t {
+            mesh.colored_vertex(at(v), col);
+        }
+        mesh.add_triangle(base, base + 1, base + 2);
+    }
+    if !mesh.is_empty() {
+        clip.add(egui::Shape::mesh(mesh));
+    }
 }
 
 /// The decimal places as AutoCAD shows them: `0`, `0.0`, `0.00`…

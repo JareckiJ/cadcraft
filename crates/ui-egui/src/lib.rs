@@ -106,6 +106,8 @@ pub struct UiState {
     pub collapsed_groups: Vec<String>,
     /// The folder the Hatch and Gradient dialog's Custom Patterns tab lists `.pat` files from.
     pub pattern_folder: String,
+    /// The Block Manager opens as a window (else as a panel pinned on the right).
+    pub blocks_window: bool,
     /// Tools the user took out of the Tool Sets palette (command ids); each category's gear
     /// menu puts them back.
     pub hidden_tools: Vec<String>,
@@ -194,6 +196,7 @@ impl Default for UiState {
             ribbon_tab: "Draw".into(),
             collapsed_groups: Vec::new(),
             pattern_folder: String::new(),
+            blocks_window: false,
             hidden_tools: Vec::new(),
             properties_all: true,
             in_window_menu: !cfg!(target_os = "macos"),

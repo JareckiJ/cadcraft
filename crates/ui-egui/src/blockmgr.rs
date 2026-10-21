@@ -138,12 +138,22 @@ enum Act {
     Rename(String, String),
     Delete(String),
     Write(String),
+    /// Pin the window as a panel on the right; float the panel as a window.
+    ToPanel,
+    ToWindow,
 }
 
-/// Format ▸ Blocks / the Blocks button: the Block Manager window.
-pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
-    let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
-    let Ok(d) = app.session.doc() else { return };
+/// The data the Block Manager shows this frame.
+struct View {
+    all: Vec<String>,
+    selected: Option<String>,
+    info: Option<(usize, usize, cadcraft_geom::Vec3, bool, String, Option<String>)>,
+    pv: Option<Preview>,
+    can_write: bool,
+}
+
+fn view(app: &CadApp, ctx: &egui::Context, st: &mut State) -> Option<View> {
+    let d = app.session.doc().ok()?;
     let all = names(d);
     if st.selected.as_ref().is_some_and(|s| !all.iter().any(|n| n == s)) {
         st.selected = None;
@@ -158,167 +168,180 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         Some((b.entities.len(), reference_count(d, n), b.base, b.annotative, b.description.clone(), b.xref_path.clone()))
     });
     let pv = selected.as_deref().and_then(|n| preview(app, ctx, n));
-    let can_write = app.services.pick_save.is_some();
-    let mut act = None;
-    egui::Window::new(crate::tl!("Block Manager"))
-        .id(egui::Id::new("Blocks"))
-        .open(open)
-        .default_size(vec2(640.0, 440.0))
-        .min_size(vec2(480.0, 320.0))
-        .resizable(true)
-        .show(ctx, |ui| {
-            let t = Tokens::get();
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text(crate::tl!("Search blocks")).desired_width(200.0));
-                ui.label(egui::RichText::new(format!("{} {}", all.len(), crate::tl!("blocks"))).color(t.text_dim));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::tl!("Create...")).on_hover_text(crate::tl!("Make a block from objects (BLOCK)")).clicked() {
-                        act = Some(Act::Create);
+    Some(View { all, selected, info, pv, can_write: app.services.pick_save.is_some() })
+}
+
+/// The manager's contents: in a window the list sits left of the preview, in a panel above it.
+fn body(ui: &mut egui::Ui, v: &View, st: &mut State, as_panel: bool, act: &mut Option<Act>) {
+    let View { all, selected, info, pv, can_write } = v;
+    let can_write = *can_write;
+    let t = Tokens::get();
+    ui.horizontal(|ui| {
+        let w = if as_panel { (ui.available_width() - 70.0).max(80.0) } else { 200.0 };
+        ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text(crate::tl!("Search blocks")).desired_width(w));
+        if !as_panel {
+            ui.label(egui::RichText::new(format!("{} {}", all.len(), crate::tl!("blocks"))).color(t.text_dim));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Window ⇄ panel.
+            let (icon, tip) = if as_panel {
+                (crate::icons::Icon::Workspace, crate::tl!("Float as a window"))
+            } else {
+                (crate::icons::Icon::Properties, crate::tl!("Pin as a panel on the right"))
+            };
+            if crate::icons::button(ui, icon, 20.0, tip, false).clicked() {
+                *act = Some(if as_panel { Act::ToWindow } else { Act::ToPanel });
+            }
+            if !as_panel && ui.button(crate::tl!("Create...")).on_hover_text(crate::tl!("Make a block from objects (BLOCK)")).clicked() {
+                *act = Some(Act::Create);
+            }
+        });
+    });
+    ui.add_space(4.0);
+    let avail = ui.available_size();
+    let (list_w, height) =
+        if as_panel { (avail.x, (avail.y * 0.38).clamp(120.0, 320.0)) } else { (230.0_f32.min(avail.x * 0.45), (avail.y - 4.0).max(200.0)) };
+    let list = |ui: &mut egui::Ui, st: &mut State, act: &mut Option<Act>| {
+        ui.allocate_ui_with_layout(vec2(list_w, height), egui::Layout::top_down(egui::Align::LEFT), |ui| {
+            egui::Frame::NONE.stroke(Stroke::new(1.0, t.border)).inner_margin(2.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("cc_block_list").auto_shrink([false, false]).max_height(height - 6.0).show(ui, |ui| {
+                    ui.set_width(list_w - 8.0);
+                    let filter = st.filter.trim().to_lowercase();
+                    let mut shown = 0;
+                    for n in all.iter().filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter)) {
+                        shown += 1;
+                        let on = selected.as_deref() == Some(n.as_str());
+                        let r = ui.selectable_label(on, n);
+                        if r.clicked() {
+                            st.selected = Some(n.clone());
+                            st.rename = None;
+                            st.note = None;
+                        }
+                        if r.double_clicked() {
+                            *act = Some(Act::Insert(n.clone()));
+                        }
+                        r.on_hover_text(crate::tl!("Double-click to insert"));
                     }
-                });
-            });
-            ui.add_space(4.0);
-            let avail = ui.available_size();
-            let list_w = 230.0_f32.min(avail.x * 0.45);
-            let height = (avail.y - 4.0).max(200.0);
-            ui.horizontal_top(|ui| {
-                // The list of blocks.
-                ui.allocate_ui_with_layout(vec2(list_w, height), egui::Layout::top_down(egui::Align::LEFT), |ui| {
-                    egui::Frame::NONE.stroke(Stroke::new(1.0, t.border)).inner_margin(2.0).show(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt("cc_block_list").auto_shrink([false, false]).max_height(height - 6.0).show(ui, |ui| {
-                            ui.set_width(list_w - 8.0);
-                            let filter = st.filter.trim().to_lowercase();
-                            let mut shown = 0;
-                            for n in all.iter().filter(|n| filter.is_empty() || n.to_lowercase().contains(&filter)) {
-                                shown += 1;
-                                let on = selected.as_deref() == Some(n.as_str());
-                                let r = ui.selectable_label(on, n);
-                                if r.clicked() {
-                                    st.selected = Some(n.clone());
-                                    st.rename = None;
-                                    st.note = None;
-                                }
-                                if r.double_clicked() {
-                                    act = Some(Act::Insert(n.clone()));
-                                }
-                                r.on_hover_text(crate::tl!("Double-click to insert"));
-                            }
-                            if shown == 0 {
-                                let msg = if all.is_empty() {
-                                    crate::tl!("No blocks defined in this drawing.")
-                                } else {
-                                    crate::tl!("No blocks match the search.")
-                                };
-                                ui.label(egui::RichText::new(msg).color(t.text_dim));
-                            }
-                        });
-                    });
-                });
-                // Preview, details and actions of the selected block.
-                ui.vertical(|ui| {
-                    let side = ui.available_width().min(height - 150.0).clamp(140.0, 320.0);
-                    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), Sense::hover());
-                    match &pv {
-                        Some(p) => paint_list(ui.painter(), r, &p.list, &p.bounds),
-                        None => {
-                            ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-                            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, crate::tl!("Preview"), crate::theme::small(), t.text_faint);
-                        }
-                    }
-                    if pv.as_ref().is_some_and(|p| p.bounds.is_empty()) {
-                        ui.painter().text(
-                            r.center(),
-                            egui::Align2::CENTER_CENTER,
-                            crate::tl!("The block is empty"),
-                            crate::theme::small(),
-                            t.text_faint,
-                        );
-                    }
-                    ui.add_space(4.0);
-                    let Some(name) = selected.clone() else { return };
-                    if let Some(mut new) = st.rename.take() {
-                        let mut keep = true;
-                        ui.horizontal(|ui| {
-                            ui.add(egui::TextEdit::singleline(&mut new).desired_width(160.0));
-                            if ui.button(crate::tl!("OK")).clicked() && !new.trim().is_empty() {
-                                act = Some(Act::Rename(name.clone(), new.trim().to_string()));
-                            }
-                            if ui.button(crate::tl!("Cancel")).clicked() {
-                                keep = false;
-                            }
-                        });
-                        if keep {
-                            st.rename = Some(new);
-                        }
-                    } else {
-                        ui.label(egui::RichText::new(&name).strong());
-                    }
-                    if let Some((objects, refs, base, annotative, description, xref)) = &info {
-                        egui::Grid::new("cc_block_info").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
-                            ui.label(egui::RichText::new(crate::tl!("Objects")).color(t.text_dim));
-                            ui.label(objects.to_string());
-                            ui.end_row();
-                            ui.label(egui::RichText::new(crate::tl!("References")).color(t.text_dim));
-                            ui.label(refs.to_string());
-                            ui.end_row();
-                            ui.label(egui::RichText::new(crate::tl!("Base point")).color(t.text_dim));
-                            ui.label(format!("{:.4}, {:.4}", base.x, base.y));
-                            ui.end_row();
-                            ui.label(egui::RichText::new(crate::tl!("Annotative")).color(t.text_dim));
-                            ui.label(if *annotative { crate::tl!("Yes") } else { crate::tl!("No") });
-                            ui.end_row();
-                            if let Some(path) = xref {
-                                ui.label(egui::RichText::new(crate::tl!("External reference")).color(t.text_dim));
-                                ui.label(path);
-                                ui.end_row();
-                            }
-                            if !description.is_empty() {
-                                ui.label(egui::RichText::new(crate::tl!("Description")).color(t.text_dim));
-                                ui.label(description);
-                                ui.end_row();
-                            }
-                        });
-                    }
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button(crate::tl!("Insert")).clicked() {
-                            act = Some(Act::Insert(name.clone()));
-                        }
-                        if ui.button(crate::tl!("Edit Block")).on_hover_text(crate::tl!("Open in the Block Editor")).clicked() {
-                            act = Some(Act::Edit(name.clone()));
-                        }
-                        if ui.button(crate::tl!("Rename...")).clicked() {
-                            st.rename = Some(name.clone());
-                        }
-                        if ui.button(crate::tl!("Delete")).on_hover_text(crate::tl!("Delete a block that no object uses")).clicked() {
-                            act = Some(Act::Delete(name.clone()));
-                        }
-                        if can_write
-                            && ui.button(crate::tl!("Save to File...")).on_hover_text(crate::tl!("Write the block as a drawing (WBLOCK)")).clicked()
-                        {
-                            act = Some(Act::Write(name.clone()));
-                        }
-                    });
-                    if let Some(n) = &st.note {
-                        ui.label(egui::RichText::new(n).color(t.text_dim));
+                    if shown == 0 {
+                        let msg =
+                            if all.is_empty() { crate::tl!("No blocks defined in this drawing.") } else { crate::tl!("No blocks match the search.") };
+                        ui.label(egui::RichText::new(msg).color(t.text_dim));
                     }
                 });
             });
         });
+    };
+    let details = |ui: &mut egui::Ui, st: &mut State, act: &mut Option<Act>| {
+        let side = if as_panel { ui.available_width().clamp(120.0, 360.0) } else { ui.available_width().min(height - 150.0).clamp(140.0, 320.0) };
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side.min(if as_panel { 220.0 } else { side })), Sense::hover());
+        match pv {
+            Some(p) => paint_list(ui.painter(), r, &p.list, &p.bounds),
+            None => {
+                ui.painter().rect_stroke(r, 3.0, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, crate::tl!("Preview"), crate::theme::small(), t.text_faint);
+            }
+        }
+        if pv.as_ref().is_some_and(|p| p.bounds.is_empty()) {
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, crate::tl!("The block is empty"), crate::theme::small(), t.text_faint);
+        }
+        ui.add_space(4.0);
+        let Some(name) = selected.clone() else { return };
+        if let Some(mut new) = st.rename.take() {
+            let mut keep = true;
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut new).desired_width(160.0));
+                if ui.button(crate::tl!("OK")).clicked() && !new.trim().is_empty() {
+                    *act = Some(Act::Rename(name.clone(), new.trim().to_string()));
+                }
+                if ui.button(crate::tl!("Cancel")).clicked() {
+                    keep = false;
+                }
+            });
+            if keep {
+                st.rename = Some(new);
+            }
+        } else {
+            ui.label(egui::RichText::new(&name).strong());
+        }
+        if let Some((objects, refs, base, annotative, description, xref)) = info {
+            egui::Grid::new("cc_block_info").num_columns(2).spacing(vec2(12.0, 2.0)).show(ui, |ui| {
+                ui.label(egui::RichText::new(crate::tl!("Objects")).color(t.text_dim));
+                ui.label(objects.to_string());
+                ui.end_row();
+                ui.label(egui::RichText::new(crate::tl!("References")).color(t.text_dim));
+                ui.label(refs.to_string());
+                ui.end_row();
+                ui.label(egui::RichText::new(crate::tl!("Base point")).color(t.text_dim));
+                ui.label(format!("{:.4}, {:.4}", base.x, base.y));
+                ui.end_row();
+                ui.label(egui::RichText::new(crate::tl!("Annotative")).color(t.text_dim));
+                ui.label(if *annotative { crate::tl!("Yes") } else { crate::tl!("No") });
+                ui.end_row();
+                if let Some(path) = xref {
+                    ui.label(egui::RichText::new(crate::tl!("External reference")).color(t.text_dim));
+                    ui.label(path);
+                    ui.end_row();
+                }
+                if !description.is_empty() {
+                    ui.label(egui::RichText::new(crate::tl!("Description")).color(t.text_dim));
+                    ui.label(description);
+                    ui.end_row();
+                }
+            });
+        }
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(crate::tl!("Insert")).clicked() {
+                *act = Some(Act::Insert(name.clone()));
+            }
+            if ui.button(crate::tl!("Edit Block")).on_hover_text(crate::tl!("Open in the Block Editor")).clicked() {
+                *act = Some(Act::Edit(name.clone()));
+            }
+            if ui.button(crate::tl!("Rename...")).clicked() {
+                st.rename = Some(name.clone());
+            }
+            if ui.button(crate::tl!("Delete")).on_hover_text(crate::tl!("Delete a block that no object uses")).clicked() {
+                *act = Some(Act::Delete(name.clone()));
+            }
+            if can_write && ui.button(crate::tl!("Save to File...")).on_hover_text(crate::tl!("Write the block as a drawing (WBLOCK)")).clicked() {
+                *act = Some(Act::Write(name.clone()));
+            }
+            if as_panel && ui.button(crate::tl!("Create...")).on_hover_text(crate::tl!("Make a block from objects (BLOCK)")).clicked() {
+                *act = Some(Act::Create);
+            }
+        });
+        if let Some(n) = &st.note {
+            ui.label(egui::RichText::new(n).color(t.text_dim));
+        }
+    };
+    if as_panel {
+        list(ui, st, act);
+        ui.add_space(6.0);
+        details(ui, st, act);
+    } else {
+        ui.horizontal_top(|ui| {
+            list(ui, st, act);
+            ui.vertical(|ui| details(ui, st, act));
+        });
+    }
+}
+
+/// Do what a button asked; false when the manager should close (a command takes over).
+fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>) -> bool {
     match act {
         Some(Act::Insert(n)) => {
-            *open = false;
             crate::dialogs::insert_block(app, &n);
+            return false;
         }
         Some(Act::Edit(n)) => {
-            *open = false;
             if let Err(e) = app.run("bedit", json!({ "name": n })) {
                 app.session.echo(e);
             }
+            return false;
         }
         Some(Act::Create) => {
-            *open = false;
             app.start("block");
+            return false;
         }
         Some(Act::Rename(from, to)) => match app.run("rename", json!({ "table": "block", "from": from, "to": to })) {
             Ok(_) => {
@@ -350,7 +373,78 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 st.note = Some(e);
             }
         }
+        Some(Act::ToPanel) => {
+            app.ui.blocks_window = false;
+            let _ = open_panel(app);
+            return false;
+        }
+        Some(Act::ToWindow) => {
+            app.ui.blocks_window = true;
+            let _ = crate::docking::command(app, false, &json!({ "operation": "close", "panel": crate::docking::Panel::Blocks.id() }));
+            app.ui.dialog = Some("blocks".into());
+        }
         None => {}
+    }
+    true
+}
+
+/// Open the Block Manager the way it was last used: a panel pinned on the right (the first
+/// time) or a window.
+pub fn open(app: &mut CadApp) -> Result<serde_json::Value, String> {
+    if app.ui.blocks_window {
+        app.ui.dialog = Some("blocks".into());
+        return Ok(serde_json::Value::Null);
+    }
+    open_panel(app)
+}
+
+/// Show the Blocks panel, docked on the right of the drawing.
+fn open_panel(app: &mut CadApp) -> Result<serde_json::Value, String> {
+    if app.ui.dialog.as_deref() == Some("blocks") {
+        app.ui.dialog = None;
+    }
+    let panel = crate::docking::Panel::Blocks;
+    let first = !app.ui.docking.layout.contains(&panel) && !app.ui.docking.hidden.iter().any(|(p, _)| *p == panel);
+    let r = crate::docking::command(app, false, &json!({ "operation": "open", "panel": panel.id() }))?;
+    // The first time: pinned at the right edge, beside the Layers and Properties palettes.
+    if first && app.ui.docking.layout.contains(&crate::docking::Panel::Properties) {
+        return crate::docking::command(app, false, &json!({ "operation": "move", "panel": panel.id(), "target": "properties", "zone": "right" }));
+    }
+    Ok(r)
+}
+
+/// The Blocks panel.
+pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
+    let ctx = ui.ctx().clone();
+    let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
+    let Some(v) = view(app, &ctx, &mut st) else { return };
+    let mut act = None;
+    egui::ScrollArea::vertical().id_salt("dock-blocks").auto_shrink([false, false]).show(ui, |ui| {
+        egui::Frame::NONE.inner_margin(6.0).show(ui, |ui| body(ui, &v, &mut st, true, &mut act));
+    });
+    // The panel stays open whatever the button did.
+    apply(app, &mut st, act);
+    ctx.data_mut(|d| d.insert_temp(state_id(), st));
+}
+
+/// The Block Manager as a window.
+pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
+    let Some(v) = view(app, ctx, &mut st) else { return };
+    let mut act = None;
+    egui::Window::new(crate::tl!("Block Manager"))
+        .id(egui::Id::new("Blocks"))
+        .open(open)
+        .default_size(vec2(640.0, 440.0))
+        .min_size(vec2(480.0, 320.0))
+        .resizable(true)
+        .show(ctx, |ui| body(ui, &v, &mut st, false, &mut act));
+    let to_panel = matches!(act, Some(Act::ToPanel));
+    if !apply(app, &mut st, act) && !to_panel {
+        *open = false;
+    }
+    if to_panel {
+        *open = false;
     }
     ctx.data_mut(|d| d.insert_temp(state_id(), st));
 }

@@ -118,6 +118,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         return Some(crate::docking::command(app, false, &json!({"operation":"open", "panel":panel})));
     }
     // QUICKCALC typed or from a menu opens the palette; with parameters it is CAL.
+    // The Blocks button and INSERT typed or from a menu open the Block Manager (as AutoCAD's
+    // INSERT opens its Blocks palette); -INSERT and calls with parameters run the command.
+    if id == "ui.dialog.blocks" || (matches!(id, "insert" | "i" | "ddinsert") && params.is_null()) {
+        return Some(crate::blockmgr::open(app));
+    }
     if id == "ui.panel.quickcalc" || (matches!(id, "quickcalc" | "qc") && params.is_null()) {
         return Some(crate::palettes::quickcalc::open(app));
     }

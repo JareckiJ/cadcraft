@@ -16,7 +16,7 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; textStyle (text, multiline text, multileaders); multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -222,9 +222,26 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad("properties.set", format!("multileader style `{n}` not found")))
         })
         .transpose()?;
+    let text_style = str_param(p, "textStyle")
+        .map(|n| d.text_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("text style `{n}` not found"))))
+        .transpose()?;
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {
+            // The text style of text, multiline text and a multileader's text.
+            if let Some(st) = &text_style {
+                match &mut e.kind {
+                    EntityKind::Text(t) => t.style.clone_from(st),
+                    EntityKind::MText(t) => t.style.clone_from(st),
+                    EntityKind::MLeader(m) => {
+                        if let Some(t) = &mut m.text {
+                            t.style.clone_from(st);
+                        }
+                    }
+                    EntityKind::AttDef(a) => a.text.style.clone_from(st),
+                    _ => {}
+                }
+            }
             // Annotative: Yes supports the current annotation scale; No drops every scale.
             if let Some(a) = p.get("annotative").and_then(Value::as_bool) {
                 cadcraft_doc::set_annotative(e, a, &anno_scale);

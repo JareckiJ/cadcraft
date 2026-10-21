@@ -271,6 +271,10 @@ const STANDARD: &[&[(Icon, &str, &str, Option<&str>)]] = &[
     &[(Icon::Help, "ui.dialog.about", "Help", None)],
 ];
 
+/// Standard tools that are not on the bar at first but can be added to it.
+const STANDARD_EXTRA: &[(Icon, &str, &str)] =
+    &[(Icon::TextStyle, "style", "Text Style"), (Icon::DimStyle, "dimstyle", "Dimension Style"), (Icon::Gear, "options", "Options")];
+
 /// The category of the [`STANDARD`] tools in the Customize dialog.
 const STANDARD_CATEGORY: &str = "Standard";
 
@@ -332,6 +336,9 @@ pub fn catalog() -> &'static [Tool] {
             for (icon, command, label, shortcut) in group.iter() {
                 push(&mut tools, Tool { icon: *icon, command, label, category: STANDARD_CATEGORY, shortcut: *shortcut });
             }
+        }
+        for (icon, command, label) in STANDARD_EXTRA {
+            push(&mut tools, Tool { icon: *icon, command, label, category: STANDARD_CATEGORY, shortcut: None });
         }
         for (icon, command, label) in LAYER_TOOLS {
             push(&mut tools, Tool { icon: *icon, command, label, category: LAYERS_CATEGORY, shortcut: None });

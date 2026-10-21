@@ -8,6 +8,62 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 22.10.2026 (0.9.0-b12)
+
+### Русский
+
+**Свойства текста и выносок**
+- В палитре «Свойства» у текста, многострочного текста и мультивыносок появилась строка «Стиль» (текстовый стиль). Она работает и для нескольких выбранных объектов сразу. Если стили разные, показывается «*РАЗНЫЕ*».
+- В списках стрелок (у мультивыносок в «Свойствах» и в редакторе размерного стиля) рядом с каждой стрелкой нарисован её вид, в том числе у пользовательских стрелок-блоков.
+
+**Ручка текста мультивыноски**
+- У текста мультивыноски появилась своя ручка. Её меню: «Переместить с выноской», «Переместить только текст», «Восстановить положение текста».
+- «Переместить с выноской» ставит текст в указанную точку, полочка встаёт рядом с текстом, а выноска тянется к ней от своей последней точки.
+- «Переместить только текст» двигает один текст. «Восстановить положение текста» возвращает его к полочке.
+
+**Печать: толщина линий**
+- Найдена причина слишком тонких линий. У листов, настроенных в миллиметрах внутри дюймового чертежа (как в «אריה צוק»), PDF получался в 25,4 раза больше листа: A3 был 10,7 × 7,5 м. При печати такой страницы на A3 всё уменьшалось в 25,4 раза, вместе с толщиной линий. Теперь страница PDF имеет размер листа, и толщины линий печатаются как задано.
+- Программа читает таблицы стилей печати AutoCAD (.ctb и .stb): цвета, толщины линий, оттенки серого, интенсивность. Если лист ссылается на таблицу, которой нет в программе (у «אריה צוק» это SIVAN.ctb), CADCraft ищет файл рядом с чертежом и в папках стилей печати AutoCAD этого пользователя. Если файл не найден, в командной строке появляется сообщение, и лист печатается с цветами и толщинами самих объектов. Файл .ctb также можно загрузить вручную в «Диспетчере стилей печати».
+
+**Значки**
+- «Показать целиком» в предварительном просмотре: четыре прямых угла вокруг прямоугольника.
+- «Параметры»: шестерня с зубцами.
+- «Отменить» и «Повторить»: толще дуга и крупнее стрелка.
+- На панель инструментов можно добавить кнопки «Текстовый стиль», «Размерный стиль» и «Параметры» («Настроить панель инструментов», раздел «Стандартный»).
+
+**Диспетчер блоков**
+- Кнопка «Вставить блок» (и команда ВСТАВИТЬ / INSERT) открывает диспетчер блоков панелью, закреплённой справа, рядом со «Слоями» и «Свойствами».
+- Значок в правом верхнем углу превращает панель в отдельное окно, а в окне — обратно в панель. Программа запоминает, как диспетчер открывался в последний раз.
+- Команда -ВСТАВИТЬ (-INSERT) по-прежнему спрашивает имя блока в командной строке.
+
+### English
+
+**Text and leader properties**
+- The Properties palette has a Style row (text style) for text, multiline text and multileaders. It works for several selected objects at once and shows *VARIES* when their styles differ.
+- The arrowhead lists (multileaders in Properties, the dimension style editor) show a picture of each arrowhead, user arrowhead blocks included.
+
+**The multileader text grip**
+- Multileader text has its own grip, with Move with Leader, Move Text Only and Reset Text Position.
+- Move with Leader puts the text at the picked point; the landing goes beside the text and the leader runs to it from its last point.
+- Move Text Only moves the text alone; Reset Text Position puts it back beside the landing.
+
+**Printing: lineweights**
+- Found why lines printed too thin: a layout set up in millimetres in an inch drawing (as in "אריה צוק") produced a PDF page 25.4 times the sheet (A3 came out 10.7 × 7.5 m), so printing it on A3 shrank everything, lineweights included, 25.4 times. The PDF page is now the size of the sheet and lineweights print as set.
+- AutoCAD plot style tables (.ctb and .stb) are read: colours, lineweights, grayscale and screening. When a layout names a table CADCraft doesn't have (SIVAN.ctb for "אריה צוק"), it looks next to the drawing and in this user's AutoCAD plot style folders. If it isn't found, the command line says so and the layout plots with the objects' own colours and lineweights. A .ctb file can also be loaded in the Plot Style Manager.
+
+**Icons**
+- Zoom to Fit in Plot Preview: four right-angle corners around a rectangle.
+- Options: a gear with teeth.
+- Undo and Redo: a thicker arc and a larger arrowhead.
+- Text Style, Dimension Style and Options buttons can be added to the Tool Bar (Customize Tool Bar, Standard section).
+
+**Block Manager**
+- The Insert Block button (and INSERT typed) opens the Block Manager as a panel pinned on the right, beside Layers and Properties.
+- The icon at its top right turns the panel into a window, and the window back into a panel. The last choice is remembered.
+- -INSERT still asks for the block name on the command line.
+
+---
+
 ## 21.10.2026 (0.9.0-b11)
 
 ### Русский
