@@ -162,6 +162,9 @@ fn typed(code: i32, text: &str) -> Value {
 }
 
 const BINARY_SENTINEL: &[u8] = b"AutoCAD Binary DXF\r\n\x1a\0";
+/// Fewest bytes an ASCII group takes: a code line and a value line of one byte each, with their
+/// newlines.
+const MIN_GROUP_BYTES: usize = 4;
 /// Most group codes read from one file. A `Tag` takes 40 bytes plus its text, so this bounds the
 /// tag list to a few GB; real drawings stay far below (a 10 MB DWG is typically a few million).
 pub const MAX_TAGS: usize = 50_000_000;
@@ -264,10 +267,12 @@ pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
 
 /// `expect` is the number of groups the line count promises: it sizes the tag list once instead
 /// of letting it double its way up (every doubling moves all the tags read so far, and the last
-/// one holds old and new lists at once). Capped by `max_tags`, never trusted beyond that.
+/// one holds old and new lists at once). Never trusted beyond `max_tags`, nor beyond what a text
+/// of this length can hold (a group is two lines of at least two bytes each), so a sparse file of
+/// blank lines cannot reserve more than a dense one of the same size would fill.
 #[allow(clippy::while_let_loop)]
 fn parse_ascii_with_limit(text: &str, max_tags: usize, expect: usize) -> Result<Vec<Tag>> {
-    let mut tags = Vec::with_capacity(expect.min(max_tags));
+    let mut tags = Vec::with_capacity(expect.min(max_tags).min(text.len() / MIN_GROUP_BYTES));
     let mut lines = text.lines().enumerate();
     loop {
         let Some((ln, code_line)) = lines.next() else { break };
