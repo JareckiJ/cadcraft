@@ -109,3 +109,18 @@ fn editing_a_recalled_command_completes_from_the_list_again() {
     keys.extend(["ArrowDown", "Enter"]);
     assert_eq!(press(&mut a, &ctx, "", &keys).as_deref(), Some(second.as_str()));
 }
+
+#[test]
+fn a_row_chosen_with_down_wins_over_an_exact_alias() {
+    let ctx = egui::Context::default();
+    let mut a = CadApp::new(Session::new(), Services::default());
+    for _ in 0..3 {
+        frame(&mut a, &ctx);
+    }
+    // `l` is LINE's alias: Enter alone runs LINE, but Down picks the next row and Enter runs it.
+    assert_eq!(press(&mut a, &ctx, "l", &["Enter"]).as_deref(), Some("l"));
+    let chosen = press(&mut a, &ctx, "l", &["ArrowDown", "Enter"]).expect("Down then Enter runs a suggestion");
+    assert!(chosen.len() > 1 && !chosen.eq_ignore_ascii_case("line"), "the chosen row runs, not LINE: {chosen}");
+    // Down then Up comes back to the first row: the alias runs as typed again.
+    assert_eq!(press(&mut a, &ctx, "l", &["ArrowDown", "ArrowUp", "Enter"]).as_deref(), Some("l"));
+}

@@ -466,13 +466,16 @@ pub fn submit(app: &mut CadApp) {
 
 /// Enter (or Space) on a partly typed command name runs the AutoComplete row shown as chosen (the
 /// first unless Up/Down moved it), as CAD command lines usually do: `HA` + Enter is HATCH. A
-/// name that already is a command, an alias, a LISP command or a system variable runs as typed.
+/// name that already is a command, an alias, a LISP command or a system variable runs as typed,
+/// unless Up/Down chose another row.
 fn complete_command(app: &mut CadApp) {
     if app.session.prompting() || app.cmd.history_pos.is_some() {
         return;
     }
     let typed = app.cmd.buffer.trim();
-    if typed.is_empty() || app.session.knows_command(typed) {
+    // A row chosen with Up/Down wins over an exact name or alias (`pol`, Down: the next row).
+    let chosen = app.cmd.suggestion > 0;
+    if typed.is_empty() || (!chosen && app.session.knows_command(typed)) {
         return;
     }
     let sug = suggestions(typed);
