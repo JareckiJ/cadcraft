@@ -23,6 +23,14 @@ pub struct Remote {
     next_id: u64,
     /// Open the app when nothing answers (see [`Remote::lazy`]).
     launch: bool,
+    /// The per-session control token for this port, read from the owner-only token file on first
+    /// use so requests can authenticate (CWE-306).
+    token: Option<String>,
+}
+
+/// The port component of a `HOST:PORT` address, for locating the token file.
+fn port_of(addr: &str) -> Option<u16> {
+    addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok())
 }
 
 /// How long a launched app has to open its control port.
@@ -30,7 +38,7 @@ const LAUNCH_WAIT: Duration = Duration::from_secs(30);
 
 impl Remote {
     pub fn connect(addr: &str) -> std::io::Result<Self> {
-        let mut r = Self { addr: addr.to_string(), conn: None, next_id: 1, launch: false };
+        let mut r = Self { addr: addr.to_string(), conn: None, next_id: 1, launch: false, token: None };
         r.reconnect()?;
         Ok(r)
     }
@@ -38,7 +46,20 @@ impl Remote {
     /// the server before the app is open. With `launch`, a call that finds nothing at `addr`
     /// opens the app with that control port first (macOS) and waits for it.
     pub fn lazy(addr: &str, launch: bool) -> Self {
-        Self { addr: addr.to_string(), conn: None, next_id: 1, launch }
+        Self { addr: addr.to_string(), conn: None, next_id: 1, launch, token: None }
+    }
+
+    /// The per-session token for this port, read (and cached) from the owner-only token file. A
+    /// missing file is not fatal here: the request is sent without a token and the server replies
+    /// with an authentication error the user can act on.
+    fn token(&mut self) -> Option<&str> {
+        if self.token.is_none()
+            && let Some(port) = port_of(&self.addr)
+            && let Ok(t) = crate::control_token::read(port)
+        {
+            self.token = Some(t);
+        }
+        self.token.as_deref()
     }
     /// Connect, opening the app first when asked to and nothing answers.
     fn reach(&mut self) -> std::io::Result<()> {
@@ -162,7 +183,12 @@ impl Backend for Remote {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id += 1;
-        let line = json!({"id": id, "method": method, "params": params}).to_string();
+        let token = self.token().map(str::to_string);
+        let mut req = json!({"id": id, "method": method, "params": params});
+        if let (Some(obj), Some(token)) = (req.as_object_mut(), token) {
+            obj.insert("token".into(), Value::String(token));
+        }
+        let line = req.to_string();
         let reply = match self.roundtrip(&line) {
             Ok(r) => r,
             // Resend only when the request cannot have been applied. After a sent mutation with no reply the outcome is unknown, and
