@@ -113,8 +113,10 @@ impl CadApp {
 
 /// `secs` since 1970 as `YYYY-MM-DD HH:MM` (UTC). Out of range reads as the epoch.
 fn utc(secs: u64) -> String {
+    use chrono::Datelike;
     let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    t.format("%Y-%m-%d %H:%M").to_string()
+    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{:04}-{}", t.year(), t.format("%m-%d %H:%M"))
 }
 
 /// The Drawing Recovery window, while autosave files from a crash are waiting.
@@ -222,5 +224,7 @@ mod tests {
         assert_eq!(super::utc(0), "1970-01-01 00:00");
         assert_eq!(super::utc(951_782_400 + 3_660), "2000-02-29 01:01");
         assert_eq!(super::utc(1_791_676_800), "2026-10-11 00:00");
+        assert_eq!(super::utc(253_402_300_800), "10000-01-01 00:00");
+        assert_eq!(super::utc(u64::MAX), "1970-01-01 00:00");
     }
 }

@@ -33,9 +33,12 @@ fn today() -> String {
     date(std::time::SystemTime::now())
 }
 
-/// `t` as a UTC `YYYY-MM-DD`.
+/// `t` as a UTC `YYYY-MM-DD`. A clock before 1970, or past chrono's range, reads as 1970-01-01.
 fn date(t: std::time::SystemTime) -> String {
-    chrono::DateTime::<chrono::Utc>::from(t).format("%Y-%m-%d").to_string()
+    use chrono::Datelike;
+    let secs = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
+    format!("{:04}-{}", t.year(), t.format("%m-%d"))
 }
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -109,6 +112,8 @@ mod tests {
         assert_eq!(day(0), "1970-01-01");
         assert_eq!(day(11_016), "2000-02-29");
         assert_eq!(day(20_736), "2026-10-10");
+        assert_eq!(date(std::time::UNIX_EPOCH - std::time::Duration::from_secs(86_400)), "1970-01-01");
+        assert_eq!(date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::MAX / 2)), "1970-01-01");
     }
 
     #[test]
