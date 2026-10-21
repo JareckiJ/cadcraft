@@ -18,6 +18,9 @@ use crate::{Comp, MAX_CONSTRAINTS, SolveError, SolveOptions, build, lm};
 const MAX_NULL_COLS: usize = 600;
 /// Largest Jacobian (rows × columns × min) whose rank is computed.
 const MAX_RANK_WORK: f64 = 4e8;
+/// Largest residual-evaluation work (rows × free × per-residual cost, including spline
+/// reconstruction) allowed before building the Jacobian during numerical differentiation.
+const MAX_EVAL_WORK: f64 = 2e9;
 /// Most objects listed in one report.
 const MAX_OBJECTS: usize = 10_000;
 
@@ -92,6 +95,14 @@ fn analyse(comp: &Comp) -> CompDof {
     let nf = free.len();
     let unknown = CompDof { dof: None, redundant: 0, objects: vec![None; comp.model.slots.len()] };
     if rows > lm::MAX_ROWS || (rows as f64) * (nf as f64) * (rows.min(nf) as f64) > MAX_RANK_WORK {
+        return unknown;
+    }
+    // Numerical differentiation evaluates every residual about `rows × free` times, and each
+    // spline-end residual reconstructs its spline through a dense solve. Account for that
+    // reconstruction cost before building the Jacobian so a component with few equations but large
+    // splines cannot pass the rank-work check yet still require billions of operations (row 43).
+    let eval_work = (rows as f64) * (nf as f64) * (1.0 + comp.model.spline_reconstruct_cost());
+    if eval_work > MAX_EVAL_WORK {
         return unknown;
     }
     let f = |x: &[f64], out: &mut Vec<f64>| comp.eval(x, out, None);

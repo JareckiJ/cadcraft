@@ -27,6 +27,9 @@ pub const MAX_PARAMS: usize = 4000;
 pub const MAX_SPLINE_POINTS: usize = 500;
 /// Most characteristic points of a block reference used as rigid constraint points.
 pub const MAX_RIGID_POINTS: usize = 256;
+/// Block members examined when sampling rigid points, counting those that contribute none, so a
+/// block padded with point-less entities cannot make sampling (repeated per Insert) unbounded.
+const MAX_RIGID_MEMBERS: usize = 100_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shape {
@@ -74,6 +77,22 @@ pub(crate) struct Model {
     rigid: HashMap<Handle, Vec<Vec2>>,
 }
 
+impl Model {
+    /// A rough cost of reconstructing every retained spline once, used to budget numerical
+    /// differentiation: each spline-end residual refits its spline through a dense interpolation
+    /// solve (about O(points²)), and the Jacobian evaluates residuals `rows × free` times, so this
+    /// cost must enter the pre-Jacobian work budget (CWE-407).
+    pub(crate) fn spline_reconstruct_cost(&self) -> f64 {
+        self.splines
+            .values()
+            .map(|s| {
+                let n = s.fit.len().max(s.control.len()) as f64;
+                n * n
+            })
+            .sum()
+    }
+}
+
 /// Can this entity take part in constraints?
 pub fn supported(kind: &EntityKind) -> bool {
     matches!(
@@ -96,8 +115,13 @@ pub fn rigid_points(d: &Drawing, ins: &Insert) -> Vec<Vec2> {
     let Some(block) = d.block(&ins.block) else { return Vec::new() };
     let m = ins.transform(block.base.xy());
     let mut out = Vec::new();
+    // Bound the members examined, not only the points collected: entities that contribute no
+    // points (Text, Ray, …) still cost traversal, so a block full of them — scanned again for
+    // every Insert — would otherwise be unbounded (CWE-407).
+    let mut examined = 0usize;
     for e in block.entities.iter() {
-        if out.len() >= MAX_RIGID_POINTS {
+        examined += 1;
+        if out.len() >= MAX_RIGID_POINTS || examined > MAX_RIGID_MEMBERS {
             break;
         }
         let pts: Vec<Vec2> = match &e.kind {
@@ -208,7 +232,15 @@ impl Model {
                     // fit point; a control polygon's ends are its first and last points when the
                     // knots are clamped.
                     let ends = !sp.closed && (fit || (clamped(sp, false) && clamped(sp, true)));
-                    m.splines.insert(h, sp.clone());
+                    // Retain a normalised copy: a spline may carry more weights than control
+                    // points, and every residual evaluation clones this template, so drop
+                    // mismatched excess weights (treated as non-rational) before retaining it so
+                    // the repeated clones don't copy unused data (CWE-400).
+                    let mut kept = sp.clone();
+                    if !kept.weights.is_empty() && kept.weights.len() != kept.control.len() {
+                        kept.weights = Vec::new();
+                    }
+                    m.splines.insert(h, kept);
                     Shape::Spline { n, fit, ends }
                 }
                 EntityKind::Insert(ins) => {
