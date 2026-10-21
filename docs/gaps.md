@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (Command Aliases dialog for ALIASEDIT: U12 and E5 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (AutoLISP dictionary and table object access, #1659/#1661: E1 narrowed; previously minor: Command Aliases dialog for ALIASEDIT: U12 and E5 narrowed) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -133,7 +133,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | # | Gap | Est. |
 |---|---|---|
-| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup): Visual LISP ActiveX (`vlax-`, `vla-`), DCL dialogs, reactors, an APPLOAD dialog with a Startup Suite, UCS-aware `trans` | 30–50 |
+| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup; #1659/#1661 added `namedobjdict`, `dictsearch`, `dictnext`, `tblobjname` and `entget`/`handent` of non-graphic objects): `entmod`/`entmake` of non-graphic objects, Visual LISP ActiveX (`vlax-`, `vla-`), DCL dialogs, reactors, an APPLOAD dialog with a Startup Suite, UCS-aware `trans` | 30–50 |
 | E3 | Express Tools equivalents (SUPERHATCH; NCOPY, BREAKLINE, TXT2MTXT, BURST and MOCORO exist: BREAKLINE's Block option takes a block of the drawing, not a `.dwg` file, and TXT2MTXT's Settings are command-line prompts rather than a dialog, without the uniform line spacing option) | 24–40 |
 | E4 | Plug-in API (owner decision: Rust/WASM plug-ins rather than ObjectARX/.NET) | 30–50 |
 | E5 | CUI customisation (the alias editor, ALIASEDIT's Command Aliases dialog, landed, #1381; edits stay for the session) | 13–23 |
@@ -150,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | AutoLISP reaches non-graphic objects: `namedobjdict`, `dictsearch`, `dictnext`, `tblobjname`, and `entget`/`handent` of table records, dictionaries and layouts (a file's own handles work), #1659/#1661: E1 narrowed |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
 | 2026-10-16 | minor | MLEDIT Merged Tee (MT): the first multiline's outer elements stop at the second one's near side, which opens, and its inner elements run on to the second one's inner element: F21 narrowed, hours unchanged |

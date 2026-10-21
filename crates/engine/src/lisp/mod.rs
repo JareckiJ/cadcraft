@@ -9,6 +9,7 @@ pub mod builtins;
 mod drawing;
 pub mod eval;
 pub mod input;
+mod objects;
 pub mod read;
 mod startup;
 pub mod value;
@@ -58,6 +59,8 @@ pub struct Env {
     pub order: Option<(usize, Arc<Vec<Handle>>)>,
     /// `tblnext`'s place in each table.
     pub tblnext: HashMap<String, usize>,
+    /// Entity names of non-graphic objects (dictionaries, table records, layouts).
+    pub(crate) objects: objects::Names,
     /// The command history's length after LISP last printed a line: when something else wrote since
     /// (a prompt, a command's echo), a leading newline only ends that line.
     pub printed_at: Option<usize>,
@@ -75,6 +78,7 @@ impl Default for Env {
             deleted: HashMap::new(),
             order: None,
             tblnext: HashMap::new(),
+            objects: objects::Names::default(),
             printed_at: None,
         };
         builtins::install(&mut e);

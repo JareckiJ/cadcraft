@@ -71,7 +71,9 @@ reached", malformed source is a reader error, and every built-in checks its argu
   next call, and `(command)` to cancel; `getvar setvar`; `entget entmake entmod entdel entlast
   entnext entupd handent`; `ssget` (modes X, L, P, I, W, C, F, WP, CP, a point, or the user
   selecting; filters with wildcards and `-4` operators) `ssadd ssdel sslength ssname ssmemb
-  sssetfirst ssgetfirst`; `tblsearch tblnext` (LAYER, LTYPE, STYLE, BLOCK, DIMSTYLE, APPID)
+  sssetfirst ssgetfirst`; `tblsearch tblnext` (LAYER, LTYPE, STYLE, BLOCK, DIMSTYLE, APPID);
+  `namedobjdict dictsearch dictnext tblobjname`, with `entget` and `handent` of the non-graphic
+  objects they reach (table records, dictionaries, layouts and their plot settings)
 - **Input:** `initget getpoint getcorner getdist getangle getorient getreal getint getstring
   getkword entsel nentsel`
 - **Units:** `rtos angtos distof angtof`
@@ -81,6 +83,13 @@ Entity lists use the DXF group codes of CADCraft's DXF files: what `entget` retu
 DXF file holds for the object, plus `-1` (its name) and `410` (its layout). Angles (groups 50–58)
 are in radians, as in AutoCAD, where the file holds degrees; `entmake`, `entmod` and `ssget`
 filters take radians too.
+
+Non-graphic objects (the named object dictionary and its dictionaries, layouts, table records)
+are listed as a DXF file of the drawing holds them, pointers as entity names and group 5 as the
+object's own name. An object read from a file keeps that file's handle as its name, so
+`(handent "112C")` with a layer's handle from the file finds it; one the file didn't have gets a
+name of its own (from `7F00000000000000` up). Names stay the same while the drawing is open,
+also when it changes. These lists are read-only for now: `entmod` and `entmake` don't take them.
 
 ## Testing against the corpus
 

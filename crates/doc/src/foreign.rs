@@ -66,6 +66,10 @@ pub struct Foreign {
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,
+    /// The roles of every file handle of an object CADCraft writes itself (table records, tables,
+    /// blocks, the named object dictionary and its entries), so that AutoLISP names those objects
+    /// as the file did (`handent`). Saving gives them new handles; not part of [`Foreign::is_empty`].
+    pub handles: BTreeMap<Handle, ForeignKey>,
     /// The file's data store section (ACDSDATA, AutoCAD 2013 and later), as read: its groups
     /// after the section name. It holds the ACIS geometry of 3D solids, regions, bodies and
     /// surfaces, which from 2013 on those entities don't carry themselves: each `ACDSRECORD`
