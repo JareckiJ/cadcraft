@@ -11,8 +11,10 @@
 #   * `CRAFT_FONTS_DIR` embeds the fonts from storytold/craft-fonts (the `craft-fonts` flake input, pinned to
 #     the revision the release workflow uses); without it everything builds and runs, but some
 #     scripts (e.g. Japanese, Chinese) have no glyphs;
-#   * `doCheck` is off: the test suite needs corpora and a GPU the Nix sandbox cannot provide
-#     (`cargo xtask ci` is the gate). `pkgs.cadcraft.overrideAttrs { doCheck = true; }` runs it.
+#   * `doCheck` is off (`cargo xtask ci` is the gate). `pkgs.cadcraft.overrideAttrs { doCheck = true; }`
+#     runs the workspace tests except cadcraft-ui-egui's, whose GPU tests need a wgpu adapter the
+#     Nix sandbox does not have (see `cargoTestFlags`); the AutoLISP corpus test skips itself
+#     without CADCRAFT_LISP_CORPUS.
 #
 # Everything in the product is pure Rust, so this needs no build system beyond cargo plus the
 # libraries winit/wgpu `dlopen` at run time (see `runtimeLibs`).
@@ -119,6 +121,14 @@ rustPlatform.buildRustPackage {
     "cadcraft"
     "-p"
     "cadcraft-cli"
+  ];
+
+  # `overrideAttrs { doCheck = true; }`: every crate but the UI, whose gpu_* tests render through a
+  # wgpu adapter (tests/gpu_viewport_stencil.rs reads pixels back) and panic without one.
+  cargoTestFlags = [
+    "--workspace"
+    "--exclude"
+    "cadcraft-ui-egui"
   ];
 
   doCheck = false;
