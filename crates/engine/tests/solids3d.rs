@@ -484,3 +484,142 @@ fn the_typed_3dface_honours_invisible_and_three_sided_faces() {
     assert!(s.running.is_none(), "the fourth point finishes the face");
     assert_eq!(count(&s), 2);
 }
+
+#[test]
+fn wedge_cone_pyramid_sphere_and_torus_are_groups_of_outward_faces() {
+    let pi = std::f64::consts::PI;
+    let mut s = Session::new();
+    let w = s.execute("wedge", &json!({ "corner": [0, 0, 1], "corner2": [4, 3], "height": 2 })).unwrap();
+    assert_eq!(w["faces"], 5);
+    assert!((volume(&faces(&s)) - 12.0).abs() < 1e-9, "{}", volume(&faces(&s)));
+    s.undo().unwrap();
+    assert_eq!(count(&s), 0, "one undo removes the whole wedge");
+
+    for (cmd, params, want, tol) in [
+        ("cone", json!({ "center": [0, 0, 0], "radius": 3, "height": 6 }), pi * 9.0 * 6.0 / 3.0, 5e-3),
+        ("cone", json!({ "center": [0, 0, 0], "radius": 3, "height": -6, "topRadius": 1 }), pi * 6.0 / 3.0 * (9.0 + 3.0 + 1.0), 5e-3),
+        ("pyramid", json!({ "center": [1, 1, 1], "radius": 2, "height": 3, "sides": 4 }), 0.5 * 4.0 * 4.0 * 3.0 / 3.0, 1e-9),
+        ("pyramid", json!({ "center": [0, 0], "radius": 2, "height": 3 }), 0.5 * 4.0 * 4.0 * 3.0 / 3.0, 1e-9),
+        ("sphere", json!({ "center": [0, 0, 0], "radius": 2 }), 4.0 / 3.0 * pi * 8.0, 1e-2),
+        ("torus", json!({ "center": [0, 0, 0], "radius": 5, "tubeRadius": 1 }), 2.0 * pi * pi * 5.0, 1e-2),
+    ] {
+        let mut s = Session::new();
+        let r = s.execute(cmd, &params).unwrap();
+        assert_eq!(s.doc().unwrap().groups.len(), 1, "{cmd}: one group");
+        assert_eq!(s.doc().unwrap().groups[0].members.len() as u64, r["faces"].as_u64().unwrap());
+        let v = volume(&faces(&s));
+        assert!((v - want).abs() / want < tol, "{cmd}: {v} vs {want}");
+    }
+}
+
+#[test]
+fn primitives_reject_bad_sizes_and_hostile_numbers_without_adding_anything() {
+    let bad: Vec<(&str, Value)> = vec![
+        ("wedge", json!({ "corner": [0, 0], "corner2": [0, 5], "height": 1 })),
+        ("wedge", json!({ "corner": [0, 0], "corner2": [5, 5], "height": 0 })),
+        ("wedge", json!({})),
+        ("cone", json!({ "center": [0, 0], "radius": 0, "height": 1 })),
+        ("cone", json!({ "center": [0, 0], "radius": 1, "height": 0 })),
+        ("cone", json!({ "center": [0, 0], "radius": 1, "height": 1, "topRadius": -1 })),
+        ("cone", json!({ "center": [0, 0], "radius": 1, "height": 1, "segments": 2 })),
+        ("cone", json!({ "center": [0, 0], "radius": 1, "height": 1, "segments": "x" })),
+        ("pyramid", json!({ "center": [0, 0], "radius": 1, "height": 1, "sides": 2 })),
+        ("pyramid", json!({ "center": [0, 0], "radius": 1, "height": 1, "sides": 5000 })),
+        ("pyramid", json!({ "center": [0, 0], "radius": 1, "height": 1, "sides": 3.5 })),
+        ("sphere", json!({ "center": [0, 0], "radius": -1 })),
+        ("sphere", json!({ "center": [0, 0], "radius": 1, "segments": 3 })),
+        ("sphere", json!({ "center": [0, 0], "radius": 1, "segments": 1024 })),
+        ("sphere", json!({ "center": "origin", "radius": 1 })),
+        ("torus", json!({ "center": [0, 0], "radius": 2, "tubeRadius": 2 })),
+        ("torus", json!({ "center": [0, 0], "radius": 2, "tubeRadius": 3 })),
+        ("torus", json!({ "center": [0, 0], "radius": 2, "tubeRadius": 0 })),
+        ("torus", json!({ "center": [0, 0], "radius": 2, "tubeRadius": 1, "segments": 1024, "tubeSegments": 1024 })),
+        ("torus", json!({ "center": [0, 0], "radius": 2, "tubeRadius": 1, "tubeSegments": 1 })),
+    ];
+    for (cmd, p) in bad {
+        let mut s = Session::new();
+        assert!(s.execute(cmd, &p).is_err(), "{cmd} {p} must be refused");
+        assert_eq!(count(&s), 0, "{cmd} {p}: nothing was added");
+        assert!(s.doc().unwrap().groups.is_empty());
+    }
+    // Huge but numeric input must come back as a result, never a panic.
+    for cmd in ["wedge", "cone", "pyramid", "sphere", "torus"] {
+        let mut s = Session::new();
+        let _ = s.execute(cmd, &json!({ "corner": [1e308, 1e308], "corner2": [-1e308, -1e308], "center": [1e308, -1e308, 1e308], "radius": 1e300, "tubeRadius": 1e299, "height": 1e308, "tolerance": 1e-300 }));
+    }
+}
+
+#[test]
+fn the_other_primitives_survive_a_dxf_round_trip() {
+    let mut s = Session::new();
+    s.execute("wedge", &json!({ "corner": [0, 0, 0], "corner2": [2, 3], "height": 4 })).unwrap();
+    s.execute("cone", &json!({ "center": [10, 0, 0], "radius": 2, "height": 3, "segments": 24 })).unwrap();
+    s.execute("sphere", &json!({ "center": [20, 0, 2], "radius": 2, "segments": 24 })).unwrap();
+    s.execute("torus", &json!({ "center": [30, 0, 0], "radius": 4, "tubeRadius": 1, "segments": 24, "tubeSegments": 12 })).unwrap();
+    s.execute("pyramid", &json!({ "center": [40, 0, 0], "radius": 2, "height": 3, "sides": 5, "topRadius": 1 })).unwrap();
+    let before = faces(&s);
+    let text = cadcraft_io::write_dxf(s.doc().unwrap());
+    let back = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    let after: Vec<[[f64; 3]; 4]> = back
+        .model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntityKind::Face3d(f) => Some(f.corners.map(|c| [c.x, c.y, c.z])),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(before.len(), after.len());
+    assert!((volume(&before) - volume(&after)).abs() < 1e-9);
+    assert_eq!(back.groups.len(), 5);
+}
+
+#[test]
+fn typed_primitives_follow_their_prompts() {
+    let mut s = Session::new();
+
+    s.start("wedge").unwrap();
+    assert!(s.prompt_text().contains("first corner"), "{}", s.prompt_text());
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Point(Vec2::new(4.0, 3.0))).unwrap();
+    s.input(Input::Text("2".into())).unwrap();
+    assert!(s.running.is_none());
+    assert!((volume(&faces(&s)) - 12.0).abs() < 1e-9);
+
+    let mut s = Session::new();
+    s.start("cone").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Text("3".into())).unwrap();
+    assert!(s.prompt_text().contains("height"), "{}", s.prompt_text());
+    s.input(Input::Text("6".into())).unwrap();
+    assert!(s.running.is_none() && count(&s) > 0);
+
+    // PYRAMID: four sides unless the Sides option changes it.
+    let mut s = Session::new();
+    s.start("pyramid").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    assert!(s.prompt_text().contains("Sides") || s.prompt_text().contains("base radius"), "{}", s.prompt_text());
+    s.input(Input::Keyword("Sides".into())).unwrap();
+    assert!(s.prompt_text().contains("number of sides"), "{}", s.prompt_text());
+    s.input(Input::Text("6".into())).unwrap();
+    s.input(Input::Text("2".into())).unwrap();
+    s.input(Input::Text("3".into())).unwrap();
+    assert!(s.running.is_none());
+    assert_eq!(count(&s), 6 * 2, "a hexagonal pyramid: 6 side triangles and 6 base triangles");
+
+    let mut s = Session::new();
+    s.start("sphere").unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Text("2".into())).unwrap();
+    assert!(s.running.is_none(), "a sphere needs only a centre and a radius");
+    assert!(count(&s) > 8);
+
+    let mut s = Session::new();
+    s.start("torus").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Text("5".into())).unwrap();
+    assert!(s.prompt_text().contains("tube radius"), "{}", s.prompt_text());
+    let _ = s.input(Input::Text("6".into()));
+    assert!(s.running.is_some(), "a tube wider than the ring is refused and the prompt stays");
+    s.input(Input::Text("1".into())).unwrap();
+    assert!(s.running.is_none() && count(&s) > 0);
+}

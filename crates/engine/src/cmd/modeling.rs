@@ -23,11 +23,31 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("box", "Box", run_box)
             .menu(&["Draw", "3D Modeling", "Box"])
             .params("{corner: [x,y,z?], corner2?: [x,y] | {length, width}, height} → {handles, group, faces}. A negative size goes the other way; no size is zero. The box is a group of 3D faces.")
-            .interactive(|_| Ok(Box::new(BoxM::default()))),
+            .interactive(|_| Ok(Box::new(BoxM::new(false)))),
+        CommandSpec::new("wedge", "Wedge", run_wedge)
+            .menu(&["Draw", "3D Modeling", "Wedge"])
+            .params("{corner: [x,y,z?], corner2?: [x,y] | {length, width}, height} → {handles, group, faces}. A box cut in half along its diagonal: the tall end is at the corner's X and it slopes down to the other end. A negative size goes the other way.")
+            .interactive(|_| Ok(Box::new(BoxM::new(true)))),
         CommandSpec::new("cylinder", "Cylinder", run_cylinder)
             .menu(&["Draw", "3D Modeling", "Cylinder"])
             .params("{center: [x,y,z?], radius, height, tolerance? (chord error, default radius/1000) | segments? (3..1024)} → {handles, group, faces}. The base is at the centre's Z; a negative height goes down.")
-            .interactive(|_| Ok(Box::new(CylinderM::default()))),
+            .interactive(|_| Ok(Box::new(RadialM::new(Radial::Cylinder)))),
+        CommandSpec::new("cone", "Cone", run_cone)
+            .menu(&["Draw", "3D Modeling", "Cone"])
+            .params("{center: [x,y,z?], radius, height, topRadius? (default 0: a point; above 0: a truncated cone), tolerance? | segments? (3..1024)} → {handles, group, faces}. The base is at the centre's Z; a negative height goes down.")
+            .interactive(|_| Ok(Box::new(RadialM::new(Radial::Cone)))),
+        CommandSpec::new("pyramid", "Pyramid", run_pyramid)
+            .menu(&["Draw", "3D Modeling", "Pyramid"])
+            .params("{center: [x,y,z?], radius (to the corners), height, sides? (3..1024, default 4), topRadius? (default 0: a point)} → {handles, group, faces}. The first corner is on +X; the base is at the centre's Z; a negative height goes down.")
+            .interactive(|_| Ok(Box::new(RadialM::new(Radial::Pyramid)))),
+        CommandSpec::new("sphere", "Sphere", run_sphere)
+            .menu(&["Draw", "3D Modeling", "Sphere"])
+            .params("{center: [x,y,z?], radius, tolerance? (chord error, default radius/1000) | segments? (4..1024 slices; half as many rings)} → {handles, group, faces}. Poles on the Z axis; the face count is capped.")
+            .interactive(|_| Ok(Box::new(RadialM::new(Radial::Sphere)))),
+        CommandSpec::new("torus", "Torus", run_torus)
+            .menu(&["Draw", "3D Modeling", "Torus"])
+            .params("{center: [x,y,z?], radius (centre to the middle of the tube), tubeRadius (smaller than radius), tolerance? | segments? (around), tubeSegments? (around the tube)} → {handles, group, faces}. In the XY plane.")
+            .interactive(|_| Ok(Box::new(RadialM::new(Radial::Torus)))),
         CommandSpec::new("extrude", "Extrude", run_extrude)
             .menu(&["Draw", "3D Modeling", "Extrude"])
             .params("{handles? (default the selection: closed polylines and circles), holes? [handles] (closed polylines and circles fully inside one profile, cut through it; touching, overlapping or nested holes are refused), height, tolerance? (chord error for arcs, default 1/1000 of the profile), erase?: bool (default false; also erases the holes)} → {handles, groups, faces}. Extrudes along +Z from the profile's elevation, as one group of 3D faces per profile.")
@@ -85,34 +105,54 @@ fn hexes(hs: &[Handle]) -> Vec<String> {
     hs.iter().map(|h| h.hex()).collect()
 }
 
-// ---------------------------------------------------------------------------------- BOX
+// ---------------------------------------------------------------------------------- BOX, WEDGE
 
-fn box_at(s: &mut Session, corner: Vec3, size: Vec3) -> Result<Value> {
-    let faces = mesh::box_faces(corner, size).map_err(|e| err("box", e))?;
-    let (hs, group) = add_solid(s, &faces, None, "box")?;
-    Ok(json!({ "handles": hexes(&hs), "group": group, "faces": hs.len(), "message": format!("Box created ({} faces, group {group}).", hs.len()) }))
+fn solid_json(s: &mut Session, faces: std::result::Result<Vec<Face>, mesh::MeshError>, cmd: &str, label: &str) -> Result<Value> {
+    let faces = faces.map_err(|e| err(cmd, e))?;
+    let (hs, group) = add_solid(s, &faces, None, cmd)?;
+    Ok(
+        json!({ "handles": hexes(&hs), "group": group, "faces": hs.len(), "message": format!("{label} created ({} faces, group {group}).", hs.len()) }),
+    )
 }
 
-fn run_box(s: &mut Session, p: &Value) -> Result<Value> {
-    let corner = point3(p, "corner").ok_or_else(|| err("box", "`corner` ([x, y, z?]) is required"))?;
-    let height = number_req("box", p, "height")?;
+fn block_at(s: &mut Session, corner: Vec3, size: Vec3, wedge: bool) -> Result<Value> {
+    if wedge { solid_json(s, mesh::wedge(corner, size), "wedge", "Wedge") } else { solid_json(s, mesh::box_faces(corner, size), "box", "Box") }
+}
+
+fn run_block(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let corner = point3(p, "corner").ok_or_else(|| err(cmd, "`corner` ([x, y, z?]) is required"))?;
+    let height = number_req(cmd, p, "height")?;
     let (dx, dy) = if let Some(c2) = p.get("corner2").and_then(point_value) {
         (c2.x - corner.x, c2.y - corner.y)
     } else {
-        (number_req("box", p, "length").map_err(|_| err("box", "`corner2` or `length` and `width` are required"))?, number_req("box", p, "width")?)
+        (number_req(cmd, p, "length").map_err(|_| err(cmd, "`corner2` or `length` and `width` are required"))?, number_req(cmd, p, "width")?)
     };
-    box_at(s, corner, Vec3::new(dx, dy, height))
+    block_at(s, corner, Vec3::new(dx, dy, height), cmd == "wedge")
 }
 
-#[derive(Default)]
+fn run_box(s: &mut Session, p: &Value) -> Result<Value> {
+    run_block(s, p, "box")
+}
+
+fn run_wedge(s: &mut Session, p: &Value) -> Result<Value> {
+    run_block(s, p, "wedge")
+}
+
 struct BoxM {
+    wedge: bool,
     first: Option<Vec2>,
     second: Option<Vec2>,
 }
 
+impl BoxM {
+    fn new(wedge: bool) -> Self {
+        BoxM { wedge, first: None, second: None }
+    }
+}
+
 impl Interactive for BoxM {
     fn name(&self) -> &'static str {
-        "BOX"
+        if self.wedge { "WEDGE" } else { "BOX" }
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         match (self.first, self.second) {
@@ -138,7 +178,7 @@ impl Interactive for BoxM {
                 }
                 .filter(|h| h.is_finite() && *h != 0.0)
                 .ok_or_else(|| EngineError::Other("Requires a non-zero height.".into()))?;
-                box_at(s, a.to3(0.0), Vec3::new(b.x - a.x, b.y - a.y, h))?;
+                block_at(s, a.to3(0.0), Vec3::new(b.x - a.x, b.y - a.y, h), self.wedge)?;
                 return Ok(Step::Done);
             }
             _ => {}
@@ -154,50 +194,149 @@ impl Interactive for BoxM {
     }
 }
 
-// ---------------------------------------------------------------------------------- CYLINDER
+// ---------------------------------------------------------------------------------- CYLINDER, CONE, PYRAMID, SPHERE, TORUS
+
+/// Sides around a round shape: `key` when given (a whole number the geometry then checks), else
+/// from the chord `tolerance` (default radius/1000), at most `cap`.
+fn segs(cmd: &str, p: &Value, key: &str, radius: f64, cap: usize) -> Result<usize> {
+    match p.get(key) {
+        None | Some(Value::Null) => {
+            let tol = size_param(cmd, p, "tolerance", false)?.unwrap_or(radius.abs() * 1e-3);
+            Ok(mesh::circle_segments(radius.abs(), tol).min(cap))
+        }
+        Some(v) => v.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| err(cmd, format!("`{key}` must be a whole number"))),
+    }
+}
+
+fn centre_radius(p: &Value, cmd: &str) -> Result<(Vec3, f64)> {
+    Ok((point3(p, "center").ok_or_else(|| err(cmd, "`center` ([x, y, z?]) is required"))?, number_req(cmd, p, "radius")?))
+}
 
 fn cylinder_at(s: &mut Session, center: Vec3, radius: f64, height: f64, segments: usize) -> Result<Value> {
-    let faces = mesh::cylinder(center, radius, height, segments).map_err(|e| err("cylinder", e))?;
-    let (hs, group) = add_solid(s, &faces, None, "cylinder")?;
-    Ok(
-        json!({ "handles": hexes(&hs), "group": group, "faces": hs.len(), "message": format!("Cylinder created ({} faces, group {group}).", hs.len()) }),
-    )
+    solid_json(s, mesh::cylinder(center, radius, height, segments), "cylinder", "Cylinder")
 }
 
 fn run_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
-    let center = point3(p, "center").ok_or_else(|| err("cylinder", "`center` ([x, y, z?]) is required"))?;
-    let radius = number_req("cylinder", p, "radius")?;
+    let (center, radius) = centre_radius(p, "cylinder")?;
     let height = number_req("cylinder", p, "height")?;
-    let segments = match p.get("segments") {
-        None | Some(Value::Null) => {
-            let tol = size_param("cylinder", p, "tolerance", false)?.unwrap_or(radius.abs() * 1e-3);
-            mesh::circle_segments(radius.abs(), tol)
-        }
-        Some(v) => {
-            v.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| err("cylinder", "`segments` must be a whole number from 3 to 1024"))?
-        }
-    };
-    cylinder_at(s, center, radius, height, segments)
+    let n = segs("cylinder", p, "segments", radius, mesh::MAX_SEGMENTS)?;
+    cylinder_at(s, center, radius, height, n)
 }
 
-#[derive(Default)]
-struct CylinderM {
+fn run_cone(s: &mut Session, p: &Value) -> Result<Value> {
+    let (center, radius) = centre_radius(p, "cone")?;
+    let height = number_req("cone", p, "height")?;
+    let top = size_param("cone", p, "topRadius", true)?.unwrap_or(0.0);
+    let n = segs("cone", p, "segments", radius, mesh::MAX_SEGMENTS)?;
+    solid_json(s, mesh::frustum(center, radius, top, height, n), "cone", "Cone")
+}
+
+fn run_pyramid(s: &mut Session, p: &Value) -> Result<Value> {
+    let (center, radius) = centre_radius(p, "pyramid")?;
+    let height = number_req("pyramid", p, "height")?;
+    let top = size_param("pyramid", p, "topRadius", true)?.unwrap_or(0.0);
+    let sides = match p.get("sides") {
+        None | Some(Value::Null) => 4,
+        Some(v) => v.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| err("pyramid", "`sides` must be a whole number from 3 to 1024"))?,
+    };
+    solid_json(s, mesh::frustum(center, radius, top, height, sides), "pyramid", "Pyramid")
+}
+
+fn run_sphere(s: &mut Session, p: &Value) -> Result<Value> {
+    let (center, radius) = centre_radius(p, "sphere")?;
+    let n = segs("sphere", p, "segments", radius, 256)?;
+    solid_json(s, mesh::sphere(center, radius, n), "sphere", "Sphere")
+}
+
+fn run_torus(s: &mut Session, p: &Value) -> Result<Value> {
+    let (center, radius) = centre_radius(p, "torus")?;
+    let tube = number_req("torus", p, "tubeRadius")?;
+    let n = segs("torus", p, "segments", radius + tube.abs(), 256)?;
+    let k = segs("torus", p, "tubeSegments", tube, 128)?;
+    solid_json(s, mesh::torus(center, radius, tube, n, k), "torus", "Torus")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Radial {
+    Cylinder,
+    Cone,
+    Pyramid,
+    Sphere,
+    Torus,
+}
+
+struct RadialM {
+    kind: Radial,
     center: Option<Vec2>,
     radius: Option<f64>,
+    sides: usize,
+    asking_sides: bool,
 }
 
-impl Interactive for CylinderM {
+impl RadialM {
+    fn new(kind: Radial) -> Self {
+        RadialM { kind, center: None, radius: None, sides: 4, asking_sides: false }
+    }
+    fn has_height(&self) -> bool {
+        matches!(self.kind, Radial::Cylinder | Radial::Cone | Radial::Pyramid)
+    }
+    /// Make the solid; `last` is the height, or the tube radius of a torus.
+    fn finish(&self, s: &mut Session, c: Vec2, r: f64, last: f64) -> Result<Step> {
+        let ctr = c.to3(0.0);
+        let n = mesh::circle_segments(r, r * 1e-3);
+        match self.kind {
+            Radial::Cylinder => cylinder_at(s, ctr, r, last, n)?,
+            Radial::Cone => solid_json(s, mesh::frustum(ctr, r, 0.0, last, n), "cone", "Cone")?,
+            Radial::Pyramid => solid_json(s, mesh::frustum(ctr, r, 0.0, last, self.sides), "pyramid", "Pyramid")?,
+            Radial::Sphere => solid_json(s, mesh::sphere(ctr, r, n.min(256)), "sphere", "Sphere")?,
+            Radial::Torus => {
+                let ring = mesh::circle_segments(r + last, (r + last) * 1e-3).min(256);
+                solid_json(s, mesh::torus(ctr, r, last, ring, mesh::circle_segments(last, last * 1e-3).min(128)), "torus", "Torus")?
+            }
+        };
+        Ok(Step::Done)
+    }
+}
+
+impl Interactive for RadialM {
     fn name(&self) -> &'static str {
-        "CYLINDER"
+        match self.kind {
+            Radial::Cylinder => "CYLINDER",
+            Radial::Cone => "CONE",
+            Radial::Pyramid => "PYRAMID",
+            Radial::Sphere => "SPHERE",
+            Radial::Torus => "TORUS",
+        }
     }
     fn prompt(&self, _s: &Session) -> Prompt {
+        if self.asking_sides {
+            return Prompt::new("Enter number of sides", Accept::NUMBER).default(self.sides.to_string());
+        }
+        let on_base = self.has_height();
         match (self.center, self.radius) {
-            (None, _) => Prompt::new("Specify center point of base", Accept::POINT),
-            (Some(c), None) => Prompt::new("Specify base radius", Accept::POINT_OR_NUMBER).base(c),
-            (Some(c), Some(_)) => Prompt::new("Specify height", Accept::POINT_OR_NUMBER).base(c),
+            (None, _) => Prompt::new(if on_base { "Specify center point of base" } else { "Specify center point" }, Accept::POINT),
+            (Some(c), None) => {
+                let msg = if on_base { "Specify base radius" } else { "Specify radius" };
+                if self.kind == Radial::Pyramid {
+                    Prompt::new("Specify base radius or", Accept::POINT_OR_NUMBER).kw(&["Sides"]).base(c)
+                } else {
+                    Prompt::new(msg, Accept::POINT_OR_NUMBER).base(c)
+                }
+            }
+            (Some(c), Some(_)) => Prompt::new(if on_base { "Specify height" } else { "Specify tube radius" }, Accept::POINT_OR_NUMBER).base(c),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.asking_sides {
+            if let Input::Text(t) = &i {
+                let n = number(t)
+                    .filter(|n| n.fract() == 0.0 && (3.0..=1024.0).contains(n))
+                    .ok_or_else(|| EngineError::Other("Requires a whole number from 3 to 1024.".into()))?;
+                self.sides = n as usize;
+            }
+            self.asking_sides = false;
+            return Ok(Step::Continue);
+        }
         let dist = |i: &Input, c: Vec2| match i {
             Input::Text(t) => number(t),
             Input::Point(p) => Some(c.dist(*p)),
@@ -210,13 +349,24 @@ impl Interactive for CylinderM {
                 }
             }
             (Some(c), None) => {
+                if let Input::Keyword(k) = &i
+                    && k == "Sides"
+                {
+                    self.asking_sides = true;
+                    return Ok(Step::Continue);
+                }
                 let r = dist(&i, c).filter(|r| r.is_finite() && *r > 0.0).ok_or_else(|| EngineError::Other("Requires a positive radius.".into()))?;
                 self.radius = Some(r);
+                if self.kind == Radial::Sphere {
+                    return self.finish(s, c, r, 0.0);
+                }
             }
             (Some(c), Some(r)) => {
-                let h = dist(&i, c).filter(|h| h.is_finite() && *h != 0.0).ok_or_else(|| EngineError::Other("Requires a non-zero height.".into()))?;
-                cylinder_at(s, c.to3(0.0), r, h, mesh::circle_segments(r, r * 1e-3))?;
-                return Ok(Step::Done);
+                let (what, need_sign) = if self.has_height() { ("a non-zero height", true) } else { ("a positive tube radius", false) };
+                let v = dist(&i, c)
+                    .filter(|v| v.is_finite() && if need_sign { *v != 0.0 } else { *v > 0.0 })
+                    .ok_or_else(|| EngineError::Other(format!("Requires {what}.")))?;
+                return self.finish(s, c, r, v);
             }
         }
         Ok(Step::Continue)

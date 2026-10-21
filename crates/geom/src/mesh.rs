@@ -515,6 +515,178 @@ pub fn cylinder(center: Vec3, radius: f64, height: f64, segments: usize) -> Resu
     prism(&poly, lo, hi, Some(c))
 }
 
+// ------------------------------------------------------------------ more primitives
+
+/// Most faces any primitive returns.
+pub const MAX_FACES: usize = 50_000;
+
+fn too_many(faces: usize) -> Result<(), MeshError> {
+    if faces > MAX_FACES { Err(MeshError::Size("the solid would have too many faces: use fewer segments")) } else { Ok(()) }
+}
+
+/// The face with its winding reversed (and its invisible-edge bits following the edges).
+fn flipped(f: &Face) -> Face {
+    let [a, b, c, d] = f.corners;
+    let h = f.hidden;
+    let bit = |mask: u8, to: u8| if h & mask != 0 { to } else { 0 };
+    if c == d {
+        Face { corners: [a, c, b, b], hidden: bit(8, 1) | bit(2, 2) | 4 | bit(1, 8) }
+    } else {
+        Face { corners: [a, d, c, b], hidden: bit(8, 1) | bit(4, 2) | bit(2, 4) | bit(1, 8) }
+    }
+}
+
+/// Make every face wind counter-clockwise seen from outside. `inside(p)` is a point inside the
+/// solid near `p` (the axis point for a convex solid, the tube centre for a torus).
+fn outward(faces: Vec<Face>, inside: impl Fn(Vec3) -> Vec3) -> Vec<Face> {
+    faces
+        .into_iter()
+        .map(|f| {
+            let [a, b, c, d] = f.corners;
+            let (centre, normal) =
+                if c == d { ((a + b + c) * (1.0 / 3.0), (b - a).cross(c - a)) } else { ((a + b + c + d) * 0.25, (c - a).cross(d - b)) };
+            if normal.dot(centre - inside(centre)) < 0.0 { flipped(&f) } else { f }
+        })
+        .collect()
+}
+
+fn base_checks(center: Vec3, radius: f64, height: f64) -> Result<(), MeshError> {
+    if !center.is_finite() || !radius.is_finite() || !height.is_finite() {
+        return Err(MeshError::Size("the centre, radius and height must be numbers"));
+    }
+    if radius <= EPS {
+        return Err(MeshError::Size("the radius must be greater than zero"));
+    }
+    if height.abs() <= EPS * (1.0 + center.z.abs()) {
+        return Err(MeshError::Size("the height must not be zero"));
+    }
+    Ok(())
+}
+
+/// A wedge (a triangular prism standing on a rectangle): the base runs from `corner` by
+/// `size.x` and `size.y`, the tall end is at the corner's X and it slopes down to the other end.
+/// `size.z` is the height (downwards when negative). No size is zero.
+pub fn wedge(corner: Vec3, size: Vec3) -> Result<Vec<Face>, MeshError> {
+    if !corner.is_finite() || !size.is_finite() {
+        return Err(MeshError::Size("the corner and the size must be numbers"));
+    }
+    if size.x.abs() <= EPS || size.y.abs() <= EPS {
+        return Err(MeshError::Size("the length and the width must not be zero"));
+    }
+    let (lo, hi) = z_range(corner.z, size.z)?;
+    let (tx, ox) = (corner.x, corner.x + size.x);
+    let (y0, y1) = (corner.y.min(corner.y + size.y), corner.y.max(corner.y + size.y));
+    let p = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
+    let (p0, p1, p2, p3) = (p(tx, y0, lo), p(ox, y0, lo), p(ox, y1, lo), p(tx, y1, lo));
+    let (t0, t3) = (p(tx, y0, hi), p(tx, y1, hi));
+    let faces = vec![
+        Face { corners: [p0, p1, p2, p3], hidden: 0 },
+        Face { corners: [p0, p3, t3, t0], hidden: 0 },
+        Face { corners: [t0, t3, p2, p1], hidden: 0 },
+        Face { corners: [p0, p1, t0, t0], hidden: 4 },
+        Face { corners: [p2, p3, t3, t3], hidden: 4 },
+    ];
+    let mid = (p0 + p1 + p2 + p3 + t0 + t3) * (1.0 / 6.0);
+    Ok(outward(faces, |_| mid))
+}
+
+/// A cone, pyramid or their frusta: a regular polygon of `sides` corners (3 to
+/// [`MAX_SEGMENTS`]) with circumradius `radius` on `center`, rising `height` (downwards when
+/// negative) to a polygon of circumradius `top_radius`, or to a point when that is zero.
+pub fn frustum(center: Vec3, radius: f64, top_radius: f64, height: f64, sides: usize) -> Result<Vec<Face>, MeshError> {
+    base_checks(center, radius, height)?;
+    if !top_radius.is_finite() || top_radius < 0.0 {
+        return Err(MeshError::Size("the top radius must be zero or greater"));
+    }
+    if !(3..=MAX_SEGMENTS).contains(&sides) {
+        return Err(MeshError::Size("the base needs between 3 and 1024 sides"));
+    }
+    let top = top_radius > EPS;
+    let c = center.xy();
+    let z1 = center.z + height;
+    let ring = |r: f64, z: f64| -> Vec<Vec3> { (0..sides).map(|i| Vec2::polar(c, r, TAU * i as f64 / sides as f64).to3(z)).collect() };
+    let (base, upper) = (ring(radius, center.z), ring(top_radius, z1));
+    let apex = Vec3::new(c.x, c.y, z1);
+    let mut faces: Vec<Face> = Vec::with_capacity(sides * 3);
+    for i in 0..sides {
+        let j = (i + 1) % sides;
+        let (Some(&a0), Some(&b0), Some(&a1), Some(&b1)) = (base.get(i), base.get(j), upper.get(i), upper.get(j)) else { continue };
+        if top {
+            faces.push(Face { corners: [a0, b0, b1, a1], hidden: 0 });
+            faces.push(Face { corners: [Vec3::new(c.x, c.y, z1), a1, b1, b1], hidden: 1 | 4 | 8 });
+        } else {
+            faces.push(Face { corners: [a0, b0, apex, apex], hidden: 4 });
+        }
+        faces.push(Face { corners: [Vec3::new(c.x, c.y, center.z), b0, a0, a0], hidden: 1 | 4 | 8 });
+    }
+    let mid = Vec3::new(c.x, c.y, center.z + height / 2.0);
+    Ok(outward(faces, |_| mid))
+}
+
+/// A UV sphere on `center`: `segments` slices around the Z axis (4 to [`MAX_SEGMENTS`]) and half as
+/// many rings from pole to pole.
+pub fn sphere(center: Vec3, radius: f64, segments: usize) -> Result<Vec<Face>, MeshError> {
+    if !center.is_finite() || !radius.is_finite() {
+        return Err(MeshError::Size("the centre and the radius must be numbers"));
+    }
+    if radius <= EPS {
+        return Err(MeshError::Size("the radius must be greater than zero"));
+    }
+    if !(4..=MAX_SEGMENTS).contains(&segments) {
+        return Err(MeshError::Size("a sphere needs between 4 and 1024 segments"));
+    }
+    let rings = segments / 2;
+    too_many(segments.saturating_mul(rings))?;
+    let pt = |lat: f64, lon: f64| center + Vec3::new(radius * lat.cos() * lon.cos(), radius * lat.cos() * lon.sin(), radius * lat.sin());
+    let lat = |j: usize| -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * j as f64 / rings as f64;
+    let lon = |i: usize| TAU * (i % segments) as f64 / segments as f64;
+    let (south, north) = (center - Vec3::new(0.0, 0.0, radius), center + Vec3::new(0.0, 0.0, radius));
+    let mut faces: Vec<Face> = Vec::with_capacity(segments * rings);
+    for i in 0..segments {
+        faces.push(Face { corners: [south, pt(lat(1), lon(i)), pt(lat(1), lon(i + 1)), pt(lat(1), lon(i + 1))], hidden: 4 });
+        for j in 1..rings.saturating_sub(1) {
+            faces.push(Face { corners: [pt(lat(j), lon(i)), pt(lat(j), lon(i + 1)), pt(lat(j + 1), lon(i + 1)), pt(lat(j + 1), lon(i))], hidden: 0 });
+        }
+        let r = rings.saturating_sub(1);
+        faces.push(Face { corners: [pt(lat(r), lon(i)), pt(lat(r), lon(i + 1)), north, north], hidden: 4 });
+    }
+    Ok(outward(faces, |_| center))
+}
+
+/// A torus on `center` in the XY plane: `radius` from the centre to the middle of the tube,
+/// `tube_radius` of the tube (smaller than `radius`), `segments` around and `tube_segments` around
+/// the tube (3 to [`MAX_SEGMENTS`] each).
+pub fn torus(center: Vec3, radius: f64, tube_radius: f64, segments: usize, tube_segments: usize) -> Result<Vec<Face>, MeshError> {
+    if !center.is_finite() || !radius.is_finite() || !tube_radius.is_finite() {
+        return Err(MeshError::Size("the centre and the radii must be numbers"));
+    }
+    if radius <= EPS || tube_radius <= EPS {
+        return Err(MeshError::Size("the radii must be greater than zero"));
+    }
+    if tube_radius >= radius {
+        return Err(MeshError::Size("the tube radius must be smaller than the torus radius"));
+    }
+    if !(3..=MAX_SEGMENTS).contains(&segments) || !(3..=MAX_SEGMENTS).contains(&tube_segments) {
+        return Err(MeshError::Size("a torus needs between 3 and 1024 segments around and around the tube"));
+    }
+    too_many(segments.saturating_mul(tube_segments))?;
+    let pt = |i: usize, j: usize| {
+        let (th, ph) = (TAU * (i % segments) as f64 / segments as f64, TAU * (j % tube_segments) as f64 / tube_segments as f64);
+        let rr = radius + tube_radius * ph.cos();
+        center + Vec3::new(rr * th.cos(), rr * th.sin(), tube_radius * ph.sin())
+    };
+    let mut faces: Vec<Face> = Vec::with_capacity(segments * tube_segments);
+    for i in 0..segments {
+        for j in 0..tube_segments {
+            faces.push(Face { corners: [pt(i, j), pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1)], hidden: 0 });
+        }
+    }
+    Ok(outward(faces, |p| {
+        let th = (p.y - center.y).atan2(p.x - center.x);
+        center + Vec3::new(radius * th.cos(), radius * th.sin(), 0.0)
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,5 +894,84 @@ mod tests {
         let r = extrude(&pts, 0.0, 1.0);
         assert!(t.elapsed().as_secs() < 20, "took {:?}", t.elapsed());
         assert!(r.is_ok(), "{:?}", r.err());
+    }
+
+    fn poly_area(n: usize, r: f64) -> f64 {
+        0.5 * n as f64 * r * r * (TAU / n as f64).sin()
+    }
+
+    #[test]
+    fn a_wedge_is_half_a_box_and_slopes_away_from_the_corner() {
+        let f = wedge(Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0)).unwrap();
+        assert_eq!(f.len(), 5);
+        assert!((volume(&f) - 0.5 * 4.0 * 5.0 * 6.0).abs() < 1e-9, "{}", volume(&f));
+        // Tall end at the corner's X (1.0), zero height at the far end (5.0).
+        assert!(f.iter().flat_map(|f| f.corners).filter(|c| c.z > 3.0 + 1e-9).all(|c| (c.x - 1.0).abs() < 1e-9));
+        let back = wedge(Vec3::new(5.0, 2.0, 3.0), Vec3::new(-4.0, 5.0, -6.0)).unwrap();
+        assert!((volume(&back) - 60.0).abs() < 1e-9, "negative sizes mirror the wedge: {}", volume(&back));
+        assert!(wedge(Vec3::ZERO, Vec3::new(1.0, 0.0, 1.0)).is_err());
+        assert!(wedge(Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn pyramids_cones_and_their_frusta_have_exact_volumes() {
+        for (n, r0, r1, h) in
+            [(4, 3.0, 0.0, 5.0), (3, 2.0, 0.0, 1.0), (96, 2.0, 0.0, 4.0), (6, 3.0, 1.5, 2.0), (32, 2.0, 2.0, 3.0), (8, 2.0, 3.0, 2.0)]
+        {
+            let f = frustum(Vec3::new(1.0, -1.0, 2.0), r0, r1, h, n).unwrap();
+            let (a0, a1) = (poly_area(n, r0), poly_area(n, r1));
+            let want = h / 3.0 * (a0 + (a0 * a1).sqrt() + a1);
+            assert!((volume(&f) - want).abs() < 1e-9 * want.max(1.0), "n={n} r0={r0} r1={r1}: {} vs {want}", volume(&f));
+            let down = frustum(Vec3::new(1.0, -1.0, 2.0), r0, r1, -h, n).unwrap();
+            assert!((volume(&down) - want).abs() < 1e-9 * want.max(1.0), "downwards: {} vs {want}", volume(&down));
+        }
+        let apex = frustum(Vec3::ZERO, 1.0, 0.0, 1.0, 5).unwrap();
+        assert_eq!(apex.len(), 5 * 2, "side triangles and base fan");
+        assert!(frustum(Vec3::ZERO, 0.0, 0.0, 1.0, 5).is_err());
+        assert!(frustum(Vec3::ZERO, 1.0, -1.0, 1.0, 5).is_err());
+        assert!(frustum(Vec3::ZERO, 1.0, 0.0, 0.0, 5).is_err());
+        assert!(frustum(Vec3::ZERO, 1.0, 0.0, 1.0, 2).is_err());
+        assert!(frustum(Vec3::ZERO, 1.0, 0.0, 1.0, MAX_SEGMENTS + 1).is_err());
+        assert!(frustum(Vec3::ZERO, f64::NAN, 0.0, 1.0, 5).is_err());
+    }
+
+    #[test]
+    fn a_sphere_fills_nearly_four_thirds_pi_r_cubed() {
+        let f = sphere(Vec3::new(5.0, 5.0, 5.0), 3.0, 96).unwrap();
+        let want = 4.0 / 3.0 * PI * 27.0;
+        assert!((volume(&f) - want).abs() / want < 0.01, "{} vs {want}", volume(&f));
+        assert!(f.len() <= MAX_FACES);
+        assert_eq!(sphere(Vec3::ZERO, 1.0, 4).unwrap().len(), 4 * 2, "the smallest sphere is an octahedron");
+        let oct = sphere(Vec3::ZERO, 1.0, 4).unwrap();
+        assert!((volume(&oct) - 4.0 / 3.0).abs() < 1e-9, "{}", volume(&oct));
+        assert!(sphere(Vec3::ZERO, 1.0, 3).is_err());
+        assert!(sphere(Vec3::ZERO, 0.0, 16).is_err());
+        assert!(sphere(Vec3::ZERO, f64::INFINITY, 16).is_err());
+        assert!(sphere(Vec3::ZERO, 1.0, MAX_SEGMENTS).is_err(), "too many faces is refused, not built");
+    }
+
+    #[test]
+    fn a_torus_matches_two_pi_squared_r_r2() {
+        let f = torus(Vec3::new(0.0, 0.0, 1.0), 5.0, 1.5, 96, 48).unwrap();
+        let want = 2.0 * PI * PI * 5.0 * 1.5 * 1.5;
+        assert!((volume(&f) - want).abs() / want < 0.01, "{} vs {want}", volume(&f));
+        assert_eq!(f.len(), 96 * 48);
+        assert!(torus(Vec3::ZERO, 2.0, 2.0, 16, 8).is_err(), "a tube as wide as the ring crosses itself");
+        assert!(torus(Vec3::ZERO, 2.0, 3.0, 16, 8).is_err());
+        assert!(torus(Vec3::ZERO, 2.0, 0.0, 16, 8).is_err());
+        assert!(torus(Vec3::ZERO, 2.0, 1.0, 2, 8).is_err());
+        assert!(torus(Vec3::ZERO, 2.0, 1.0, 16, MAX_SEGMENTS + 1).is_err());
+        assert!(torus(Vec3::ZERO, 2.0, 1.0, MAX_SEGMENTS, MAX_SEGMENTS).is_err());
+        assert!(torus(Vec3::ZERO, f64::NAN, 1.0, 16, 8).is_err());
+    }
+
+    #[test]
+    fn flipping_keeps_the_invisible_edges_on_their_edges() {
+        let (ex, ey) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let q = Face { corners: [Vec3::ZERO, ex, Vec3::new(1.0, 1.0, 0.0), ey], hidden: 1 };
+        assert_eq!(flipped(&q).hidden, 8, "edge a-b becomes the closing edge b-a");
+        assert_eq!(flipped(&flipped(&q)), q);
+        let t = Face { corners: [Vec3::ZERO, ex, ey, ey], hidden: 2 | 4 };
+        assert_eq!(flipped(&flipped(&t)), t);
     }
 }
