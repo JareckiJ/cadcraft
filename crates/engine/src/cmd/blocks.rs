@@ -44,7 +44,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .params(
                 "{tag, prompt?, default?, at | below: true (one line under the previous definition, with its text settings), \
                  height? (default: the style's fixed height, else TEXTSIZE), rotation? (degrees), \
-                 justify?: L|C|R|A|M|F|TL|TC|TR|ML|MC|MR|BL|BC|BR, style? (default: the current style), \
+                 justify?: L|C|R|A|M|F|TL|TC|TR|ML|MC|MR|BL|BC|BR, end? (A and F: the baseline's second endpoint; \
+                 default: the tag's own width along rotation), style? (default: the current style), \
                  invisible?, constant?, verify?, preset?, lockPosition?}",
             )
             .interactive(|_| Ok(Box::new(AttdefM::default()))),
@@ -320,6 +321,42 @@ struct AttdefSpec {
     invisible: bool,
     constant: bool,
     modes: AttribModes,
+    /// Align and Fit: the baseline's second endpoint (`at` is the first); [`AttdefSpec::baseline`]
+    /// fills it in when none was given.
+    end: Option<Vec2>,
+}
+
+impl AttdefSpec {
+    /// An aligned or fit definition's baseline, as AutoCAD stores it: with a typed second endpoint,
+    /// the baseline's angle and the height (Align) or width factor (Fit) that make the tag span it;
+    /// without one, the tag at its own size along the rotation.
+    fn baseline(&mut self, s: &Session) -> Result<()> {
+        if !super::draw::spans_baseline(self.justify.0) {
+            self.end = None;
+            return Ok(());
+        }
+        let d = s.doc()?;
+        let style = d.text_style(&self.style);
+        let tag = self.tag.to_ascii_uppercase();
+        let Some(end) = self.end else {
+            self.end = Some(super::draw::baseline_end(style, &tag, self.height, self.width_factor, self.at, self.rotation));
+            return Ok(());
+        };
+        let len = self.at.dist(end);
+        if !len.is_finite() || len <= 1e-9 {
+            return Err(bad("attdef", "the baseline's two endpoints must differ"));
+        }
+        self.rotation = self.at.angle_to(end);
+        let w = super::draw::styled_width(style, &tag, self.height, self.width_factor);
+        if w.is_finite() && w > 1e-9 {
+            if self.justify.0 == HAlign::Aligned {
+                self.height *= len / w;
+            } else {
+                self.width_factor *= len / w;
+            }
+        }
+        Ok(())
+    }
 }
 
 fn attdef_kind(a: &AttdefSpec) -> EntityKind {
@@ -329,7 +366,7 @@ fn attdef_kind(a: &AttdefSpec) -> EntityKind {
         tag: a.tag.to_ascii_uppercase(),
         text: Text {
             insert: v3(a.at),
-            align_pt: if left { None } else { Some(v3(a.at)) },
+            align_pt: if left { None } else { Some(v3(a.end.filter(|_| super::draw::spans_baseline(h)).unwrap_or(a.at))) },
             height: a.height,
             value: a.default.clone(),
             rotation: a.rotation,
@@ -426,8 +463,9 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
         invisible: bool_or(p, "invisible", false),
         constant,
         modes,
+        end: None,
     };
-    let spec = if bool_or(p, "below", false) {
+    let mut spec = if bool_or(p, "below", false) {
         let prev = previous_attdef(s).ok_or_else(|| bad("attdef", "no attribute definition to align below"))?;
         let t = &prev.text;
         texts(below_point(t), t.height, t.rotation, (t.halign, t.valign), t.style.clone(), t.width_factor, t.oblique)
@@ -444,8 +482,13 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
             None if fixed > 0.0 => fixed,
             None => s.doc()?.header.f64("TEXTSIZE", 0.2),
         };
-        texts(at, height, f64_or(p, "rotation", 0.0).to_radians(), justify, style, width_factor, oblique)
+        let end = point_param(p, "end");
+        if end.is_some() && !super::draw::spans_baseline(justify.0) {
+            return Err(bad("attdef", "`end` is for the A and F justifications"));
+        }
+        AttdefSpec { end, ..texts(at, height, f64_or(p, "rotation", 0.0).to_radians(), justify, style, width_factor, oblique) }
     };
+    spec.baseline(s)?;
     Ok(json!({ "handle": s.add_entity(attdef_kind(&spec))?.hex() }))
 }
 
@@ -954,8 +997,9 @@ enum AttdefAsk {
 }
 
 /// ATTDEF at the command line, as -ATTDEF asks: the modes, the tag, prompt and default, then the
-/// start point (with Justify and Style), height and rotation. The Attribute Definition dialog
-/// answers everything but the start point through [`Session::attdef_answers`].
+/// start point (with Justify and Style), height and rotation; Align asks the baseline's two
+/// endpoints instead, Fit its endpoints and the height. The Attribute Definition dialog answers
+/// everything but the points through [`Session::attdef_answers`].
 #[derive(Default)]
 struct AttdefM {
     /// Enter at the modes question.
@@ -967,14 +1011,20 @@ struct AttdefM {
     prompt: Option<String>,
     default: Option<String>,
     at: Option<Vec2>,
+    /// Align and Fit: the baseline's second endpoint.
+    end: Option<Vec2>,
     justify: Option<(HAlign, VAlign)>,
     /// Chosen with the Style option; else the current style when the definition is made.
     style: Option<String>,
     height: Option<f64>,
     /// Radians.
     rotation: Option<f64>,
+    /// Taken from the previous definition (Enter at the start point); else the style's.
+    width_factor: Option<f64>,
+    /// Radians; as `width_factor`.
+    oblique: Option<f64>,
     ask: Option<AttdefAsk>,
-    /// The dialog answered: after the start point nothing more is asked.
+    /// The dialog answered: after the points nothing more is asked.
     from_dialog: bool,
 }
 
@@ -984,6 +1034,11 @@ const JUSTIFY_OPTIONS: [&str; 15] = ["Left", "Center", "Right", "Align", "Middle
 impl AttdefM {
     fn justify(&self) -> (HAlign, VAlign) {
         self.justify.unwrap_or((HAlign::Left, VAlign::Baseline))
+    }
+
+    /// Align or Fit: the baseline's second endpoint is asked after the first.
+    fn spans(&self) -> bool {
+        super::draw::spans_baseline(self.justify().0)
     }
 
     fn modes_line(&self) -> String {
@@ -1062,7 +1117,7 @@ impl AttdefM {
             None if fixed > 0.0 => fixed,
             None => s.doc()?.header.f64("TEXTSIZE", 0.2),
         };
-        let spec = AttdefSpec {
+        let mut spec = AttdefSpec {
             tag: self.tag.clone().unwrap_or_default(),
             prompt: self.prompt.clone().unwrap_or_default(),
             default: self.default.clone().unwrap_or_default(),
@@ -1071,12 +1126,14 @@ impl AttdefM {
             rotation: self.rotation.unwrap_or(0.0),
             justify: self.justify(),
             style,
-            width_factor,
-            oblique,
+            width_factor: self.width_factor.unwrap_or(width_factor),
+            oblique: self.oblique.unwrap_or(oblique),
             invisible: self.invisible,
             constant: self.constant,
             modes: self.modes,
+            end: self.end,
         };
+        spec.baseline(s)?;
         s.add_entity(attdef_kind(&spec))?;
         Ok(Step::Done)
     }
@@ -1118,7 +1175,9 @@ impl Interactive for AttdefM {
         }
         let th = s.doc().map(|d| d.header.f64("TEXTSIZE", 0.2)).unwrap_or(0.2);
         match (self.at, self.height) {
+            (None, _) if self.spans() => Prompt::new("Specify first endpoint of text baseline", Accept::POINT).kw(&["Justify", "Style"]),
             (None, _) => Prompt::new("Specify start point of text", Accept::POINT).kw(&["Justify", "Style"]),
+            (Some(a), _) if self.spans() && self.end.is_none() => Prompt::new("Specify second endpoint of text baseline", Accept::POINT).base(a),
             (Some(a), None) => Prompt::new("Specify height", Accept::POINT_OR_NUMBER).default(format!("{th:.4}")).base(a),
             (Some(a), Some(_)) => Prompt::new("Specify rotation angle of text", Accept::POINT_OR_NUMBER).default("0").base(a),
         }
@@ -1200,13 +1259,29 @@ impl Interactive for AttdefM {
             }
             return Ok(Step::Continue);
         }
+        if let Some(a) = self.at
+            && self.spans()
+            && self.end.is_none()
+        {
+            if let Input::Point(p) = i {
+                if a.dist(p) <= 1e-9 {
+                    return Err(EngineError::Other("The second endpoint must differ from the first.".into()));
+                }
+                self.end = Some(p);
+                // Align takes its height from the baseline; Fit asks it unless it is known.
+                if self.from_dialog || self.height.is_some() || self.justify().0 == HAlign::Aligned {
+                    return self.finish(s);
+                }
+            }
+            return Ok(Step::Continue);
+        }
         let th = s.doc()?.header.f64("TEXTSIZE", 0.2);
         match (self.at, self.height, i) {
             (None, _, Input::Keyword(k)) if k == "Justify" => self.ask = Some(AttdefAsk::Justify),
             (None, _, Input::Keyword(k)) if k == "Style" => self.ask = Some(AttdefAsk::Style),
             (None, _, Input::Point(p)) => {
                 self.at = Some(p);
-                if self.from_dialog {
+                if self.from_dialog && !self.spans() {
                     return self.finish(s);
                 }
                 // A fixed-height style sets the height; only the rotation is asked.
@@ -1227,6 +1302,8 @@ impl Interactive for AttdefM {
                 self.style = Some(t.style.clone());
                 self.height = Some(t.height);
                 self.rotation = Some(t.rotation);
+                self.width_factor = Some(t.width_factor);
+                self.oblique = Some(t.oblique);
                 return self.finish(s);
             }
             (Some(_), None, Input::Enter) => self.height = Some(th),
@@ -1249,6 +1326,10 @@ impl Interactive for AttdefM {
                 return self.finish(s);
             }
             _ => {}
+        }
+        // Fit: the height was the last question (its angle is the baseline's).
+        if self.spans() && self.end.is_some() && self.height.is_some() {
+            return self.finish(s);
         }
         Ok(Step::Continue)
     }

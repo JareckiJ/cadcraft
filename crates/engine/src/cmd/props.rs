@@ -205,6 +205,8 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         .transpose()?;
     let dim_over = dim_overrides(p)?;
     let attdef = attdef_fields(p, d)?;
+    // Aligned and fit text get a baseline as long as the text is in its style's font.
+    let styles = d.text_styles.clone();
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {
@@ -326,17 +328,11 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
                         a.text.width_factor = x;
                     }
-                    if let Some((h, v)) = attdef.justify {
-                        // The point the text is placed by stays; the text re-justifies about it.
-                        let at = a.text.justify_point();
-                        let at = Vec3 { x: at.x, y: at.y, z: a.text.insert.z };
-                        a.text.halign = h;
-                        a.text.valign = v;
-                        a.text.insert = at;
-                        a.text.align_pt = if h == HAlign::Left && v == VAlign::Baseline { None } else { Some(at) };
-                    }
                     if let Some(st) = &attdef.style {
                         a.text.style.clone_from(st);
+                    }
+                    if let Some((h, v)) = attdef.justify {
+                        rejustify(&mut a.text, h, v, &a.tag, &styles);
                     }
                     if let Some(to) = p.get("position").and_then(point_value) {
                         let d = to - a.text.justify_point();
@@ -1126,6 +1122,40 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()
+}
+
+/// Give `t` justification (`h`, `v`): the point the text is placed by stays, the text re-justifies
+/// about it. Aligned and fit text, which take their angle from their two points, keep it when they
+/// become another justification; text that becomes aligned or fit gets a baseline as long as
+/// `shown` (what is drawn: the value, or a definition's tag) in its style's font, along its
+/// rotation, so it keeps its size and angle.
+fn rejustify(t: &mut cadcraft_doc::Text, h: HAlign, v: VAlign, shown: &str, styles: &[cadcraft_doc::TextStyle]) {
+    use super::draw::spans_baseline;
+    let was = t.halign;
+    if spans_baseline(was)
+        && let Some(p) = t.align_pt
+        && t.insert.xy().dist(p.xy()) > 1e-9
+    {
+        t.rotation = t.insert.xy().angle_to(p.xy());
+    }
+    let at = t.justify_point();
+    let at = Vec3 { x: at.x, y: at.y, z: t.insert.z };
+    // Align ↔ Fit: the baseline stays.
+    let keeps_baseline = spans_baseline(was) && spans_baseline(h) && t.align_pt.is_some_and(|p| at.xy().dist(p.xy()) > 1e-9);
+    t.halign = h;
+    t.valign = v;
+    t.insert = at;
+    t.align_pt = if h == HAlign::Left && v == VAlign::Baseline {
+        None
+    } else if keeps_baseline {
+        t.align_pt
+    } else if spans_baseline(h) {
+        let style = styles.iter().find(|st| st.name.eq_ignore_ascii_case(&t.style));
+        let end = super::draw::baseline_end(style, shown, t.height, t.width_factor, at.xy(), t.rotation);
+        Some(Vec3 { x: end.x, y: end.y, z: at.z })
+    } else {
+        Some(at)
+    };
 }
 
 /// `properties.set`'s attribute definition fields that can be wrong, checked before anything

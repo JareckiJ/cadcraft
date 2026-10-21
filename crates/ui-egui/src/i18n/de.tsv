@@ -1066,3 +1066,5 @@
 	Bottom right	Unten rechts
 justify	Center	Zentriert
 justify	Align	Ausgerichtet
+	Specify first endpoint of text baseline	Geben Sie den ersten Endpunkt der Text-Basislinie an
+	Specify second endpoint of text baseline	Geben Sie den zweiten Endpunkt der Text-Basislinie an

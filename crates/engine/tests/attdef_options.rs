@@ -1,6 +1,6 @@
 //! ATTDEF beyond tag, prompt and default: justification, text style, rotation and the modes,
-//! typed (-ATTDEF) and as JSON; Enter at the start point puts the definition under the previous
-//! one; `properties.set` edits a definition's fields.
+//! typed (-ATTDEF) and as JSON; Align and Fit span a baseline of two points; Enter at the start
+//! point puts the definition under the previous one; `properties.set` edits a definition's fields.
 
 use cadcraft_engine::doc::{Attrib, EntityKind, HAlign, Handle, VAlign};
 use cadcraft_engine::geom::Vec2;
@@ -21,6 +21,21 @@ fn attdefs(s: &Session) -> Vec<Attrib> {
 
 fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
+}
+
+/// How long a definition's tag is drawn with its stored height and width factor, left-justified
+/// and unrotated: an aligned or fit definition stores the values that make it span its baseline.
+fn drawn_width(s: &Session, a: &Attrib) -> f64 {
+    let mut t = a.text.clone();
+    (t.halign, t.valign, t.align_pt, t.rotation) = (HAlign::Left, VAlign::Baseline, None, 0.0);
+    let (_, b) = cadcraft_engine::render::place_text_entity(s.doc().unwrap(), &t, &a.tag);
+    b.max.x - b.min.x
+}
+
+/// Where a definition is drawn, as it is drawn.
+fn drawn_bounds(s: &Session, a: &Attrib) -> [f64; 4] {
+    let (_, b) = cadcraft_engine::render::place_text_entity(s.doc().unwrap(), &a.text, &a.tag);
+    [b.min.x, b.min.y, b.max.x, b.max.y]
 }
 
 #[test]
@@ -203,4 +218,139 @@ fn properties_set_edits_a_definition() {
         assert!(set(&mut s, bad.clone()).is_err(), "{bad}");
     }
     assert_eq!(attdefs(&s)[0].tag, "B", "nothing changed by a refused call");
+}
+
+#[test]
+fn typed_align_and_fit_ask_the_baselines_two_endpoints() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "TEXTSIZE", "value": 2.0})).unwrap();
+    s.start("-attdef").unwrap();
+    for i in [Input::Enter, Input::Text("A".into()), Input::Text("a?".into()), Input::Text("x".into()), Input::Keyword("Justify".into())] {
+        s.input(i).unwrap();
+    }
+    s.input(Input::Keyword("Align".into())).unwrap();
+    assert!(s.prompt_text().contains("first endpoint of text baseline"), "{}", s.prompt_text());
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    assert!(s.prompt_text().contains("second endpoint of text baseline"), "{}", s.prompt_text());
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    assert!(s.log.last().is_some_and(|l| l.contains("must differ")), "{:?}", s.log.last());
+    assert!(s.prompt_text().contains("second endpoint"), "{}", s.prompt_text());
+    // Align asks no height and no rotation: both come from the baseline.
+    s.input(Input::Point(Vec2::new(20.0, 0.0))).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let a = &attdefs(&s)[0];
+    assert_eq!(a.text.halign, HAlign::Aligned);
+    assert_eq!(((a.text.insert.x, a.text.insert.y), a.text.align_pt.map(|p| (p.x, p.y))), ((0.0, 0.0), Some((20.0, 0.0))));
+    assert!(near(a.text.rotation, 0.0));
+    assert!((drawn_width(&s, a) - 20.0).abs() < 1e-6, "the height spans the tag over the baseline: {}", drawn_width(&s, a));
+
+    // Fit: the two endpoints, then the height; the width factor spans the baseline.
+    s.start("-attdef").unwrap();
+    for i in [Input::Enter, Input::Text("F".into()), Input::Text("f?".into()), Input::Text("y".into()), Input::Keyword("Justify".into())] {
+        s.input(i).unwrap();
+    }
+    s.input(Input::Keyword("Fit".into())).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 15.0))).unwrap();
+    assert!(s.prompt_text().contains("height"), "{}", s.prompt_text());
+    s.input(Input::Text("3".into())).unwrap();
+    assert!(s.running.is_none(), "no rotation is asked: {}", s.prompt_text());
+    let f = &attdefs(&s)[1];
+    assert_eq!((f.text.halign, f.text.height), (HAlign::Fit, 3.0));
+    assert_eq!(f.text.align_pt.map(|p| (p.x, p.y)), Some((5.0, 15.0)));
+    assert!(near(f.text.rotation, std::f64::consts::FRAC_PI_2), "the baseline's angle");
+    assert!((drawn_width(&s, f) - 10.0).abs() < 1e-6, "{}", drawn_width(&s, f));
+}
+
+#[test]
+fn json_align_and_fit_span_their_end_or_keep_their_size() {
+    let mut s = Session::new();
+    s.execute("attdef", &json!({"tag": "A", "at": [0, 0], "justify": "A", "end": [0, 30]})).unwrap();
+    let a = &attdefs(&s)[0];
+    assert_eq!(a.text.align_pt.map(|p| (p.x, p.y)), Some((0.0, 30.0)));
+    assert!(near(a.text.rotation, std::f64::consts::FRAC_PI_2));
+    assert!((drawn_width(&s, a) - 30.0).abs() < 1e-6, "{}", drawn_width(&s, a));
+
+    // Without `end`, the tag at its own size along the rotation: never both points on one spot,
+    // which would draw it unrotated.
+    s.execute("attdef", &json!({"tag": "Bee", "at": [10, 0], "justify": "F", "height": 2.0, "rotation": 30})).unwrap();
+    let b = &attdefs(&s)[1];
+    let (start, end) = (b.text.insert.xy(), b.text.align_pt.unwrap().xy());
+    assert!(near(b.text.rotation, 30f64.to_radians()) && near(start.angle_to(end), 30f64.to_radians()), "{start:?} → {end:?}");
+    assert!((start.dist(end) - drawn_width(&s, b)).abs() < 1e-6, "its own width");
+    assert_eq!((b.text.height, b.text.width_factor), (2.0, 1.0));
+
+    for bad in [json!({"tag": "X", "at": [0, 0], "justify": "MC", "end": [5, 0]}), json!({"tag": "X", "at": [0, 0], "justify": "A", "end": [0, 0]})] {
+        assert!(s.execute("attdef", &bad).is_err(), "{bad}");
+    }
+    assert_eq!(attdefs(&s).len(), 2);
+}
+
+#[test]
+fn enter_below_takes_the_previous_definitions_width_factor_and_obliquing() {
+    let mut s = Session::new();
+    s.execute("style", &json!({"name": "Slant", "font": "Arial", "oblique": 15, "current": false})).unwrap();
+    let r = s.execute("attdef", &json!({"tag": "A", "at": [0, 10], "style": "slant", "height": 2.0})).unwrap();
+    s.execute("properties.set", &json!({"handles": [r["handle"]], "widthFactor": 0.5})).unwrap();
+    // The style changes afterwards; the definition keeps what it was made with.
+    s.execute("style", &json!({"name": "Slant", "oblique": 0, "current": false})).unwrap();
+    s.start("-attdef").unwrap();
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Text("B".into())).unwrap();
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    s.execute("attdef", &json!({"tag": "C", "below": true})).unwrap();
+    for (i, d) in attdefs(&s).iter().enumerate().skip(1) {
+        assert_eq!((d.text.style.as_str(), d.text.width_factor), ("Slant", 0.5), "definition {i}");
+        assert!(near(d.text.oblique, 15f64.to_radians()), "definition {i}: {}", d.text.oblique.to_degrees());
+    }
+}
+
+#[test]
+fn properties_set_align_and_fit_keep_a_rotated_definitions_size_and_angle() {
+    let mut s = Session::new();
+    let r = s.execute("attdef", &json!({"tag": "AB", "at": [10, 20], "height": 2.0, "rotation": 30})).unwrap();
+    let set = |s: &mut Session, j: &str| s.execute("properties.set", &json!({"handles": [r["handle"]], "justify": j})).unwrap();
+    let before = drawn_bounds(&s, &attdefs(&s)[0]);
+    let same = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+    set(&mut s, "A");
+    let a = &attdefs(&s)[0];
+    assert_eq!(a.text.halign, HAlign::Aligned);
+    let end = a.text.align_pt.unwrap();
+    assert!(a.text.insert.xy().dist(end.xy()) > 1e-6, "a baseline, not one point");
+    assert!(same(drawn_bounds(&s, a), before), "drawn as before: {:?} vs {before:?}", drawn_bounds(&s, a));
+    set(&mut s, "F");
+    assert_eq!(attdefs(&s)[0].text.align_pt, Some(end), "Align to Fit keeps the baseline");
+    set(&mut s, "L");
+    let l = &attdefs(&s)[0];
+    assert!(near(l.text.rotation, 30f64.to_radians()), "the angle stays: {}", l.text.rotation.to_degrees());
+    assert!(same(drawn_bounds(&s, l), before), "{:?} vs {before:?}", drawn_bounds(&s, l));
+}
+
+#[test]
+fn the_dialog_on_screen_asks_align_and_fit_for_both_endpoints() {
+    let mut s = Session::new();
+    s.attdef_answers = Some(json!({"tag": "D", "prompt": "d?", "default": "1", "justify": "A", "height": 2.0}));
+    s.start("-attdef").unwrap();
+    assert!(s.prompt_text().contains("first endpoint of text baseline"), "{}", s.prompt_text());
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    assert!(s.prompt_text().contains("second endpoint of text baseline"), "{}", s.prompt_text());
+    s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let d = &attdefs(&s)[0];
+    assert_eq!((d.text.halign, d.text.align_pt.map(|p| (p.x, p.y))), (HAlign::Aligned, Some((10.0, 0.0))));
+    assert!((drawn_width(&s, d) - 10.0).abs() < 1e-6, "{}", drawn_width(&s, d));
+
+    // Fit takes the dialog's height: nothing is asked after the second endpoint.
+    s.attdef_answers = Some(json!({"tag": "E", "justify": "F", "height": 2.0}));
+    s.start("-attdef").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 5.0))).unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 25.0))).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let e = &attdefs(&s)[1];
+    assert_eq!((e.text.halign, e.text.height), (HAlign::Fit, 2.0));
+    assert!(near(e.text.rotation, std::f64::consts::FRAC_PI_2));
+    assert!((drawn_width(&s, e) - 20.0).abs() < 1e-6, "{}", drawn_width(&s, e));
 }

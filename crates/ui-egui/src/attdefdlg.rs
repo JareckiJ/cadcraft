@@ -296,7 +296,8 @@ pub fn confirm(app: &mut CadApp) -> bool {
             }
         };
     }
-    // The start point on screen: -ATTDEF takes the other answers and asks only for the point.
+    // The start point on screen: -ATTDEF takes the other answers and asks only for the point (and,
+    // for Align and Fit, the baseline's second endpoint).
     app.session.attdef_answers = Some(p);
     app.start("-attdef");
     if app.session.running.as_ref().is_some_and(|r| r.id == "attdef") {
