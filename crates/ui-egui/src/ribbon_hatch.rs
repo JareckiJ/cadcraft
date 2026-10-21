@@ -220,7 +220,7 @@ fn shown_create(app: &CadApp) -> Option<Shown> {
         separate: hd.i64("HPSEPARATE", 0) != 0,
         draw_order: hd.i64("HPDRAWORDER", 1).clamp(0, 4) as usize,
         retain: hd.i64("HPBOUNDRETAIN", 0).clamp(0, 2) as usize,
-        custom_set: app.session.hatch_boundary_set.is_some(),
+        custom_set: app.session.hatch_boundary_set().is_some(),
     })
 }
 
@@ -1134,7 +1134,7 @@ fn slide_boundaries(ui: &mut egui::Ui, sh: &Shown, out: &mut Option<Action>) {
     {
         *out = Some(Action::Do(Box::new(move |app: &mut CadApp| {
             if i == 0 {
-                app.session.hatch_boundary_set = None;
+                app.session.set_hatch_boundary_set(None);
             } else {
                 keyword(app, "new boundary Set");
             }

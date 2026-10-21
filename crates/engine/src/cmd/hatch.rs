@@ -243,8 +243,9 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
     let ext = d.extents(&space);
     let tol = ((ext.width() + ext.height()) * 1e-9).max(1e-9);
     let (mut polys, mut owners) = outlines(d, &space, None);
-    // The Hatch Editor's boundary set: only its objects bound the hatch.
-    if let Some(set) = &s.hatch_boundary_set {
+    // The Hatch Editor's boundary set: only its objects bound the hatch, islands included.
+    let set = s.hatch_boundary_set();
+    if let Some(set) = set {
         let keep: Vec<bool> = owners.iter().map(|h| set.contains(h)).collect();
         let mut k = keep.iter();
         polys.retain(|_| k.next().copied().unwrap_or(false));
@@ -252,8 +253,14 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
     }
     // A line that ends on a flattened curve (an ellipse) can stop short of its chords.
     let polys = cadcraft_geom::region::snap_ends(&polys, outline_tol(ext), tol);
-    let found = cadcraft_geom::region::boundary_at_gap(&polys, p, tol, gap_tolerance(d))
-        .ok_or_else(|| EngineError::Other("Valid hatch boundary not found.".into()))?;
+    let found = cadcraft_geom::region::boundary_at_gap(&polys, p, tol, gap_tolerance(d)).ok_or_else(|| {
+        EngineError::Other(match set {
+            Some(set) => {
+                format!("Valid hatch boundary not found in the boundary set ({} object(s)). Use Current Viewport looks at every object.", set.len())
+            }
+            None => "Valid hatch boundary not found.".into(),
+        })
+    })?;
     let outer = found.outer;
     let ob = Bounds2::from_points(outer.iter().copied());
     let sources = handles_of(&owners, &found.outer_sources);
@@ -261,7 +268,7 @@ pub(crate) fn loops_at(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
     // Islands: closed objects entirely inside the outer loop that don't contain the pick point.
     if let Some(store) = d.space(&space) {
         for e in store.iter() {
-            if !d.is_visible(e) {
+            if !d.is_visible(e) || set.is_some_and(|set| !set.contains(&e.handle)) {
                 continue;
             }
             let eb = entity_bounds(d, e, 0);
@@ -714,12 +721,15 @@ impl Interactive for PickHatchM {
 /// Boundary Set), or everything again with `clear`.
 fn run_boundary_set(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_or(p, "clear", false) {
-        s.hatch_boundary_set = None;
+        s.set_hatch_boundary_set(None);
         return Ok(json!({ "objects": Value::Null, "message": "Pick points use the current viewport." }));
     }
     let hs = targets(s, p)?;
+    if hs.is_empty() {
+        return Err(bad("hatchboundaryset", "select the objects of the boundary set, or give `clear: true`"));
+    }
     let n = hs.len();
-    s.hatch_boundary_set = Some(hs);
+    s.set_hatch_boundary_set(Some(hs));
     Ok(json!({ "objects": n, "message": format!("Boundary set: {n} object(s).") }))
 }
 
@@ -737,7 +747,7 @@ impl Interactive for BoundarySetM {
         match i {
             Input::Pick(hs) if !hs.is_empty() => {
                 let n = hs.len();
-                s.hatch_boundary_set = Some(hs);
+                s.set_hatch_boundary_set(Some(hs));
                 s.echo(format!("Boundary set: {n} object(s)."));
                 Ok(Step::Done)
             }
@@ -940,6 +950,11 @@ impl Interactive for HatchM {
             self.settings.scale,
             self.settings.angle.to_degrees()
         ));
+        // A boundary set chosen earlier still limits pick points: say so.
+        if let Some(set) = s.hatch_boundary_set() {
+            let n = set.len();
+            s.echo(format!("Boundary set: {n} object(s); pick points look only at them (Use Current Viewport looks at every object)."));
+        }
         Ok(Step::Continue)
     }
     fn prompt(&self, s: &Session) -> Prompt {
@@ -1001,7 +1016,7 @@ impl Interactive for HatchM {
                 Input::Pick(hs) if a == HatchAsk::Inherit => inherit_settings(s, hs)?,
                 Input::Pick(hs) if a == HatchAsk::BoundarySet && !hs.is_empty() => {
                     s.echo(format!("Boundary set: {} object(s).", hs.len()));
-                    s.hatch_boundary_set = Some(hs.clone());
+                    s.set_hatch_boundary_set(Some(hs.clone()));
                 }
                 Input::Point(p) if a == HatchAsk::Origin => self.set_origin(s, Some(*p), OriginMode::Current)?,
                 Input::Text(t) | Input::Keyword(t) => self.answer(s, a, t)?,

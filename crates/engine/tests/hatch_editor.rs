@@ -243,3 +243,49 @@ fn hatch_creation_removes_a_boundary_and_matches_a_hatch() {
     assert_eq!(made[0].loops.len(), 1, "the second square's boundary was removed");
     assert_eq!((made[0].pattern.as_str(), made[0].scale), ("ANSI37", 3.0));
 }
+
+#[test]
+fn a_boundary_set_also_limits_the_islands() {
+    let mut s = Session::new();
+    let outer = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    rect(&mut s, [5.0, 5.0], [10.0, 10.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [outer] })).unwrap();
+    // Picked between the squares: the inner one is not in the set, so it is no island.
+    let h = handle(&s.execute("hatch", &json!({ "points": [[2, 2]] })).unwrap());
+    let x = hatch(&s, &h);
+    assert_eq!(x.loops.len(), 1, "only the outer square bounds the hatch");
+    assert_eq!(x.loops[0].sources, vec![Handle::parse_hex(&outer).unwrap()]);
+}
+
+#[test]
+fn an_empty_boundary_set_is_refused() {
+    let mut s = Session::new();
+    rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    assert!(s.execute("hatchboundaryset", &json!({})).is_err(), "no handles and nothing selected");
+    // Pick points still find the square.
+    s.execute("hatch", &json!({ "points": [[2, 2]] })).unwrap();
+}
+
+#[test]
+fn a_boundary_set_belongs_to_its_drawing() {
+    let mut s = Session::new();
+    let outer = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [outer] })).unwrap();
+    // Another drawing: its own objects bound its hatches. Handles are numbered per drawing, so
+    // its first square may share the set's handle: hatch its second one.
+    s.new_drawing(true);
+    rect(&mut s, [-50.0, -50.0], [-40.0, -40.0]);
+    let second = rect(&mut s, [100.0, 100.0], [120.0, 120.0]);
+    assert_ne!(second, outer);
+    s.execute("hatch", &json!({ "points": [[110, 110]] })).unwrap();
+}
+
+#[test]
+fn a_pick_outside_the_boundary_set_says_so() {
+    let mut s = Session::new();
+    let a = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    rect(&mut s, [50.0, 0.0], [70.0, 20.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [a] })).unwrap();
+    let e = s.execute("hatch", &json!({ "points": [[60, 10]] })).unwrap_err().to_string();
+    assert!(e.contains("boundary set"), "{e}");
+}
