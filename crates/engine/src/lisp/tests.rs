@@ -690,6 +690,9 @@ fn tblobjname_names_table_records() {
     // The BLOCK table gives the block's BLOCK entity.
     assert_eq!(ok(&mut s, "(cdr (assoc 0 (entget (tblobjname \"BLOCK\" \"*Model_Space\"))))"), "\"BLOCK\"");
     assert_eq!(ok(&mut s, "(tblobjname \"LAYER\" \"NO_SUCH_LAYER\")"), "nil");
+    // Names outside ASCII: found in the case they have, ASCII letters in any case.
+    s.execute("layer.new", &serde_json::json!({"name": "ébauche"})).unwrap();
+    assert_eq!(ok(&mut s, "(cdr (assoc 2 (entget (tblobjname \"LAYER\" \"éBAUCHE\"))))"), "\"ébauche\"");
     assert_eq!(ok(&mut s, "(tblobjname \"NO_SUCH_TABLE\" \"0\")"), "nil");
     assert!(eval(&mut s, "(tblobjname \"LAYER\")").is_err());
     // The name holds while the drawing changes.

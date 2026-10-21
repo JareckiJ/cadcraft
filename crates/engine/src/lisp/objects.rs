@@ -13,7 +13,7 @@
 //! read-only: `entmod` and `entmake` don't take them.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use cadcraft_doc::foreign::ForeignKey;
 use cadcraft_doc::{Drawing, Handle};
@@ -35,8 +35,9 @@ pub struct Names {
     by_key: HashMap<ForeignKey, Handle>,
     by_name: HashMap<Handle, ForeignKey>,
     next: u64,
-    /// The written records of the drawing they were taken from (its address).
-    records: Option<(usize, Arc<Records>)>,
+    /// The written records of the drawing they were taken from (held weakly, so its address
+    /// can't be reused for another drawing while the records are kept).
+    records: Option<(Weak<Drawing>, Arc<Records>)>,
     /// `dictnext`'s place in each dictionary.
     dictnext: HashMap<Handle, usize>,
 }
@@ -75,9 +76,8 @@ fn norm(hex: &str) -> Option<String> {
 }
 
 fn records(names: &mut Names, d: &Arc<Drawing>) -> Option<Arc<Records>> {
-    let at = Arc::as_ptr(d) as usize;
-    if let Some((k, r)) = &names.records
-        && *k == at
+    if let Some((w, r)) = &names.records
+        && std::ptr::eq(w.as_ptr(), Arc::as_ptr(d))
     {
         return Some(r.clone());
     }
@@ -93,7 +93,7 @@ fn records(names: &mut Names, d: &Arc<Drawing>) -> Option<Arc<Records>> {
         by_handle.entry(h).or_insert(i);
     }
     let r = Arc::new(Records { list, by_handle, by_role });
-    names.records = Some((at, r.clone()));
+    names.records = Some((Arc::downgrade(d), r.clone()));
     Some(r)
 }
 
@@ -202,7 +202,8 @@ pub fn namedobjdict(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError>
 pub fn tblobjname(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     arity(&a, 2, 2)?;
     let table = string(&a[0])?.trim().to_ascii_uppercase();
-    let name = string(&a[1])?.to_uppercase();
+    // As the roles spell names (upper case in ASCII only).
+    let name = string(&a[1])?.trim().to_ascii_uppercase();
     let Ok(st) = ctx.s.state() else { return Ok(Flow::Value(Value::Nil)) };
     let names = &mut ctx.env.objects;
     let key: ForeignKey = (table, name);
