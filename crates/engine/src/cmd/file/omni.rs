@@ -85,8 +85,9 @@ const SAVE_DESCRIPTION: &str = "save";
 /// (a gzip bomb costs memory before anything else can refuse it).
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_UNPACKED: u64 = 512 * 1024 * 1024;
-/// Overlay references are named with this prefix, so OMNI-CLEAR and OMNI-TOGGLE touch only their
-/// own and leave the user's external references alone.
+/// Overlay references are named with this prefix, so a report tells the underlay from the drawing's
+/// own objects at a glance. The name alone does not make a reference an overlay — `XATTACH` takes
+/// any name — so what OMNI-CLEAR and OMNI-TOGGLE claim is decided by [`is_overlay_block`].
 const OVERLAY_PREFIX: &str = "OMNI_";
 /// The layer OMNI-NOTE's markers go on.
 const NOTE_LAYER: &str = "OMNI_NOTES";
@@ -164,7 +165,10 @@ fn history_dir(folder: &Path) -> PathBuf {
 /// is the record of what a drawing's saves held, so nothing may be saved onto one: an opened
 /// revision is a file to read, and `SAVEAS` is how it becomes a drawing with a name of its own.
 pub(crate) fn is_version_path(path: &str) -> bool {
-    Path::new(path).components().any(|c| matches!(c, std::path::Component::Normal(n) if n.to_string_lossy().eq_ignore_ascii_case(HISTORY_DIR)))
+    // Both separators, whatever the host: `Path` splits on the host's separator only, so a path
+    // written on Windows (`C:\jobs\_OMNI_HISTORY\a.dxf`) has a single component on Unix and a
+    // history file read from a project that travels between machines would not be recognised.
+    path.split(['/', '\\']).any(|part| part.eq_ignore_ascii_case(HISTORY_DIR))
 }
 
 /// The folder a file is in (`.` when it names no folder), so a bare file name works everywhere.
@@ -787,13 +791,19 @@ fn overlay_name(snap: &Snap) -> String {
     }
 }
 
+/// Whether `b` is a snapshot overlay: an external reference that reads a file inside a history
+/// folder. That is what OMNI-DIFF attaches, and the reference's own record says so — the `OMNI_`
+/// name prefix does not: `XATTACH` accepts a name like `OMNI_site`, and a reference of the user's
+/// own must survive OMNI-CLEAR (detaching it would take its definition, its references and the
+/// symbols they brought with it). A reference into the history, on the other hand, is a version of
+/// the drawing laid under it, which is exactly what the commands are for.
+fn is_overlay_block(b: &cadcraft_doc::Block) -> bool {
+    b.xref_path.as_deref().is_some_and(is_version_path) && !b.name.contains('|') && has_prefix(&b.name, OVERLAY_PREFIX)
+}
+
 /// The overlay references attached to `d` (and nothing else).
 fn overlays(d: &Drawing) -> Vec<String> {
-    d.blocks
-        .values()
-        .filter(|b| b.xref_path.is_some() && !b.name.contains('|') && has_prefix(&b.name, OVERLAY_PREFIX))
-        .map(|b| b.name.clone())
-        .collect()
+    d.blocks.values().filter(|b| is_overlay_block(b)).map(|b| b.name.clone()).collect()
 }
 
 /// The path an overlay stores for `snap`: relative to the drawing's folder when the snapshot is
@@ -870,10 +880,13 @@ fn recolour(s: &mut Session, name: &str, color: Color) -> Result<(usize, usize)>
 }
 
 /// The handles of the overlay references OMNI itself laid under a drawing: a report is about the
-/// drawing, not about the underlay the tool put there.
+/// drawing, not about the underlay the tool put there. The overlay's name is what its references
+/// are counted by, so a user's `OMNI_…` reference is not left out of the report either.
 fn overlay_handles(d: &Drawing, space: &cadcraft_doc::Space) -> Vec<cadcraft_doc::Handle> {
+    let ours = overlays(d);
+    let mine = |name: &str| ours.iter().any(|n| n.eq_ignore_ascii_case(name));
     d.space(space)
-        .map(|st| st.iter().filter(|e| matches!(&e.kind, EntityKind::Insert(i) if has_prefix(&i.block, OVERLAY_PREFIX))).map(|e| e.handle).collect())
+        .map(|st| st.iter().filter(|e| matches!(&e.kind, EntityKind::Insert(i) if mine(&i.block))).map(|e| e.handle).collect())
         .unwrap_or_default()
 }
 
@@ -1357,6 +1370,23 @@ mod tests {
         for p in ["jobs/site/plan.dxf", "jobs/_OMNI_HISTORY_FULL/plan.dxf", "", "plan.dxf"] {
             assert!(!is_version_path(p), "{p}");
         }
+    }
+
+    #[test]
+    fn an_overlay_is_a_reference_into_the_history_not_a_name() {
+        let overlay = |name: &str, path: Option<&str>| {
+            let mut b = cadcraft_doc::Block::new(name);
+            b.xref_path = path.map(str::to_string);
+            is_overlay_block(&b)
+        };
+        assert!(overlay("OMNI_plan_20261014_083512", Some("_OMNI_HISTORY/plan.dxf")));
+        assert!(overlay("OMNI_plan", Some("C:\\jobs\\_OMNI_HISTORY\\.cache\\plan.dxf")));
+        // A user's `XATTACH OMNI_site` reads a drawing of their own, wherever it is called from.
+        assert!(!overlay("OMNI_site", Some("site.dxf")));
+        assert!(!overlay("OMNI_site", Some("/jobs/OMNI_site.dxf")));
+        // Not a reference at all, or a symbol that came with one.
+        assert!(!overlay("OMNI_plan", None));
+        assert!(!overlay("OMNI_plan|x", Some("_OMNI_HISTORY/plan.dxf")));
     }
 
     #[test]

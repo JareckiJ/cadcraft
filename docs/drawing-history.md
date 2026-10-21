@@ -133,8 +133,9 @@ own would stay visible in it.
   0 is the *host's* layer 0 (in AutoCAD as here), so those objects can't be hidden that way. The
   colour the overlay was given stays on its layers, so showing it again brings it back red.
 - `OMNI-CLEAR` detaches the overlays and nothing else: an external reference of the user's own
-  stays attached, wherever the history folder is and whatever it is called. Overlays are found by
-  their `OMNI_` prefix.
+  stays attached, wherever the history folder is and whatever it is called. An overlay is found by
+  what its reference reads — a file inside a history folder — not by its name, so `XATTACH` with a
+  name like `OMNI_site` is the user's reference and is left alone.
 
 `OMNI-DIFF` with `mode: "report"` attaches nothing and instead compares the drawing with the
 version through the same machinery `COMPARE` uses (objects matched by geometry and properties,

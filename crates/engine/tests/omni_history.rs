@@ -260,6 +260,52 @@ fn diff_lays_the_snapshot_under_the_drawing_recoloured_and_takes_it_away_again()
     assert!(s.execute("omni-clear", &json!({})).is_ok(), "clearing twice is not an error");
 }
 
+/// `XATTACH` takes any name, so a user's own reference may well be called `OMNI_site`. What makes a
+/// reference an overlay is that it reads the drawing's history, not its name: OMNI-TOGGLE and
+/// OMNI-CLEAR must leave the user's reference alone — detaching it would take away its definition,
+/// its reference and the symbols it brought.
+#[test]
+fn a_user_reference_named_like_an_overlay_survives_toggle_and_clear() {
+    hooks();
+    let dir = folder("user-name");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    let mut site = Drawing::new_metric();
+    let h = site.new_handle();
+    site.model.push(cadcraft_engine::doc::Entity::new(h, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(0.0, 10.0, 0.0) })));
+    save(&site, &dir.join("site.dxf"));
+
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    s.execute("omni-snap", &json!({ "description": "revision" })).unwrap();
+    s.execute("xattach", &json!({ "path": "site.dxf", "name": "OMNI_site" })).unwrap();
+    let r = s.execute("omni-diff", &json!({})).unwrap();
+    let overlay = r["overlay"].as_str().unwrap().to_string();
+    assert!(overlay.starts_with("OMNI_plan_"), "{overlay}");
+    assert_ne!(overlay, "OMNI_site", "the tool's own reference is named after the drawing and the moment");
+
+    // Hiding the underlay leaves the user's reference loaded.
+    let r = s.execute("omni-toggle", &json!({})).unwrap();
+    assert_eq!(r["overlay"], json!([overlay.clone()]));
+    let d = s.doc().unwrap();
+    assert_eq!(d.block(&overlay).map(|b| b.xref_status), Some(XrefStatus::Unloaded));
+    assert_eq!(d.block("OMNI_site").map(|b| b.xref_status), Some(XrefStatus::Loaded), "the user's reference is not the underlay");
+    s.execute("omni-toggle", &json!({ "show": true })).unwrap();
+
+    // And clearing the underlay leaves the user's reference, its definition and its reference.
+    let r = s.execute("omni-clear", &json!({})).unwrap();
+    assert_eq!(r["cleared"], json!([overlay.clone()]));
+    let d = s.doc().unwrap();
+    assert!(d.block(&overlay).is_none());
+    let user = d.block("OMNI_site").expect("the reference the user attached is not the tool's to detach");
+    assert_eq!(user.xref_path.as_deref(), Some("site.dxf"));
+    assert_eq!(user.xref_status, XrefStatus::Loaded);
+    assert!(
+        d.model.iter().any(|e| matches!(&e.kind, EntityKind::Insert(i) if i.block == "OMNI_site")),
+        "the user's reference is still placed in the drawing"
+    );
+}
+
 #[test]
 fn diff_can_report_what_changed_instead_of_only_showing_it() {
     hooks();
