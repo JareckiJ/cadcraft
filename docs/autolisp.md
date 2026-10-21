@@ -88,8 +88,10 @@ Non-graphic objects (the named object dictionary and its dictionaries, layouts, 
 are listed as a DXF file of the drawing holds them, pointers as entity names and group 5 as the
 object's own name. An object read from a file keeps that file's handle as its name, so
 `(handent "112C")` with a layer's handle from the file finds it; one the file didn't have gets a
-name of its own (from `7F00000000000000` up). Names stay the same while the drawing is open,
-also when it changes. These lists are read-only for now: `entmod` and `entmake` don't take them.
+name of its own (from `7F00000000000000` up). The names of table records, blocks, the named
+object dictionary and its dictionaries' entries stay the same while the drawing is open, also
+when it changes; an object deeper down (an entry of a dictionary inside those) keeps its name
+only until the drawing changes, after which the old name finds nothing. These lists are read-only for now: `entmod` and `entmake` don't take them.
 
 ## Testing against the corpus
 

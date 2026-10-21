@@ -9,7 +9,7 @@
 //! read from a file that had it, otherwise a name above any file's handles. An object is known by
 //! its role (a layer's name, a dictionary key, a layout's name), so its name follows it across
 //! edits; one without a role (an object of a deeper dictionary) is known by its handle in the
-//! written records, which holds while the drawing doesn't change. Lists of these objects are
+//! written records, so its name holds only until the drawing changes (then it names nothing). Lists of these objects are
 //! read-only: `entmod` and `entmake` don't take them.
 
 use std::collections::HashMap;
@@ -70,6 +70,11 @@ impl Records {
     }
 }
 
+/// A record's own handle: group 5, or 105 for a DIMSTYLE (before any xdata).
+fn own_handle(tags: &[Tag]) -> Option<&Tag> {
+    tags.iter().take_while(|t| t.code < 1000).find(|t| matches!(t.code, 5 | 105))
+}
+
 /// A handle as the records spell it (upper-case hex without leading zeros).
 fn norm(hex: &str) -> Option<String> {
     Handle::parse_hex(hex.trim()).map(Handle::hex)
@@ -86,13 +91,16 @@ fn records(names: &mut Names, d: &Arc<Drawing>) -> Option<Arc<Records>> {
     let mut by_handle = HashMap::new();
     let mut by_role = HashMap::new();
     for (i, (_, tags, role)) in list.iter().enumerate() {
-        let Some(h) = tags.iter().find(|t| t.code == 5).and_then(|t| norm(&t.str())) else { continue };
+        let Some(h) = own_handle(tags).and_then(|t| norm(&t.str())) else { continue };
         if let Some(role) = role {
             by_role.entry(role.clone()).or_insert_with(|| h.clone());
         }
         by_handle.entry(h).or_insert(i);
     }
     let r = Arc::new(Records { list, by_handle, by_role });
+    // Written handles change with the drawing: names given by them no longer hold.
+    names.by_key.retain(|k, _| k.0 != BY_HANDLE);
+    names.by_name.retain(|_, k| k.0 != BY_HANDLE);
     names.records = Some((Arc::downgrade(d), r.clone()));
     Some(r)
 }
@@ -137,7 +145,7 @@ fn pointer_group(code: i32) -> bool {
 }
 
 /// The object `written` as an entity list: `(-1 . name)`, its type and its groups, with its
-/// handle (group 5) as its name's and pointers as entity names.
+/// handle (group 5, a DIMSTYLE's 105) as its name's and pointers as entity names.
 fn object_list(names: &mut Names, d: &Drawing, recs: &Records, name: Handle, written: &str) -> Value {
     let Some((kind, tags, _)) = recs.record(written) else { return Value::Nil };
     let mut items = vec![Value::cons(Value::Int(-1), Value::Ename(name)), Value::cons(Value::Int(0), Value::str(kind))];
@@ -148,7 +156,7 @@ fn object_list(names: &mut Names, d: &Drawing, recs: &Records, name: Handle, wri
             _ => None,
         };
         match (code, text) {
-            (Some(5), Some(_)) => items.push(Value::cons(Value::Int(5), Value::str(&name.hex()))),
+            (Some(c @ (5 | 105)), Some(_)) => items.push(Value::cons(Value::Int(c), Value::str(&name.hex()))),
             (Some(c), Some(t)) if pointer_group(c) => {
                 let Some(h) = norm(&t).filter(|h| h != "0") else { continue };
                 let target = Handle::parse_hex(&h).filter(|e| d.entity(*e).is_some());

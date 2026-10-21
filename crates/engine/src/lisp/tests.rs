@@ -694,6 +694,10 @@ fn tblobjname_names_table_records() {
     s.execute("layer.new", &serde_json::json!({"name": "ébauche"})).unwrap();
     assert_eq!(ok(&mut s, "(cdr (assoc 2 (entget (tblobjname \"LAYER\" \"éBAUCHE\"))))"), "\"ébauche\"");
     assert_eq!(ok(&mut s, "(tblobjname \"NO_SUCH_TABLE\" \"0\")"), "nil");
+    // A DIMSTYLE has its handle in group 105.
+    ok(&mut s, "(setq ds (tblobjname \"DIMSTYLE\" (cdr (assoc 2 (tblnext \"DIMSTYLE\" T)))))");
+    assert_eq!(ok(&mut s, "(cdr (assoc 0 (entget ds)))"), "\"DIMSTYLE\"");
+    assert_eq!(ok(&mut s, "(eq ds (handent (cdr (assoc 105 (entget ds)))))"), "T");
     assert!(eval(&mut s, "(tblobjname \"LAYER\")").is_err());
     // The name holds while the drawing changes.
     ok(&mut s, "(entmake '((0 . \"LINE\") (10 0.0 0.0 0.0) (11 10.0 0.0 0.0)))");
@@ -719,4 +723,62 @@ fn handent_names_a_files_layer_and_layout() {
     assert_eq!(ok(&mut s, &format!("(cdr (assoc 5 (entget (handent \"{layout}\"))))")), format!("\"{layout}\""));
     assert_eq!(ok(&mut s, "(handent \"FFFFF\")"), "nil");
     assert_eq!(ok(&mut s, "(handent \"not hex\")"), "nil");
+}
+
+/// A drawing with a dictionary two levels below the named object dictionary (kept from its file):
+/// NOD › MY_DICT › INNER › LEAF (an XRECORD).
+fn nested_dictionary_file() -> Vec<u8> {
+    let s = session();
+    let bytes = cadcraft_io::write(s.doc().unwrap(), "n.dxf").unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut pairs: Vec<(String, String)> = lines.chunks(2).map(|c| (c[0].trim().to_string(), c[1].to_string())).collect();
+    let objects = pairs.iter().position(|p| p.0 == "2" && p.1 == "OBJECTS").unwrap();
+    let nod = objects + pairs[objects..].iter().position(|p| p.0 == "0" && p.1 == "DICTIONARY").unwrap();
+    let nod_handle = pairs[nod + 1].1.clone();
+    let after = nod + pairs[nod..].iter().position(|p| p.0 == "281").unwrap() + 1;
+    pairs.splice(after..after, [("3".into(), "MY_DICT".into()), ("350".into(), "AAA1".into())]);
+    let end = objects + pairs[objects..].iter().position(|p| p.0 == "0" && p.1 == "ENDSEC").unwrap();
+    let p = |c: &str, v: &str| (c.to_string(), v.to_string());
+    let added = vec![
+        p("0", "DICTIONARY"),
+        p("5", "AAA1"),
+        p("330", &nod_handle),
+        p("100", "AcDbDictionary"),
+        p("281", "1"),
+        p("3", "INNER"),
+        p("350", "AAA2"),
+        p("0", "DICTIONARY"),
+        p("5", "AAA2"),
+        p("330", "AAA1"),
+        p("100", "AcDbDictionary"),
+        p("281", "1"),
+        p("3", "LEAF"),
+        p("350", "AAA3"),
+        p("0", "XRECORD"),
+        p("5", "AAA3"),
+        p("330", "AAA2"),
+        p("100", "AcDbXrecord"),
+        p("280", "1"),
+        p("1", "hello"),
+    ];
+    pairs.splice(end..end, added);
+    pairs.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect::<String>().into_bytes()
+}
+
+/// An object found below a dictionary entry has no role: once the drawing changes, its old name
+/// finds nothing rather than whatever now has its written handle.
+#[test]
+fn a_deeper_objects_name_lapses_when_the_drawing_changes() {
+    let mut s = session();
+    s.open_drawing(cadcraft_io::read(&nested_dictionary_file(), "n.dxf").unwrap(), "n.dxf", None);
+    ok(&mut s, "(setq inner (cdr (assoc -1 (dictsearch (cdr (assoc -1 (dictsearch (namedobjdict) \"MY_DICT\"))) \"INNER\"))))");
+    ok(&mut s, "(setq leaf (cdr (assoc -1 (dictsearch inner \"LEAF\"))))");
+    assert_eq!(ok(&mut s, "(cdr (assoc 1 (entget leaf)))"), "\"hello\"");
+    // Unchanged drawing: the same name.
+    assert_eq!(ok(&mut s, "(eq leaf (cdr (assoc -1 (dictsearch inner \"LEAF\"))))"), "T");
+    s.execute("layer.new", &serde_json::json!({"name": "Walls"})).unwrap();
+    assert_eq!(ok(&mut s, "(entget leaf)"), "nil");
+    // Looked up again, it is there (under a new name); the entry with a role kept its name.
+    assert_eq!(ok(&mut s, "(cdr (assoc 1 (dictsearch inner \"LEAF\")))"), "\"hello\"");
 }
