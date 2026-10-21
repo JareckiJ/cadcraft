@@ -433,6 +433,11 @@ pub fn snap_ends(polys: &[Vec<Vec2>], snap: f64, tol: f64) -> Vec<Vec<Vec2>> {
     if !(snap.is_finite() && snap > tol) {
         return out;
     }
+    // build() refuses this input anyway; don't spend ends x segments work on it.
+    let total: usize = polys.iter().map(|p| p.len().saturating_sub(1)).sum();
+    if total > MAX_SEGMENTS {
+        return out;
+    }
     // (target polyline, segment index, parameter on it, the point) for every vertex to insert.
     let mut inserts: Vec<(usize, usize, f64, Vec2)> = Vec::new();
     let mut budget = MAX_GAP_PAIRS;
@@ -453,6 +458,10 @@ pub fn snap_ends(polys: &[Vec<Vec2>], snap: f64, tol: f64) -> Vec<Vec<Vec2>> {
                     continue;
                 }
                 for (k, w) in other.windows(2).enumerate() {
+                    if budget == 0 {
+                        break 'ends;
+                    }
+                    budget -= 1;
                     let [a, b] = w else { continue };
                     if !(a.is_finite() && b.is_finite())
                         || e.x < a.x.min(b.x) - snap
@@ -462,10 +471,6 @@ pub fn snap_ends(polys: &[Vec<Vec2>], snap: f64, tol: f64) -> Vec<Vec<Vec2>> {
                     {
                         continue;
                     }
-                    if budget == 0 {
-                        break 'ends;
-                    }
-                    budget -= 1;
                     let line = Line::new(*a, *b);
                     let t = line.param_of(e).clamp(0.0, 1.0);
                     let q = line.at(t);
@@ -805,5 +810,17 @@ mod tests {
         assert!((shoelace(&l) - 20.0).abs() < 1e-6, "{}", shoelace(&l));
         // Too far away: left alone.
         assert_eq!(snap_ends(&polys, 0.01, 1e-9), polys);
+    }
+
+    #[test]
+    fn snap_ends_skips_input_over_the_segment_cap() {
+        let mut polys: Vec<Vec<Vec2>> = (0..=MAX_SEGMENTS)
+            .map(|i| {
+                let x = i as f64 * 10.0;
+                vec![Vec2::new(x, 0.0), Vec2::new(x, 1.0)]
+            })
+            .collect();
+        polys.push(vec![Vec2::new(0.0, 1.05), Vec2::new(5.0, 1.05)]);
+        assert_eq!(snap_ends(&polys, 0.1, 1e-9), polys);
     }
 }
