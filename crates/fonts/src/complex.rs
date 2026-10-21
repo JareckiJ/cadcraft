@@ -65,7 +65,15 @@ fn shape_chars(primary: Option<&Face>, chars: &[(char, bool, bool)], height: f64
     let wf = if width_factor.is_finite() && width_factor.abs() > 1e-6 { width_factor } else { 1.0 };
     let shear = oblique.tan().clamp(-10.0, 10.0);
     let sc = h / stroke::CAP;
-    let cs: Vec<char> = chars.iter().map(|c| c.0).collect();
+    // A character the text's face lacks is one of its substitutes when it has one, as in the
+    // left-to-right path.
+    let cs: Vec<char> = chars
+        .iter()
+        .map(|c| match primary {
+            Some(p) if !c.0.is_whitespace() && !p.has_glyph(c.0) => crate::substitutes(c.0).iter().copied().find(|&s| p.has_glyph(s)).unwrap_or(c.0),
+            _ => c.0,
+        })
+        .collect();
     let flags = |i: usize| chars.get(i).map(|c| (c.1, c.2)).unwrap_or((false, false));
     let mut out = Shaped::default();
     let mut spans: Vec<(f64, f64, bool, bool)> = Vec::new();
