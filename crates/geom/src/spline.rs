@@ -145,15 +145,18 @@ impl Spline {
     /// drawing took to open (#1076); a typical spline now takes a few hundred evaluations. The
     /// cap holds over all spans: the floor drops below eight per span when that would exceed it,
     /// and a spline with more spans than two each allow gets its control box, which contains the
-    /// curve unless a weight is negative (then the grid). A degree-1
-    /// spline is its control polygon, so its control box is exact; a degenerate spline gets its
-    /// control box, which contains the curve (the box of the finite control points when one is
-    /// not finite: `hull` skips it, but it would poison every sample).
+    /// curve unless a weight is negative (then the grid). A degree-1 spline with positive weights
+    /// is its control polygon, so its control box is exact; a degenerate spline gets its control
+    /// box, which contains the curve (the box of the finite control points when one is not
+    /// finite: `hull` skips it, but it would poison every sample).
     pub fn bounds(&self) -> Bounds2 {
         let hull = Bounds2::from_points(self.control.iter().copied());
         let diag = hull.min.dist(hull.max);
         let finite = self.control.iter().all(|c| c.is_finite()) && self.weights.iter().all(|w| w.is_finite());
-        if !self.is_valid() || self.degree == 1 || !finite || !(diag.is_finite() && diag > 0.0) {
+        // The convex hull property, which makes the control box contain the curve and a
+        // degree-1 spline its control polygon, needs every weight positive.
+        let positive = self.weights.iter().all(|w| *w > 0.0);
+        if !self.is_valid() || (self.degree == 1 && positive) || !finite || !(diag.is_finite() && diag > 0.0) {
             return hull;
         }
         let spans = self.knot_spans().count();
@@ -164,7 +167,7 @@ impl Spline {
             // Too many spans for two samples each: the control box contains the curve when no
             // weight is negative (the convex hull property), so it is the safe answer; a grid could
             // step over a narrow span. Negative weights void that property, so they keep the grid.
-            if self.weights.iter().all(|w| *w > 0.0) {
+            if positive {
                 return hull;
             }
             return Bounds2::from_points(self.samples(MAX_SAMPLES));
@@ -538,6 +541,21 @@ mod tests {
                 assert!(Bounds2::from_points(s.control.iter().copied()).expand(1e-9 * diag).contains_box(&b), "degree {} at scale {k}", s.degree);
             }
         }
+    }
+
+    /// A negative weight voids the convex hull property: a degree-1 spline is then not its
+    /// control polygon, so it is sampled like any other.
+    #[test]
+    fn a_degree_one_spline_with_a_negative_weight_is_sampled() {
+        let mut s = Spline::from_control(vec![Vec2::new(1.0, 0.0), Vec2::new(2.0, 0.0)], 1);
+        s.weights = vec![1.0, -0.5];
+        assert!(s.is_valid());
+        let far = s.eval(0.75);
+        assert!((far.x - 4.0).abs() < 1e-9, "{far:?}");
+        let b = s.bounds();
+        assert!(b.contains(far), "{b:?} misses {far:?}");
+        s.weights = vec![1.0, 0.5];
+        assert_eq!(s.bounds(), Bounds2::new(Vec2::new(1.0, 0.0), Vec2::new(2.0, 0.0)));
     }
 
     #[test]
