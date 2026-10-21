@@ -590,14 +590,7 @@ impl Interactive for WblockPickM {
                     Input::Keyword(k) | Input::Text(k) => {
                         let k = k.to_ascii_lowercase();
                         if k.starts_with('o') {
-                            let sel = SelectPhase::begin(s);
-                            let done = sel.done;
-                            if done {
-                                let hs = sel.picked.clone();
-                                s.wblock_picks = Some(WblockPicks { handles: hs, base: None });
-                                return Ok(Step::Done);
-                            }
-                            self.mode = WblockPickMode::Objects(sel);
+                            self.mode = WblockPickMode::Objects(SelectPhase::default());
                         } else {
                             self.mode = WblockPickMode::Base;
                         }

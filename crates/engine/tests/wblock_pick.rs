@@ -45,3 +45,16 @@ fn escape_keeps_nothing() {
     assert!(s.running.is_none());
     assert!(s.wblock_picks.is_none());
 }
+
+#[test]
+fn preexisting_selection_still_prompts() {
+    // Even if there is a pickfirst selection, WBLOCKPICK Objects must keep prompting
+    // so the dialog drives picking explicitly — it never bypasses the "Select objects" step.
+    let (mut s, h) = session_with_line();
+    s.set_selection(vec![h]);
+    s.start("wblockpick").unwrap();
+    s.input(Input::Keyword("Objects".into())).unwrap();
+    // Must still be running — "Select objects" prompt expected.
+    assert!(s.running.is_some());
+    assert!(s.wblock_picks.is_none());
+}

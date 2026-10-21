@@ -282,8 +282,25 @@ fn confirm(app: &mut CadApp) -> bool {
             json!({ "path": path, "handles": handles })
         }
         Source::Objects => {
-            let bx: f64 = app.wblock.base_x.trim().parse().unwrap_or(0.0);
-            let by: f64 = app.wblock.base_y.trim().parse().unwrap_or(0.0);
+            let parse_coord = |s: &str| -> Option<f64> {
+                let s = s.trim();
+                if s.is_empty() { return Some(0.0); }
+                s.parse::<f64>().ok().filter(|v| v.is_finite())
+            };
+            let bx = match parse_coord(&app.wblock.base_x) {
+                Some(v) => v,
+                None => {
+                    app.wblock.error = Some(crate::tl!("Invalid base X coordinate.").to_string());
+                    return false;
+                }
+            };
+            let by = match parse_coord(&app.wblock.base_y) {
+                Some(v) => v,
+                None => {
+                    app.wblock.error = Some(crate::tl!("Invalid base Y coordinate.").to_string());
+                    return false;
+                }
+            };
             if app.wblock.picked_handles.is_empty() {
                 app.wblock.error = Some(crate::tl!("No objects selected.").to_string());
                 return false;
