@@ -86,7 +86,9 @@ filters take radians too.
 definition, the entities made after it go into the block instead of the drawing, and an ENDBLK
 list adds the block (redefining one of the same name) and returns its name. Flag 1 with a `*U`
 name makes an anonymous block, named when it ends. A BLOCK while a definition is open, an
-xref (flag 4), an invalid name and a block that inserts itself return nil.
+xref (flag 4), an invalid name, a block that inserts itself and a block being edited in place
+(REFEDIT) return nil. A definition stays open across routines until ENDBLK, but a routine that
+fails drops the one it began.
 
 ## Testing against the corpus
 

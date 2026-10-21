@@ -441,6 +441,12 @@ impl Session {
     /// A LISP error: run `*error*` when the routine defined one, else print it.
     fn lisp_error(&mut self, e: LispError) {
         let Some(mut run) = self.lisp.run.take() else { return };
+        // A block definition the failed routine began is dropped: a later routine's entities
+        // would otherwise go into it instead of the drawing (#1662). A definition still spans
+        // runs that end normally.
+        if let Some(env) = self.lisp.envs.get_mut(&run.uid) {
+            env.pending_block = None;
+        }
         // The command a failed routine left running is cancelled.
         if self.running.is_some() {
             self.cancel();

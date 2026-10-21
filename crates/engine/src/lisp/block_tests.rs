@@ -135,3 +135,62 @@ fn a_saved_drawing_keeps_the_block() {
     assert_eq!((b.entities.len(), b.base.x, b.base.y), (2, 5.0, 5.0));
     assert_eq!(read.model.len(), 1, "the insert");
 }
+
+/// Flag 1 makes an anonymous block whatever the name says: a name that isn't `*X` gets `*U`.
+#[test]
+fn an_anonymous_block_is_always_named_with_a_star() {
+    let mut s = session();
+    for (given, prefix) in [("FOO", "*U"), ("*X", "*X"), ("*", "*U")] {
+        ok(&mut s, &format!(r#"(entmake '((0 . "BLOCK") (2 . "{given}") (70 . 1) (10 0.0 0.0 0.0)))"#));
+        ok(&mut s, LINE);
+        let name = ok(&mut s, ENDBLK);
+        let name = name.trim_matches('"');
+        assert!(name.starts_with(prefix) && name.len() > prefix.len(), "{given} -> {name}");
+        assert!(s.doc().unwrap().block(name).unwrap().anonymous);
+    }
+}
+
+/// As BLOCK: a block being edited in place (REFEDIT) isn't redefined until REFCLOSE.
+#[test]
+fn a_block_being_edited_in_place_is_not_redefined() {
+    let mut s = session();
+    for code in [r#"(entmake '((0 . "BLOCK") (2 . "R") (70 . 0) (10 0.0 0.0 0.0)))"#, LINE, ENDBLK] {
+        ok(&mut s, code);
+    }
+    let ins = s.execute("insert", &serde_json::json!({"name": "R", "at": [0, 0]})).unwrap();
+    s.execute("refedit", &serde_json::json!({"handle": ins["handle"]})).unwrap();
+    ok(&mut s, r#"(entmake '((0 . "BLOCK") (2 . "r") (70 . 0) (10 0.0 0.0 0.0)))"#);
+    ok(&mut s, CIRCLE);
+    ok(&mut s, CIRCLE);
+    assert_eq!(ok(&mut s, ENDBLK), "nil");
+    s.execute("refclose", &serde_json::json!({"option": "discard"})).unwrap();
+    assert_eq!(s.doc().unwrap().block("R").unwrap().entities.len(), 1, "the definition is unchanged");
+    // After REFCLOSE it can be redefined.
+    for code in [r#"(entmake '((0 . "BLOCK") (2 . "R") (70 . 0) (10 0.0 0.0 0.0)))"#, CIRCLE, CIRCLE] {
+        ok(&mut s, code);
+    }
+    assert_eq!(ok(&mut s, ENDBLK), "\"R\"");
+    assert_eq!(s.doc().unwrap().block("R").unwrap().entities.len(), 2);
+}
+
+/// A routine that fails drops the definition it began, with or without an *error* handler: the
+/// next routine's entities go into the drawing. One that ends normally keeps it open.
+#[test]
+fn a_failed_routine_drops_its_open_definition() {
+    let mut s = session();
+    for handler in [None, Some("(defun *error* (msg) (princ msg))")] {
+        if let Some(h) = handler {
+            ok(&mut s, h);
+        }
+        let before = model_len(&s);
+        assert!(eval(&mut s, r#"(progn (entmake '((0 . "BLOCK") (2 . "FAIL") (70 . 0) (10 0.0 0.0 0.0))) (car 1))"#).is_err());
+        ok(&mut s, LINE);
+        assert_eq!(model_len(&s), before + 1, "the line is in the drawing ({handler:?})");
+        assert_eq!(ok(&mut s, ENDBLK), "nil", "nothing is open");
+        assert!(s.doc().unwrap().block("FAIL").is_none());
+    }
+    // A routine that ends normally leaves its definition open for the next one.
+    ok(&mut s, BLOCK_EB);
+    ok(&mut s, LINE);
+    assert_eq!(ok(&mut s, ENDBLK), "\"EB\"");
+}

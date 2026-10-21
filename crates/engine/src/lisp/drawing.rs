@@ -408,14 +408,20 @@ fn end_block(ctx: &mut Ctx<'_>) -> Value {
     let Some((mut b, ents)) = ctx.env.pending_block.take() else { return Value::Nil };
     let Ok(d) = ctx.s.doc_mut() else { return Value::Nil };
     if b.anonymous {
+        // Its kind letter (`*U`, `*X`…) is kept; a name that isn't one gets `*U`.
         let prefix: String = b.name.chars().take(2).collect();
-        b.name = d.anonymous_block_name(if prefix.chars().count() == 2 { &prefix } else { "*U" });
+        let prefix = if prefix.chars().count() == 2 && prefix.starts_with('*') { prefix.as_str() } else { "*U" };
+        b.name = d.anonymous_block_name(prefix);
     } else {
         // Block names are case-insensitive: a redefinition keeps the existing name.
         if let Some(existing) = d.blocks.keys().find(|k| k.eq_ignore_ascii_case(&b.name)) {
             b.name = existing.clone();
         }
         if crate::cmd::blocks::references_block(d, &ents, &b.name) {
+            return Value::Nil;
+        }
+        // As BLOCK: a block being edited in place isn't redefined until REFCLOSE.
+        if d.refedit.as_ref().is_some_and(|r| r.block.eq_ignore_ascii_case(&b.name)) {
             return Value::Nil;
         }
     }
