@@ -128,9 +128,9 @@ fn shape_chars(primary: Option<&Face>, chars: &[(char, bool, bool)], height: f64
         }
     }
     out.strokes.extend(crate::decorations(&spans, h));
-    // A stroke-font glyph at the right end: the width leaves out its trailing gap, like
-    // `shape_stroke`.
-    out.width = if stroke_last { (x - stroke::GAP * sc * wf).max(0.0) } else { x };
+    // A stroke-font glyph at the right end of a stroke-font line: the width leaves out its
+    // trailing gap, like `shape_stroke`. A TrueType line keeps it, like `ttf::shape`.
+    out.width = if stroke_last && primary.is_none() { (x - stroke::GAP * sc * wf).max(0.0) } else { x };
     out
 }
 
@@ -156,7 +156,9 @@ fn itemize(cs: &[char], run: Range<usize>, primary: Option<&Face>) -> Vec<(Src, 
 }
 
 /// What draws `c`: the text's face when it has the character, else the previous fallback face,
-/// else the first fallback font that has it (FONTFALLBACK, FONTALT, installed fonts).
+/// else the first fallback font that has it (FONTFALLBACK, FONTALT, installed fonts), else the
+/// stroke font when it has it; what no font has is the text's face's missing-glyph shape (a box
+/// in the stroke font).
 fn resolve(c: char, primary: Option<&Face>, prev: Option<&Face>) -> Src {
     if let Some(p) = primary
         && (c.is_whitespace() || p.has_glyph(c))
@@ -171,6 +173,8 @@ fn resolve(c: char, primary: Option<&Face>, prev: Option<&Face>) -> Src {
     }
     match (ttf::fallback_for(c), primary) {
         (Some(f), _) => Src::Face(f),
+        // No font has it: the stroke font's glyph, as in the left-to-right path.
+        (None, _) if stroke::glyph(c).is_some() => Src::Stroke,
         // The text's font draws its own missing-glyph shape.
         (None, Some(p)) => Src::Face(p.clone()),
         (None, None) => Src::Missing,
@@ -259,6 +263,30 @@ mod tests {
         assert!((crate::line_width("A\u{200F}B", 1.0, 1.0) - a).abs() < 1e-9);
         let sh = crate::shape_stroke("A\u{200F}B", 1.0, 1.0, 0.0);
         assert!(!sh.strokes.iter().any(|s| s.len() == 5 && s.first() == s.last()), "no boxes for marks");
+    }
+
+    #[test]
+    fn a_face_lacking_what_no_font_has_gets_the_stroke_glyph() {
+        // A face that maps no character stands in for the text's font lacking one. What no
+        // installed font has either is the stroke font's glyph when it has one, as in the
+        // left-to-right path; what the stroke font lacks too, and whitespace, stay the face's.
+        let junk = Face { bytes: std::sync::Arc::new(b"not a font".to_vec()), index: 0 };
+        let c = '\u{2300}';
+        match ttf::fallback_for(c) {
+            None => assert!(matches!(resolve(c, Some(&junk), None), Src::Stroke), "the stroke font's glyph"),
+            Some(f) => assert!(matches!(resolve(c, Some(&junk), None), Src::Face(g) if g.same(&f)), "the fallback font's"),
+        }
+        assert!(matches!(resolve('\u{E000}', Some(&junk), None), Src::Face(_)), "the face's missing-glyph shape");
+        assert!(matches!(resolve(' ', Some(&junk), None), Src::Face(_)));
+        assert!(matches!(resolve(c, None, None), Src::Stroke));
+        if ttf::fallback_for(c).is_none() {
+            // Drawn as strokes, not a box, with the stroke font's advance; the trailing gap
+            // stays in the width, as `ttf::shape` keeps it.
+            let sh = shape(Some(&junk), "\u{05D0}\u{2300}", 1.0, 1.0, 0.0).unwrap_or_default();
+            assert!(sh.strokes.iter().any(|s| s.len() == 2), "the slash of the diameter sign");
+            assert!(!sh.strokes.iter().any(|s| s.len() == 5 && s.first() == s.last()), "no missing-glyph box");
+            assert!(sh.width >= crate::char_advance(c) - 1e-9, "{}", sh.width);
+        }
     }
 
     /// An installed font that shapes Arabic (Persian), or `None` (the test then skips).

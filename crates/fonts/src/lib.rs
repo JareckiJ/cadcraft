@@ -751,9 +751,13 @@ mod ttf_tests {
             assert_eq!(sh.text.first().map(|t| (t.gid, t.ch)), o_slash.text.first().map(|t| (t.gid, t.ch)), "{s}: the PDF glyph");
             assert!((crate::ttf::width(&face, s, 1.0, 1.0).unwrap() - o_slash.width).abs() < 1e-9, "{s}");
         }
-        // The same on a line with right-to-left text (the shaped path).
+        // The same on a line with right-to-left text (the shaped path): the face's Ø, not the
+        // stroke font's last resort, at the same width.
         let rtl = crate::complex::shape(Some(&face), "\u{2300}50 \u{5D0}", 1.0, 1.0, 0.0).unwrap();
-        assert_eq!(rtl.glyphs, crate::complex::shape(Some(&face), "Ø50 \u{5D0}", 1.0, 1.0, 0.0).unwrap().glyphs);
+        let o_rtl = crate::complex::shape(Some(&face), "Ø50 \u{5D0}", 1.0, 1.0, 0.0).unwrap();
+        assert_eq!(rtl.glyphs, o_rtl.glyphs);
+        assert!((rtl.width - o_rtl.width).abs() < 1e-9);
+        assert!(rtl.strokes.is_empty(), "no stroke-font glyphs");
     }
 
     #[test]
