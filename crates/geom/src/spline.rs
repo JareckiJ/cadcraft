@@ -144,7 +144,8 @@ impl Spline {
     /// 4000-point cap on every spline of a drawing in millimetres, a third of the time a large
     /// drawing took to open (#1076); a typical spline now takes a few hundred evaluations. The
     /// cap holds over all spans: the floor drops below eight per span when that would exceed it,
-    /// and a spline with more spans than two each allow is sampled on the grid. A degree-1
+    /// and a spline with more spans than two each allow gets its control box, which contains the
+    /// curve unless a weight is negative (then the grid). A degree-1
     /// spline is its control polygon, so its control box is exact; a degenerate spline gets its
     /// control box, which contains the curve (the box of the finite control points when one is
     /// not finite: `hull` skips it, but it would poison every sample).
@@ -160,6 +161,12 @@ impl Spline {
             return hull;
         }
         if spans > MAX_SAMPLES / 2 {
+            // Too many spans for two samples each: the control box contains the curve when no
+            // weight is negative (the convex hull property), so it is the safe answer; a grid could
+            // step over a narrow span. Negative weights void that property, so they keep the grid.
+            if self.weights.iter().all(|w| *w > 0.0) {
+                return hull;
+            }
             return Bounds2::from_points(self.samples(MAX_SAMPLES));
         }
         let (lo, hi) = self.domain();
@@ -467,12 +474,18 @@ mod tests {
 
     #[test]
     fn bounds_keep_their_cap_over_many_spans() {
-        // 1500 spans: four per span would pass the cap, so two; 2500 spans: more than the cap
-        // allows two for, so the grid. A smooth curve stays within the margin either way.
+        // 1500 spans: eight per span would pass the cap, so two; 2500 spans: more than the cap
+        // allows two for, so the control box, which contains the curve. A smooth curve stays
+        // within the margin either way.
         for n in [1502, 2502] {
-            let control = (0..n).map(|i| Vec2::from_angle(i as f64 / n as f64 * std::f64::consts::TAU) * 50.0).collect();
+            let control: Vec<Vec2> = (0..n).map(|i| Vec2::from_angle(i as f64 / n as f64 * std::f64::consts::TAU) * 50.0).collect();
+            let hull = Bounds2::from_points(control.iter().copied());
             let s = Spline::from_control(control, 2);
             let (b, want) = (s.bounds(), fine_box(&s));
+            if n > MAX_SAMPLES / 2 {
+                assert_eq!(b, hull, "{n} control points");
+                assert!(b.contains(want.min) && b.contains(want.max), "{b:?} vs {want:?}");
+            }
             let diag = want.min.dist(want.max);
             let err = [b.min.x - want.min.x, b.min.y - want.min.y, b.max.x - want.max.x, b.max.y - want.max.y]
                 .into_iter()
