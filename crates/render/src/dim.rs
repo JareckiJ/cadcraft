@@ -414,7 +414,7 @@ fn tol_height_code(st: &DimStyle) -> String {
 }
 
 fn post(template: &str, meas: &str) -> String {
-    if template.contains("<>") { template.replace("<>", meas) } else { format!("{meas}{template}") }
+    if template.contains("<>") { bounded_replace(template, meas) } else { format!("{meas}{template}") }
 }
 
 fn apply_override(base: &str, d: &Dimension) -> String {
@@ -423,8 +423,42 @@ fn apply_override(base: &str, d: &Dimension) -> String {
     } else if d.text.trim().is_empty() {
         String::new()
     } else {
-        d.text.replace("<>", base)
+        bounded_replace(&d.text, base)
     }
+}
+
+/// Largest dimension text produced by substituting the measurement into style/override text. Two
+/// modest strings can otherwise expand into gigabytes when the template holds many `<>` markers
+/// (CWE-789); past this the output is truncated rather than allocated unbounded.
+const MAX_DIM_TEXT: usize = 64 * 1024;
+
+/// Replace every `<>` in `template` with `value`, with the expanded length checked against
+/// [`MAX_DIM_TEXT`] before allocating so a many-placeholder template cannot blow up memory.
+fn bounded_replace(template: &str, value: &str) -> String {
+    let markers = template.matches("<>").count();
+    let grew = markers.saturating_mul(value.len());
+    let est = template.len().saturating_sub(markers.saturating_mul(2)).saturating_add(grew);
+    if est <= MAX_DIM_TEXT {
+        return template.replace("<>", value);
+    }
+    // Too large: substitute only until the budget is reached, then keep the rest literally.
+    let mut out = String::with_capacity(MAX_DIM_TEXT);
+    let mut rest = template;
+    while let Some(i) = rest.find("<>") {
+        if out.len() + i + value.len() > MAX_DIM_TEXT {
+            break;
+        }
+        out.push_str(&rest[..i]);
+        out.push_str(value);
+        rest = &rest[i + 2..];
+    }
+    let room = MAX_DIM_TEXT.saturating_sub(out.len());
+    let mut end = rest.len().min(room);
+    while end > 0 && !rest.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.push_str(&rest[..end]);
+    out
 }
 
 fn ext_line(origin: Vec2, foot: Vec2, st: &DimStyle, k: f64) -> Option<Vec<Vec2>> {

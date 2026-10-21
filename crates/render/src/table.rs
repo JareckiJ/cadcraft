@@ -59,11 +59,19 @@ pub fn table_covered(t: &Table) -> Vec<Vec<bool>> {
         return vec![Vec::new(); rows];
     }
     let mut cov = vec![vec![false; cols]; rows];
+    // Coverage marking visits each merge's whole rectangle. Overlapping merges re-mark cells that
+    // are already covered, so bound the total marking steps to a small multiple of the cell count
+    // rather than letting overlapping declarations cause quadratic work (CWE-407).
+    let mut budget: u64 = (rows as u64).saturating_mul(cols as u64).saturating_mul(4).saturating_add(1024);
     for (r, row) in t.cells.iter().enumerate().take(rows) {
         for (c, cell) in row.iter().enumerate().take(cols) {
             if let Some((rs, cs)) = cell.merged {
                 for rr in r..(r + rs.max(1) as usize).min(rows) {
                     for cc in c..(c + cs.max(1) as usize).min(cols) {
+                        budget = budget.saturating_sub(1);
+                        if budget == 0 {
+                            return cov;
+                        }
                         if (rr, cc) != (r, c)
                             && let Some(x) = cov.get_mut(rr).and_then(|v| v.get_mut(cc))
                         {
@@ -136,17 +144,22 @@ pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
 fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
     let cols = t.col_widths.len();
     let mut cells: Vec<Vec<cadcraft_doc::TableCell>> = rows.iter().map(|r| t.cells.get(*r).cloned().unwrap_or_default()).collect();
-    for (i, row) in cells.iter_mut().enumerate() {
-        row.resize_with(cols, Default::default);
-        for cell in row.iter_mut() {
-            if let Some((rs, cs)) = cell.merged {
-                // Rows of the merge that follow in this part.
-                let start = rows.get(i).copied().unwrap_or(0);
-                let mut n = 1u32;
-                while n < rs && rows.get(i + n as usize).is_some_and(|r| *r == start + n as usize) {
-                    n += 1;
+    // Only expand sparse rows to the full column count when detailed layout is actually permitted.
+    // Otherwise `layout` renders an outline, so materialising millions of empty cells here would be
+    // wasted work an attacker can trigger with a compact dimension array (CWE-789).
+    if rows.len().saturating_mul(cols) <= MAX_LAYOUT_CELLS {
+        for (i, row) in cells.iter_mut().enumerate() {
+            row.resize_with(cols, Default::default);
+            for cell in row.iter_mut() {
+                if let Some((rs, cs)) = cell.merged {
+                    // Rows of the merge that follow in this part.
+                    let start = rows.get(i).copied().unwrap_or(0);
+                    let mut n = 1u32;
+                    while n < rs && rows.get(i + n as usize).is_some_and(|r| *r == start + n as usize) {
+                        n += 1;
+                    }
+                    cell.merged = (n > 1 || cs > 1).then_some((n, cs));
                 }
-                cell.merged = (n > 1 || cs > 1).then_some((n, cs));
             }
         }
     }

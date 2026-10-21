@@ -94,8 +94,18 @@ pub fn ranges(len: f64, lt: &Linetype, scale: f64, min_pattern: f64) -> Option<V
     }
     let mut out = Vec::new();
     let mut pos = 0.0;
+    // An all-gap pattern (no non-negative element) can never draw anything, so return a
+    // continuous run instead of cycling it: otherwise the loop below spins without ever growing
+    // `out`, the only thing the emit limit counts (CWE-407).
+    if !lt.pattern.iter().any(|d| d.length >= 0.0) {
+        return None;
+    }
+    // Bound the pattern elements visited, independent of emitted ranges, so a pattern that emits
+    // little still cannot cycle hundreds of millions of times.
+    let mut visits: u64 = 0;
     for d in lt.pattern.iter().map(|d| d.length * scale).cycle() {
-        if pos >= len || out.len() > 2_000_000 {
+        visits += 1;
+        if pos >= len || out.len() > 2_000_000 || visits > 4_000_000 {
             break;
         }
         if d >= 0.0 {
@@ -109,6 +119,14 @@ pub fn ranges(len: f64, lt: &Linetype, scale: f64, min_pattern: f64) -> Option<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_all_gap_pattern_draws_continuous_instead_of_spinning() {
+        // A pattern with only negative (gap) elements can never draw; `ranges` returns None
+        // (continuous) rather than cycling it hundreds of millions of times (CWE-407, row 38).
+        let lt = Linetype::simple("GAPS", "", &[-0.001, -0.002]);
+        assert_eq!(ranges(1.0e6, &lt, 1.0, 0.0), None);
+    }
 
     #[test]
     fn dashes_split_line() {
