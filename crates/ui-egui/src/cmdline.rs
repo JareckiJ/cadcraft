@@ -462,8 +462,8 @@ pub fn submit(app: &mut CadApp) {
 }
 
 /// Enter (or Space) on a partly typed command name runs the AutoComplete row shown as chosen (the
-/// first unless Up/Down moved it), as AutoCAD does: `HA` + Enter is HATCH. A name that already
-/// is a command, an alias, a LISP command or a system variable runs as typed.
+/// first unless Up/Down moved it), as CAD command lines usually do: `HA` + Enter is HATCH. A
+/// name that already is a command, an alias, a LISP command or a system variable runs as typed.
 fn complete_command(app: &mut CadApp) {
     if app.session.prompting() || app.cmd.history_pos.is_some() {
         return;

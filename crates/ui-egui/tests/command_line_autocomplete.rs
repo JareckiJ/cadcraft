@@ -1,5 +1,5 @@
 //! Enter (or Space) on a partly typed command name runs the AutoComplete row shown as chosen,
-//! as AutoCAD does; an exact name or alias runs as typed.
+//! as CAD command lines usually do; an exact name or alias runs as typed.
 
 use cadcraft_engine::Session;
 use cadcraft_ui_egui::{CadApp, Services, cmdline};
