@@ -259,11 +259,22 @@ pub fn tangent_circles(c1: &TanCurve, c2: &TanCurve, r: f64, near: &[Vec2]) -> V
         let (d1, d2) = (s1 * r, s2 * r);
         let (o1, o2) = (sample(c1, &r1, d1), sample(c2, &r2, d2));
         let mut seeds = Vec::new();
-        for a in &o1 {
+        // Cap total seeds across all run-pairs and stop the enclosing loops once reached: the
+        // per-call cap inside `crossings` does not stop these outer loops, so repeated
+        // intersecting runs could otherwise accumulate hundreds of thousands of candidates
+        // (CWE-407).
+        const MAX_SEEDS: usize = MAX_SOLUTIONS * 8;
+        'pairs: for a in &o1 {
             for b in &o2 {
                 crossings(a, b, &mut seeds);
+                if seeds.len() >= MAX_SEEDS {
+                    break 'pairs;
+                }
             }
         }
+        // Deduplicate near-equal seeds so Newton refinement is not spent on duplicates.
+        seeds.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.total_cmp(&y.1)));
+        seeds.dedup_by(|x, y| (x.0 - y.0).abs() < 1e-9 && (x.1 - y.1).abs() < 1e-9);
         for seed in seeds {
             let Some((t1, t2)) = refine(c1, &r1, d1, c2, &r2, d2, seed, tol) else { continue };
             let (Some(center), p1, p2) = (c1.offset(t1, d1), c1.point(t1), c2.point(t2)) else { continue };
