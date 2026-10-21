@@ -132,11 +132,13 @@ impl Spline {
     /// absolute tolerance sampled the 4000-point cap on every spline of a drawing in millimetres,
     /// a third of the time a large drawing took to open (#1076); a typical spline now takes a few
     /// hundred evaluations. A degree-1 spline is its control polygon, so its control box is exact;
-    /// a degenerate spline gets its control box, which contains the curve.
+    /// a degenerate spline gets its control box, which contains the curve (the box of the finite
+    /// control points when one is not finite: `hull` skips it, but it would poison every sample).
     pub fn bounds(&self) -> Bounds2 {
         let hull = Bounds2::from_points(self.control.iter().copied());
         let diag = hull.min.dist(hull.max);
-        if !self.is_valid() || self.degree == 1 || !(diag.is_finite() && diag > 0.0) {
+        let finite = self.control.iter().all(|c| c.is_finite()) && self.weights.iter().all(|w| w.is_finite());
+        if !self.is_valid() || self.degree == 1 || !finite || !(diag.is_finite() && diag > 0.0) {
             return hull;
         }
         let spans = self.control.len().saturating_sub(self.degree);
@@ -402,6 +404,20 @@ mod tests {
         assert_eq!(invalid.bounds(), Bounds2::new(Vec2::new(0.0, -1.0), Vec2::new(5.0, 2.0)));
         let hostile = Spline::from_control(vec![Vec2::new(f64::NAN, 0.0), Vec2::new(1.0, f64::INFINITY), Vec2::new(2.0, 2.0)], 2);
         assert_eq!(hostile.bounds(), Bounds2::new(Vec2::new(2.0, 2.0), Vec2::new(2.0, 2.0)));
+        // A non-finite control point among finite ones poisons every sample: the box of the
+        // finite control points, not the empty box.
+        for bad in [Vec2::new(f64::NAN, 5.0), Vec2::new(5.0, f64::NAN), Vec2::new(f64::INFINITY, 5.0), Vec2::new(5.0, f64::NEG_INFINITY)] {
+            let s = Spline::from_control(vec![Vec2::ZERO, bad, Vec2::new(10.0, 10.0), Vec2::new(20.0, 0.0)], 3);
+            assert!(s.is_valid());
+            assert_eq!(s.bounds(), Bounds2::new(Vec2::ZERO, Vec2::new(20.0, 10.0)), "{bad:?}");
+        }
+        // A non-finite weight poisons the samples the same way.
+        for bad in [f64::NAN, f64::INFINITY] {
+            let mut s = Spline::from_control(vec![Vec2::ZERO, Vec2::new(5.0, 5.0), Vec2::new(10.0, 10.0), Vec2::new(20.0, 0.0)], 3);
+            s.weights = vec![1.0, bad, 1.0, 1.0];
+            assert!(s.is_valid());
+            assert_eq!(s.bounds(), Bounds2::new(Vec2::ZERO, Vec2::new(20.0, 10.0)), "weight {bad:?}");
+        }
         assert!(Spline::default().bounds().is_empty());
     }
 }
