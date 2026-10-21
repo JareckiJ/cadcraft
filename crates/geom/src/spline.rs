@@ -107,18 +107,47 @@ impl Spline {
         if !self.is_valid() {
             return self.control.clone();
         }
-        let (lo, hi) = self.domain();
-        // Control-polygon length guides the sample count.
-        let poly: f64 = self.control.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
-        let n = ((poly / tol.max(1e-9)).sqrt() * 2.0).clamp(8.0, 2000.0) as usize * self.degree.max(1);
-        let n = n.min(4000);
-        (0..=n).map(|i| self.eval_valid(lo + (hi - lo) * i as f64 / n as f64, lo, hi)).collect()
+        self.samples(self.sample_count(tol)).collect()
     }
 
+    /// How many segments a tessellation at `tol` takes: the control-polygon length guides it,
+    /// capped at `MAX_SAMPLES`.
+    fn sample_count(&self, tol: f64) -> usize {
+        let poly: f64 = self.control.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
+        let n = ((poly / tol.max(1e-9)).sqrt() * 2.0).clamp(8.0, 2000.0) as usize * self.degree.max(1);
+        n.min(MAX_SAMPLES)
+    }
+
+    /// `n + 1` points evenly spaced in parameter over the domain (the spline must be valid).
+    fn samples(&self, n: usize) -> impl Iterator<Item = Vec2> + '_ {
+        let (lo, hi) = self.domain();
+        (0..=n).map(move |i| self.eval_valid(lo + (hi - lo) * i as f64 / n as f64, lo, hi))
+    }
+
+    /// The box round the curve, from samples like `tessellate`'s at a tolerance relative to the
+    /// spline's own size (1e-3 of its control box's diagonal), and at least four per knot span so
+    /// a dense spline's wiggles are seen. The box can fall short of an extreme by the sag between
+    /// two samples, far under 1% of the spline's size, whatever the drawing's units (zoom extents
+    /// and selection pre-filtering tolerate that; the sampled box was never exact). A fixed
+    /// absolute tolerance sampled the 4000-point cap on every spline of a drawing in millimetres,
+    /// a third of the time a large drawing took to open (#1076); a typical spline now takes a few
+    /// hundred evaluations. A degree-1 spline is its control polygon, so its control box is exact;
+    /// a degenerate spline gets its control box, which contains the curve.
     pub fn bounds(&self) -> Bounds2 {
-        Bounds2::from_points(self.tessellate(1e-3))
+        let hull = Bounds2::from_points(self.control.iter().copied());
+        let diag = hull.min.dist(hull.max);
+        if !self.is_valid() || self.degree == 1 || !(diag.is_finite() && diag > 0.0) {
+            return hull;
+        }
+        let spans = self.control.len().saturating_sub(self.degree);
+        let n = self.sample_count(diag * 1e-3).max(spans.saturating_mul(4)).min(MAX_SAMPLES);
+        Bounds2::from_points(self.samples(n))
     }
 }
+
+/// Most segments `tessellate` and `bounds` evaluate for one spline (#268: a high degree on many
+/// control points took minutes).
+const MAX_SAMPLES: usize = 4000;
 
 pub(crate) fn clamped_uniform_knots(n: usize, degree: usize) -> Vec<f64> {
     let mut k = vec![0.0; degree + 1];
@@ -318,5 +347,61 @@ mod tests {
         let (mut n, mut left, mut right) = ([0.5; 3], [0.0; 4], [0.0; 4]);
         basis_into(3, 0.5, 3, &knots, &mut n, &mut left, &mut right);
         assert_eq!(n, [0.5; 3]);
+    }
+
+    /// A cubic through 300 points of a sine wave, open or closed.
+    fn wiggly(closed: bool) -> Spline {
+        let fit: Vec<Vec2> = (0..300)
+            .map(|i| {
+                let x = i as f64 / 299.0;
+                Vec2::new(x * 100.0, 10.0 * (x * 60.0).sin())
+            })
+            .collect();
+        Spline::from_fit(&fit, closed)
+    }
+
+    /// The box from 4000 evaluations, which `bounds` approximates.
+    fn fine_box(s: &Spline) -> Bounds2 {
+        let (lo, hi) = s.domain();
+        Bounds2::from_points((0..=4000).map(|i| s.eval(lo + (hi - lo) * i as f64 / 4000.0)))
+    }
+
+    fn scaled(s: &Spline, k: f64) -> Spline {
+        Spline { control: s.control.iter().map(|c| *c * k).collect(), fit: s.fit.iter().map(|c| *c * k).collect(), ..s.clone() }
+    }
+
+    #[test]
+    fn bounds_stay_within_a_small_margin_of_the_finely_sampled_box() {
+        let mut all = samples();
+        all.push(wiggly(false));
+        all.push(wiggly(true));
+        all.push(Spline::from_fit_points_closed(&[Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]));
+        for s in all {
+            // Whatever the drawing's units: the same relative margin at any scale.
+            for k in [1e-6, 1.0, 1e6] {
+                let s = scaled(&s, k);
+                let (b, want) = (s.bounds(), fine_box(&s));
+                let diag = want.min.dist(want.max);
+                let err = [b.min.x - want.min.x, b.min.y - want.min.y, b.max.x - want.max.x, b.max.y - want.max.y]
+                    .into_iter()
+                    .map(f64::abs)
+                    .fold(0.0, f64::max);
+                assert!(err <= 1e-3 * diag, "degree {} with {} control points at scale {k}: {b:?} vs {want:?}", s.degree, s.control.len());
+                // The curve lies in its control points' convex hull (positive weights), up to rounding.
+                assert!(Bounds2::from_points(s.control.iter().copied()).expand(1e-9 * diag).contains_box(&b), "degree {} at scale {k}", s.degree);
+            }
+        }
+    }
+
+    #[test]
+    fn degenerate_splines_get_their_control_box() {
+        let point = Spline::from_control(vec![Vec2::new(3.0, 4.0); 4], 3);
+        assert_eq!(point.bounds(), Bounds2::new(Vec2::new(3.0, 4.0), Vec2::new(3.0, 4.0)));
+        let invalid = Spline { knots: vec![0.0; 3], ..Spline::from_control(vec![Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::new(5.0, -1.0)], 2) };
+        assert!(!invalid.is_valid());
+        assert_eq!(invalid.bounds(), Bounds2::new(Vec2::new(0.0, -1.0), Vec2::new(5.0, 2.0)));
+        let hostile = Spline::from_control(vec![Vec2::new(f64::NAN, 0.0), Vec2::new(1.0, f64::INFINITY), Vec2::new(2.0, 2.0)], 2);
+        assert_eq!(hostile.bounds(), Bounds2::new(Vec2::new(2.0, 2.0), Vec2::new(2.0, 2.0)));
+        assert!(Spline::default().bounds().is_empty());
     }
 }
