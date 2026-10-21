@@ -12,6 +12,7 @@ mod curve;
 mod fillet;
 mod intersect;
 mod mat;
+pub mod mesh;
 mod nurbs;
 pub mod region;
 mod spline;

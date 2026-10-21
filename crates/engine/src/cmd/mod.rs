@@ -24,6 +24,7 @@ mod layout;
 mod lisp;
 mod mleader_content;
 mod mleader_edit;
+mod modeling;
 mod modify;
 mod modify2;
 mod mtext_opts;
@@ -180,6 +181,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view::specs());
         v.extend(draw::specs());
         v.extend(draw2::specs());
+        v.extend(modeling::specs());
         v.extend(annotate::specs());
         v.extend(mleader_edit::specs());
         v.extend(annoscale::specs());
