@@ -10,20 +10,41 @@ struct Counts {
     proptests: usize,
 }
 
+/// Upper bound on directory entries visited in one `walk`, so even a crafted tree of aliases can
+/// never make the stats command run unbounded work.
+const MAX_ENTRIES: usize = 2_000_000;
+
 fn walk(dir: &Path, c: &mut Counts) {
+    let mut budget = MAX_ENTRIES;
+    walk_inner(dir, c, &mut budget);
+}
+
+fn walk_inner(dir: &Path, c: &mut Counts, budget: &mut usize) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
     for e in rd.flatten() {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        // Use the entry's own type and never follow symlinks: a directory symlink would otherwise
+        // be re-scanned as a fresh directory, so a small graph of aliases could cause exponential
+        // repeated enumeration and reads (CWE-400).
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_symlink() {
+            continue;
+        }
         let p = e.path();
         let name = e.file_name();
         let name = name.to_string_lossy();
-        if p.is_dir() {
+        if ft.is_dir() {
             // Nested fuzz workspaces and build output are not part of the crate.
             if name != "target" && name != "fuzz" && !name.starts_with('.') {
-                walk(&p, c);
+                walk_inner(&p, c, budget);
             }
-        } else if name.ends_with(".rs")
+        } else if ft.is_file()
+            && name.ends_with(".rs")
             && let Ok(s) = std::fs::read_to_string(&p)
         {
             c.files += 1;
@@ -108,11 +129,28 @@ pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::count_tests;
+    use super::{Counts, count_tests, walk};
 
     #[test]
     fn counts_attributes_and_proptest_blocks() {
         let src = "#[test]\nfn a() {}\n// #[test] commented\n    #[test]\nfn b() {}\nproptest! {\n}\n";
         assert_eq!(count_tests(src), (2, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_does_not_follow_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir().join(format!("cadcraft-xtask-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("a.rs"), "fn a() {}\n").unwrap();
+        // A directory symlink pointing back at `real` would be re-scanned if followed.
+        symlink(&real, base.join("alias")).unwrap();
+        let mut c = Counts::default();
+        walk(&base, &mut c);
+        assert_eq!(c.files, 1, "the aliased directory was followed and counted twice");
+        std::fs::remove_dir_all(&base).ok();
     }
 }
