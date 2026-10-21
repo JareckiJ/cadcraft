@@ -201,10 +201,14 @@ rustPlatform.buildRustPackage {
       It ships with cadcraft-cli, a headless converter, command runner and MCP server for AI agents.
     '';
     homepage = "https://getartcraft.com/apps/cadcraft";
-    license = with lib.licenses; [
-      mit
-      asl20
-    ];
+    # The craft-fonts build input embeds OFL fonts in the binaries.
+    license =
+      with lib.licenses;
+      [
+        mit
+        asl20
+      ]
+      ++ lib.optional (craft-fonts != null) ofl;
     sourceProvenance = with lib.sourceTypes; [ fromSource ];
     platforms = lib.platforms.linux ++ lib.platforms.darwin;
     # `nix run` and the desktop entry both start the GUI.
