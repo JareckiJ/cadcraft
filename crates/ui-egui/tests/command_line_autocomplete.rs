@@ -87,3 +87,25 @@ fn up_and_down_choose_the_suggestion_that_enter_or_space_runs() {
     // Up at the first row stays there.
     assert_eq!(press(&mut a, &ctx, "dimc", &["ArrowUp", "Enter"]).as_deref(), Some(first.as_str()));
 }
+
+#[test]
+fn editing_a_recalled_command_completes_from_the_list_again() {
+    let ctx = egui::Context::default();
+    let mut a = CadApp::new(Session::new(), Services::default());
+    for _ in 0..3 {
+        frame(&mut a, &ctx);
+    }
+    let first = press(&mut a, &ctx, "dimc", &["Enter"]).expect("Enter runs the first suggestion");
+    let second = press(&mut a, &ctx, "dimc", &["ArrowDown", "Enter"]).expect("Down then Enter runs a suggestion");
+    // Up recalls the last command; erasing it back to `dimc` leaves the history: the list shows
+    // again, Enter takes its first row and Down moves in the list, not in the history.
+    let back = |name: &str| vec!["Backspace"; name.len() - "dimc".len()];
+    let mut keys = vec!["ArrowUp"];
+    keys.extend(back(&second));
+    keys.push("Enter");
+    assert_eq!(press(&mut a, &ctx, "", &keys).as_deref(), Some(first.as_str()));
+    let mut keys = vec!["ArrowUp"];
+    keys.extend(back(&first));
+    keys.extend(["ArrowDown", "Enter"]);
+    assert_eq!(press(&mut a, &ctx, "", &keys).as_deref(), Some(second.as_str()));
+}

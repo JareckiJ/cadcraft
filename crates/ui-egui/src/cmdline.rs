@@ -346,6 +346,8 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     app.cmd.preedit.clear();
                     app.cmd.buffer.push_str(&t);
                     app.cmd.suggestion = 0;
+                    // Editing a recalled command leaves the history: AutoComplete applies again.
+                    app.cmd.history_pos = None;
                 }
             }
             // IME composition: the pre-edit is shown but stays out of the buffer; the commit is
@@ -381,6 +383,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     } else {
                         app.cmd.buffer.pop();
                         app.cmd.suggestion = 0;
+                        app.cmd.history_pos = None;
                     }
                 }
                 Key::ArrowUp if !modifiers.any() && suggesting(app) => {
