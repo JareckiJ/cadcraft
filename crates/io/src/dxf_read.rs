@@ -1101,12 +1101,29 @@ fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &m
 fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, skipped: &mut usize) -> Vec<(Option<String>, bool, Entity)> {
     let mut out = Vec::new();
     let mut i = 0;
+    // Document-wide budget on materialised ACAD_TABLE cells, so many small table declarations
+    // cannot add up to gigabytes even though each one stays under the per-table cap (CWE-789).
+    const MAX_DOC_TABLE_CELLS: usize = 4_000_000;
+    let mut table_cells_left: usize = MAX_DOC_TABLE_CELLS;
     while let Some((kind, tags)) = recs.get(i) {
         let t = T(tags);
         let owner = crate::dxf_ext::owner(tags);
         let paper = t.i(67) == Some(1);
         let handle = t.s(5).and_then(|h| Handle::parse_hex(&h));
         let mut kindent = entity(kind, tags);
+        // Charge table cells against the shared budget; a table that would overflow it is reduced
+        // to an empty table rather than retained.
+        if let Some((_, EntityKind::Table(tbl))) = kindent.as_mut() {
+            let cells: usize = tbl.cells.iter().map(Vec::len).sum();
+            match table_cells_left.checked_sub(cells) {
+                Some(left) => table_cells_left = left,
+                None => {
+                    tbl.cells = Vec::new();
+                    tbl.row_heights = Vec::new();
+                    tbl.col_widths = Vec::new();
+                }
+            }
+        }
         if let Some((c, _)) = kindent.as_mut()
             && let Some(n) = entity_plot_style(tags, rx)
         {
@@ -1420,6 +1437,10 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
         }
     }
     let mut active_vport = false;
+    // Index of layers already appended, by lower-cased name, so each LAYER record updates or
+    // appends in O(1) instead of scanning the growing layer list — otherwise many distinct layer
+    // names make import quadratic (CWE-407).
+    let mut layer_index: HashMap<String, usize> = d.layers.iter().enumerate().map(|(i, l)| (l.name.to_ascii_lowercase(), i)).collect();
     for (kind, tg) in recs {
         let t = T(&tg);
         match kind.as_str() {
@@ -1455,9 +1476,16 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 if let Some(desc) = crate::dxf_ext::xdata(&tg, crate::dxf_ext::LAYER_DESCRIPTION_APP).iter().filter(|x| x.code == 1000).nth(1) {
                     l.description = desc.str();
                 }
-                match d.layer_mut(&name) {
-                    Some(x) => *x = l,
-                    None => d.layers.push(l),
+                match layer_index.get(&name.to_ascii_lowercase()) {
+                    Some(&i) => {
+                        if let Some(x) = d.layers.get_mut(i) {
+                            *x = l;
+                        }
+                    }
+                    None => {
+                        layer_index.insert(name.to_ascii_lowercase(), d.layers.len());
+                        d.layers.push(l);
+                    }
                 }
             }
             "LTYPE" => {
