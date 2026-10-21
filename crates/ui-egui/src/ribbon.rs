@@ -648,18 +648,18 @@ pub const TABS: &[TabDef] = &[
 /// Height of the tab row.
 pub const TAB_ROW: f32 = 24.0;
 /// Height of the panel body (three small-button rows) and of the panel title row under it.
-const BODY: f32 = 72.0;
-const TITLE: f32 = 18.0;
+pub(crate) const BODY: f32 = 72.0;
+pub(crate) const TITLE: f32 = 18.0;
 /// Whole ribbon height when expanded.
 pub const HEIGHT: f32 = TAB_ROW + BODY + TITLE + 4.0;
 
-const ROW: f32 = BODY / 3.0;
-const BIG_ICON: f32 = 30.0;
-const SMALL_ICON: f32 = 16.0;
-const PAD: f32 = 3.0;
+pub(crate) const ROW: f32 = BODY / 3.0;
+pub(crate) const BIG_ICON: f32 = 30.0;
+pub(crate) const SMALL_ICON: f32 = 16.0;
+pub(crate) const PAD: f32 = 3.0;
 
 /// Ribbon text is a little smaller than the palettes' body text.
-fn font() -> FontId {
+pub(crate) fn font() -> FontId {
     FontId::proportional(11.0)
 }
 
@@ -676,7 +676,7 @@ pub fn known(id: &str) -> bool {
     cadcraft_engine::find_command(id).is_some() || crate::menus::is_ui_command(id)
 }
 
-fn text_w(ui: &egui::Ui, s: &str) -> f32 {
+pub(crate) fn text_w(ui: &egui::Ui, s: &str) -> f32 {
     ui.painter().layout_no_wrap(crate::i18n::ribbon(s).to_string(), font(), Color32::WHITE).size().x
 }
 
@@ -692,7 +692,7 @@ fn two_lines(label: &str) -> (String, Option<String>) {
     (a.to_string(), Some(b.trim_start().to_string()))
 }
 
-fn cell_width(ui: &egui::Ui, cell: &Cell) -> f32 {
+pub(crate) fn cell_width(ui: &egui::Ui, cell: &Cell) -> f32 {
     match cell {
         Cell::Big(cmd, variants) => {
             let (a, b) = two_lines(cmd.label);
@@ -741,21 +741,23 @@ pub fn fit(full: &[f32], collapsed: &[f32], room: f32) -> Vec<bool> {
 // ------------------------------------------------------------------------------------------
 
 /// What a click in the ribbon asks for.
-enum Action {
+pub(crate) enum Action {
     Start(&'static str),
+    /// A contextual tab's change, applied after the ribbon is drawn.
+    Do(Box<dyn FnOnce(&mut CadApp)>),
     Tab(&'static str),
     ToggleMinimized,
     Layer(String),
     LayerToggle(String, &'static str, bool),
 }
 
-fn hover_fill(ui: &egui::Ui, r: Rect, resp: &egui::Response) {
+pub(crate) fn hover_fill(ui: &egui::Ui, r: Rect, resp: &egui::Response) {
     if resp.hovered() {
         ui.painter().rect_filled(r, 3.0, Tokens::get().control_hover.gamma_multiply(0.6));
     }
 }
 
-fn paint_icon(p: &egui::Painter, r: Rect, cmd: &Cmd, dim: bool) {
+pub(crate) fn paint_icon(p: &egui::Painter, r: Rect, cmd: &Cmd, dim: bool) {
     match cmd.icon {
         Some(icon) => icons::paint(p, r, icon, dim),
         None => {
@@ -768,13 +770,13 @@ fn paint_icon(p: &egui::Painter, r: Rect, cmd: &Cmd, dim: bool) {
     }
 }
 
-fn tooltip(cmd: &Cmd, enabled: bool) -> String {
+pub(crate) fn tooltip(cmd: &Cmd, enabled: bool) -> String {
     let label = crate::i18n::ribbon(cmd.label);
     if enabled { format!("{label} ({})", cmd.id.to_uppercase()) } else { format!("{label} — {}", crate::tl!("not available yet")) }
 }
 
 /// A menu of command variants (or a collapsed panel's commands).
-fn variant_menu(ui: &mut egui::Ui, items: &[Cmd], out: &mut Option<Action>) {
+pub(crate) fn variant_menu(ui: &mut egui::Ui, items: &[Cmd], out: &mut Option<Action>) {
     for v in items {
         let enabled = known(v.id);
         let resp = ui.add_enabled(enabled, egui::Button::new(crate::i18n::ribbon(v.label)));
@@ -786,7 +788,7 @@ fn variant_menu(ui: &mut egui::Ui, items: &[Cmd], out: &mut Option<Action>) {
     }
 }
 
-fn big(ui: &mut egui::Ui, r: Rect, cmd: &Cmd, variants: &'static [Cmd], out: &mut Option<Action>) {
+pub(crate) fn big(ui: &mut egui::Ui, r: Rect, cmd: &Cmd, variants: &'static [Cmd], out: &mut Option<Action>) {
     let t = Tokens::get();
     let enabled = known(cmd.id);
     let top = Rect::from_min_max(r.min, pos2(r.right(), r.top() + BIG_ICON + 8.0));
@@ -814,7 +816,7 @@ fn big(ui: &mut egui::Ui, r: Rect, cmd: &Cmd, variants: &'static [Cmd], out: &mu
     }
 }
 
-fn small(ui: &mut egui::Ui, r: Rect, cmd: &Cmd, variants: &'static [Cmd], out: &mut Option<Action>) {
+pub(crate) fn small(ui: &mut egui::Ui, r: Rect, cmd: &Cmd, variants: &'static [Cmd], out: &mut Option<Action>) {
     let t = Tokens::get();
     let enabled = known(cmd.id);
     let main = if variants.is_empty() { r } else { Rect::from_min_max(r.min, pos2(r.right() - 12.0, r.bottom())) };
@@ -977,7 +979,7 @@ fn list(ui: &mut egui::Ui, app: &CadApp, r: Rect, w: Widget, out: &mut Option<Ac
     }
 }
 
-fn draw_cell(ui: &mut egui::Ui, app: &CadApp, cell: &Cell, r: Rect, out: &mut Option<Action>) {
+pub(crate) fn draw_cell(ui: &mut egui::Ui, app: &CadApp, cell: &Cell, r: Rect, out: &mut Option<Action>) {
     match cell {
         Cell::Big(cmd, v) => big(ui, r.shrink2(vec2(PAD / 2.0, 0.0)), cmd, v, out),
         Cell::Small(rows) => {
@@ -1040,9 +1042,13 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut out: Option<Action> = None;
     egui::Panel::top("cc_ribbon").exact_size(h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let r = ui.max_rect();
-        // Tabs.
+        // Tabs, then the contextual tab of the selection (Hatch Editor), which opens by itself.
         let mut x = r.left() + 8.0;
-        let active = TABS.iter().find(|tab| tab.id == app.ui.ribbon_tab).map_or("home", |tab| tab.id);
+        let context = crate::ribbon_hatch::context(app, ui.ctx());
+        let active = match context {
+            Some(c) if app.ui.ribbon_tab == c => c,
+            _ => TABS.iter().find(|tab| tab.id == app.ui.ribbon_tab).map_or("home", |tab| tab.id),
+        };
         for tab in TABS {
             let label = tab_label(tab.title);
             let w = ui.painter().layout_no_wrap(label.clone(), crate::theme::body(), t.text).size().x + 18.0;
@@ -1063,6 +1069,23 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
             }
             x += w + 2.0;
         }
+        if let Some(id) = context {
+            let label = tab_label(crate::ribbon_hatch::title(id));
+            let w = ui.painter().layout_no_wrap(label.clone(), crate::theme::body(), t.text).size().x + 18.0;
+            let tr = Rect::from_min_size(pos2(x + 4.0, r.top() + 1.0), vec2(w, TAB_ROW - 1.0));
+            let resp = ui.interact(tr, ui.id().with(("rb_tab", id)), Sense::click());
+            let is_active = id == active;
+            // A contextual tab is drawn in the accent colour, as Windows CAD ribbons do.
+            let fill = if is_active { t.accent } else { t.accent.gamma_multiply(if resp.hovered() { 0.75 } else { 0.55 }) };
+            ui.painter().rect_filled(tr, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, fill);
+            ui.painter().text(tr.center(), Align2::CENTER_CENTER, label, crate::theme::body(), Color32::WHITE);
+            icons::describe_control(ui, &resp, crate::ribbon_hatch::title(id), Some(is_active), true);
+            if resp.double_clicked() {
+                out = Some(Action::ToggleMinimized);
+            } else if resp.clicked() {
+                out = Some(Action::Tab(id));
+            }
+        }
         if app.ui.ribbon_minimized {
             return;
         }
@@ -1070,6 +1093,10 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
         let body = Rect::from_min_max(pos2(r.left(), r.top() + TAB_ROW), r.max);
         ui.painter().rect_filled(body, 0.0, t.panel);
         ui.painter().hline(body.x_range(), body.bottom() - 0.5, Stroke::new(1.0, t.border));
+        if context == Some(active) {
+            crate::ribbon_hatch::body(app, ui, body, &mut out);
+            return;
+        }
         let Some(tab) = TABS.iter().find(|tab| tab.id == active) else { return };
         let full: Vec<f32> = tab.panels.iter().map(|p| panel_width(ui, p)).collect();
         let collapsed: Vec<f32> = tab.panels.iter().map(|p| collapsed_width(ui, p)).collect();
@@ -1137,6 +1164,7 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
     });
     match out {
         Some(Action::Start(id)) => app.start(id),
+        Some(Action::Do(f)) => f(app),
         Some(Action::Tab(id)) => {
             app.ui.ribbon_tab = id.to_string();
             app.ui.ribbon_minimized = false;

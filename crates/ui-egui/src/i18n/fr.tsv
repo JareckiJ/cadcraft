@@ -1189,3 +1189,86 @@ ribbon	Command Line	Ligne de commande
 	Ribbon	Ruban
 	Windows Layout (Ribbon)	Disposition Windows (ruban)
 	Mac Layout (Tool Sets)	Disposition Mac (palettes)
+# Hatch Editor contextual tab (context `ribbon`, and `hatchribbon` where the Hatch Editor words a
+# label differently from the other tabs): the French wording drafting users know from Windows CAD
+# ribbons (observed black-box, 2026-10-16).
+ribbon	Hatch Editor	Editeur de hachures
+ribbon	Boundaries	Contours
+ribbon	Origin	Origine
+ribbon	Options	Options
+ribbon	Close	Fermer
+ribbon	Pick Points	Choisir des points
+ribbon	Select	Sélection
+ribbon	Recreate	Recréer
+ribbon	Set Origin	Définir l'origine
+ribbon	Close Hatch Editor	Fermer Editeur de hachures
+ribbon	Associative	Associatif
+ribbon	Annotative	Annotatif
+ribbon	Spacing	Espacement
+ribbon	Hatch Transparency	Transparence des hachures
+ribbon	User defined	Défini par l'utilisateur
+ribbon	Display Boundary Objects	Afficher les objets de contour
+ribbon	Don't Retain Boundaries	Ne pas conserver les contours
+ribbon	Use Current Viewport	Utiliser la fenêtre courante
+ribbon	Use Current	Utiliser la valeur courante
+ribbon	Relative to Paper Space	Relative à l'espace papier
+ribbon	Double	Double
+ribbon	ISO Pen Width:	Largeur de plume ISO:
+ribbon	Top Left	En haut à gauche
+ribbon	Top Right	En haut à droite
+ribbon	Bottom Left	En bas à gauche
+ribbon	Bottom Right	En bas à droite
+ribbon	Center	Centre
+ribbon	Use Current Origin	Utiliser l'origine courante
+ribbon	Store as Default Origin	Enregistrer en tant qu'origine par défaut
+ribbon	Use Source Hatch Origin	Utiliser l'origine de la hachure source
+ribbon	Gap Tolerance	Tolérance d'espace
+ribbon	Separate Hatches	Séparer les hachures
+ribbon	Normal Island Detection	Détection d'îlots normale
+ribbon	Outer Island Detection	Détection d'îlots externe
+ribbon	Ignore Island Detection	Ignorer la détection d'îlots
+ribbon	No Island Detection	Pas de détection d'îlots
+ribbon	Do Not Change	Ne pas modifier
+ribbon	Send Behind Boundary	Placer derrière le contour
+ribbon	Bring in Front of Boundary	Placer devant le contour
+ribbon	Hatch Type	Type de hachure
+ribbon	Hatch Color	Couleur de hachure
+ribbon	Background Color	Couleur d'arrière-plan
+ribbon	Gradient Color 2	Couleur de dégradé 2
+ribbon	Hatch Layer Override	Remplacement du calque de hachure
+ribbon	Island Detection	Détection d'îlots
+ribbon	Draw Order	Ordre de tracé
+ribbon	Retain Boundaries	Conserver les contours
+ribbon	Boundary Set	Jeu de contours
+ribbon	Next	Suivant
+ribbon	More	Plus
+ribbon	GR_LINEAR	GR_LINEAIRE
+ribbon	GR_INVCYL	GR_CYLINV
+ribbon	GR_CURVED	GR_COURBE
+ribbon	GR_INVSPH	GR_SPHINV
+ribbon	GR_INVHEM	GR_HEMINV
+ribbon	GR_INVCUR	GR_CURINV
+hatchribbon	Match Properties	Faire correspondre les propriétés
+hatchribbon	Send to Back	Mettre à l'arrière-plan
+hatchribbon	Bring to Front	Mettre au premier plan
+	Transparency Value	Valeur de transparence
+	Pin	Épingler
+	Pick Points	Choisir des points
+	Select Boundary Objects	Sélectionner les objets de contour
+	Remove Boundaries	Supprimer des contours
+	Recreate Boundary	Recréer le contour
+	Set Origin	Définir l'origine
+	Display Boundary Objects	Afficher les objets de contour
+	Boundary Set	Jeu de contours
+	Close Hatch Editor	Fermer Editeur de hachures
+	Index Colors	Couleurs de l'index
+	More Colors...	Plus de couleurs...
+	Select Color	Sélectionner une couleur
+ribbon	Hatch Creation	Création de hachures
+ribbon	Close Hatch Creation	Fermer Création de hachures
+ribbon	Retain Boundaries - Polyline	Conserver les contours - Polyligne
+ribbon	Retain Boundaries - Region	Conserver les contours - Région
+ribbon	Select New Boundary Set	Sélectionner un nouveau jeu de contours
+ribbon	Hatch and Gradient	Hachures et gradient
+	Close Hatch Creation	Fermer Création de hachures
+	Select Hatch	Sélectionner une hachure

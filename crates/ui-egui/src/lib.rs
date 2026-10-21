@@ -30,6 +30,7 @@ pub mod spacemouse;
 // The External References palette.
 pub mod xrefs;
 
+pub mod color_list;
 pub mod dyngrips;
 pub mod dyninput;
 pub mod gpu;
@@ -47,6 +48,7 @@ pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
 pub mod ribbon;
+pub mod ribbon_hatch;
 pub mod shortcut_menus;
 pub mod theme;
 #[cfg(not(target_arch = "wasm32"))]

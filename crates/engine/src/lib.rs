@@ -711,6 +711,11 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// The Hatch Editor's boundary set (HATCHBOUNDARYSET): the only objects pick points look at;
+    /// `None` uses everything visible in the current viewport.
+    pub hatch_boundary_set: Option<Vec<Handle>>,
+    /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
+    pub hatch_store_origin: bool,
 }
 
 impl Default for Session {
@@ -761,6 +766,8 @@ impl Session {
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            hatch_boundary_set: None,
+            hatch_store_origin: false,
         }
     }
     /// Append a new untitled drawing (`DrawingN`, metric or imperial default view), end a running command, make it active, bump the document epoch and return its index.
