@@ -289,6 +289,9 @@ fn extrude_handles(s: &mut Session, hs: &[Handle], height: f64, tol: Option<f64>
     let mut built: Vec<(Handle, Common, Vec<Face>)> = Vec::new();
     let mut total = 0usize;
     for h in hs {
+        if erase && super::curves::is_locked(s, *h) {
+            return Err(err("extrude", "a profile is locked"));
+        }
         let d: &Drawing = s.doc()?;
         let e = d.entity(*h).ok_or_else(|| err("extrude", format!("{} is not an object in this drawing", h.hex())))?;
         let prof = profile_of(e, tol).map_err(|m| err("extrude", format!("{}: {m}", h.hex())))?;
@@ -330,6 +333,23 @@ struct ExtrudeM {
     picked: Vec<Handle>,
 }
 
+impl ExtrudeM {
+    /// Keep the picked objects that have a usable profile; say how many were left out. Ends the
+    /// command when none remain.
+    fn take(&mut self, s: &mut Session, hs: Vec<Handle>) -> Step {
+        let total = hs.len();
+        self.picked = match s.doc() {
+            Ok(d) => hs.into_iter().filter(|h| d.entity(*h).is_some_and(|e| profile_of(e, None).is_ok())).collect(),
+            Err(_) => Vec::new(),
+        };
+        let ignored = total.saturating_sub(self.picked.len());
+        if ignored > 0 {
+            s.echo(format!("{ignored} object(s) cannot be extruded and were ignored."));
+        }
+        if self.picked.is_empty() { Step::Done } else { Step::Continue }
+    }
+}
+
 impl Interactive for ExtrudeM {
     fn name(&self) -> &'static str {
         "EXTRUDE"
@@ -337,7 +357,8 @@ impl Interactive for ExtrudeM {
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         self.sel = SelectPhase::begin(s);
         if self.sel.done {
-            self.picked = self.sel.picked.clone();
+            let picked = self.sel.picked.clone();
+            return Ok(self.take(s, picked));
         }
         Ok(Step::Continue)
     }
@@ -349,10 +370,7 @@ impl Interactive for ExtrudeM {
             return Ok(match self.sel.feed(s, &i)? {
                 SelOutcome::More => Step::Continue,
                 SelOutcome::Empty => Step::Done,
-                SelOutcome::Done(hs) => {
-                    self.picked = hs;
-                    Step::Continue
-                }
+                SelOutcome::Done(hs) => self.take(s, hs),
             });
         }
         let h = match &i {

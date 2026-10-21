@@ -235,3 +235,59 @@ fn typed_box_cylinder_and_extrude_follow_the_prompts() {
     assert!(s.running.is_none());
     assert_eq!(count(&s), before + 6);
 }
+
+#[test]
+fn erasing_a_locked_profile_is_refused_before_anything_changes() {
+    let mut s = Session::new();
+    s.execute("layer.new", &json!({ "name": "LOCKED" })).unwrap();
+    s.execute("layer.current", &json!({ "name": "LOCKED" })).unwrap();
+    let h = s.add_entity(pline(&[(0.0, 0.0, 0.0), (3.0, 0.0, 0.0), (3.0, 2.0, 0.0), (0.0, 2.0, 0.0)], true, 0.0)).unwrap();
+    s.execute("layer.set", &json!({ "name": "LOCKED", "locked": true })).unwrap();
+    let before = count(&s);
+    let r = s.execute("extrude", &json!({ "handles": [h.hex()], "height": 2, "erase": true }));
+    assert!(r.is_err(), "a locked profile cannot be erased");
+    assert_eq!(count(&s), before, "nothing was added or removed");
+    assert!(s.doc().unwrap().model.iter().any(|e| e.handle == h));
+    s.execute("extrude", &json!({ "handles": [h.hex()], "height": 2 })).unwrap();
+    assert_eq!(count(&s), before + 6, "keeping the profile is still allowed");
+}
+
+#[test]
+fn typed_extrude_ignores_what_it_cannot_extrude() {
+    let mut s = Session::new();
+    let c = s.execute("circle", &json!({ "center": [0, 0], "radius": 2 })).unwrap();
+    let c = Handle::parse_hex(c["handle"].as_str().unwrap()).unwrap();
+    let l = s.add_entity(EntityKind::Line(cadcraft_engine::doc::Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) })).unwrap();
+    let before = count(&s);
+
+    s.start("extrude").unwrap();
+    s.input(Input::Pick(vec![c, l])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.prompt_text().contains("height of extrusion"), "{}", s.prompt_text());
+    s.input(Input::Text("2".into())).unwrap();
+    assert!(s.running.is_none());
+    let made = count(&s) - before;
+    assert!(made >= 8 * 3, "the circle was extruded: {made} faces");
+    assert!(s.doc().unwrap().model.iter().any(|e| e.handle == l), "the line is untouched");
+
+    // Only the line: nothing to extrude, the command ends and adds nothing.
+    let before = count(&s);
+    s.start("extrude").unwrap();
+    s.input(Input::Pick(vec![l])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none());
+    assert_eq!(count(&s), before);
+
+    // A pickfirst selection is filtered the same way.
+    s.set_selection(vec![c, l]);
+    s.start("extrude").unwrap();
+    assert!(s.prompt_text().contains("height of extrusion"), "{}", s.prompt_text());
+    s.input(Input::Text("1".into())).unwrap();
+    assert!(s.running.is_none());
+    assert!(count(&s) > before);
+
+    // The JSON form stays strict: one bad object refuses the whole batch.
+    let before = count(&s);
+    assert!(s.execute("extrude", &json!({ "handles": [c.hex(), l.hex()], "height": 1 })).is_err());
+    assert_eq!(count(&s), before);
+}
