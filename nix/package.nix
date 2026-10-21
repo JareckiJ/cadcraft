@@ -220,7 +220,9 @@ rustPlatform.buildRustPackage {
       ]
       ++ lib.optional (craft-fonts != null) ofl;
     sourceProvenance = with lib.sourceTypes; [ fromSource ];
-    platforms = lib.platforms.linux ++ lib.platforms.darwin;
+    # Apple Silicon only on the Darwin side: the pinned nixpkgs (unstable, 26.11) has dropped
+    # x86_64-darwin, so the flake cannot offer it although the universal macOS release covers it.
+    platforms = lib.platforms.linux ++ [ "aarch64-darwin" ];
     # `nix run` and the desktop entry both start the GUI.
     mainProgram = "cadcraft";
   };
