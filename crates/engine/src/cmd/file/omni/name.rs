@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use super::OVERLAY_PREFIX;
-use super::time::{civil, iso, stamp_epoch};
+use super::time::{iso, stamp, stamp_epoch};
 
 /// Versions are stored gzipped; the suffix says so.
 pub(super) const COMPRESSED_EXT: &str = "gz";
@@ -181,10 +181,7 @@ pub(super) fn chosen(list: &[Snap], v: &Value) -> Option<Snap> {
 pub(super) fn overlay_name(snap: &Snap) -> String {
     let (stem, _) = split_ext(&snap.drawing);
     match snap.epoch {
-        Some(e) => {
-            let (y, mo, da, h, mi, sd) = civil(e);
-            format!("{OVERLAY_PREFIX}{}_{y:04}{mo:02}{da:02}_{h:02}{mi:02}{sd:02}", slug(stem, "-_"))
-        }
+        Some(e) => format!("{OVERLAY_PREFIX}{}_{}", slug(stem, "-_"), stamp(e).replace('.', "_")),
         None => format!("{OVERLAY_PREFIX}{}", slug(stem, "-_")),
     }
 }

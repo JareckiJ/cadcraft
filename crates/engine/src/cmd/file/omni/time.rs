@@ -1,79 +1,66 @@
-//! UTC stamps: the epoch second as a civil date and back, so a version's name sorts by time
-//! without a time zone database.
+//! UTC stamps: the name a version is filed under, the ISO stamp it is listed with, and back.
+//!
+//! The calendar is [`chrono`]'s job (issue #1785): this module owns only the two formats the
+//! history uses, so a stamp means the same moment on every platform and nothing here hand-rolls
+//! leap years, month lengths or the epoch shift.
 
-/// UTC time as (civil year, month, day, hour, minute, second) from Unix seconds — Hinnant's
-/// algorithm, so a stamp needs no time zone database and reads the same on every platform.
-pub(super) fn civil(secs: i64) -> (i64, i64, i64, i64, i64, i64) {
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (if m <= 2 { y + 1 } else { y }, m, d, rem / 3600, (rem % 3600) / 60, rem % 60)
-}
-
-/// [`civil`] backwards: days since the epoch of a civil UTC date.
-pub(super) fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = if m > 2 { m - 3 } else { m + 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
-}
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 
 /// Now, as (a name stamp `YYYYMMDD.HHMMSS`, Unix seconds, milliseconds).
 pub(super) fn now() -> (String, i64, u32) {
     let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     let secs = i64::try_from(d.as_secs()).unwrap_or(i64::MAX);
-    let (y, mo, da, h, mi, sd) = civil(secs);
-    (format!("{y:04}{mo:02}{da:02}.{h:02}{mi:02}{sd:02}"), secs, d.subsec_millis())
+    (stamp(secs), secs, d.subsec_millis())
 }
 
-/// A point in time as ISO-8601 UTC with milliseconds.
+/// The name stamp of a Unix second (`20260819.153012`). Every field is zero-padded and the date
+/// comes first, so a folder's names sort as text in the order they were taken.
+pub(super) fn stamp(secs: i64) -> String {
+    at(secs).format("%Y%m%d.%H%M%S").to_string()
+}
+
+/// A point in time as ISO-8601 UTC with milliseconds (`2026-10-14T08:35:12.482Z`).
 pub(super) fn iso(secs: i64, ms: u32) -> String {
-    let (y, mo, da, h, mi, sd) = civil(secs);
-    format!("{y:04}-{mo:02}-{da:02}T{h:02}:{mi:02}:{sd:02}.{ms:03}Z")
+    at(secs).with_nanosecond(ms.min(999) * 1_000_000).unwrap_or_else(|| at(secs)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
-/// The Unix second a name stamp (`20260819.153012`) stands for.
+/// The Unix second a name stamp (`20260819.153012`) stands for, or `None` when it is not one.
+/// A name in a history folder is input from a file, so this refuses what it does not recognise
+/// instead of guessing: the wrong moment would reorder the timeline under the user.
 pub(super) fn stamp_epoch(stamp: &str) -> Option<i64> {
-    let (d, t) = stamp.split_once('.')?;
-    if d.len() != 8 || t.len() != 6 {
+    let (date, time) = stamp.split_once('.')?;
+    if date.len() != 8 || time.len() != 6 || !date.bytes().all(|b| b.is_ascii_digit()) || !time.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    if !d.bytes().all(|b| b.is_ascii_digit()) || !t.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let n = |s: &str, r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
-    let (y, mo, da) = (n(d, 0..4)?, n(d, 4..6)?, n(d, 6..8)?);
-    let (h, mi, sd) = (n(t, 0..2)?, n(t, 2..4)?, n(t, 4..6)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || h > 23 || mi > 59 || sd > 60 {
-        return None;
-    }
-    Some(days_from_civil(y, mo, da) * 86_400 + h * 3600 + mi * 60 + sd)
+    let date = NaiveDate::parse_from_str(date, "%Y%m%d").ok()?;
+    let time = NaiveTime::parse_from_str(time, "%H%M%S").ok()?;
+    Some(NaiveDateTime::new(date, time).and_utc().timestamp())
 }
+
+/// A Unix second as a UTC moment. A second past the end of the calendar reads as the epoch rather
+/// than panicking: it can only come from a file name, and no command replies with an error there.
+fn at(secs: i64) -> DateTime<Utc> {
+    Utc.timestamp_opt(secs, 0).single().unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_stamp_round_trips_through_civil_time() {
-        for secs in [0i64, 1_760_000_000, 1_766_000_000, 4_102_444_800] {
-            let (y, mo, da, h, mi, sd) = civil(secs);
-            assert_eq!(days_from_civil(y, mo, da) * 86_400 + h * 3600 + mi * 60 + sd, secs, "{secs}");
-        }
+    fn a_stamp_round_trips_through_the_calendar() {
         // A known moment: 2026-10-14T08:35:12Z.
-        let (y, mo, da, h, mi, sd) = civil(1_791_966_912);
-        assert_eq!((y, mo, da, h, mi, sd), (2026, 10, 14, 8, 35, 12));
+        assert_eq!(stamp(1_791_966_912), "20261014.083512");
         assert_eq!(iso(1_791_966_912, 482), "2026-10-14T08:35:12.482Z");
         assert_eq!(stamp_epoch("20261014.083512"), Some(1_791_966_912));
+        // The name a snapshot takes is the moment it was taken, to the second.
+        let (name, secs, _) = now();
+        assert_eq!(stamp_epoch(&name), Some(secs), "{name}");
+        // Every stamp the tool writes reads back as the second it was made from, a century either
+        // side of now, including leap days and the ends of their months.
+        for secs in [0i64, 1_760_000_000, 1_766_000_000, 4_102_444_800, 951_782_400, -1_000_000_000] {
+            assert_eq!(stamp_epoch(&stamp(secs)), Some(secs), "{secs}");
+        }
     }
 
     #[test]
@@ -88,6 +75,7 @@ mod tests {
             "x0261014.083512",
             "20261014.0835127",
             "20261314.083512",
+            "20260231.083512",
             "20261014.253512",
             "é0261014.083512",
         ] {

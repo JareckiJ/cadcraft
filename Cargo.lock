@@ -634,6 +634,7 @@ dependencies = [
  "cadcraft-geom",
  "cadcraft-io",
  "cadcraft-render",
+ "chrono",
  "flate2",
  "log",
  "rstar",
@@ -822,6 +823,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ced0551234e87afee12411d535648dd89d2e7f34c78b753395567aff3d447ff"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "chrono"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

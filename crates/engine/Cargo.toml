@@ -25,6 +25,10 @@ rstar = { version = "0.12", default-features = false }
 # Deflate for drawing-history versions: DXF is verbose text, so a gzipped snapshot is roughly a
 # tenth of the size (MIT OR Apache-2.0, pure Rust backend, builds for wasm).
 flate2 = "1"
+# The calendar for drawing-history stamps (MIT OR Apache-2.0, pure Rust, no system time zone
+# database needed): the history names and lists moments in UTC and nothing here hand-rolls the
+# conversion (issue #1785). No `clock` feature: `now` reads the process clock, the crate formats.
+chrono = { workspace = true }
 
 [dev-dependencies]
 # Real DXF files for the external reference tests (io is a lower layer).
