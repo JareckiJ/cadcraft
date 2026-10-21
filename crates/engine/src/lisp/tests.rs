@@ -189,6 +189,25 @@ fn runaway_routines_are_errors_not_crashes() {
 }
 
 #[test]
+fn synchronous_callback_loop_is_an_error_not_a_hang() {
+    // A comparator with an infinite loop used to run with u64::MAX fuel and hang the thread; it
+    // now terminates at the synchronous-callback step cap (CWE-400, finding row 2).
+    let mut s = session();
+    assert!(eval(&mut s, "(vl-sort '(1 2) (function (lambda (a b) (while t))))").is_err());
+    // A well-behaved comparator still works afterwards.
+    assert_eq!(ok(&mut s, "(vl-sort '(3 1 2) '<)"), "(1 2 3)");
+}
+
+#[test]
+fn setvar_rejects_an_oversized_shared_structure() {
+    // A list repeatedly sharing its own contents expands exponentially; setvar's bounded JSON
+    // conversion rejects it instead of allocating gigabytes (CWE-400, finding row 39).
+    let mut s = session();
+    let build = "(setq x '(1)) (repeat 40 (setq x (list x x))) (setvar \"GRIDUNIT\" x)";
+    assert!(eval(&mut s, build).is_err());
+}
+
+#[test]
 fn printing() {
     let mut s = session();
     let before = s.log.len();

@@ -658,8 +658,24 @@ fn wcmatch(a: &[Value]) -> R {
     arity(a, 2, 2)?;
     let (s, pat) = (string(&a[0])?, string(&a[1])?);
     let text: Vec<char> = s.chars().collect();
-    Ok(Value::bool(split_patterns(&pat).iter().any(|p| match_pattern(&text, p))))
+    // Native wildcard matching runs as a single interpreter step, so its internal `*` backtracking
+    // must not explore exponentially many placements unchecked (CWE-400). Charge every glob step
+    // against a shared budget and fail the call if it is exhausted.
+    let mut budget: u64 = WCMATCH_BUDGET;
+    for p in split_patterns(&pat) {
+        match match_pattern(&text, &p, &mut budget) {
+            Ok(true) => return Ok(Value::bool(true)),
+            Ok(false) => {}
+            Err(()) => return Err(LispError::new("wcmatch: pattern too complex")),
+        }
+    }
+    Ok(Value::bool(false))
 }
+
+/// Shared step budget for one `wcmatch` call's wildcard matching. Large enough for the patterns
+/// AutoLISP routines legitimately use (including the pathological-but-bounded cases the tests
+/// cover), but finite so truly exponential `*`-heavy patterns are rejected rather than hanging.
+const WCMATCH_BUDGET: u64 = 200_000_000;
 
 fn split_patterns(pat: &str) -> Vec<Vec<char>> {
     let mut out = vec![Vec::new()];
@@ -696,38 +712,48 @@ fn split_patterns(pat: &str) -> Vec<Vec<char>> {
     out
 }
 
-fn match_pattern(text: &[char], pat: &[char]) -> bool {
+fn match_pattern(text: &[char], pat: &[char], budget: &mut u64) -> Result<bool, ()> {
     if let Some(('~', rest)) = pat.split_first().map(|(c, r)| (*c, r))
         && !rest.is_empty()
     {
-        return !glob(text, rest, 0);
+        return glob(text, rest, 0, budget).map(|m| !m);
     }
-    glob(text, pat, 0)
+    glob(text, pat, 0, budget)
 }
 
-/// Iterative-enough glob with `*` backtracking; `depth` bounds the recursion on `*`.
-fn glob(text: &[char], pat: &[char], depth: usize) -> bool {
+/// Iterative-enough glob with `*` backtracking; `depth` bounds the recursion on `*`. Every step is
+/// charged against `budget`; `Err(())` means the shared budget ran out (treated as too complex).
+fn glob(text: &[char], pat: &[char], depth: usize, budget: &mut u64) -> Result<bool, ()> {
+    if *budget == 0 {
+        return Err(());
+    }
+    *budget -= 1;
     if depth > 64 {
-        return false;
+        return Ok(false);
     }
     let (mut t, mut p) = (0usize, 0usize);
     while p < pat.len() {
         match pat[p] {
             '*' => {
                 let rest = &pat[p + 1..];
-                return (t..=text.len()).any(|i| glob(&text[i..], rest, depth + 1));
+                for i in t..=text.len() {
+                    if glob(&text[i..], rest, depth + 1, budget)? {
+                        return Ok(true);
+                    }
+                }
+                return Ok(false);
             }
             '`' => {
-                let Some(&lit) = pat.get(p + 1) else { return false };
+                let Some(&lit) = pat.get(p + 1) else { return Ok(false) };
                 if text.get(t) != Some(&lit) {
-                    return false;
+                    return Ok(false);
                 }
                 t += 1;
                 p += 2;
             }
             '[' => {
-                let Some(close) = pat[p..].iter().position(|c| *c == ']').map(|i| p + i) else { return false };
-                let Some(&c) = text.get(t) else { return false };
+                let Some(close) = pat[p..].iter().position(|c| *c == ']').map(|i| p + i) else { return Ok(false) };
+                let Some(&c) = text.get(t) else { return Ok(false) };
                 let set = &pat[p + 1..close];
                 let (neg, set) = match set.split_first() {
                     Some(('~', r)) if !r.is_empty() => (true, r),
@@ -749,13 +775,13 @@ fn glob(text: &[char], pat: &[char], depth: usize) -> bool {
                     }
                 }
                 if hit == neg {
-                    return false;
+                    return Ok(false);
                 }
                 t += 1;
                 p = close + 1;
             }
             pc => {
-                let Some(&c) = text.get(t) else { return false };
+                let Some(&c) = text.get(t) else { return Ok(false) };
                 let ok = match pc {
                     '#' => c.is_ascii_digit(),
                     '@' => c.is_alphabetic(),
@@ -764,14 +790,14 @@ fn glob(text: &[char], pat: &[char], depth: usize) -> bool {
                     other => other == c,
                 };
                 if !ok {
-                    return false;
+                    return Ok(false);
                 }
                 t += 1;
                 p += 1;
             }
         }
     }
-    t == text.len()
+    Ok(t == text.len())
 }
 
 // ---------------- geometry ----------------
@@ -963,11 +989,10 @@ fn findfile(a: &[Value]) -> R {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_text_file(path: &str) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    // Cap what a routine can pull into memory.
-    if bytes.len() > 64 * 1024 * 1024 {
-        return None;
-    }
+    // Read through a byte-limited, regular-file-only reader so a path naming an endless device
+    // cannot exhaust memory before the 64 MiB cap is enforced (CWE-400).
+    const MAX: usize = 64 * 1024 * 1024;
+    let bytes = crate::capped_read::read_capped(std::path::Path::new(path), MAX).ok()?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 #[cfg(target_arch = "wasm32")]
@@ -1482,5 +1507,6 @@ pub fn real(r: f64) -> String {
 /// `wcmatch` for other callers (`ssget` filters).
 pub fn wild_match(text: &str, pattern: &str) -> bool {
     let t: Vec<char> = text.chars().collect();
-    split_patterns(pattern).iter().any(|p| match_pattern(&t, p))
+    let mut budget: u64 = WCMATCH_BUDGET;
+    split_patterns(pattern).iter().any(|p| match_pattern(&t, p, &mut budget) == Ok(true))
 }
