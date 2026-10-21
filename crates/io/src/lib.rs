@@ -61,10 +61,7 @@ fn ext(name: &str) -> String {
 /// (SVG and gzip-compressed SVGZ).
 pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
     if cadcraft_dwg::is_dwg(bytes) {
-        let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
-        d.read_notes = notes;
-        return Ok(d);
+        return read_dwg(bytes);
     }
     match ext(name).as_str() {
         "svg" | "svgz" => svg_read::read(bytes),
@@ -72,6 +69,32 @@ pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
         e if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
         e => Err(IoError::Unsupported(e.to_string())),
     }
+}
+
+/// A DWG file through the DWG bridge: BlackCAD's conversion when it carries the file over whole,
+/// otherwise acadrust's (`cadcraft_dwg::convert_dwg`). Should the DXF reader refuse what
+/// BlackCAD wrote, the file is converted again by acadrust. A drawing BlackCAD converted keeps
+/// the DWG's own version in `$ACADVER`, which saving uses: BlackCAD's DXF is always the 2018
+/// format, where acadrust's declares the file's version.
+fn read_dwg(bytes: &[u8]) -> Result<Drawing> {
+    use cadcraft_dwg::{Engine, Limits};
+    let in_dxf = |e: IoError| IoError::Format(format!("{e} (in the DXF converted from this DWG)"));
+    let c = cadcraft_dwg::convert_dwg(bytes, Limits::DEFAULT).map_err(IoError::Format)?;
+    let (mut d, c) = match dxf_read::read(&c.dxf) {
+        Ok(d) => (d, c),
+        Err(e) if c.engine == Engine::BlackCad => match cadcraft_dwg::convert_dwg_with(Engine::Acadrust, bytes, Limits::DEFAULT) {
+            Ok(again) => (dxf_read::read(&again.dxf).map_err(in_dxf)?, again),
+            Err(_) => return Err(in_dxf(e)),
+        },
+        Err(e) => return Err(in_dxf(e)),
+    };
+    if c.engine == Engine::BlackCad
+        && let Some(v) = cadcraft_dwg::version(bytes)
+    {
+        d.header.set("ACADVER", cadcraft_doc::HVal::Str(v));
+    }
+    d.read_notes = c.notes;
+    Ok(d)
 }
 
 /// Write a drawing in the format chosen by the name's extension. Images (PNG, SVG, PDF) show
