@@ -133,16 +133,20 @@ impl Spline {
         (0..=n).map(move |i| self.eval_valid(lo + (hi - lo) * i as f64 / n as f64, lo, hi))
     }
 
-    /// The box round the curve, from samples like `tessellate`'s at a tolerance relative to the
-    /// spline's own size (1e-3 of its control box's diagonal), and at least four per knot span so
-    /// a dense spline's wiggles are seen. The box can fall short of an extreme by the sag between
-    /// two samples, far under 1% of the spline's size, whatever the drawing's units (zoom extents
-    /// and selection pre-filtering tolerate that; the sampled box was never exact). A fixed
-    /// absolute tolerance sampled the 4000-point cap on every spline of a drawing in millimetres,
-    /// a third of the time a large drawing took to open (#1076); a typical spline now takes a few
-    /// hundred evaluations. A degree-1 spline is its control polygon, so its control box is exact;
-    /// a degenerate spline gets its control box, which contains the curve (the box of the finite
-    /// control points when one is not finite: `hull` skips it, but it would poison every sample).
+    /// The box round the curve, from as many samples as `tessellate` takes at a tolerance
+    /// relative to the spline's own size (1e-3 of its control box's diagonal), spread over the
+    /// knot spans in proportion to their length with at least four per span (its ends included),
+    /// so a narrow span, which one grid over the whole domain can step over entirely, is seen
+    /// too. The box can fall short of an extreme by the sag between two samples, far under 1% of
+    /// the spline's size, whatever the drawing's units (zoom extents and selection pre-filtering
+    /// tolerate that; the sampled box was never exact). A fixed absolute tolerance sampled the
+    /// 4000-point cap on every spline of a drawing in millimetres, a third of the time a large
+    /// drawing took to open (#1076); a typical spline now takes a few hundred evaluations. The
+    /// cap holds over all spans: the floor drops to two or three per span when four would exceed
+    /// it, and a spline with more spans than two each allow is sampled on the grid. A degree-1
+    /// spline is its control polygon, so its control box is exact; a degenerate spline gets its
+    /// control box, which contains the curve (the box of the finite control points when one is
+    /// not finite: `hull` skips it, but it would poison every sample).
     pub fn bounds(&self) -> Bounds2 {
         let hull = Bounds2::from_points(self.control.iter().copied());
         let diag = hull.min.dist(hull.max);
@@ -150,9 +154,35 @@ impl Spline {
         if !self.is_valid() || self.degree == 1 || !finite || !(diag.is_finite() && diag > 0.0) {
             return hull;
         }
-        let spans = self.control.len().saturating_sub(self.degree);
-        let n = self.segments_for(self.polygon_length() / (diag * 1e-3)).max(spans.saturating_mul(4)).min(MAX_SAMPLES);
-        Bounds2::from_points(self.samples(n))
+        let spans = self.knot_spans().count();
+        if spans == 0 {
+            return hull;
+        }
+        if spans > MAX_SAMPLES / 2 {
+            return Bounds2::from_points(self.samples(MAX_SAMPLES));
+        }
+        let (lo, hi) = self.domain();
+        let floor = 4.min(MAX_SAMPLES / spans);
+        // The span's share of the domain first: huge knots (1e308, from a hostile edit) would
+        // overflow `budget * (b - a)` to infinity and the cast to a boundless count.
+        let segments = |budget: usize, (a, b): (f64, f64)| floor.max((budget as f64 * ((b - a) / (hi - lo))) as usize).min(MAX_SAMPLES);
+        let n = self.segments_for(self.polygon_length() / (diag * 1e-3));
+        let budget = if self.knot_spans().map(|s| segments(n, s)).sum::<usize>() <= MAX_SAMPLES { n } else { MAX_SAMPLES - floor * spans };
+        let mut out = Bounds2::EMPTY;
+        for (a, b) in self.knot_spans() {
+            let seg = segments(budget, (a, b));
+            for i in 0..seg {
+                out.add(self.eval_valid(a + (b - a) * i as f64 / seg as f64, lo, hi));
+            }
+        }
+        out.add(self.eval_valid(hi, lo, hi));
+        out
+    }
+
+    /// The non-empty knot spans the curve is defined over, in parameter order.
+    fn knot_spans(&self) -> impl Iterator<Item = (f64, f64)> + '_ {
+        let knots = self.knots.get(self.degree..=self.control.len()).unwrap_or(&[]);
+        knots.windows(2).filter_map(|w| w.first().zip(w.get(1)).map(|(a, b)| (*a, *b)).filter(|(a, b)| b > a))
     }
 }
 
@@ -373,8 +403,78 @@ mod tests {
 
     /// The box from 4000 evaluations, which `bounds` approximates.
     fn fine_box(s: &Spline) -> Bounds2 {
+        uniform_box(s, MAX_SAMPLES)
+    }
+
+    /// The box of `n + 1` samples evenly spaced in parameter over the domain, as `bounds` sampled
+    /// before it spread its samples over the knot spans.
+    fn uniform_box(s: &Spline, n: usize) -> Bounds2 {
         let (lo, hi) = s.domain();
-        Bounds2::from_points((0..=4000).map(|i| s.eval(lo + (hi - lo) * i as f64 / 4000.0)))
+        Bounds2::from_points((0..=n).map(|i| s.eval(lo + (hi - lo) * i as f64 / n as f64)))
+    }
+
+    /// A degree-2 spline whose fourth control point, the only one off the x axis, is supported
+    /// on the single knot span [0.5003, 0.5004) (double knots either side): the curve is flat
+    /// except for a peak of 50 at t = 0.50035, inside a span of width 1e-4 that no point of a
+    /// uniform grid of up to 4000 hits (0.50025 and 0.5005 are the nearest).
+    fn narrow_span() -> Spline {
+        let control = (0..7).map(|i| Vec2::new(i as f64, if i == 3 { 100.0 } else { 0.0 })).collect();
+        Spline { degree: 2, knots: vec![0.0, 0.0, 0.0, 0.5003, 0.5003, 0.5004, 0.5004, 1.0, 1.0, 1.0], control, ..Spline::default() }
+    }
+
+    #[test]
+    fn bounds_see_an_extreme_inside_a_narrow_knot_span() {
+        let s = narrow_span();
+        assert!(s.is_valid());
+        let (a, b) = (0.5003, 0.5004);
+        let peak = (0..=1000).map(|i| s.eval(a + (b - a) * i as f64 / 1000.0)).fold(Vec2::ZERO, |m, p| if p.y > m.y { p } else { m });
+        assert!((peak.x - 3.0).abs() < 1e-9 && (peak.y - 50.0).abs() < 1e-9, "{peak:?}");
+        let hull = Bounds2::from_points(s.control.iter().copied());
+        let diag = hull.min.dist(hull.max);
+        // One uniform grid, at the count `bounds` used to take or at the cap, steps over the span
+        // and sees only the flat parts of the curve.
+        let old = s.segments_for(s.polygon_length() / (diag * 1e-3)).max((s.control.len() - s.degree) * 4).min(MAX_SAMPLES);
+        for n in [old, MAX_SAMPLES] {
+            let grid = uniform_box(&s, n);
+            assert!(grid.max.y < 1e-9 && !grid.contains(peak), "{n} segments: {grid:?}");
+        }
+        let got = s.bounds();
+        assert!(got.expand(1e-9 * diag).contains(peak), "{got:?} misses {peak:?}");
+        assert!((got.max.y - peak.y).abs() <= 1e-9 * diag, "{got:?}");
+    }
+
+    #[test]
+    fn bounds_keep_their_cap_over_many_spans() {
+        // 1500 spans: four per span would pass the cap, so two; 2500 spans: more than the cap
+        // allows two for, so the grid. A smooth curve stays within the margin either way.
+        for n in [1502, 2502] {
+            let control = (0..n).map(|i| Vec2::from_angle(i as f64 / n as f64 * std::f64::consts::TAU) * 50.0).collect();
+            let s = Spline::from_control(control, 2);
+            let (b, want) = (s.bounds(), fine_box(&s));
+            let diag = want.min.dist(want.max);
+            let err = [b.min.x - want.min.x, b.min.y - want.min.y, b.max.x - want.max.x, b.max.y - want.max.y]
+                .into_iter()
+                .map(f64::abs)
+                .fold(0.0, f64::max);
+            assert!(err <= 1e-3 * diag, "{n} control points: {b:?} vs {want:?}");
+        }
+    }
+
+    #[test]
+    fn bounds_keep_their_cap_over_huge_knot_spans() {
+        // Knots a hostile edit can produce (lengthening by 1e308): a span's count must not
+        // overflow into a boundless loop or a sum that panics.
+        let control = vec![Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::new(3.0, 0.0), Vec2::new(4.0, 1.0)];
+        for knots in [
+            vec![0.0, 0.0, 0.0, 1e308, 1.5e308, 1.5e308, 1.5e308],
+            vec![0.0, 0.0, 0.0, f64::MAX, f64::MAX, f64::MAX, f64::MAX],
+            vec![-1e308, -1e308, -1e308, 0.0, 1e308, 1e308, 1e308],
+        ] {
+            let s = Spline { knots, ..Spline::from_control(control.clone(), 2) };
+            assert!(s.is_valid());
+            let b = s.bounds();
+            assert!(b.is_empty() || Bounds2::from_points(control.iter().copied()).expand(1e-9).contains_box(&b), "{b:?}");
+        }
     }
 
     fn scaled(s: &Spline, k: f64) -> Spline {
