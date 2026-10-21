@@ -330,7 +330,7 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             ]
         };
-        if let Some(bytes) = installed(candidates).iter().find_map(|path| std::fs::read(path).ok()) {
+        if let Some(bytes) = installed(candidates).iter().find_map(|path| read_capped(path, MAX_UI_FONT_BYTES)) {
             fonts.font_data.insert("system-ui".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
             if let Some(f) = fonts.families.get_mut(&FontFamily::Proportional) {
                 f.insert(0, "system-ui".into());
