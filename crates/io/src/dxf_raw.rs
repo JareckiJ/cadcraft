@@ -329,9 +329,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let get = |name: &str| secs.iter().find(|s| s.name == name).map(|s| split(&s.tags)).unwrap_or_default();
     let (classes, tables, blocks, entities, objects) = (get("CLASSES"), get("TABLES"), get("BLOCKS"), get("ENTITIES"), get("OBJECTS"));
     // The drawing's entities by handle: whether each is of a type CADCraft doesn't model.
-    let mut ents: HashMap<String, bool> = HashMap::new();
+    let mut ents: HashMap<Handle, bool> = HashMap::new();
     for e in all_entities(d) {
-        ents.entry(e.handle.hex()).or_insert(matches!(e.kind, EntityKind::Unknown(_)));
+        ents.entry(e.handle).or_insert(matches!(e.kind, EntityKind::Unknown(_)));
     }
     let ids = identities(&tables, &blocks, &objects);
     // Extension dictionaries of entities and records: owner → dictionary.
@@ -348,7 +348,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // Objects by handle: the first of each, and none that has an entity's handle.
     let mut by_handle: HashMap<String, usize> = HashMap::new();
     for (i, (_, _, t)) in objects.iter().enumerate() {
-        if let Some(h) = head(t).handle.filter(|h| handle(h).is_some() && !ents.contains_key(h)) {
+        if let Some(h) = head(t).handle.filter(|h| handle(h).is_some_and(|hh| !ents.contains_key(&hh))) {
             by_handle.entry(h).or_insert(i);
         }
     }
@@ -360,7 +360,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some((_, _, t)) = objects.get(k) else { return false };
         let hd = head(t);
         let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
-        !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
+        !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (handle(&o).is_some_and(|oh| ents.contains_key(&oh)) || ids.contains_key(&o))
     };
     let modelled_entry = |t: &[Tag], h: &str| entries(t).iter().any(|(k, eh)| eh == h && MODELLED_XDICT_KEYS.contains(&up(k).as_str()));
     // Which objects to keep: those under a named object dictionary entry CADCraft doesn't model,
@@ -398,7 +398,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             if is_xdict(cur) {
                 break entries(t).iter().any(|(k, _)| !MODELLED_XDICT_KEYS.contains(&up(k).as_str()));
             }
-            break ents.get(&o) == Some(&true);
+            break handle(&o).and_then(|oh| ents.get(&oh)) == Some(&true);
         };
         for p in path {
             memo.insert(p, verdict);
@@ -429,10 +429,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         if matches!(kind.as_str(), "BLOCK" | "ENDBLK") {
             continue;
         }
-        let Some(h) = head(t).handle else { continue };
-        let Some(&unknown) = ents.get(&h) else { continue };
+        let Some(hh) = head(t).handle.as_deref().and_then(handle) else { continue };
+        let Some(&unknown) = ents.get(&hh) else { continue };
         let mut x = extra(kind, t, true, unknown, &kept);
-        let Some(hh) = handle(&h) else { continue };
         // Xdata belongs to the entity itself (it follows the entity's copies).
         let xd = std::mem::take(&mut x.xdata);
         if !xd.is_empty() {
