@@ -113,7 +113,10 @@ mod tests {
         assert_eq!(day(11_016), "2000-02-29");
         assert_eq!(day(20_736), "2026-10-10");
         assert_eq!(date(std::time::UNIX_EPOCH - std::time::Duration::from_secs(86_400)), "1970-01-01");
-        assert_eq!(date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::MAX / 2)), "1970-01-01");
+        // Windows' SystemTime can't hold this instant, so it is only checked where it exists.
+        if let Some(far) = std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(u64::MAX / 2)) {
+            assert_eq!(date(far), "1970-01-01");
+        }
     }
 
     #[test]
