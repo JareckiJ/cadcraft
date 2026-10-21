@@ -1499,8 +1499,8 @@ impl TextM {
     }
 }
 
-/// Justification → the name TEXT's status line gives it.
-fn justify_code(j: (HAlign, VAlign)) -> &'static str {
+/// Justification → the name TEXT's and ATTDEF's status line gives it.
+pub(crate) fn justify_code(j: (HAlign, VAlign)) -> &'static str {
     match j {
         (HAlign::Left, VAlign::Baseline) => "Left",
         (HAlign::Center, VAlign::Baseline) => "Center",

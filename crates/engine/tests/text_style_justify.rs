@@ -1,5 +1,5 @@
 //! TEXT's text style and justification after the fact (`properties.set`) and the Style option
-//! of the typed TEXT command.
+//! of the typed TEXT command; Align and Fit keep a text's size and angle.
 
 use cadcraft_engine::doc::{EntityKind, HAlign, Handle, Text, VAlign};
 use cadcraft_engine::geom::Vec2;
@@ -74,4 +74,32 @@ fn typed_text_style_option_makes_a_style_current() {
     s.input(Input::Enter).unwrap();
     assert!(s.prompt_text().contains("start point"), "{}", s.prompt_text());
     assert_eq!(s.doc().unwrap().header.str("TEXTSTYLE", ""), "Big");
+}
+
+#[test]
+fn properties_set_align_and_fit_keep_a_rotated_texts_size_and_angle() {
+    let mut s = Session::new();
+    let r = s.execute("text", &json!({"at": [10, 20], "text": "HELLO", "height": 2.0, "rotation": 30})).unwrap();
+    let h = Handle::parse_hex(r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap()).unwrap();
+    let set = |s: &mut Session, j: &str| s.execute("properties.set", &json!({"handles": [h.hex()], "justify": j})).unwrap();
+    let drawn = |s: &Session| {
+        let t = &texts(s)[0];
+        let (_, b) = cadcraft_engine::render::place_text_entity(s.doc().unwrap(), t, &t.value);
+        [b.min.x, b.min.y, b.max.x, b.max.y]
+    };
+    let same = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+    let before = drawn(&s);
+    set(&mut s, "A");
+    let t = &texts(&s)[0];
+    assert_eq!(t.halign, HAlign::Aligned);
+    let end = t.align_pt.unwrap();
+    // Not both points on one spot, which draws the text unrotated.
+    assert!(t.insert.xy().dist(end.xy()) > 1e-6 && (t.insert.xy().angle_to(end.xy()) - 30f64.to_radians()).abs() < 1e-9, "{t:?}");
+    assert!(same(drawn(&s), before), "drawn as before: {:?} vs {before:?}", drawn(&s));
+    set(&mut s, "F");
+    assert_eq!(texts(&s)[0].align_pt, Some(end), "Align to Fit keeps the baseline");
+    set(&mut s, "MC");
+    let t = &texts(&s)[0];
+    assert!((t.rotation - 30f64.to_radians()).abs() < 1e-9, "leaving Fit keeps the angle: {}", t.rotation.to_degrees());
+    assert_eq!(t.align_pt.map(|p| (p.x, p.y)), Some((10.0, 20.0)), "re-justified about the point it was placed by");
 }
