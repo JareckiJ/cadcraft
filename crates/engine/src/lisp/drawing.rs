@@ -955,10 +955,16 @@ fn dict_entries(tags: &[Tag]) -> Vec<(String, Handle)> {
     out
 }
 
-/// The DICTIONARY record `v` names.
+/// The entries of the dictionary record `v` names.
 fn dictionary(recs: &super::ObjectRecords, v: &Value) -> Result<Option<Vec<(String, Handle)>>, LispError> {
     let h = ename(v)?;
-    Ok(object_by_handle(recs, h).filter(|r| r.1 == "DICTIONARY").map(|r| dict_entries(&r.2)))
+    Ok(object_by_handle(recs, h).filter(|r| is_dictionary(&r.1)).map(|r| dict_entries(&r.2)))
+}
+
+/// A dictionary record: a DICTIONARY, or one with a default entry (the plot style names'
+/// ACDBDICTIONARYWDFLT), as the DXF reader takes them.
+fn is_dictionary(kind: &str) -> bool {
+    kind == "DICTIONARY" || kind == "ACDBDICTIONARYWDFLT"
 }
 
 /// `(tblobjname table name)`: the entity name of a table record (a block's BLOCK record).

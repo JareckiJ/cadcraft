@@ -149,3 +149,16 @@ fn bad_arguments_are_errors_not_crashes() {
     assert_eq!(ok(&mut s, "(entdel (tblobjname \"LAYER\" \"0\"))"), "nil");
     assert_eq!(ok(&mut s, "(entmod (entget (tblobjname \"LAYER\" \"0\")))"), "nil");
 }
+
+/// A dictionary with a default entry (ACDBDICTIONARYWDFLT, the plot style names) is a dictionary
+/// too: dictsearch and dictnext read its entries.
+#[test]
+fn a_dictionary_with_a_default_has_entries() {
+    let mut s = session();
+    let walk = r#"(progn
+      (setq d (dictsearch (namedobjdict) "ACAD_PLOTSTYLENAME") e (cdr (assoc -1 d)) names nil)
+      (setq x (dictnext e T))
+      (while x (setq names (cons (cdr (assoc 0 x)) names) x (dictnext e)))
+      (list (cdr (assoc 0 d)) (> (length names) 0) (not (null (dictsearch e "Normal")))))"#;
+    assert_eq!(ok(&mut s, walk), "(\"ACDBDICTIONARYWDFLT\" T T)");
+}
