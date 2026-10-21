@@ -186,7 +186,7 @@ pub fn parse_with_limit(bytes: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
     if tags > max_tags {
         return Err(DxfError::TooLarge { tags, limit: max_tags });
     }
-    parse_ascii_with_limit(&codepage::decode_ascii_file(bytes), max_tags)
+    parse_ascii_with_limit(&codepage::decode_ascii_file(bytes), max_tags, tags)
 }
 
 /// The four hex digits of a `\U+XXXX` escape starting at `chars[i]`, if there is one.
@@ -258,12 +258,16 @@ fn unescape_unicode(s: &str) -> String {
 }
 
 pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
-    parse_ascii_with_limit(text, MAX_TAGS)
+    let tags = text.bytes().filter(|&b| b == b'\n').count().div_ceil(2);
+    parse_ascii_with_limit(text, MAX_TAGS, tags)
 }
 
+/// `expect` is the number of groups the line count promises: it sizes the tag list once instead
+/// of letting it double its way up (every doubling moves all the tags read so far, and the last
+/// one holds old and new lists at once). Capped by `max_tags`, never trusted beyond that.
 #[allow(clippy::while_let_loop)]
-fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
-    let mut tags = Vec::new();
+fn parse_ascii_with_limit(text: &str, max_tags: usize, expect: usize) -> Result<Vec<Tag>> {
+    let mut tags = Vec::with_capacity(expect.min(max_tags));
     let mut lines = text.lines().enumerate();
     loop {
         let Some((ln, code_line)) = lines.next() else { break };
