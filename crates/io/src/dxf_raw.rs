@@ -150,6 +150,13 @@ fn head(tags: &[Tag]) -> Head {
     h
 }
 
+/// Whether a record has any `102` group (reactors, an extension dictionary or an application's
+/// own group). Without one [`head`] finds no reactors and no extension dictionary, so the scan
+/// and its handle text are spared: most entities of a large drawing have none (#1076).
+fn has_groups(tags: &[Tag]) -> bool {
+    tags.iter().take_while(|t| t.code < 1000).any(|t| t.code == 102)
+}
+
 fn val(tags: &[Tag], code: i32) -> Option<String> {
     tags.iter().take_while(|t| t.code < 1000).find(|t| t.code == code).map(Tag::str)
 }
@@ -270,7 +277,7 @@ fn entity_groups(tags: &[Tag]) -> &[Tag] {
 /// What an entity record (`entity`) or a table record carries beyond the model; reactors and
 /// the extension dictionary only when kept (`kept`).
 fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<String>) -> ForeignExtra {
-    let h = head(tags);
+    let h = if has_groups(tags) { head(tags) } else { Head::default() };
     let mut x = ForeignExtra {
         xdict: h.xdict.filter(|x| kept.contains(x)).and_then(|x| handle(&x)),
         reactors: h.reactors.iter().filter(|r| kept.contains(*r)).filter_map(|r| handle(r)).collect(),
@@ -337,7 +344,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     // Extension dictionaries of entities and records: owner → dictionary.
     let mut xdict_of: HashMap<String, String> = HashMap::new();
     for (kind, _, t) in tables.iter().chain(&blocks).chain(&entities) {
-        if kind == "ENDBLK" {
+        if kind == "ENDBLK" || !has_groups(t) {
             continue;
         }
         let h = head(t);
