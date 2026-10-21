@@ -752,10 +752,23 @@ mod ttf_tests {
             assert!((crate::ttf::width(&face, s, 1.0, 1.0).unwrap() - o_slash.width).abs() < 1e-9, "{s}");
         }
         // The same on a line with right-to-left text (the shaped path): the face's Ø, not the
-        // stroke font's last resort, at the same width.
+        // stroke font's last resort, at the same width. The line keeps the order its own text
+        // gives it: "⌀50 א" reads right to left (⌀ is bidi-neutral, Ø left-to-right), so the Ø
+        // is its rightmost glyph, where a font with ⌀ puts the sign; "Ø50 א" reads left to right.
         let rtl = crate::complex::shape(Some(&face), "\u{2300}50 \u{5D0}", 1.0, 1.0, 0.0).unwrap();
         let o_rtl = crate::complex::shape(Some(&face), "Ø50 \u{5D0}", 1.0, 1.0, 0.0).unwrap();
-        assert_eq!(rtl.glyphs, o_rtl.glyphs);
+        let x0 = |g: &[Vec<cadcraft_geom::Vec2>]| g.iter().flatten().map(|p| p.x).fold(f64::MAX, f64::min);
+        let same_shape = |a: &[Vec<cadcraft_geom::Vec2>], b: &[Vec<cadcraft_geom::Vec2>]| {
+            let (ax, bx) = (x0(a), x0(b));
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(c, d)| {
+                    c.len() == d.len() && c.iter().zip(d).all(|(p, q)| (p.x - ax - (q.x - bx)).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9)
+                })
+        };
+        let rightmost = rtl.glyphs.iter().max_by(|a, b| x0(a).total_cmp(&x0(b))).unwrap();
+        assert!(same_shape(rightmost, o_slash.glyphs.first().unwrap()), "the face's Ø at the right end");
+        assert!(same_shape(o_rtl.glyphs.first().unwrap(), o_slash.glyphs.first().unwrap()), "Ø at the left end of a left-to-right line");
+        assert_eq!(rtl.glyphs.len(), o_rtl.glyphs.len());
         assert!((rtl.width - o_rtl.width).abs() < 1e-9);
         assert!(rtl.strokes.is_empty(), "no stroke-font glyphs");
     }

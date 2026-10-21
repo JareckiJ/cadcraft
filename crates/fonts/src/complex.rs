@@ -66,12 +66,16 @@ fn shape_chars(primary: Option<&Face>, chars: &[(char, bool, bool)], height: f64
     let shear = oblique.tan().clamp(-10.0, 10.0);
     let sc = h / stroke::CAP;
     // A character the text's face lacks is one of its substitutes when it has one, as in the
-    // left-to-right path.
-    let cs: Vec<char> = chars
+    // left-to-right path. The bidi runs come from the text as decoded, before substitution: a
+    // substitute may be of another bidi class (⌀ and ∅ are neutral, Ø is left-to-right), and
+    // the line keeps the direction its own text gives it; the substitute is drawn at the same
+    // logical index.
+    let decoded: Vec<char> = chars.iter().map(|c| c.0).collect();
+    let cs: Vec<char> = decoded
         .iter()
-        .map(|c| match primary {
-            Some(p) if !c.0.is_whitespace() && !p.has_glyph(c.0) => crate::substitutes(c.0).iter().copied().find(|&s| p.has_glyph(s)).unwrap_or(c.0),
-            _ => c.0,
+        .map(|&c| match primary {
+            Some(p) if !c.is_whitespace() && !p.has_glyph(c) => crate::substitutes(c).iter().copied().find(|&s| p.has_glyph(s)).unwrap_or(c),
+            _ => c,
         })
         .collect();
     let flags = |i: usize| chars.get(i).map(|c| (c.1, c.2)).unwrap_or((false, false));
@@ -80,7 +84,7 @@ fn shape_chars(primary: Option<&Face>, chars: &[(char, bool, bool)], height: f64
     let mut x = 0.0;
     // Whether the rightmost glyph so far is a stroke-font glyph.
     let mut stroke_last = false;
-    for (run, rtl) in bidi::visual_runs(&cs, None) {
+    for (run, rtl) in bidi::visual_runs(&decoded, None) {
         let mut pieces = itemize(&cs, run, primary);
         if rtl {
             pieces.reverse();
@@ -335,5 +339,79 @@ mod tests {
         let long = "\u{05D0}b ".repeat(MAX_CHARS);
         assert!(shape(None, &long, 1.0, 1.0, 0.0).is_none());
         assert!(crate::shape_stroke(&long, 1.0, 1.0, 0.0).width > 0.0);
+    }
+
+    /// A TrueType font that maps `chars` to glyphs 1, 2, ... in code point order (each with the
+    /// same advance) and nothing else: a character map and metrics, no outlines. Enough for
+    /// `has_glyph` and the shaper, with a coverage the test chooses, whatever fonts are installed.
+    fn font_mapping(chars: &[char]) -> Face {
+        // Big-endian fields: (width in bytes, value).
+        fn table(fields: &[(usize, i64)]) -> Vec<u8> {
+            fields.iter().flat_map(|&(w, x)| x.to_be_bytes()[8 - w..].to_vec()).collect()
+        }
+        let mut chars = chars.to_vec();
+        chars.sort_unstable();
+        chars.dedup();
+        let n = i64::try_from(chars.len() + 1).unwrap();
+        // head: version 1.0, revision, checksum adjustment, magic, flags, units per em; created,
+        // modified and bounds (zero); mac style, lowest ppem, direction hint, loca format, glyph
+        // data format.
+        let mut head = table(&[(2, 1), (2, 0), (4, 0x1_0000), (4, 0), (4, 0x5F0F_3CF5), (2, 0), (2, 1000)]);
+        head.extend(table(&[(8, 0), (8, 0), (8, 0), (2, 0), (2, 8), (2, 2), (2, 0), (2, 0)]));
+        // hhea: version 1.0, ascender, descender, line gap, max advance, min side bearings,
+        // max extent, caret slope and offset, reserved, metric format, number of h metrics.
+        let hhea =
+            table(&[(2, 1), (2, 0), (2, 800), (2, -200), (2, 0), (2, 500), (2, 0), (2, 0), (2, 500), (2, 1), (2, 0), (2, 0), (8, 0), (2, 0), (2, n)]);
+        let maxp = table(&[(4, 0x5000), (2, n)]);
+        let hmtx = table(&[(2, 500), (2, 0)].repeat(chars.len() + 1));
+        // cmap: one (3, 10) format 12 subtable, one group per character, in code point order.
+        let groups: Vec<(usize, i64)> = chars
+            .iter()
+            .enumerate()
+            .flat_map(|(i, c)| [(4, i64::from(u32::from(*c))), (4, i64::from(u32::from(*c))), (4, i64::try_from(i + 1).unwrap())])
+            .collect();
+        let count = i64::try_from(chars.len()).unwrap();
+        let mut cmap = table(&[(2, 0), (2, 1), (2, 3), (2, 10), (4, 12), (2, 12), (2, 0), (4, 16 + 12 * count), (4, 0), (4, count)]);
+        cmap.extend(table(&groups));
+        let tables = [(b"cmap", cmap), (b"head", head), (b"hhea", hhea), (b"hmtx", hmtx), (b"maxp", maxp)];
+        let mut font = table(&[(4, 0x1_0000), (2, 5), (2, 64), (2, 2), (2, 16)]);
+        let mut offset = 12 + 16 * tables.len();
+        for (tag, t) in &tables {
+            font.extend_from_slice(*tag);
+            font.extend(table(&[(4, 0), (4, i64::try_from(offset).unwrap()), (4, i64::try_from(t.len()).unwrap())]));
+            offset += t.len().next_multiple_of(4);
+        }
+        for (_, t) in &tables {
+            font.extend_from_slice(t);
+            font.resize(font.len().next_multiple_of(4), 0);
+        }
+        Face { bytes: std::sync::Arc::new(font), index: 0 }
+    }
+
+    #[test]
+    fn a_substitute_does_not_change_the_direction_of_the_line() {
+        // ⌀ and ∅ are bidi-neutral; Ø, drawn for them in a font that lacks both, is
+        // left-to-right. "⌀50 אב" reads right to left (its first strong character is Hebrew),
+        // so "50⌀" sits at the right end of the line. A font without ⌀ lays the line out the
+        // same way: the runs come from the text as decoded, not from the characters
+        // substituted for it, which would make Ø the first strong character and flip the line.
+        let s = "%%u\u{2300}50%%u \u{05D0}\u{05D1}";
+        assert_eq!(bidi::base_rtl(&crate::decode_controls(s).iter().map(|c| c.0).collect::<String>()), Some(true));
+        let shared: Vec<char> = "Ø50 \u{05D0}\u{05D1}".chars().collect();
+        let has = font_mapping(&[&['\u{2300}'][..], &shared].concat());
+        let lacks = font_mapping(&shared);
+        assert!(has.has_glyph('\u{2300}') && !lacks.has_glyph('\u{2300}') && !lacks.has_glyph('\u{2205}') && lacks.has_glyph('Ø'));
+        let with = shape(Some(&has), s, 1.0, 1.0, 0.0).unwrap();
+        let without = shape(Some(&lacks), s, 1.0, 1.0, 0.0).unwrap();
+        // The underline follows "⌀50" wherever the line puts it; nothing else is a stroke.
+        let underline = |sh: &Shaped| {
+            assert_eq!(sh.strokes.len(), 1, "{:?}", sh.strokes);
+            (sh.strokes[0][0].x, sh.strokes[0][1].x)
+        };
+        let (x0, x1) = underline(&with);
+        assert!(x0 > 0.3 * with.width && (x1 - with.width).abs() < 1e-9, "at the right end: {x0}..{x1} of {}", with.width);
+        let (y0, y1) = underline(&without);
+        assert!((y0 - x0).abs() < 1e-9 && (y1 - x1).abs() < 1e-9, "{y0}..{y1}, not {x0}..{x1}");
+        assert!((without.width - with.width).abs() < 1e-9);
     }
 }
