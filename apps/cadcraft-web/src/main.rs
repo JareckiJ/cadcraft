@@ -41,8 +41,8 @@ mod web {
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
-            self.4.set(self.0.session.docs.iter().any(|d| d.is_dirty()));
             self.0.logic(ctx);
+            self.4.set(self.0.session.docs.iter().any(|d| d.is_dirty()));
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
@@ -60,8 +60,8 @@ mod web {
             false
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-            self.4.set(self.0.session.docs.iter().any(|d| d.is_dirty()));
             self.0.ui(ui);
+            self.4.set(self.0.session.docs.iter().any(|d| d.is_dirty()));
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }

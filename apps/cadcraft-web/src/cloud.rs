@@ -93,8 +93,8 @@ impl Service {
             Job::Account => {
                 let answer =
                     self.me().await.map(|me| Account { display: me.display, capabilities: me.capabilities, provider_linked: me.provider_linked });
-                if matches!(&answer, Err(Fault::Unauthenticated)) && !self.session_dirty.get() {
-                    offer_login(self.client.base());
+                if matches!(&answer, Err(Fault::Unauthenticated)) {
+                    offer_login(self.client.base(), self.session_dirty.get());
                 }
                 post(Event::Account(answer));
             }
@@ -178,7 +178,10 @@ fn auth_url(base: &str, path: &str) -> String {
 
 /// Redirect to the sign-in page when the session cookie has expired or was
 /// never set. Guard: avoids a redirect loop inside `/auth/`.
-fn offer_login(base: &str) {
+fn offer_login(base: &str, session_dirty: bool) {
+    if session_dirty {
+        return;
+    }
     let Some(window) = web_sys::window() else { return };
     let Ok(path) = window.location().pathname() else { return };
     if path.starts_with("/auth/") {
