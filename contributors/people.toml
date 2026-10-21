@@ -73,3 +73,8 @@ sync_github_name = false
 
 [people.gurparvez]
 real_name = "Gurparvez"
+
+[people.aussieboer61]
+real_name = "Richard Sauer"
+display_name = "Richard Sauer"
+sync_github_name = false
