@@ -637,6 +637,17 @@ mod tests {
         assert_eq!(decode_controls("%%").len(), 2);
     }
 
+    /// The stroke font draws U+2205 (what some files store `%%c` as) as its diameter sign, not
+    /// as a missing-glyph box or a fallback font's glyph.
+    #[test]
+    fn empty_set_is_the_stroke_diameter_sign() {
+        let a = shape_stroke("\u{2205}50", 1.0, 1.0, 0.0);
+        assert_eq!(a, shape_stroke("\u{2300}50", 1.0, 1.0, 0.0));
+        assert_eq!(a, shape_stroke("%%c50", 1.0, 1.0, 0.0));
+        assert!(a.glyphs.is_empty(), "no fallback glyphs");
+        assert!((line_width("\u{2205}50", 1.0, 1.0) - a.width).abs() < 1e-9);
+    }
+
     #[test]
     fn line_metrics_scale_with_height() {
         let a = layout_line("HELLO", 1.0, 1.0, 0.0);
