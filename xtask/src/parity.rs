@@ -33,12 +33,34 @@ fn today() -> String {
     date(std::time::SystemTime::now())
 }
 
-/// `t` as a UTC `YYYY-MM-DD`. A clock before 1970, or past chrono's range, reads as 1970-01-01.
+/// `t` as a UTC `YYYY-MM-DD`. A clock before 1970 reads as 1970-01-01 (the `unwrap_or(0)` clamp);
+/// past chrono's year 262143 range the proleptic Gregorian date is kept via the 400-year cycle
+/// rather than falling back to the epoch.
 fn date(t: std::time::SystemTime) -> String {
-    use chrono::Datelike;
     let secs = t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    format!("{:04}-{}", t.year(), t.format("%m-%d"))
+    let (y, m, d) = civil_from_days(secs / 86_400);
+    // `{y:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Days since 1970-01-01 → proleptic Gregorian (year, month, day).
+///
+/// `date` clamps a pre-1970 clock to the epoch, so `days` is an unsigned count that can run past
+/// `NaiveDate`'s ±262143-year range. The Gregorian calendar repeats every 400 years (146_097
+/// days), so chrono converts the day within one cycle and whole cycles go back into the year (an
+/// `i128`, then saturated into `i64`), keeping chrono as the only calendar logic and reproducing
+/// the old `civil_from_days` result exactly. 1970-01-01 is `num_days_from_ce` 719_163.
+fn civil_from_days(days: u64) -> (i64, u32, u32) {
+    use chrono::Datelike;
+    let (cycles, rest) = (days / 146_097, days % 146_097);
+    // `rest + 719_163` is 719_163..865_259, always a valid CE day.
+    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            (i64::try_from(y).unwrap_or(i64::MAX), d.month(), d.day())
+        }
+        None => (1970, 1, 1), // unreachable
+    }
 }
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -113,9 +135,11 @@ mod tests {
         assert_eq!(day(11_016), "2000-02-29");
         assert_eq!(day(20_736), "2026-10-10");
         assert_eq!(date(std::time::UNIX_EPOCH - std::time::Duration::from_secs(86_400)), "1970-01-01");
-        // Windows' SystemTime can't hold this instant, so it is only checked where it exists.
+        // Past chrono's range keeps the proleptic Gregorian date, not the epoch (old `civil_from_days`).
+        assert_eq!(day(115_740_740), "318857-05-20");
+        // Windows' SystemTime can't hold u64::MAX / 2 seconds, so it is only checked where it exists.
         if let Some(far) = std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(u64::MAX / 2)) {
-            assert_eq!(date(far), "1970-01-01");
+            assert_eq!(date(far), "292277026596-12-04");
         }
     }
 

@@ -111,12 +111,34 @@ impl CadApp {
     }
 }
 
-/// `secs` since 1970 as `YYYY-MM-DD HH:MM` (UTC). Out of range reads as the epoch.
+/// `secs` since 1970 as `YYYY-MM-DD HH:MM` (UTC). Past chrono's year 262143 range the proleptic
+/// Gregorian date is kept via the 400-year cycle rather than falling back to the epoch.
 fn utc(secs: u64) -> String {
+    let (h, m) = ((secs % 86_400) / 3600, (secs % 3600) / 60);
+    let (y, mo, d) = civil_from_days(secs / 86_400);
+    // `{y:04}` rather than `%Y`, which writes a `+` before years past 9999.
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}")
+}
+
+/// Days since 1970-01-01 → proleptic Gregorian (year, month, day).
+///
+/// A recovery file's mtime can in principle land past `NaiveDate`'s ±262143-year range; the old
+/// hand-rolled converter still produced a date there, so falling back to the epoch would change
+/// the shown time. The Gregorian calendar repeats every 400 years (146_097 days), so chrono
+/// converts the day within one cycle and whole cycles go back into the year (an `i128`, then
+/// saturated into `i64`), keeping chrono as the only calendar logic and reproducing the old
+/// result exactly. 1970-01-01 is `num_days_from_ce` 719_163.
+fn civil_from_days(days: u64) -> (i64, u32, u32) {
     use chrono::Datelike;
-    let t = i64::try_from(secs).ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0)).unwrap_or_default();
-    // `{:04}` rather than `%Y`, which writes a `+` before years past 9999.
-    format!("{:04}-{}", t.year(), t.format("%m-%d %H:%M"))
+    let (cycles, rest) = (days / 146_097, days % 146_097);
+    // `rest + 719_163` is 719_163..865_259, always a valid CE day.
+    match i32::try_from(rest + 719_163).ok().and_then(chrono::NaiveDate::from_num_days_from_ce_opt) {
+        Some(d) => {
+            let y = i128::from(d.year()) + i128::from(cycles) * 400;
+            (i64::try_from(y).unwrap_or(i64::MAX), d.month(), d.day())
+        }
+        None => (1970, 1, 1), // unreachable
+    }
 }
 
 /// The Drawing Recovery window, while autosave files from a crash are waiting.
@@ -225,6 +247,8 @@ mod tests {
         assert_eq!(super::utc(951_782_400 + 3_660), "2000-02-29 01:01");
         assert_eq!(super::utc(1_791_676_800), "2026-10-11 00:00");
         assert_eq!(super::utc(253_402_300_800), "10000-01-01 00:00");
-        assert_eq!(super::utc(u64::MAX), "1970-01-01 00:00");
+        // Past chrono's range the proleptic Gregorian date is kept, not the epoch (old output).
+        assert_eq!(super::utc(10_000_000_000_000), "318857-05-20 17:46");
+        assert_eq!(super::utc(u64::MAX), "584554051223-11-09 07:00");
     }
 }
