@@ -624,7 +624,8 @@ fn a_panic_inside_a_routine_ends_it_with_an_error() {
     assert_eq!(ok(&mut s, "(+ 1 2)"), "3");
 }
 
-/// The handle of the `kind` record named `name` (group 2, or 1 for a LAYOUT; any for "") in DXF text.
+/// The handle (group 5, a DIMSTYLE's 105) of the `kind` record named `name` (group 2, or 1 for a
+/// LAYOUT; any for "") in DXF text.
 fn dxf_handle(dxf: &str, kind: &str, name: &str) -> String {
     let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
     let pairs: Vec<(&str, &str)> = lines.chunks(2).filter_map(|c| Some((*c.first()?, *c.get(1)?))).collect();
@@ -634,7 +635,7 @@ fn dxf_handle(dxf: &str, kind: &str, name: &str) -> String {
             let rec: Vec<(&str, &str)> = pairs[i + 1..].iter().take_while(|p| p.0 != "0").copied().collect();
             let named = name.is_empty() || rec.iter().any(|p| (p.0 == "2" || (kind == "LAYOUT" && p.0 == "1")) && p.1 == name);
             if named {
-                return rec.iter().find(|p| p.0 == "5").unwrap().1.to_string();
+                return rec.iter().find(|p| p.0 == "5" || p.0 == "105").unwrap().1.to_string();
             }
         }
         i += 1;
@@ -714,6 +715,7 @@ fn handent_names_a_files_layer_and_layout() {
     let dxf = String::from_utf8(bytes.clone()).unwrap();
     let (layer, layout) = (dxf_handle(&dxf, "LAYER", "0"), dxf_handle(&dxf, "LAYOUT", "Layout1"));
     let line = dxf_handle(&dxf, "LINE", "");
+    let dimstyle = dxf_handle(&dxf, "DIMSTYLE", "Standard");
     let mut s = session();
     s.open_drawing(cadcraft_io::read(&bytes, "h.dxf").unwrap(), "h.dxf", None);
     assert_eq!(ok(&mut s, &format!("(cdr (assoc 0 (entget (handent \"{line}\"))))")), "\"LINE\"");
@@ -721,6 +723,10 @@ fn handent_names_a_files_layer_and_layout() {
     assert_eq!(ok(&mut s, &format!("(eq (handent \"{layer}\") (tblobjname \"LAYER\" \"0\"))")), "T");
     assert_eq!(ok(&mut s, &format!("(cdr (assoc 0 (entget (handent \"{layout}\"))))")), "\"LAYOUT\"");
     assert_eq!(ok(&mut s, &format!("(cdr (assoc 5 (entget (handent \"{layout}\"))))")), format!("\"{layout}\""));
+    // A DIMSTYLE's handle is in group 105, in the file and in its list.
+    assert_eq!(ok(&mut s, &format!("(cdr (assoc 0 (entget (handent \"{dimstyle}\"))))")), "\"DIMSTYLE\"");
+    assert_eq!(ok(&mut s, &format!("(cdr (assoc 105 (entget (handent \"{dimstyle}\"))))")), format!("\"{dimstyle}\""));
+    assert_eq!(ok(&mut s, &format!("(eq (handent \"{dimstyle}\") (tblobjname \"DIMSTYLE\" \"Standard\"))")), "T");
     assert_eq!(ok(&mut s, "(handent \"FFFFF\")"), "nil");
     assert_eq!(ok(&mut s, "(handent \"not hex\")"), "nil");
 }
