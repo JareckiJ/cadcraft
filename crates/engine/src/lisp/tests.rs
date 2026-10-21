@@ -346,7 +346,10 @@ fn getvar_drawing_and_session_variables() {
     let mut s = session();
     assert_eq!(ok(&mut s, "(list (getvar \"DWGPREFIX\") (getvar \"DWGTITLED\"))"), "(\"\" 0)");
     assert_eq!(ok(&mut s, "(list (getvar \"FILEDIA\") (getvar \"CMDECHO\") (getvar \"TILEMODE\"))"), "(1 1 1)");
-    assert_eq!(ok(&mut s, "(setvar \"FILEDIA\" 0) (getvar \"FILEDIA\")"), "0");
+    assert_eq!(ok(&mut s, "(setvar \"FILEDIA\" 0) (setvar \"CMDECHO\" 0) (getvar \"FILEDIA\")"), "0");
+    // Both belong to the session, so they survive a switch to another drawing.
+    s.new_drawing(true);
+    assert_eq!(ok(&mut s, "(list (getvar \"FILEDIA\") (getvar \"CMDECHO\"))"), "(0 0)");
     assert_eq!(ok(&mut s, "(getvar \"CMDACTIVE\")"), "0");
     let dir = std::env::temp_dir();
     let file = dir.join("lisp_getvar_test.dxf");
