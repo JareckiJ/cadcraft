@@ -525,3 +525,28 @@ fn a_full_group_table_refuses_before_anything_changes() {
     s.execute("extrude", &json!({ "handles": [a.hex()], "height": 1 })).unwrap();
     assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS);
 }
+
+#[test]
+fn a_refused_fourth_point_can_be_retried() {
+    let mut s = Session::new();
+    s.start("3dface").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Keyword("Invisible".into())).unwrap();
+    s.input(Input::Point(Vec2::new(1.0, 0.0))).unwrap();
+    s.input(Input::Point(Vec2::new(2.0, 0.0))).unwrap();
+    // Collinear: the face has no area, the point and its Invisible flag are dropped, the prompt stays.
+    s.input(Input::Keyword("Invisible".into())).unwrap();
+    let _ = s.input(Input::Point(Vec2::new(3.0, 0.0)));
+    assert!(s.running.is_some());
+    assert!(s.prompt_text().contains("fourth point"), "{}", s.prompt_text());
+    assert_eq!(count(&s), 0);
+    s.input(Input::Point(Vec2::new(2.0, 2.0))).unwrap();
+    assert!(s.running.is_none());
+    assert_eq!(count(&s), 1);
+    let f = match &s.doc().unwrap().model.iter().last().unwrap().kind {
+        EntityKind::Face3d(f) => (f.corners, f.hidden_edges),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(f.0[3], Vec3::new(2.0, 2.0, 0.0), "the retried point is the fourth corner");
+    assert_eq!(f.1, 2, "only the first Invisible survives; the refused point's flag was dropped");
+}

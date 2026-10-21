@@ -335,13 +335,23 @@ impl Interactive for FaceM {
                 Ok(Step::Continue)
             }
             Input::Point(p) => {
+                let hidden_before = self.hidden;
                 if self.next_hidden {
                     // The edge that starts at this point is the invisible one.
                     self.hidden |= 1u8 << self.pts.len();
                     self.next_hidden = false;
                 }
                 self.pts.push(p.to3(0.0));
-                if self.pts.len() == 4 { self.finish(s) } else { Ok(Step::Continue) }
+                if self.pts.len() < 4 {
+                    return Ok(Step::Continue);
+                }
+                let r = self.finish(s);
+                if r.is_err() {
+                    // Refused (for example collinear points): drop this point so the fourth can be retried.
+                    self.pts.pop();
+                    self.hidden = hidden_before;
+                }
+                r
             }
             Input::Enter if self.pts.len() == 3 => self.finish(s),
             Input::Enter => Ok(Step::Done),
