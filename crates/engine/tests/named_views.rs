@@ -180,3 +180,40 @@ fn zoomfactor_scales_the_wheel() {
     assert!(close(s.wheel_zoom_factor(-50.0), 1.0 / at3));
     assert_eq!(s.wheel_zoom_factor(f64::INFINITY), 1.0);
 }
+
+#[test]
+fn test_view_orthographic() {
+    let mut s = session();
+    // Default view direction is Top (0, 0, 1)
+    let dir = s.doc().unwrap().header.view_dir();
+    assert_eq!((dir.x, dir.y, dir.z), (0.0, 0.0, 1.0));
+
+    // Execute orthographic via JSON command
+    let res = s.execute("view", &json!({ "option": "orthographic", "view": "Front" })).unwrap();
+    assert_eq!(res["orthographic"], "Front");
+    let dir = s.doc().unwrap().header.view_dir();
+    assert!((dir.x - 0.0).abs() < 1e-6 && (dir.y - (-1.0)).abs() < 1e-6 && (dir.z - 0.0).abs() < 1e-6);
+
+    // Test typed/interactive machine: -view o right
+    typed(&mut s, &["-view", "o", "right"]);
+    assert!(s.running.is_none());
+    let dir = s.doc().unwrap().header.view_dir();
+    assert!((dir.x - 1.0).abs() < 1e-6 && (dir.y - 0.0).abs() < 1e-6 && (dir.z - 0.0).abs() < 1e-6);
+
+    // Test other orthographic options: bottom, back, left, top
+    s.execute("view", &json!({ "option": "orthographic", "view": "bottom" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.view_dir().z, -1.0);
+
+    s.execute("view", &json!({ "option": "orthographic", "view": "back" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.view_dir().y, 1.0);
+
+    s.execute("view", &json!({ "option": "orthographic", "view": "left" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.view_dir().x, -1.0);
+
+    s.execute("view", &json!({ "option": "orthographic", "view": "top" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.view_dir().z, 1.0);
+
+    // Missing view or invalid view returns error
+    assert!(s.execute("view", &json!({ "option": "orthographic" })).is_err());
+    assert!(s.execute("view", &json!({ "option": "orthographic", "view": "invalid" })).is_err());
+}

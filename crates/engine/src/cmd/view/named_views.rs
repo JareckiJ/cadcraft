@@ -6,7 +6,7 @@
 //! into the view history, not the undo stack (a layer snapshot it restores is an undo step).
 
 use cadcraft_doc::{LayerState, NamedView, Space};
-use cadcraft_geom::{Bounds2, Vec2};
+use cadcraft_geom::{Bounds2, Vec2, Vec3};
 use serde_json::{Value, json};
 
 use super::super::qselect::wildcard;
@@ -22,7 +22,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["View", "Named Views..."])
             .alias(&["v"])
             .params(
-                "{option: save|window|restore|delete|list|settings, name? (save/window/restore), names?: \"a,b*\" | [names] (delete/list; wildcards), p1?, p2? (window), layerSnapshot?: bool (save: default the Layer snapshot setting; settings: change it)} (typed VIEW / -VIEW: option prompts)",
+                "{option: save|window|restore|delete|list|settings|orthographic, name? (save/window/restore), names?: \"a,b*\" | [names] (delete/list; wildcards), p1?, p2? (window), view?: \"Top\"|\"Bottom\"|\"Front\"|\"Back\"|\"Left\"|\"Right\" (orthographic), layerSnapshot?: bool (save: default the Layer snapshot setting; settings: change it)} (typed VIEW / -VIEW: option prompts)",
             )
             .interactive(|_| Ok(Box::new(ViewM::default()))),
     ]
@@ -91,8 +91,13 @@ fn run_view(s: &mut Session, p: &Value) -> Result<Value> {
             }
             Ok(json!({ "layerSnapshot": s.settings.view_layer_snapshot }))
         }
-        "orthographic" | "o" => Err(EngineError::Other("Orthographic views are not available yet: CADCraft views are 2D.".into())),
-        _ => Err(bad("view", "option must be save, window, restore, delete, list or settings")),
+        "orthographic" | "o" => {
+            let view_name = str_param(p, "view")
+                .or_else(|| str_param(p, "name"))
+                .ok_or_else(|| bad("view", "`view` (Top, Bottom, Front, BAck, Left, Right) is required"))?;
+            orthographic(s, view_name)
+        }
+        _ => Err(bad("view", "option must be save, window, restore, delete, list, settings or orthographic")),
     }
 }
 
@@ -232,6 +237,29 @@ fn list(s: &mut Session, pats: &[String]) -> Result<Value> {
     Ok(json!({ "views": rows, "message": lines.join("\n") }))
 }
 
+fn orthographic(s: &mut Session, view_name: &str) -> Result<Value> {
+    let (dir, label) = match view_name.trim().to_ascii_lowercase().as_str() {
+        "top" | "t" => (Vec3::new(0.0, 0.0, 1.0), "Top"),
+        "bottom" | "b" => (Vec3::new(0.0, 0.0, -1.0), "Bottom"),
+        "front" | "f" => (Vec3::new(0.0, -1.0, 0.0), "Front"),
+        "back" | "ba" | "k" => (Vec3::new(0.0, 1.0, 0.0), "Back"),
+        "left" | "l" => (Vec3::new(-1.0, 0.0, 0.0), "Left"),
+        "right" | "r" => (Vec3::new(1.0, 0.0, 0.0), "Right"),
+        _ => return Err(bad("view", "orthographic view must be Top, Bottom, Front, BAck, Left, or Right")),
+    };
+
+    // If currently in Paper space on a layout, switch to Model space for orthographic view changes
+    if s.layout_space() != Space::Model && s.state()?.active_viewport().is_none() {
+        super::run_layout_set(s, &json!({ "name": "Model" }))?;
+    }
+
+    super::super::views3d::run_preset_view(s, dir)?;
+    let _ = s.zoom_extents();
+    s.touch();
+    let msg = format!("View direction set to {label}.");
+    Ok(json!({ "orthographic": label, "direction": [dir.x, dir.y, dir.z], "message": msg }))
+}
+
 // ---------------- prompts ----------------
 
 #[derive(Clone, Copy, Default)]
@@ -247,6 +275,7 @@ enum Stage {
     WindowSecond(Vec2),
     Settings,
     Snapshot,
+    Orthographic,
 }
 
 /// -VIEW: "Enter an option [?/Delete/Orthographic/Restore/Save/sEttings/Window]:".
@@ -285,6 +314,7 @@ impl Interactive for ViewM {
                 let on = if s.settings.view_layer_snapshot { "Yes" } else { "No" };
                 Prompt::new("Save layer settings with views?", Accept::TEXT).kw(&["Yes", "No"]).default(on)
             }
+            Stage::Orthographic => Prompt::new("Enter an option", Accept::TEXT).kw(&["Top", "Bottom", "Front", "BAck", "Left", "Right"]),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -304,14 +334,15 @@ impl Interactive for ViewM {
                     "save" | "s" => Stage::Save,
                     "window" | "w" => Stage::WindowName,
                     "settings" | "e" => Stage::Settings,
-                    "orthographic" | "o" => {
-                        s.echo("Orthographic views are not available yet: CADCraft views are 2D.");
-                        return Ok(Step::Done);
-                    }
+                    "orthographic" | "o" => Stage::Orthographic,
                     _ => return Err(EngineError::Other("Invalid option keyword.".into())),
                 };
                 Ok(Step::Continue)
             }
+            Stage::Orthographic => match text.filter(|t| !t.is_empty()) {
+                Some(name) => report(s, |s| orthographic(s, &name)),
+                None => Ok(Step::Done),
+            },
             Stage::List => {
                 let names = text.filter(|t| !t.is_empty()).unwrap_or_else(|| "*".into());
                 report(s, |s| list(s, &name_patterns(&json!({ "names": names }))))
