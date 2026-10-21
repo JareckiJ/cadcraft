@@ -967,7 +967,7 @@
 	Viewport {id}	Fenêtre {id}
 	Viewports	Fenêtres
 	W	O
-	WCS ⌄	SCG ⌄
+	WCS	SCG
 	Website	Site web
 	White	Blanc
 	Width factor	Facteur de largeur
@@ -1015,3 +1015,4 @@
 	Search for pattern	Rechercher un motif
 	Not a number or distance: {text}	Ni un nombre ni une distance : {text}
 	Query Texts	Interroger les textes
+	Analyze Shapes	Analyser les formes

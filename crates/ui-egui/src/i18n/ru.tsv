@@ -967,7 +967,7 @@
 	Viewport {id}	Видовой экран {id}
 	Viewports	Видовые экраны
 	W	З
-	WCS ⌄	МСК ⌄
+	WCS	МСК
 	Website	Веб-сайт
 	White	Белый
 	Width factor	Коэффициент ширины
@@ -1016,3 +1016,4 @@
 	Sheet Books to PDF...	Книги листов в PDF...
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
+	Analyze Shapes	Анализ фигур

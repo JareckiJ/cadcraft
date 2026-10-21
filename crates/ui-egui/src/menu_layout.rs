@@ -313,6 +313,8 @@ pub const MENU_LAYOUT: &[(&str, &[Row])] = &[
             SEP,
             ico("dsettings", Icon::Gear),
             ico("ui.spacemouse", Icon::Mouse3d),
+            sub("Express Tools", &[cmd("burst"), cmd("txt2mtxt"), cmd("mocoro"), cmd("breakline")]),
+            sub("Customize", &[cmd("aliasedit")]),
             ico("options", Icon::Gear),
         ],
     ),

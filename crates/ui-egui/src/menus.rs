@@ -427,6 +427,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::hatchdlg::open_create(app, matches!(id, "gradient" | "gd"));
             Ok(Value::Null)
         }
+        // Typed or from the Tools menu: the Command Aliases dialog. JSON calls keep the JSON form.
+        "aliasedit" if params.is_null() => {
+            crate::aliasdlg::open(app);
+            Ok(Value::Null)
+        }
         "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() => {
             crate::hatchdlg::open_edit(app);
             Ok(Value::Null)
@@ -1403,6 +1408,21 @@ pub fn activate(app: &mut CadApp, id: &str) {
     app.start(id);
 }
 
+/// Run `id` with default parameters without cancelling the active command, as the drafting
+/// toggles (F3, F7-F12, the status bar buttons) are in AutoCAD.
+pub fn run_transparent(app: &mut CadApp, id: &str) {
+    match app.session.execute(id, &json!({})) {
+        Ok(v) => {
+            if let Some(m) = v.get("message").and_then(Value::as_str) {
+                app.session.echo(m.to_string());
+            }
+        }
+        Err(_) => {
+            let _ = app.run(id, json!({}));
+        }
+    }
+}
+
 /// Keyboard shortcuts and function keys.
 pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
     use egui::{Key, KeyboardShortcut, Modifiers};
@@ -1464,16 +1484,7 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
         // Toggles run transparently (they don't cancel the active command).
         let transparent = ["osnap", "grid", "ortho", "snap", "polar", "otrack", "dynmode", "pickstyle"].contains(&id);
         if transparent || id.starts_with("ui.") {
-            match app.session.execute(id, &json!({})) {
-                Ok(v) => {
-                    if let Some(m) = v.get("message").and_then(Value::as_str) {
-                        app.session.echo(m.to_string());
-                    }
-                }
-                Err(_) => {
-                    let _ = app.run(id, json!({}));
-                }
-            }
+            run_transparent(app, id);
         } else {
             activate(app, id);
         }

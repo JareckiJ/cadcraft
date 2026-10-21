@@ -63,6 +63,7 @@
 	Area	Área
 	Arrange Panel	Organizar panel
 	Array	Matriz
+	Arrow size	Tamaño de flecha
 	Attach	Adjuntar
 	Attach DWG...	Adjuntar DWG...
 	Attribute	Atributo
@@ -228,6 +229,7 @@
 	Deselect All	Deseleccionar todo
 	Detach	Desenlazar
 	Diameter	Diámetro
+	Dim scale overall	Escala global de cota
 	Dim style	Estilo de cota
 	Dimension	Acotación
 	Dimension Break	Partir cota
@@ -773,6 +775,7 @@
 	Position X	Posición X
 	Position Y	Posición Y
 	Position Z	Posición Z
+	Precision	Precisión
 	Previous	Anterior
 	Previous Layer	Capa anterior
 	Primitives	Primitivas
@@ -1182,7 +1185,7 @@
 	Viewports	Ventanas gráficas
 	Volume	Volumen
 	W	O
-	WCS ⌄	SCU ⌄
+	WCS	SCU
 	Website	Sitio web
 	White	Blanco
 	Width factor	Factor de anchura
@@ -1251,3 +1254,4 @@
 	Search for pattern	Buscar patrón
 	Not a number or distance: {text}	No es un número ni una distancia: {text}
 	Query Texts	Consultar textos
+	Analyze Shapes	Analizar formas
