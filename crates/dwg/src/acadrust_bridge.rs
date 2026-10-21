@@ -6,22 +6,12 @@ use std::panic::AssertUnwindSafe;
 
 use super::{Limits, mb};
 
-/// Read DWG bytes and return an ASCII DXF rendition, within [`Limits::DEFAULT`].
-pub fn dwg_to_dxf(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    dwg_to_dxf_with(bytes, Limits::DEFAULT)
-}
-
-/// [`dwg_to_dxf`] with explicit limits. Both are checked before the expensive step they
-/// guard: the input size before the DWG reader runs, the DXF size while it is written, so a
-/// runaway conversion stops at the limit instead of filling memory first.
-pub fn dwg_to_dxf_with(bytes: &[u8], limits: Limits) -> Result<Vec<u8>, String> {
-    dwg_to_dxf_noted(bytes, limits).map(|(dxf, _)| dxf)
-}
-
-/// [`dwg_to_dxf_with`], also returning notes on what the read left out. The reader runs in
-/// failsafe mode: an object record it can't decode is skipped instead of failing the whole
-/// file, and the notes say how many were skipped and of which types, so a partial read never
-/// passes for a complete one.
+/// Read DWG bytes into an ASCII DXF rendition within `limits`, with notes on what the read left
+/// out. The input size is checked before the DWG reader runs and the DXF size while it is
+/// written, so a runaway conversion stops at the limit instead of filling memory first. The
+/// reader runs in failsafe mode: an object record it can't decode is skipped instead of failing
+/// the whole file, and the notes say how many were skipped and of which types, so a partial read
+/// never passes for a complete one.
 pub fn dwg_to_dxf_noted(bytes: &[u8], limits: Limits) -> Result<(Vec<u8>, Vec<String>), String> {
     if bytes.len() > limits.max_dwg_bytes {
         return Err(format!("DWG: the file is {}, larger than the {} CADCraft opens", mb(bytes.len() as u64), mb(limits.max_dwg_bytes as u64)));
