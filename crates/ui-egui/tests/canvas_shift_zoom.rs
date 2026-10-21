@@ -145,3 +145,51 @@ fn shift_double_click_returns_to_the_previous_view() {
     let back = view_height(&app);
     assert!((back - start).abs() < 1e-6, "a Shift+double-click must restore the previous view (start={start}, back={back})");
 }
+
+/// Shift can be let go before the button: the release still belongs to the zoom drag and must not
+/// reach the running command as a point.
+#[test]
+fn shift_drag_released_after_shift_places_no_point() {
+    let (ctx, mut app) = new_app();
+    call(&mut app, &ctx, "cmdline.input", json!({"text": "LINE"}));
+    for i in 0..4 {
+        step(&mut app, &ctx, vec![], 1.0 + f64::from(i) * 0.05);
+    }
+    let started = call(&mut app, &ctx, "cmdline.state", json!({}));
+    assert_eq!(started["running"], "line");
+    let r = app.canvas.rect.unwrap();
+    let from = r.center() + Vec2::new(-r.width() * 0.15, -r.height() * 0.15);
+    let to = r.center() + Vec2::new(r.width() * 0.15, r.height() * 0.15);
+
+    let s = shift();
+    let none = Modifiers::default();
+    let mut t = 2.0;
+    step(
+        &mut app,
+        &ctx,
+        vec![
+            Event::ModifiersChanged(s),
+            Event::PointerMoved(from),
+            Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: s },
+        ],
+        t,
+    );
+    for i in 1..=8 {
+        t += 0.02;
+        let p = from + (to - from) * (i as f32 / 8.0);
+        step(&mut app, &ctx, vec![Event::ModifiersChanged(s), Event::PointerMoved(p)], t);
+    }
+    t += 0.02;
+    step(&mut app, &ctx, vec![Event::ModifiersChanged(none)], t);
+    t += 0.02;
+    step(
+        &mut app,
+        &ctx,
+        vec![Event::PointerButton { pos: to, button: PointerButton::Primary, pressed: false, modifiers: none }],
+        t,
+    );
+
+    let after = call(&mut app, &ctx, "cmdline.state", json!({}));
+    assert_eq!(after["running"], "line");
+    assert_eq!(after["prompt"], started["prompt"], "the release that ends a Shift zoom drag must not place a point");
+}

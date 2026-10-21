@@ -1481,7 +1481,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if let (Some((start, _)), Some(hp)) = (app.canvas.zoom_window, hover_pos) {
         app.canvas.zoom_window = Some((start, xf.to_world(hp)));
     }
-    if resp.drag_stopped_by(egui::PointerButton::Primary)
+    // A Shift drag can end after Shift itself was let go: the release belongs to the zoom, not to
+    // the command, so remember it before the window is consumed below.
+    let primary_drag_stopped = resp.drag_stopped_by(egui::PointerButton::Primary);
+    let zoom_drag_stopped = primary_drag_stopped && app.canvas.zoom_window.is_some();
+    if primary_drag_stopped
         && let Some((start, end)) = app.canvas.zoom_window.take()
         && (start.x - end.x).abs() > 1e-9
         && (start.y - end.y).abs() > 1e-9
@@ -1569,7 +1573,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let point_prompt = app.session.current_prompt().is_some_and(|p| cadcraft_engine::pointmod::accepts(&p))
         && app.session.pending_window.is_none()
         && !app.session.realtime_zoom_active();
-    let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
+    let pressed_primary = pressed_primary || (point_prompt && primary_drag_stopped && !zoom_drag_stopped);
     if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
@@ -1577,7 +1581,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 .filter_map(|e| match e {
                     // A Shift release is the zoom gesture, never a point.
                     egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers, .. }
-                        if !modifiers.shift => Some(*pos),
+                        if !modifiers.shift && !zoom_drag_stopped => Some(*pos),
                     _ => None,
                 })
                 .collect()
@@ -1677,6 +1681,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && !cycled
         && !resp.dragged_by(egui::PointerButton::Primary)
         && !shift_click
+        && !zoom_drag_stopped
         && let Some(p) = app.canvas.cursor
     {
         if app.session.prompting() {
