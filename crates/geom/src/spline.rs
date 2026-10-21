@@ -156,7 +156,12 @@ impl Spline {
         // The convex hull property, which makes the control box contain the curve and a
         // degree-1 spline its control polygon, needs every weight positive.
         let positive = self.weights.iter().all(|w| *w > 0.0);
-        if !self.is_valid() || (self.degree == 1 && positive) || !finite || !(diag.is_finite() && diag > 0.0) {
+        if !self.is_valid() || !finite {
+            return hull;
+        }
+        // With a zero or negative weight even a degenerate control box is no bound (zero weights
+        // evaluate to the origin), so only positive weights take these shortcuts.
+        if positive && (self.degree == 1 || !(diag.is_finite() && diag > 0.0)) {
             return hull;
         }
         let spans = self.knot_spans().count();
@@ -556,6 +561,18 @@ mod tests {
         assert!(b.contains(far), "{b:?} misses {far:?}");
         s.weights = vec![1.0, 0.5];
         assert_eq!(s.bounds(), Bounds2::new(Vec2::new(1.0, 0.0), Vec2::new(2.0, 0.0)));
+    }
+
+    /// Zero weights evaluate to the origin, so a spline whose control points coincide is not its
+    /// control box either; it is sampled.
+    #[test]
+    fn zero_weights_are_sampled_not_boxed() {
+        let mut s = Spline::from_control(vec![Vec2::new(3.0, 4.0); 2], 1);
+        s.weights = vec![0.0, 0.0];
+        assert!(s.is_valid());
+        assert_eq!(s.eval(0.5), Vec2::ZERO);
+        let b = s.bounds();
+        assert!(b.contains(Vec2::ZERO), "{b:?}");
     }
 
     #[test]
