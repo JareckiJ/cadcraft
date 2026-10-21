@@ -120,8 +120,10 @@ pub fn made_annotative_at(e: &mut Entity, scale: &AnnoScale) {
     if !can_be_annotative(&e.kind) || !e.common.anno_scales.is_empty() {
         return;
     }
-    e.common.anno_scales.push(scale.clone());
+    // Scaled while it has no scale of its own (a dimension's override would take that one
+    // twice), then the scale recorded.
     *e = anno_scaled(e, scale.factor());
+    e.common.anno_scales.push(scale.clone());
 }
 
 /// How an object draws in a view.

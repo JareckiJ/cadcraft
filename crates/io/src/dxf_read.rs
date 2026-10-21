@@ -1971,8 +1971,8 @@ struct Objects {
 }
 
 pub(crate) const MAX_OBJECTS: usize = 1_000_000;
-/// Deepest chain of dictionaries followed from an object to its annotation scale contexts.
-const MAX_ANNO_DEPTH: usize = 8;
+/// Most dictionaries visited from an object's extension dictionary to its annotation scale contexts.
+const MAX_ANNO_DICTS: usize = 8;
 
 impl Objects {
     fn add(&mut self, kind: &str, tags: &[Tag]) {
@@ -2070,7 +2070,7 @@ impl Objects {
             let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
             let mut queue: Vec<&str> = vec![dict.as_str()];
             while let Some(h) = queue.pop() {
-                if !seen.insert(h) || seen.len() > MAX_ANNO_DEPTH {
+                if !seen.insert(h) || seen.len() > MAX_ANNO_DICTS {
                     continue;
                 }
                 for v in self.dicts.get(h).into_iter().flatten() {

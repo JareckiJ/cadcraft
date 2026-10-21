@@ -876,10 +876,11 @@ impl Session {
         }
         // Text, dimensions, multileaders, hatches and block references of annotative styles are
         // annotative, made at the current annotation scale: an annotative object is stored the
-        // size it shows at the scale it was made at, as AutoCAD stores it.
+        // size it shows at the scale it was made at, as AutoCAD stores it. Paper space shows them
+        // at 1:1 (`Drawing::anno_draw`), so one made there is made at 1:1.
         let d = self.doc()?;
         if d.annotative_by_style(&kind) {
-            let scale = d.current_anno_scale();
+            let scale = if space.is_paper() { cadcraft_doc::AnnoScale::unit() } else { d.current_anno_scale() };
             let mut e = cadcraft_doc::Entity { handle: cadcraft_doc::Handle(0), common, kind };
             cadcraft_doc::made_annotative_at(&mut e, &scale);
             common = e.common;

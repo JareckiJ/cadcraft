@@ -25,6 +25,9 @@ pub const MAX_FIELD_CHILDREN: usize = 256;
 const MAX_EXPR: usize = 4096;
 /// Deepest nesting of an expression's parentheses and operators.
 const MAX_EXPR_DEPTH: usize = 64;
+/// Longest text a `_text` field makes (bytes): a code repeating its children's placeholders
+/// can't multiply its text level by level.
+pub const MAX_FIELD_TEXT: usize = 65_536;
 
 /// A field: how its value is made and the value it has.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -169,22 +172,27 @@ impl Field {
         None
     }
 
-    /// A `_text` field's text: its code with each child's text in place of `%<\_FldIdx N>%`.
+    /// A `_text` field's text: its code with each child's text in place of `%<\_FldIdx N>%`, cut
+    /// at [`MAX_FIELD_TEXT`].
     fn join(&self) -> String {
         let mut out = String::new();
         let mut rest = self.code.as_str();
         while let Some(i) = rest.find("%<\\_FldIdx ") {
-            out.push_str(rest.get(..i).unwrap_or(""));
+            if !push_capped(&mut out, rest.get(..i).unwrap_or("")) {
+                return out;
+            }
             let after = rest.get(i + 11..).unwrap_or("");
             let Some(end) = after.find(">%") else {
                 rest = rest.get(i..).unwrap_or("");
                 break;
             };
             let child = after.get(..end).and_then(|n| n.trim().parse::<usize>().ok()).and_then(|n| self.children.get(n));
-            out.push_str(child.map_or("", |c| c.value.text()));
+            if !push_capped(&mut out, child.map_or("", |c| c.value.text())) {
+                return out;
+            }
             rest = after.get(end + 2..).unwrap_or("");
         }
-        out.push_str(rest);
+        push_capped(&mut out, rest);
         out
     }
 
@@ -200,6 +208,9 @@ impl Field {
             let n = after.get(..end)?.trim().parse::<usize>().ok()?;
             let v = self.children.get(n)?.value.number()?;
             out.push_str(&format!("({v:?})"));
+            if out.len() > MAX_EXPR {
+                return None;
+            }
             rest = after.get(end + 2..)?;
         }
         out.push_str(rest);
@@ -251,6 +262,22 @@ impl Field {
             }
         }
     }
+}
+
+/// Append `s` to `out` up to [`MAX_FIELD_TEXT`] (cut at a character boundary); false when it
+/// didn't all fit.
+fn push_capped(out: &mut String, s: &str) -> bool {
+    let room = MAX_FIELD_TEXT.saturating_sub(out.len());
+    if s.len() <= room {
+        out.push_str(s);
+        return true;
+    }
+    let mut cut = room;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    out.push_str(s.get(..cut).unwrap_or(""));
+    false
 }
 
 /// Text formatted by a field format's case (`%tc1` upper, `%tc2` lower, `%tc3` sentence case,
@@ -894,5 +921,18 @@ mod tests {
             deep = field("AcExpr", "\\AcExpr (%<\\_FldIdx 0>%+1)", vec![deep]);
         }
         deep.update(&d, Handle(1));
+    }
+
+    #[test]
+    fn repeated_placeholders_dont_multiply_the_text() {
+        // Each level repeats its one child 100 times: 100^5 bytes uncapped.
+        let d = Drawing::new_metric();
+        let mut f = field("_text", "x", Vec::new());
+        let code = "%<\\_FldIdx 0>%".repeat(100);
+        for _ in 0..5 {
+            f = field("_text", &code, vec![f]);
+        }
+        f.update(&d, Handle(1));
+        assert_eq!(f.value.text().len(), MAX_FIELD_TEXT);
     }
 }

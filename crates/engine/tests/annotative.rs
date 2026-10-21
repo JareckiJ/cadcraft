@@ -347,3 +347,32 @@ fn annotative_mtext_columns_follow_the_scale() {
         assert_eq!((t.height, t.width, c.count, c.gutter, c.height, c.heights), (2.0, 20.0, 2, 2.0, 40.0, vec![6.0, 10.0]));
     }
 }
+
+#[test]
+fn annotative_dimension_made_at_a_scale_stores_that_scale_once() {
+    let mut s = Session::new();
+    s.execute("dimstyle", &json!({ "name": "Anno", "annotative": true, "current": true })).unwrap();
+    setvar(&mut s, "CANNOSCALE", json!("1:50"));
+    let r = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [1000, 0], "at": [500, 200] })).unwrap();
+    let h = Handle::parse_hex(r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap()).unwrap();
+    assert_eq!(scales(&s, h), ["1:50"]);
+    match entity(&s, h).kind {
+        EntityKind::Dimension(dm) => assert_eq!(dm.overrides.get("scale"), Some(&json!(50.0))),
+        k => panic!("{k:?}"),
+    }
+}
+
+#[test]
+fn annotative_text_made_on_a_layout_is_made_at_1_1() {
+    let mut s = Session::new();
+    s.execute("style", &json!({ "name": "Notes", "annotative": true, "current": true })).unwrap();
+    setvar(&mut s, "CANNOSCALE", json!("1:50"));
+    s.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
+    let r = s.execute("text", &json!({ "at": [1, 1], "text": "NOTE", "height": 0.25 })).unwrap();
+    let h = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+    assert_eq!(scales(&s, h), ["1:1"]);
+    match entity(&s, h).kind {
+        EntityKind::Text(t) => assert_eq!(t.height, 0.25),
+        k => panic!("{k:?}"),
+    }
+}
