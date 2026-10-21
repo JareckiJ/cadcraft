@@ -27,6 +27,9 @@ use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 use crate::{Run, Shaped};
 
+#[cfg(not(target_arch = "wasm32"))]
+mod dirs;
+
 /// One face of a font file (a TrueType collection holds several).
 #[derive(Clone)]
 pub struct Face {
@@ -218,6 +221,8 @@ fn lock() -> MutexGuard<'static, Db> {
     g
 }
 
+/// Installed font files by lower-case stem, from the platform's font directories (on Linux and
+/// the BSDs, wherever fontconfig looks: [`dirs`]).
 #[cfg(not(target_arch = "wasm32"))]
 fn scan() -> HashMap<String, PathBuf> {
     let mut out = HashMap::new();
@@ -233,11 +238,19 @@ fn scan() -> HashMap<String, PathBuf> {
             dirs.push(PathBuf::from(l).join("Microsoft\\Windows\\Fonts"));
         }
     } else {
-        dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(Into::into));
-        if let Some(h) = std::env::var_os("HOME") {
-            dirs.push(PathBuf::from(&h).join(".fonts"));
-            dirs.push(PathBuf::from(h).join(".local/share/fonts"));
+        // Where fontconfig looks: NixOS, Guix and Flatpak keep fonts outside /usr/share/fonts
+        // (#674). Later directories take precedence (the stack pops them first), so the
+        // resolver's priority order is reversed; symlinked directories resolve so none is
+        // walked twice.
+        let mut found: Vec<PathBuf> = Vec::new();
+        for d in dirs::font_dirs(|k| std::env::var_os(k), dirs::read_config) {
+            if let Ok(c) = std::fs::canonicalize(&d)
+                && !found.contains(&c)
+            {
+                found.push(c);
+            }
         }
+        dirs.extend(found.into_iter().rev());
     }
     let mut stack = dirs;
     let mut seen = 0usize;
@@ -513,6 +526,16 @@ pub fn find(name: &str) -> Option<Face> {
     }
     g.resolved.insert(k, r.clone());
     r
+}
+
+/// The installed font file with this stem (`DejaVuSans`, `NotoSansCJK-Regular`; case and an
+/// extension don't matter), wherever the system keeps its fonts. A font compiled in from
+/// craft-fonts is no file and gives `None`.
+pub fn installed_font_path(stem: &str) -> Option<PathBuf> {
+    match lock().paths.get(&key(stem))? {
+        Source::File(p) => Some(p.clone()),
+        Source::Static(_) => None,
+    }
 }
 
 struct Prefs {
