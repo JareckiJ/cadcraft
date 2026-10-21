@@ -200,3 +200,24 @@ fn a_field_tree_that_lists_its_children_over_and_over_reads_quickly() {
         assert!(t.elapsed() < std::time::Duration::from_secs(20), "{name}: {:?}", t.elapsed());
     }
 }
+
+#[test]
+fn a_kept_field_list_without_its_marker_lists_the_written_fields() {
+    // A file whose field list lacks `100 AcDbIdSet`: saved again, the list is rebuilt with the
+    // marker and every written field, not copied as it was.
+    let d = cadcraft_io::read_dxf(fixture().as_bytes()).unwrap();
+    let first = save(&d);
+    let mut lines: Vec<&str> = first.lines().map(str::trim).collect();
+    let at = lines.windows(2).position(|w| w == ["0", "FIELDLIST"]).expect("a field list");
+    let marker = (at..lines.len()).step_by(2).find(|&i| lines[i..].starts_with(&["100", "AcDbIdSet"])).expect("its marker");
+    lines.drain(marker..marker + 2);
+    let stripped = lines.join("\n");
+    let again = save(&cadcraft_io::read_dxf(stripped.as_bytes()).unwrap());
+    let lines: Vec<&str> = again.lines().map(str::trim).collect();
+    let at = lines.windows(2).position(|w| w == ["0", "FIELDLIST"]).expect("a field list");
+    let body: Vec<&str> = lines[at + 2..].chunks(2).take_while(|c| c[0] != "0").flat_map(|c| c.iter().copied()).collect();
+    let set = body.chunks(2).position(|c| c == ["100", "AcDbIdSet"]).expect("the marker is back");
+    let listed: Vec<&str> = body.chunks(2).skip(set).filter(|c| c[0] == "330").map(|c| c[1]).collect();
+    assert_eq!(listed.len(), 2, "{body:?}");
+    assert_eq!(body.chunks(2).filter(|c| c[0] == "90").count(), 1, "{body:?}");
+}

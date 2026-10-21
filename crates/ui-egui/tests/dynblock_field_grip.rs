@@ -219,3 +219,34 @@ fn double_clicking_a_block_reference_edits_its_attributes() {
     assert_eq!(st.block, "Door");
     assert_eq!(st.rows.get(st.current).map(|r| r.tag.as_str()), Some("WIDTH"));
 }
+
+/// A grip drag whose events a slow frame hands over together: the press, the moves and the
+/// release in one frame, or (`split`) the press in one and the rest in the next.
+fn batched_drag(h: &mut Harness<'_, CadApp>, a: Pos2, b: Pos2, split: bool) {
+    let press = Event::PointerButton { pos: a, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE };
+    h.event(Event::PointerMoved(a));
+    h.run_steps(2);
+    h.event(press);
+    if split {
+        h.run_steps(1);
+    }
+    for i in 1..=4 {
+        h.event(Event::PointerMoved(a + (b - a) * (i as f32 / 4.0)));
+    }
+    h.event(Event::PointerButton { pos: b, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+}
+
+#[test]
+fn a_grip_drag_handed_over_in_one_slow_frame_still_edits() {
+    for split in [true, false] {
+        let mut h = harness();
+        h.state_mut().session.set_selection(vec![REF]);
+        h.run_steps(3);
+        let g = dynblock::grips(h.state().session.doc().unwrap(), REF).into_iter().find(|g| g.node == 2 && g.part == GripPart::End).unwrap();
+        let (from, to) = (screen(&h, g.at), screen(&h, g.at - Vec2::new(6.0, 0.0)));
+        batched_drag(&mut h, from, to, split);
+        assert_eq!(width_text(&h), "W=30", "split {split}: log: {:?}", h.state().session.log);
+        assert!(h.state().session.running.is_none(), "split {split}: the drag finished the edit");
+    }
+}

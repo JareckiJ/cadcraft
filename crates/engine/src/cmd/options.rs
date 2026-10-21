@@ -31,7 +31,6 @@ pub const PROFILE_VARS: &[&str] = &[
     "DYNDIGRIP",
     "DYNDIVIS",
     "OSNAPHATCH",
-    "LWDISPLAY",
     "QPMODE",
     "SELECTIONEFFECT",
     "SELECTIONPREVIEW",

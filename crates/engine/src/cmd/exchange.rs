@@ -315,6 +315,12 @@ fn plot_scale(b: &Bounds2, sheet: &Sheet, fit: bool, scale: Option<f64>) -> f64 
     if s.is_finite() && s > 0.0 { s } else { 1.0 }
 }
 
+/// The drawing area a preview of `sheet` shows when paper point `q` (the sheet's own frame, its
+/// lower-left at (0,0)) shows drawing point `(q - to) / k + from`.
+fn preview_window(sheet: &Sheet, from: Vec2, k: f64, to: Vec2) -> Bounds2 {
+    Bounds2::new((Vec2::ZERO - to) / k + from, (sheet.size - to) / k + from)
+}
+
 fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let space = plot_space("preview", s, p)?;
     let d = s.doc()?;
@@ -374,8 +380,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
         // the page setup's margins and plot origin down and left of it.
         (Vec2::ZERO, plot_scale(&b, &sheet, fit, scale), -sheet.bounds().min)
     };
-    let sb = sheet.bounds();
-    let world = Bounds2::new((sb.min - to) / k + from, (sb.max - to) / k + from);
+    let world = preview_window(&sheet, from, k, to);
     if ![world.min.x, world.min.y, world.max.x, world.max.y].iter().all(|v| v.is_finite()) {
         return Err(bad("preview", "the drawing is too large to preview at this scale"));
     }
@@ -799,5 +804,14 @@ mod tests {
             let e = s.execute(&resolve_alias(c), &Value::Null).unwrap_err().to_string();
             assert!(e.contains("not available yet"), "{c}: {e}");
         }
+    }
+
+    #[test]
+    fn a_layout_preview_at_1_1_shows_the_sheet_where_it_is() {
+        // A plot origin puts the sheet down and left of paper space (0,0); the preview shows it
+        // there, not twice as far.
+        let page = PageSetup { plot_origin_mm: [10.0, 20.0], ..PageSetup::default() };
+        let sheet = Sheet::from_page(&page, 1.0);
+        assert_eq!(preview_window(&sheet, Vec2::ZERO, 1.0, -sheet.bounds().min), sheet.bounds());
     }
 }

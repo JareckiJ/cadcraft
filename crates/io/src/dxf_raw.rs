@@ -723,16 +723,36 @@ impl Map<'_> {
 }
 
 /// The kept field list, listing the fields the written file holds: the kept ones and those
-/// written for block attributes (a field whose object is gone is not listed).
+/// written for block attributes (a field whose object is gone is not listed). A list kept without
+/// its `AcDbIdSet` marker gets one, before its first subclass marker.
 fn field_list(map: &Map, o: &ForeignObject, recs: &[Rec], tags: &[Tag], out: &mut Vec<Tag>) {
-    let set = o.tags.iter().position(|t| t.code == 100 && t.value == "AcDbIdSet");
-    let Some(set) = set else {
-        map.object(o, out);
-        return;
+    let lean = match o.tags.iter().position(|t| t.code == 100 && t.value == "AcDbIdSet") {
+        // The object without its list: its head, then what follows the list.
+        Some(set) => {
+            let tail = o.tags.iter().skip(set + 1).skip_while(|t| matches!(t.code, 90 | 330)).cloned();
+            ForeignObject { handle: o.handle, kind: o.kind.clone(), tags: o.tags.iter().take(set + 1).cloned().chain(tail).collect() }
+        }
+        // Its head (handle, reactors, owner) without the entries it lists, the marker, then the
+        // rest from its first subclass marker on.
+        None => {
+            let at = o.tags.iter().position(|t| t.code == 100).unwrap_or(o.tags.len());
+            let (mut in_group, mut owner) = (false, false);
+            let mut tags: Vec<RawTag> = Vec::new();
+            for t in o.tags.iter().take(at) {
+                match t.code {
+                    102 => in_group = t.value.starts_with('{'),
+                    330 if !in_group && owner => continue,
+                    330 if !in_group => owner = true,
+                    90 if !in_group => continue,
+                    _ => {}
+                }
+                tags.push(t.clone());
+            }
+            tags.push(RawTag { code: 100, value: "AcDbIdSet".into() });
+            tags.extend(o.tags.iter().skip(at).cloned());
+            ForeignObject { handle: o.handle, kind: o.kind.clone(), tags }
+        }
     };
-    // The object without its list: its head, then what follows the list.
-    let tail = o.tags.iter().skip(set + 1).skip_while(|t| matches!(t.code, 90 | 330)).cloned();
-    let lean = ForeignObject { handle: o.handle, kind: o.kind.clone(), tags: o.tags.iter().take(set + 1).cloned().chain(tail).collect() };
     let mut obj = Vec::new();
     map.object(&lean, &mut obj);
     let kept = map.f.objects.iter().filter(|x| x.kind.eq_ignore_ascii_case("FIELD")).filter_map(|x| map.alive.get(&x.handle.hex()).cloned());

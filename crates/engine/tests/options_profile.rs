@@ -186,3 +186,15 @@ fn preview_filter_excludes_each_kind_it_names() {
     assert!(preview_filtered(d, line, 1) && !preview_filtered(d, line, 62));
     assert!(preview_filtered(d, &mtext, 32));
 }
+
+#[test]
+fn lwdisplay_is_the_drawings_not_the_profiles() {
+    // Saved in the drawing, as in AutoCAD: the profile neither lists nor restores it, so OPTIONS
+    // can't change the drawing and then roll back only the profile.
+    let mut s = Session::new();
+    s.execute("lwdisplay", &json!({ "on": true })).unwrap();
+    let saved = profile(&s);
+    assert!(saved.get("LWDISPLAY").is_none(), "{saved}");
+    assert!(s.execute("options", &json!({ "LWDISPLAY": 0 })).is_err());
+    assert!(s.lwdisplay());
+}
