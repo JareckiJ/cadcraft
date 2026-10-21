@@ -113,9 +113,18 @@ impl Spline {
     /// How many segments a tessellation at `tol` takes: the control-polygon length guides it,
     /// capped at `MAX_SAMPLES`.
     fn sample_count(&self, tol: f64) -> usize {
-        let poly: f64 = self.control.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
-        let n = ((poly / tol.max(1e-9)).sqrt() * 2.0).clamp(8.0, 2000.0) as usize * self.degree.max(1);
+        self.segments_for(self.polygon_length() / tol.max(1e-9))
+    }
+
+    /// The segments for a control polygon `ratio` times the tolerance: dimensionless, so a
+    /// spline and its scaled copy sample alike at any scale.
+    fn segments_for(&self, ratio: f64) -> usize {
+        let n = (ratio.sqrt() * 2.0).clamp(8.0, 2000.0) as usize * self.degree.max(1);
         n.min(MAX_SAMPLES)
+    }
+
+    fn polygon_length(&self) -> f64 {
+        self.control.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum()
     }
 
     /// `n + 1` points evenly spaced in parameter over the domain (the spline must be valid).
@@ -142,7 +151,7 @@ impl Spline {
             return hull;
         }
         let spans = self.control.len().saturating_sub(self.degree);
-        let n = self.sample_count(diag * 1e-3).max(spans.saturating_mul(4)).min(MAX_SAMPLES);
+        let n = self.segments_for(self.polygon_length() / (diag * 1e-3)).max(spans.saturating_mul(4)).min(MAX_SAMPLES);
         Bounds2::from_points(self.samples(n))
     }
 }
@@ -379,8 +388,9 @@ mod tests {
         all.push(wiggly(true));
         all.push(Spline::from_fit_points_closed(&[Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]));
         for s in all {
-            // Whatever the drawing's units: the same relative margin at any scale.
-            for k in [1e-6, 1.0, 1e6] {
+            // Whatever the drawing's units: the same relative margin at any scale, including
+            // splines far smaller than any absolute tolerance floor.
+            for k in [1e-12, 1e-9, 1e-6, 1.0, 1e6] {
                 let s = scaled(&s, k);
                 let (b, want) = (s.bounds(), fine_box(&s));
                 let diag = want.min.dist(want.max);
