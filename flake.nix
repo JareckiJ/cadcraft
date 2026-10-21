@@ -70,6 +70,7 @@
           default = {
             type = "app";
             program = lib.getExe self.packages.${system}.cadcraft;
+            meta.description = self.packages.${system}.cadcraft.meta.description;
           };
         }
       );
