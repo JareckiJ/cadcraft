@@ -513,6 +513,39 @@ fn a_save_leaves_a_version_behind_and_an_unchanged_save_leaves_none() {
 }
 
 #[test]
+fn a_version_is_read_only_and_save_as_gives_it_a_name_of_its_own() {
+    hooks();
+    let dir = folder("readonly");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    s.execute("circle", &json!({ "center": [0, 0], "radius": 4 })).unwrap();
+    s.execute("qsave", &json!({})).unwrap();
+    let version = snapshots(&dir).pop().unwrap();
+    let stored = std::fs::read(history(&dir).join(&version)).unwrap();
+
+    // The palette's Open: the revision becomes the active drawing, as a tab of its own.
+    s.execute("omni-log", &json!({ "open": version })).unwrap();
+    let opened = s.state().unwrap().path.clone().unwrap_or_default();
+    assert!(opened.contains("_OMNI_HISTORY"), "{opened}: a revision is a file of the history");
+
+    // Saving it back would overwrite the record the timeline is made of: refused, with the way out
+    // named, and the drawing keeps the change rather than losing it.
+    s.execute("circle", &json!({ "center": [5, 5], "radius": 1 })).unwrap();
+    let e = s.execute("qsave", &json!({})).unwrap_err();
+    assert!(format!("{e:?}").contains("SAVEAS"), "{e:?}");
+    assert_eq!(std::fs::read(history(&dir).join(&version)).unwrap(), stored, "the stored version is untouched");
+    assert!(s.state().unwrap().is_dirty(), "nothing was saved, so nothing was lost");
+
+    // A name of its own is how a revision carries on.
+    let copy = dir.join("plan-rev.dxf");
+    s.execute("saveas", &json!({ "path": copy.to_string_lossy() })).unwrap();
+    assert!(copy.is_file(), "SAVEAS writes the revision where it is told to");
+    assert!(!s.state().unwrap().is_dirty());
+}
+
+#[test]
 fn versions_are_stored_gzipped_and_read_back_exactly() {
     hooks();
     let dir = folder("gzip");
@@ -524,7 +557,7 @@ fn versions_are_stored_gzipped_and_read_back_exactly() {
     let on_disk = r["bytes"].as_u64().unwrap();
     let unpacked = r["size"].as_u64().unwrap();
     assert!(unpacked > 40_000, "{unpacked}: a drawing of 400 walls is a verbose DXF");
-    assert!(on_disk * 3 < unpacked, "{on_disk} for {unpacked}: DXF text shrinks about tenfold when gzipped");
+    assert!(on_disk * 3 < unpacked, "{on_disk} for {unpacked}: a gzipped DXF is several times smaller");
 
     // What is stored is the drawing itself, byte for byte, once unpacked.
     let bytes = unpack(r["path"].as_str().unwrap());

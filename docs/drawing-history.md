@@ -1,9 +1,9 @@
 # Drawing history (the OMNI toolkit)
 
 CADCraft keeps a *drawing history* next to the drawing it belongs to: a version of the drawing for
-every save, named milestones when you want them, a palette that lists them, and a way to lay an old
-revision under the current one or put it back. It comes from a small AutoLISP toolkit (`OMNI.lsp`)
-its author used inside AutoCAD, and is here rebuilt as native commands — no AutoLISP, no
+every save that changes it, named milestones when you want them, a palette that lists them, and a way
+to lay an old revision under the current one or put it back. It comes from a small AutoLISP toolkit
+(`OMNI.lsp`) its author used inside AutoCAD, and is here rebuilt as native commands — no AutoLISP, no
 `-XREF`/`-LAYER` command-line scripting, and working the same for DXF and DWG.
 
 Everything is a command, so the command line, the menus (**Tools ▸ Drawing History** and
@@ -14,17 +14,18 @@ the same code. See [control-protocol.md](control-protocol.md) for the JSON forms
 
 ## Two kinds of version
 
-- **Every save leaves one behind**, without being asked. `SAVE`, `QSAVE` and `SAVEAS` write a
-  version when the drawing differs from what its file held — the unsaved-changes flag is the test —
-  so the history is a timeline of the saves you already make. Those are filed under the description
-  `save`. A save of an unchanged drawing adds nothing, and neither does a save after an edit and its
-  undo: the drawing comes back to what the newest version already holds.
+- **A save that changes the drawing leaves one behind**, without being asked. `SAVE`, `QSAVE` and
+  `SAVEAS` write a version when the drawing differs from what its file held — the unsaved-changes
+  flag is the test — so the history is a timeline of the saves you already make. Those are filed
+  under the description `save`. A save of an unchanged drawing adds nothing, and neither does a save
+  after an edit and its undo: the drawing comes back to what the newest version already holds.
 - **`OMNI-SNAP` takes a named milestone** of the drawing as it is right now — unsaved changes
   included, the file on disk untouched — for a state you want to name and come back to.
 
-Versions are gzipped on disk: a DXF is verbose text and shrinks about tenfold, so a long history
-costs what a folder of plain copies would cost only after ten times as many saves. A plain
-`.dxf`/`.dwg` written by an older build is still listed, compared and restored.
+Versions are gzipped on disk: a DXF is verbose text and shrinks several times over (about seven on
+the sample plan), so a long history costs what a folder of plain copies would cost only after that
+many more saves. A plain `.dxf`/`.dwg` written by an older build is still listed, compared and
+restored.
 
 ## The palette
 
@@ -33,7 +34,9 @@ costs what a folder of plain copies would cost only after ten times as many save
 It lists the versions newest first — time, kind (`Saved` or `Milestone`), description, size — marks
 unsaved changes since the last save, and for the selected version offers:
 
-- **Open** — the revision as a drawing of its own (remember to **Save As…** it into a new file).
+- **Open** — the revision as a drawing of its own, in a tab beside the current one. A version is the
+  history's, not a drawing to edit in place: saving onto it is refused, so **Save As…** gives the
+  revision a file name (and a history) of its own.
 - **Compare** — `OMNI-DIFF`: the revision laid under the drawing in red, plus what changed.
 - **Restore** — the revision put back into the drawing as an unsaved change. The drawing's own file
   is untouched, `UNDO` goes back, and the next save writes it and leaves a version of its own.
@@ -148,10 +151,12 @@ attached twice, so calling `OMNI-DIFF` again is safe.
 ## Going back
 
 `OMNI-RESTORE {snapshot}` (the palette's **Restore**) replaces the drawing with that version as one
-undoable change: the drawing's own file is not written, its name, layers and settings stay, `UNDO`
-goes back, and the drawing counts as changed, so the next save records the restored state as a new
-version and the timeline carries on from there. It refuses to run with the Block Editor open, and it
-needs to be told which version — a bare `OMNI-RESTORE` restores nothing rather than guessing.
+undoable change: the drawing's own file is not written and its tab and file name stay, while its
+layers, settings and objects become the version's — a restore is the whole document, not a merge
+into it. `UNDO` goes back, and the drawing counts as changed, so the next save records the restored
+state as a new version and the timeline carries on from there. It refuses to run with the Block
+Editor open, and it needs to be told which version — a bare `OMNI-RESTORE` restores nothing rather
+than guessing.
 
 ## Notes
 

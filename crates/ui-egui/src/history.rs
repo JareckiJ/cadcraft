@@ -28,7 +28,7 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
 
 /// Show the palette. The first time it docks below the Layers palette (where the palettes column
 /// is); after that it comes back where it was.
-fn open_palette(app: &mut CadApp) -> Result<Value, String> {
+pub(crate) fn open_palette(app: &mut CadApp) -> Result<Value, String> {
     let panel = Panel::DrawingHistory;
     let first = !app.ui.docking.layout.contains(&panel) && !app.ui.docking.hidden.iter().any(|(p, _)| *p == panel);
     let r = crate::docking::command(app, false, &json!({ "operation": "open", "panel": panel.id() }))?;
@@ -155,14 +155,14 @@ pub fn section(app: &mut CadApp, ui: &mut egui::Ui) {
         None => {
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
-                ui.label(RichText::new(crate::tl!("Save the drawing first: every save leaves a version behind.")).color(t.text_dim));
+                ui.label(RichText::new(crate::tl!("Save the drawing first: every save with changes leaves a version behind.")).color(t.text_dim));
             });
         }
         Some(dir) => {
             if list.rows.is_empty() {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
-                    ui.label(RichText::new(crate::tl!("No versions yet: every save leaves one behind.")).color(t.text_dim));
+                    ui.label(RichText::new(crate::tl!("No versions yet: every save with changes leaves one behind.")).color(t.text_dim));
                 });
             } else {
                 ui.horizontal(|ui| {
@@ -256,8 +256,13 @@ pub fn section(app: &mut CadApp, ui: &mut egui::Ui) {
             ui.data_mut(|d| d.remove::<Listing>(egui::Id::new("history-listing")));
         }
         Some(Act::Run(id, p)) => {
-            if let Err(e) = app.run(id, p) {
-                app.set_status(e);
+            // Opening a version is an open like any other: the revision becomes the active drawing
+            // as a tab of its own, and its geometry may sit anywhere, so the canvas fits it.
+            let opens = cadcraft_engine::cmd::resolve_alias(id) == "omni-log";
+            match app.run(id, p) {
+                Ok(_) if opens => app.canvas.zoom_pending = true,
+                Ok(_) => {}
+                Err(e) => app.set_status(e),
             }
             ui.data_mut(|d| d.remove::<Listing>(egui::Id::new("history-listing")));
         }

@@ -3,10 +3,11 @@
 //! A *version* is a full copy of the drawing written into `_OMNI_HISTORY` next to it, named
 //! `<date>.<time>_<milliseconds>_<user>_<description>_<file>.<ext>`. Versions arrive two ways:
 //!
-//! - **Every save leaves one behind**, without being asked. `SAVE`/`QSAVE`/`SAVEAS` write one
-//!   when the drawing differs from what its file held (the unsaved-changes flag is the test), so
-//!   a history is a timeline of the saves the user already makes. Those are filed under the
-//!   description `save`. A save of an unchanged drawing adds nothing.
+//! - **A save that changes the drawing leaves one behind**, without being asked.
+//!   `SAVE`/`QSAVE`/`SAVEAS` write one when the drawing differs from what its file held (the
+//!   unsaved-changes flag is the test), so a history is a timeline of the saves the user already
+//!   makes. Those are filed under the description `save`. A save of an unchanged drawing adds
+//!   nothing.
 //! - **`OMNI-SNAP` takes a named milestone** of the drawing as it is right now — unsaved changes
 //!   included, the file on disk untouched — for a state the user wants to name and come back to.
 //!
@@ -14,11 +15,17 @@
 //! an overlay reference recoloured to a single colour (red by default) and can also *report* what
 //! changed between the two as numbers instead of pixels, `OMNI-TOGGLE` hides and shows that
 //! overlay, `OMNI-CLEAR` detaches it again, `OMNI-RESTORE` puts a version back into the drawing
-//! (undoably — the file on disk is never touched), and `OMNI-NOTE` drops a marker and a comment on
-//! the drawing. `OMNI-VERSIONS` is the listing the Drawing History palette draws.
+//! (undoably — the file on disk is never touched, and the document becomes the version's whole,
+//! layers and settings included), and `OMNI-NOTE` drops a marker and a comment on the drawing.
+//! `OMNI-VERSIONS` is the listing the Drawing History palette draws.
 //!
-//! Versions are gzipped on disk (`…_plan.dxf.gz`): a DXF is verbose text and shrinks about
-//! tenfold, so a long history does not cost what a folder of plain copies would. A plain
+//! A version is history, not a drawing of its own: opening one reads it, and a save onto it is
+//! refused (see [`is_version_path`]) — `SAVEAS` is how an opened revision gets a name and a history
+//! of its own.
+//!
+//! Versions are gzipped on disk (`…_plan.dxf.gz`): a DXF is verbose text and shrinks several times
+//! over (about seven on the sample plan), so a long history does not cost what a folder of plain
+//! copies would. A plain
 //! `.dxf`/`.dwg` left by an older build is still listed, read and compared; an older version is
 //! unpacked into `_OMNI_HISTORY/.cache` only when it has to be a file on disk (the overlay
 //! reference reads it back through the io hooks).
@@ -153,6 +160,13 @@ fn history_dir(folder: &Path) -> PathBuf {
     folder.join(HISTORY_DIR)
 }
 
+/// Whether a path is a version inside a history folder (`_OMNI_HISTORY`, or its `.cache`). History
+/// is the record of what a drawing's saves held, so nothing may be saved onto one: an opened
+/// revision is a file to read, and `SAVEAS` is how it becomes a drawing with a name of its own.
+pub(crate) fn is_version_path(path: &str) -> bool {
+    Path::new(path).components().any(|c| matches!(c, std::path::Component::Normal(n) if n.to_string_lossy().eq_ignore_ascii_case(HISTORY_DIR)))
+}
+
 /// The folder a file is in (`.` when it names no folder), so a bare file name works everywhere.
 fn folder_of(p: &Path) -> PathBuf {
     match p.parent() {
@@ -191,6 +205,14 @@ fn user() -> String {
 #[cfg(target_arch = "wasm32")]
 fn user() -> String {
     "web".to_string()
+}
+
+/// The user part of a version's name. `_` separates the name's fields, so it can never appear
+/// inside one: a name from an `_`-carrying account (`john_doe`) would otherwise read back with the
+/// user `john` and the description `doe`, and every save of that account would list as a milestone.
+fn user_part_of(me: &str) -> String {
+    let s = slug(me, "-");
+    if s.is_empty() { "unknown".to_string() } else { s }
 }
 
 /// The drawing a version file belongs to. A version lives in `<folder>/_OMNI_HISTORY` (or in its
@@ -409,17 +431,18 @@ fn is_snapshot(file: &str) -> bool {
 
 /// The snapshots in `dir`, newest first — the name starts with a zero-padded UTC stamp, so a plain
 /// name sort is a chronological one. Returns whether the folder holds more than [`MAX_SNAPSHOTS`].
+///
+/// Every version in the folder is collected before the sort: `read_dir` hands its entries over in
+/// no defined order, so capping the loop itself would keep an arbitrary [`MAX_SNAPSHOTS`] of them
+/// and the "newest first" list, the `1` that OMNI-RESTORE and OMNI-DIFF mean by it, and the
+/// duplicate check in [`version_of_save`] would all point at the wrong end of the timeline. The
+/// names are cheap to hold — nothing is read until a version is asked for.
 fn snapshots(dir: &Path) -> (Vec<Snap>, bool) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut out: Vec<Snap> = Vec::new();
-        let mut capped = false;
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
-                if out.len() >= MAX_SNAPSHOTS {
-                    capped = true;
-                    break;
-                }
                 let file = e.file_name().to_string_lossy().into_owned();
                 if !is_snapshot(&file) {
                     continue;
@@ -429,6 +452,8 @@ fn snapshots(dir: &Path) -> (Vec<Snap>, bool) {
             }
         }
         out.sort_by(|a, b| b.file.cmp(&a.file));
+        let capped = out.len() > MAX_SNAPSHOTS;
+        out.truncate(MAX_SNAPSHOTS);
         (out, capped)
     }
     #[cfg(target_arch = "wasm32")]
@@ -530,10 +555,10 @@ fn run_snap(s: &mut Session, p: &Value) -> Result<Value> {
         if s.is_empty() { default.to_string() } else { s }
     };
     let description = word(str_param(p, "description"), "snapshot");
-    let me = user();
+    let me = user_part_of(&user());
     let drawing = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // The stamp's milliseconds keep two snapshots taken in the same second apart.
-    let name = format!("{stamp}_{ms:03}_{}_{}_{}", slug(&me, "-_"), description, drawing);
+    let name = format!("{stamp}_{ms:03}_{me}_{description}_{drawing}");
     let name = format!("{name}.{COMPRESSED_EXT}");
     let target = dir.join(&name);
     let target = target.to_string_lossy().into_owned();
@@ -610,7 +635,7 @@ fn version_of_save(s: &mut Session, file: &Path, bytes: &[u8]) -> std::result::R
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let (stamp, secs, ms) = now();
     let drawing = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let name = format!("{stamp}_{ms:03}_{}_{}_{}.{COMPRESSED_EXT}", slug(&user(), "-_"), SAVE_DESCRIPTION, drawing);
+    let name = format!("{stamp}_{ms:03}_{}_{}_{}.{COMPRESSED_EXT}", user_part_of(&user()), SAVE_DESCRIPTION, drawing);
     let target = dir.join(&name);
     store(&target.to_string_lossy(), &packed).map_err(|e| e.to_string())?;
     s.echo(format!("[OMNI] Version saved: {name} ({} → {}).", size(bytes.len() as u64), size(packed.len() as u64)));
@@ -1282,6 +1307,56 @@ mod tests {
         assert_eq!(overlay_path(host, &other), other.to_string_lossy());
         let theirs = PathBuf::from("other").join(HISTORY_DIR).join("plan.dxf");
         assert_eq!(overlay_path(host, &theirs), theirs.to_string_lossy());
+    }
+
+    #[test]
+    fn a_folder_past_the_limit_still_starts_with_the_newest_version() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-omni-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // One version more than a listing holds. The names sort the way versions do (a stamp
+        // first), and the loop writes them oldest first, so a cap applied while reading would keep
+        // the oldest [`MAX_SNAPSHOTS`] and lose the newest.
+        for i in 0..=MAX_SNAPSHOTS {
+            let name = format!("{i:08}_000_u_save_plan.dxf.gz");
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let (list, capped) = snapshots(&dir);
+        assert!(capped, "the folder holds more than the listing does");
+        assert_eq!(list.len(), MAX_SNAPSHOTS);
+        let newest = format!("{MAX_SNAPSHOTS:08}_000_u_save_plan.dxf.gz");
+        assert_eq!(list.first().map(|s| s.file.as_str()), Some(newest.as_str()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_account_with_an_underscore_is_still_a_save() {
+        // `_` separates a version's fields, so an account named `john_doe` must lose it here:
+        // otherwise the name reads back as user `john`, description `doe` — a milestone, not a save
+        // — and the drawing it belongs to is never found again.
+        assert_eq!(user_part_of("john_doe"), "john-doe");
+        assert_eq!(user_part_of("john doe"), "john-doe");
+        assert_eq!(user_part_of("___"), "unknown", "a part that is only separators still names someone");
+        let name = format!("20261014.083512_482_{}_save_plan.dxf.gz", user_part_of("john_doe"));
+        let s = parse(&name, PathBuf::from("h").join(&name), 9);
+        assert_eq!(s.user, "john-doe");
+        assert_eq!(s.description, SAVE_DESCRIPTION);
+        assert_eq!(s.kind(), "save");
+        assert_eq!(s.drawing, "plan.dxf");
+    }
+
+    #[test]
+    fn history_paths_are_recognised_in_any_case_and_folder() {
+        for p in [
+            "jobs/site/_OMNI_HISTORY/20261014.083512_482_u_save_plan.dxf.gz",
+            "C:\\jobs\\_omni_history\\a.dxf",
+            "jobs/site/_OMNI_HISTORY/.cache/a.dxf",
+        ] {
+            assert!(is_version_path(p), "{p}");
+        }
+        for p in ["jobs/site/plan.dxf", "jobs/_OMNI_HISTORY_FULL/plan.dxf", "", "plan.dxf"] {
+            assert!(!is_version_path(p), "{p}");
+        }
     }
 
     #[test]

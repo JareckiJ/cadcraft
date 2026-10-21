@@ -102,13 +102,14 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if matches!(id, "ui.dock" | "ui.dock.reset") {
         return Some(crate::docking::command(app, id == "ui.dock.reset", params));
     }
-    if matches!(id, "ui.panel.properties" | "ui.panel.layers" | "ui.panel.history") {
-        let panel = match id {
-            "ui.panel.properties" => "properties",
-            "ui.panel.history" => "drawingHistory",
-            _ => "layers",
-        };
+    if matches!(id, "ui.panel.properties" | "ui.panel.layers") {
+        let panel = if id == "ui.panel.properties" { "properties" } else { "layers" };
         return Some(crate::docking::command(app, false, &json!({"operation":"open", "panel":panel})));
+    }
+    // The Window menu's Drawing History opens the palette the way OMNI-LOG typed does, so both
+    // entry points dock it in the same place.
+    if id == "ui.panel.history" {
+        return Some(crate::history::open_palette(app));
     }
     // QUICKCALC typed or from a menu opens the palette; with parameters it is CAL.
     if id == "ui.panel.quickcalc" || (matches!(id, "quickcalc" | "qc") && params.is_null()) {

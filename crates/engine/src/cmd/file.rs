@@ -380,9 +380,19 @@ pub(crate) fn save_to(s: &mut Session, path: &str) -> Result<usize> {
 
 /// Save to `path` with `opts`. A drawing file then keeps the version and binary choice: the
 /// version goes into the drawing's `$ACADVER`, so later saves (QSAVE) write it again.
+///
+/// A version opened from a history is read-only in this sense: saving it would overwrite the copy
+/// the timeline is made of (and, for a compressed one, the cache it was unpacked into), so the save
+/// is refused and `SAVEAS` is what gives the revision a file name of its own.
 fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usize> {
     if s.doc()?.refedit.is_some() {
         return Err(bad(cmd, "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
+    }
+    if is_drawing_file(path) && omni::is_version_path(path) {
+        return Err(bad(
+            cmd,
+            "This drawing is a version in a drawing history: saving it would overwrite the record. Use SAVEAS to give this revision a file name of its own.",
+        ));
     }
     let bytes = write_bytes(s, cmd, path, opts)?;
     let n = commit_save(s, path, &bytes, store)?;

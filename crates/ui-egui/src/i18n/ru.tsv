@@ -1018,8 +1018,8 @@
 	Milestone	Веха
 	Saved	Сохранено
 	Compare	Сравнить
-	Save the drawing first: every save leaves a version behind.	Сначала сохраните чертёж: каждое сохранение оставляет версию.
-	No versions yet: every save leaves one behind.	Версий пока нет: каждое сохранение оставляет одну.
+	Save the drawing first: every save with changes leaves a version behind.	Сначала сохраните чертёж: каждое сохранение с изменениями оставляет версию.
+	No versions yet: every save with changes leaves one behind.	Версий пока нет: каждое сохранение с изменениями оставляет одну.
 	{n} versions (newest first)	{n} версий (сначала новые)
 	The folder holds more versions than the palette lists.	В папке больше версий, чем показывает панель.
 	Stored gzipped on disk	Хранится на диске сжатым (gzip)
