@@ -39,7 +39,7 @@ fn catalog_is_valid_and_preserves_placeholders_and_ellipses() {
 /// to English for what they don't cover yet; their gaps are reported, not enforced, so adding a
 /// command doesn't require a row in every language.
 const REQUIRED: &[&str] = &["uk"];
-const REPORTED: &[&str] = &["pt-BR", "de", "es", "cs", "ru", "fr", "zh", "it", "ko", "sv", "ar", "hu", "tr", "el"];
+const REPORTED: &[&str] = &["pt-BR", "de", "es", "cs", "ru", "fr", "zh", "it", "ko", "ja", "sv", "ar", "hu", "tr", "el"];
 
 fn check(language: &str, what: &str, missing: Vec<String>) {
     if REQUIRED.contains(&language) {
@@ -810,6 +810,191 @@ fn korean_ui_fonts_cover_catalog_and_language_picker_in_both_families() {
         missing
     });
     assert!(missing.is_empty(), "missing Korean UI glyphs: {}", missing.join(", "));
+}
+
+#[test]
+fn japanese_representative_translations_remain_available() {
+    let ja = catalog("ja").unwrap();
+    // Fixed regression examples; new source strings remain reported, not required for Japanese.
+    assert!(REPORTED.contains(&"ja"));
+    for (context, source, expected) in [
+        ("", "File", "ファイル"),
+        ("", "Edit", "編集"),
+        ("", "View", "表示"),
+        ("", "Draw", "作成"),
+        ("", "Dimension", "寸法"),
+        ("", "Modify", "変更"),
+        ("", "Layer", "レイヤ"),
+        ("", "Properties", "プロパティ"),
+        ("", "Interface Language", "インターフェース言語"),
+        ("", "Options...", "オプション..."),
+        ("", "User Preferences", "ユーザー設定"),
+        ("", "OK", "OK"),
+        ("", "WCS", "WCS"),
+        ("", "Zoom Extents", "範囲ズーム"),
+        ("@plural", "{n} contributor", "{n} 人のコントリビューター"),
+        ("@plural", "{n} commit", "{n} 件のコミット"),
+    ] {
+        assert_eq!(ja.get(&(context, source)).copied(), Some(expected), "{context}: {source}");
+    }
+    assert_eq!(tr("ja", "future untranslated label"), "future untranslated label");
+}
+
+#[test]
+fn japanese_locale_saved_preference_and_single_count_form() {
+    for tag in ["ja", "ja-JP", "ja_JP.UTF-8", "JA-jp", " ja-JP ", "ja_JP@euro"] {
+        assert_eq!(locale_language(tag), Some("ja"), "{tag}");
+    }
+    // `jpn` is the three-letter code and `japanese` the endonym; neither picks Japanese.
+    for tag in ["jpn", "japanese", "klingon"] {
+        assert_eq!(locale_language(tag), None, "{tag}");
+    }
+    assert_eq!(Preference::parse("ja"), Some(Preference::Japanese));
+    assert_eq!(Preference::Japanese.resolve(&["en-US".into()]), "ja");
+    assert_eq!(Preference::Auto.resolve(&["pl-PL".into(), "ja-JP".into(), "en-US".into()]), "ja");
+    let mut app = CadApp::new(Session::new(), Services::default());
+    app.system_languages = vec!["ja-JP".into()];
+    app.run("ui.language", json!({"lang": "ja"})).unwrap();
+    let mut restored = CadApp::new(Session::new(), Services::default());
+    restored.system_languages = vec!["en-US".into()];
+    restored.load_prefs(&app.prefs_json());
+    assert_eq!(restored.ui.interface_language, Preference::Japanese);
+    assert_eq!(restored.language(), app.language());
+    with_language("ja", || {
+        for n in [0, 1, 2, 5, 11, 21, 101, u64::MAX] {
+            assert_eq!(plural_ko(n), 0);
+            assert_eq!(count(n, "{n} contributor", "{n} contributors"), format!("{n} 人のコントリビューター"));
+        }
+        assert_eq!(format("Current: {color}", &[("color", "{n} Open".into())]), "現在: {n} Open");
+    });
+}
+
+/// Japanese shows only with a font for it: an installed Japanese or CJK font, or one this build
+/// embedded from craft-fonts. Without either the interface stays English instead of drawing boxes.
+#[test]
+fn japanese_needs_a_cjk_font() {
+    assert_eq!(locale_language("ja-JP"), Some("ja"));
+    let mut app = CadApp::new(Session::new(), Services::default());
+    let r = app.run("ui.language", json!({"lang": "ja"})).unwrap();
+    assert_eq!(r["interfaceLanguage"], "ja");
+    let shown = crate::theme::can_show("ja");
+    assert_eq!(app.language(), if shown { "ja" } else { "en" });
+    assert_eq!(r["shown"], app.language());
+    assert!(crate::theme::can_show("uk") && crate::theme::can_show("en"));
+    if !shown {
+        assert!(app.status.as_ref().is_some_and(|(s, _)| s.contains("No Japanese font")));
+    }
+}
+
+#[test]
+fn japanese_live_switch_translates_the_shell_without_mutating_drawing_or_automation() {
+    let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.in_window_menu = true;
+    app.session.state_mut().unwrap().title = "Open".into();
+    let ctx = egui::Context::default();
+    app.logic(&ctx);
+    assert!(render(&mut app, &ctx).contains("Properties"));
+    app.start("line");
+    let prompt = crate::control::cmdline_state(&app);
+    let commands = crate::control::all_commands(&app);
+    let result = app.run("ui.language", json!({"lang": "ja"})).unwrap();
+    let supported = crate::theme::can_show("ja");
+    assert_eq!(result["shown"], if supported { "ja" } else { "en" });
+    assert_eq!(app.ui.interface_language, Preference::Japanese);
+    app.logic(&ctx);
+    assert_eq!(app.fonts_language, Some(app.language()));
+    let text = render(&mut app, &ctx);
+    if supported {
+        for label in ["プロパティ", "ファイル", "レイヤ"] {
+            assert!(text.contains(label), "missing {label}: {text}");
+        }
+    } else {
+        assert!(text.contains("Properties"));
+        assert!(app.status.as_ref().is_some_and(|(s, _)| s.contains("No Japanese font")));
+        assert_eq!(Preference::Japanese.name(), "Japanese");
+    }
+    assert_eq!(app.session.state().unwrap().title, "Open");
+    assert_eq!(crate::control::cmdline_state(&app), prompt);
+    assert_eq!(crate::control::all_commands(&app), commands);
+    assert_eq!(t("Properties"), "Properties");
+    assert!(app.run("ui.language", json!({"lang": "bad"})).is_err());
+    app.run("ui.resetpalettes", json!({})).unwrap();
+    assert_eq!(app.ui.interface_language, Preference::Japanese);
+    // The general ui.set route uses the same saved preference and font installation.
+    let (request, _) = crate::ControlRequest::new("ui.set", json!({"interfaceLanguage": "en"}));
+    let _ = crate::control::handle(&mut app, &ctx, &request);
+    app.logic(&ctx);
+    assert_eq!(app.fonts_language, Some("en"));
+    assert_eq!(app.ui.interface_language, Preference::English);
+    assert!(render(&mut app, &ctx).contains("Properties"));
+    assert_eq!(crate::menus::tree(&app).first().unwrap().0, "File");
+}
+
+#[test]
+fn japanese_dialogs_keep_source_ids() {
+    if !crate::theme::can_show("ja") {
+        return; // The fallback path is covered above; do not claim glyph rendering here.
+    }
+    for (dialog, source) in [
+        ("dsettings", "Drafting Settings"),
+        ("about", "About CADCraft"),
+        ("commands", "Command Reference"),
+        ("blocks", "Blocks"),
+        ("layers", "Layer Properties Manager"),
+        ("qselect", "Quick Select"),
+        ("parameters", "Parameters Manager"),
+        ("language", "Interface Language"),
+        ("options:preferences", "User Preferences"),
+    ] {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        app.ui.interface_language = Preference::Japanese;
+        app.ui.dialog = Some(dialog.into());
+        let ctx = egui::Context::default();
+        app.logic(&ctx);
+        let text = render(&mut app, &ctx);
+        assert!(text.contains(tr("ja", source)), "{dialog}: {text}");
+        if dialog == "language" {
+            assert!(text.contains("日本語"), "{dialog}: {text}");
+        }
+        assert_eq!(app.ui.dialog.as_deref(), Some(dialog));
+    }
+}
+
+#[test]
+fn japanese_ui_fonts_cover_catalog_and_language_picker_in_both_families() {
+    if !crate::theme::can_show("ja") {
+        return;
+    }
+    // Japanese script and punctuation ranges only: the catalog's few Latin symbols (⌘, ƒ) are not
+    // the Japanese font's job.
+    let letters: BTreeSet<_> = include_str!("ja.tsv")
+        .lines()
+        .filter_map(|line| line.split('\t').nth(2))
+        .flat_map(str::chars)
+        .chain("日本語".chars())
+        .filter(|c| matches!(*c, '\u{3000}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}'))
+        .collect();
+    assert!(letters.len() > 50, "the Japanese catalog should use plenty of kana and kanji: {}", letters.len());
+    let ctx = egui::Context::default();
+    let picker = if crate::theme::shows_japanese("en") { "日本語" } else { "Japanese" };
+    assert_eq!(with_language("en", || Preference::Japanese.name()), picker);
+    assert_eq!(with_language("ja", || Preference::Japanese.name()), "日本語");
+    crate::theme::install_fonts(&ctx, "ja");
+    let mut output = ctx.run_ui(Default::default(), |_| {});
+    output.textures_delta.clear();
+    let missing = ctx.fonts_mut(|view| {
+        let mut missing = Vec::new();
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            let mut font = view.fonts.font(&family);
+            for c in &letters {
+                if !font.characters().contains_key(c) {
+                    missing.push(format!("{family:?}: {c} (U+{:04X})", u32::from(*c)));
+                }
+            }
+        }
+        missing
+    });
+    assert!(missing.is_empty(), "missing Japanese UI glyphs: {}", missing.join(", "));
 }
 
 #[test]

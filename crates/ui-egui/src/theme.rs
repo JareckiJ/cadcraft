@@ -399,6 +399,9 @@ fn embedded_ui_faces<'a>(faces: &[&'a cadcraft_fonts::CraftFont], language: &str
     if language.starts_with("zh") {
         out.sort_by_key(|f| !f.scripts.contains(&"Hans"));
     }
+    if language == "ja" {
+        out.sort_by_key(|f| !f.scripts.contains(&"Jpan"));
+    }
     if language == "ar" {
         out.extend(faces.iter().copied().filter(|f| f.style == "Regular" && f.scripts.contains(&"Arab")));
     }
@@ -576,6 +579,60 @@ pub fn cjk_covers_hangul() -> bool {
     })
 }
 
+/// The Japanese letters the Japanese interface shows: its catalog and its own name.
+fn japanese_letters() -> &'static std::collections::BTreeSet<char> {
+    static LETTERS: std::sync::OnceLock<std::collections::BTreeSet<char>> = std::sync::OnceLock::new();
+    LETTERS.get_or_init(|| {
+        include_str!("i18n/ja.tsv")
+            .lines()
+            .filter_map(|line| line.split('\t').nth(2))
+            .flat_map(str::chars)
+            .chain("日本語".chars())
+            .filter(|c| !c.is_ascii())
+            .collect()
+    })
+}
+
+/// Whether `face` has every Japanese letter the Japanese interface shows (rejects Latin-only
+/// faces and faces with kanji but no kana).
+fn covers_japanese(face: &cadcraft_fonts::ttf::Face) -> bool {
+    japanese_letters().iter().all(|c| face.has_glyph(*c))
+}
+
+/// The face of a font file that egui uses (the first one) when it covers the Japanese interface.
+fn japanese_face(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
+    cadcraft_fonts::ttf::faces(&bytes).into_iter().find(covers_japanese)
+}
+
+/// Whether the installed Japanese face [`japanese_font`] covers the interface. Checked once.
+pub fn japanese_font_covers() -> bool {
+    static COVERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *COVERS.get_or_init(|| {
+        japanese_font().is_some_and(|path| read_capped(path, MAX_UI_FONT_BYTES).and_then(|bytes| japanese_face(std::sync::Arc::new(bytes))).is_some())
+    })
+}
+
+/// Whether the CJK fonts [`install_fonts`] loads in every language already show Japanese
+/// (Noto Sans CJK's first face is Japanese; PingFang and Microsoft YaHei carry kana too). Only
+/// asked about Japanese, so other interfaces never read the font twice. Checked once.
+pub fn cjk_covers_japanese() -> bool {
+    static COVERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *COVERS.get_or_init(|| {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if cjk_font()
+                .is_some_and(|path| read_capped(path, MAX_UI_FONT_BYTES).and_then(|bytes| japanese_face(std::sync::Arc::new(bytes))).is_some())
+            {
+                return true;
+            }
+        }
+        cadcraft_fonts::CRAFT_FONTS
+            .iter()
+            .filter(|f| f.style == "Regular" && f.scripts.iter().any(|s| matches!(*s, "Jpan" | "Hans" | "Hant")))
+            .any(|f| cadcraft_fonts::ttf::faces(&std::sync::Arc::new(f.bytes.to_vec())).first().is_some_and(covers_japanese))
+    })
+}
+
 /// A Hangul font for the Korean interface when the CJK fonts don't cover it: a Korean face from
 /// the optional craft-fonts input, else one installed where the OS or common packages put it.
 /// Nothing is bundled or downloaded; without one the interface stays English. Only looked for
@@ -634,12 +691,21 @@ pub fn shows_hangul(language: &str) -> bool {
     cjk_covers_hangul() || (language == "ko" && korean_font().is_some())
 }
 
+/// Whether the interface in `language` shows Japanese (the Japanese name in the language
+/// picker): in every language but Chinese when the installed Japanese or CJK fonts cover it, in a
+/// Chinese interface only while the CJK font does (it skips the Japanese face).
+pub fn shows_japanese(language: &str) -> bool {
+    cjk_covers_japanese() || (!language.starts_with("zh") && japanese_font_covers())
+}
+
 /// Whether the interface can show `language` without missing-glyph boxes: Chinese needs a font
-/// with its glyphs (installed, or the CJK face this build embedded from craft-fonts), Korean a
-/// font with Hangul, العربية an installed Arabic font or the embedded Arabic face.
+/// with its glyphs (installed, or the CJK face this build embedded from craft-fonts), Japanese and
+/// Korean a font with their kana/kanji and Hangul, العربية an installed Arabic font or the
+/// embedded Arabic face.
 pub fn can_show(language: &str) -> bool {
     match language {
         "ko" => shows_hangul("ko"),
+        "ja" => shows_japanese("ja"),
         "ar" => arabic_font().is_some() || embedded_script("Arab"),
         l if l.starts_with("zh") => cjk_font().is_some() || embedded_script("Hans") || embedded_script("Hant"),
         _ => true,
