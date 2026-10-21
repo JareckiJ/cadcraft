@@ -966,7 +966,7 @@
 	Viewport {id}	Видовой экран {id}
 	Viewports	Видовые экраны
 	W	З
-	WCS ⌄	МСК ⌄
+	WCS	МСК
 	White	Белый
 	Width factor	Коэффициент ширины
 	Window	Окно
@@ -1060,3 +1060,4 @@
 	Copy Table Cells	Копировать ячейки таблицы
 	Paste Table Cells	Вставить ячейки таблицы
 	Clear Table Cells	Очистить ячейки таблицы
+	Analyze Shapes	Анализ фигур
