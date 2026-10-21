@@ -247,19 +247,21 @@ impl Field {
         }
     }
 
-    /// The value to keep for `v`: numbers formatted by the field's format.
+    /// The value to keep for `v`: numbers formatted by the field's format, the text cut at
+    /// [`MAX_FIELD_TEXT`] (a case change can lengthen it, `İ` lower-casing to two characters, and
+    /// a number format can add any prefix and suffix).
     fn make_value(&self, d: &Drawing, v: Val) -> FieldValue {
+        let capped = |s: String| {
+            let mut out = String::new();
+            push_capped(&mut out, &s);
+            out
+        };
         match v {
-            Val::Text(text) => {
-                // A case change can lengthen the text (`İ` lower-cases to two characters).
-                let mut capped = String::new();
-                push_capped(&mut capped, &format_text(&text, self.format().unwrap_or("")));
-                FieldValue::Text { text: capped }
-            }
+            Val::Text(text) => FieldValue::Text { text: capped(format_text(&text, self.format().unwrap_or(""))) },
             Val::Num(n) => {
                 let n = if n == 0.0 { 0.0 } else { n };
                 match self.format() {
-                    Some(f) => FieldValue::Double { value: n, text: format_number(d, n, f) },
+                    Some(f) => FieldValue::Double { value: n, text: capped(format_number(d, n, f)) },
                     // An expression with no format whose result is whole is a whole number.
                     None if n.fract() == 0.0 && n.abs() < 9.0e15 => FieldValue::Long { value: n as i64, text: format!("{}", n as i64) },
                     None => FieldValue::Double { value: n, text: format_number(d, n, "") },
@@ -943,5 +945,10 @@ mod tests {
         let lower = field("AcObjProp", "\\AcObjProp Object(%<\\_ObjIdx 0>%).Name \\f \"%tc2\"", Vec::new());
         let v = lower.make_value(&d, Val::Text("İ".repeat(MAX_FIELD_TEXT / 2)));
         assert!(v.text().len() <= MAX_FIELD_TEXT && v.text().starts_with('i'), "{}", v.text().len());
+        // So is a number with a long prefix and suffix.
+        let fix = "x".repeat(MAX_FIELD_TEXT);
+        let num = field("AcExpr", &format!("\\AcExpr (1) \\f \"%ps[{fix},{fix}]\""), Vec::new());
+        let v = num.make_value(&d, Val::Num(1.0));
+        assert!(v.text().len() <= MAX_FIELD_TEXT && v.text().starts_with('x'), "{}", v.text().len());
     }
 }
