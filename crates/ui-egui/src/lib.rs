@@ -845,7 +845,8 @@ impl CadApp {
             chrome::file_tabs(self, ui);
         }
         let has_doc = !self.session.docs.is_empty() && !self.ui.start_tab;
-        if has_doc && !self.ui.show_toolsets {
+        // With the Ribbon the tools are in it: no collapsed Tool Sets strip.
+        if has_doc && !self.ui.show_toolsets && !self.ui.show_ribbon {
             palettes::toolsets_strip(self, ui);
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {

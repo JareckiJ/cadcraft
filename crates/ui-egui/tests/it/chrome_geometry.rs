@@ -188,3 +188,15 @@ fn the_in_window_menu_bar_sits_above_the_ribbon() {
     // The menu bar's File, then the Ribbon's Home tab under it.
     assert!(top("File") < top("Home"), "File at {}, Home at {}", top("File"), top("Home"));
 }
+
+#[test]
+fn the_windows_layout_has_no_collapsed_tool_sets_strip() {
+    // The Ribbon holds the tools: no 22 px Tool Sets strip beside the Properties palette.
+    let h = harness(1200.0, 760.0, 1.0, false, true);
+    assert!(h.query_by_label("Expand Tool Sets").is_none());
+    // The Mac layout with Tool Sets hidden keeps its strip to bring them back.
+    let mut h = harness(1200.0, 760.0, 1.0, false, false);
+    h.state_mut().ui.show_toolsets = false;
+    h.run_steps(3);
+    assert!(h.query_by_label("Expand Tool Sets").is_some());
+}
