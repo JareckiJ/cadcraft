@@ -28,25 +28,14 @@ pub fn leaves(catalog: &str) -> Vec<String> {
 /// Where the generated checklist goes.
 pub const OUT: &str = "docs/parity-checklist.md";
 
-/// Today's UTC date as `YYYY-MM-DD` (from the system clock; no date crate needed).
+/// Today's UTC date as `YYYY-MM-DD` (from the system clock).
 fn today() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let (y, m, d) = civil_from_days((secs / 86_400) as i64);
-    format!("{y:04}-{m:02}-{d:02}")
+    date(std::time::SystemTime::now())
 }
 
-/// Days since 1970-01-01 → (year, month, day) in the proleptic Gregorian calendar.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    (y, m, d)
+/// `t` as a UTC `YYYY-MM-DD`.
+fn date(t: std::time::SystemTime) -> String {
+    chrono::DateTime::<chrono::Utc>::from(t).format("%Y-%m-%d").to_string()
 }
 
 pub fn run(root: &Path) -> Result<(), String> {
@@ -116,9 +105,10 @@ mod tests {
 
     #[test]
     fn civil_dates() {
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(11_016), (2000, 2, 29));
-        assert_eq!(civil_from_days(20_736), (2026, 10, 10));
+        let day = |d: u64| date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(d * 86_400));
+        assert_eq!(day(0), "1970-01-01");
+        assert_eq!(day(11_016), "2000-02-29");
+        assert_eq!(day(20_736), "2026-10-10");
     }
 
     #[test]
