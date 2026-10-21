@@ -107,6 +107,9 @@ const MAX_FIRST_WORD_FILES: usize = 24;
 const MAX_LOADED_BYTES: usize = 256 << 20;
 const MAX_CACHED_NAMES: usize = 4096;
 const MAX_CACHED_CHARS: usize = 50_000;
+/// Cumulative outline points one shaped line may retain, so an oversized expanded glyph repeated
+/// across a string cannot grow the result without bound (CWE-400).
+const MAX_SHAPED_POINTS: usize = 8_000_000;
 
 /// Fonts known to cover many scripts (CJK first), tried first for missing glyphs. Matched as
 /// substrings of the normalised file stem.
@@ -814,6 +817,10 @@ pub fn shape(face: &Face, s: &str, height: f64, width_factor: f64, oblique: f64)
     let mut out = Shaped::default();
     let mut spans = Vec::new();
     let mut x = 0.0;
+    // Cumulative retained-point budget: a compact CFF/OTF font can expand one glyph into a huge
+    // outline, and a short repeated string copies it per occurrence, so cap the total geometry
+    // kept in the Shaped result (CWE-400). Advances still accumulate so the width stays sensible.
+    let mut points_left: usize = MAX_SHAPED_POINTS;
     for (c, under, over) in crate::decode_controls(s) {
         if crate::bidi::is_format_control(c) {
             continue;
@@ -821,7 +828,9 @@ pub fn shape(face: &Face, s: &str, height: f64, width_factor: f64, oblique: f64)
         let g = glyph_or_fallback(face, c);
         if !c.is_whitespace() {
             let contours = place_glyph(&g, x, h, wf, shear);
-            if !contours.is_empty() {
+            let pts: usize = contours.iter().map(Vec::len).sum();
+            if !contours.is_empty() && pts <= points_left {
+                points_left -= pts;
                 out.push_glyph(contours, text_glyph(&g, c, x, h, wf, shear));
             }
         }
