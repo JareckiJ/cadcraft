@@ -40,7 +40,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(AreaM::default()))),
         CommandSpec::new("time", "Time", run_time).menu(&["Tools", "Inquiry", "Time"]).noundo(),
         CommandSpec::new("status", "Status", run_status).menu(&["Tools", "Inquiry", "Status"]).noundo(),
-        CommandSpec::new("drawing.inspect", "Inspect Drawing", run_inspect).params("{entities?: bool (default true), limit?: n (default 200)} → summary with insunits {code, name} and entities [{handle, type, layer, color, transparency, geometry (WCS, angles in radians), bbox?, extrusion? (only when not 0,0,1)}]").noundo(),
+        CommandSpec::new("drawing.inspect", "Inspect Drawing", run_inspect).params("{entities?: bool (default true), limit?: n (default 200)} → summary with insunits {code, name} and entities [{handle, type, layer, color, transparency, geometry (WCS, angles in radians; 2D points of a tilted extrusion can stay in OCS), bbox?, extrusion? (only when not 0,0,1)}]").noundo(),
         CommandSpec::new("entities", "Query Entities", run_entities)
             .params("{type?, layer?, selected?: bool (default false; true = current selection in active space), window?: [[x,y],[x,y]], crossing?: bool (default true; false = entirely inside), limit?, offset?} → {count (all matches), returned, offset, entities} (entities as drawing.inspect)")
             .noundo(),
@@ -370,11 +370,12 @@ fn run_status(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 /// One entity for agents (`drawing.inspect`, `entities`). `geometry` is in world coordinates
-/// (WCS); the DXF reader maps mirrored 2D objects (extrusion 0,0,-1) out of their OCS. `bbox` is
-/// the WCS extents as drawn (block references included), absent when the object draws nothing.
-/// `extrusion` is only there when it is not +Z: (0,0,-1) says the object was mirrored in its
-/// source file (its geometry is already WCS); a tilted direction says it lies in another plane,
-/// whose 2D points may still be in that plane's object coordinates (OCS).
+/// (WCS) when `extrusion` is absent or (0,0,-1). The DXF reader maps mirrored 2D objects
+/// (extrusion 0,0,-1) out of their OCS. A 2D object with a tilted `extrusion` lies in another
+/// plane. Its 2D points can stay in the object coordinates (OCS) of that plane, and a client must
+/// apply the extrusion transform before it uses them as WCS. `bbox` is the WCS extents as drawn
+/// (block references included), absent when the object draws nothing. `extrusion` is only there
+/// when it is not +Z.
 fn entity_summary(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) -> Value {
     let mut v = json!({ "handle": e.handle.hex(), "type": e.kind.type_name(), "layer": e.common.layer, "color": e.common.color.name(), "transparency": super::props::transparency_value(e.common.transparency), "geometry": e.kind });
     let Some(o) = v.as_object_mut() else { return v };
