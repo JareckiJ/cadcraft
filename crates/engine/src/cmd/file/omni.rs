@@ -39,6 +39,7 @@
 //! than hiding: the host builds keep every warning.
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -46,8 +47,11 @@ use std::sync::Arc;
 use cadcraft_color::Color;
 use cadcraft_doc::{Common, Drawing, EntityKind, XrefStatus};
 use cadcraft_geom::Vec2;
+#[cfg(not(target_arch = "wasm32"))]
 use flate2::Compression;
+#[cfg(not(target_arch = "wasm32"))]
 use flate2::read::GzDecoder;
+#[cfg(not(target_arch = "wasm32"))]
 use flate2::write::GzEncoder;
 use serde_json::{Value, json};
 
@@ -651,6 +655,7 @@ fn run_versions(s: &mut Session, p: &Value) -> Result<Value> {
 /// OMNI-RESTORE: put a version back into the drawing. The drawing's own file is not touched, the
 /// step undoes like any other change, and the next save writes it and leaves a version of its own,
 /// so looking at an old revision costs nothing: the timeline carries on from it.
+#[cfg(not(target_arch = "wasm32"))]
 fn run_restore(s: &mut Session, p: &Value) -> Result<Value> {
     let want = p
         .get("snapshot")
@@ -690,6 +695,10 @@ fn run_restore(s: &mut Session, p: &Value) -> Result<Value> {
         "versions": list.len(),
     }))
 }
+#[cfg(target_arch = "wasm32")]
+fn run_restore(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(bad("omni-restore", NO_FILES))
+}
 
 /// The listing OMNI-LOG and OMNI-DIFF show.
 fn echo_list(s: &mut Session, dir: &Path, list: &[Snap], limit: usize) {
@@ -710,11 +719,16 @@ fn echo_list(s: &mut Session, dir: &Path, list: &[Snap], limit: usize) {
 /// Open a snapshot as a drawing of its own (OMNI-LOG). A version stored gzipped is opened from
 /// the history's cache, where it is unpacked once; the history it belongs to stays the drawing's
 /// own (`history_host`), so browsing the timeline carries on in the opened revision.
+#[cfg(not(target_arch = "wasm32"))]
 fn open_snapshot(s: &mut Session, snap: &Snap) -> Result<Value> {
     let file = materialize(snap, "omni-log")?;
     s.execute("open", &json!({ "path": file.to_string_lossy() }))?;
     s.echo(format!("[OMNI] Opened {}.", snap.file));
     Ok(json!(snap.file))
+}
+#[cfg(target_arch = "wasm32")]
+fn open_snapshot(_s: &mut Session, _snap: &Snap) -> Result<Value> {
+    Err(bad("omni-log", NO_FILES))
 }
 
 /// OMNI-LOG: list the drawing's snapshots, and open one when asked to.
