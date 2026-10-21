@@ -164,3 +164,39 @@ fn path_array_parameters_survive_a_dxf_round_trip() {
     assert!(back.block("*U3").unwrap().array.is_none());
     assert_eq!(back.block("*U3").unwrap().entities.len(), 4);
 }
+
+/// A drawing whose block "*U3" is a path array along `points`, with `count` items.
+fn path_array_drawing(points: Vec<Vec2>, count: u32) -> (Drawing, ArrayParams) {
+    let mut d = drawing();
+    let path = PathArray { points, closed: false, count, divide: true, spacing: 0.0, align: true };
+    let p = ArrayParams { kind: ArrayKind::Path(path), levels: 1, level_spacing: 0.0, replaced: Vec::new(), ..params("*U1") };
+    let mut arr = Block::new("*U3");
+    for e in p.item_entities(&mut d).unwrap() {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p.clone());
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    (d, p)
+}
+
+#[test]
+fn path_arrays_too_large_for_xdata_are_saved_as_plain_blocks() {
+    // A circle flattened as ARRAYPATH does (2-degree chords, 180 vertices) fits.
+    let circle: Vec<Vec2> = (0..180)
+        .map(|i| Vec2::new(7.123456789 * (f64::from(i) * 2f64).to_radians().cos(), 7.123456789 * (f64::from(i) * 2f64).to_radians().sin()))
+        .collect();
+    let (d, p) = path_array_drawing(circle, 6);
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert_eq!(back.block("*U3").unwrap().array.as_ref(), Some(&p));
+    // A path past the xdata budget is left out: no orphaned CADCRAFT group on the record, and the
+    // array reopens as a plain block that still has every item.
+    let long: Vec<Vec2> = (0..2_000).map(|i| Vec2::new(f64::from(i) * 0.123456789, (f64::from(i) * 0.1).sin())).collect();
+    let (d, _) = path_array_drawing(long, 9);
+    let text = write_dxf(&d).replace("\r\n", "\n");
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 9);
+    assert!(!text.contains("\n1001\nCADCRAFT\n  0\n"), "an empty CADCRAFT xdata group was written");
+    // The other array in the drawing keeps its parameters.
+    assert!(back.block("*U2").unwrap().array.is_some());
+}

@@ -2327,9 +2327,11 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         if let Some(b) = blk {
             w.i(70, i64::from(b.units));
             w.i(280, i64::from(b.explodable));
-            if let Some(a) = &b.array {
+            // Parameters too large for xdata are left out: the items stay, as a plain block.
+            let x = b.array.as_ref().map(dxf_ext::array_xdata).unwrap_or_default();
+            if !x.is_empty() {
                 w.s(1001, dxf_ext::APP);
-                w.xdata(dxf_ext::array_xdata(a));
+                w.xdata(x);
             }
         }
     };
