@@ -1099,7 +1099,9 @@ fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &m
 /// Parse a run of entity records (ENTITIES section or a block's body) into entities. Records that
 /// can't be placed are counted in `skipped`.
 fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, skipped: &mut usize) -> Vec<(Option<String>, bool, Entity)> {
-    let mut out = Vec::new();
+    // Nearly every record becomes an entity (`recs` is already in memory, bounded by the tag
+    // limit), so the list is sized once rather than moved at every doubling.
+    let mut out = Vec::with_capacity(recs.len());
     let mut i = 0;
     while let Some((kind, tags)) = recs.get(i) {
         let t = T(tags);
