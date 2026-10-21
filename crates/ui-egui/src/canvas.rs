@@ -1469,6 +1469,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if shift_zoom && dbl_primary {
         let _ = app.run("zoom.previous", serde_json::json!({}));
     }
+    // The zoom gesture owns the double-click: it must not also switch space or open an editor.
+    let dbl_primary = dbl_primary && !shift_zoom;
     if shift_zoom
         && resp.drag_started_by(egui::PointerButton::Primary)
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1573,7 +1575,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             i.events
                 .iter()
                 .filter_map(|e| match e {
-                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } => Some(*pos),
+                    // A Shift release is the zoom gesture, never a point.
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers, .. }
+                        if !modifiers.shift => Some(*pos),
                     _ => None,
                 })
                 .collect()
