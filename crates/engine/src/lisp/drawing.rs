@@ -417,13 +417,15 @@ fn end_block(ctx: &mut Ctx<'_>) -> Value {
         if let Some(existing) = d.blocks.keys().find(|k| k.eq_ignore_ascii_case(&b.name)) {
             b.name = existing.clone();
         }
-        if crate::cmd::blocks::references_block(d, &ents, &b.name) {
-            return Value::Nil;
-        }
         // As BLOCK: a block being edited in place isn't redefined until REFCLOSE.
         if d.refedit.as_ref().is_some_and(|r| r.block.eq_ignore_ascii_case(&b.name)) {
             return Value::Nil;
         }
+    }
+    // Named or anonymous (a routine can know the name an anonymous block will get), a block
+    // that inserts itself isn't added.
+    if crate::cmd::blocks::references_block(d, &ents, &b.name) {
+        return Value::Nil;
     }
     for mut e in ents {
         e.handle = d.new_handle();

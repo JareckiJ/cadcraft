@@ -194,3 +194,19 @@ fn a_failed_routine_drops_its_open_definition() {
     ok(&mut s, LINE);
     assert_eq!(ok(&mut s, ENDBLK), "\"EB\"");
 }
+
+/// An anonymous block that inserts the name it is about to get (`*U1` in an empty drawing) is a
+/// block inserting itself too: refused like a named one.
+#[test]
+fn an_anonymous_block_that_inserts_itself_is_refused() {
+    let mut s = session();
+    assert!(s.doc().unwrap().block("*U1").is_none());
+    ok(&mut s, r#"(entmake '((0 . "BLOCK") (2 . "*U") (70 . 1) (10 0.0 0.0 0.0)))"#);
+    ok(&mut s, r#"(entmake '((0 . "INSERT") (2 . "*U1") (10 0.0 0.0 0.0)))"#);
+    assert_eq!(ok(&mut s, ENDBLK), "nil");
+    assert!(s.doc().unwrap().block("*U1").is_none());
+    // The next anonymous block still gets a name and is added.
+    ok(&mut s, r#"(entmake '((0 . "BLOCK") (2 . "*U") (70 . 1) (10 0.0 0.0 0.0)))"#);
+    ok(&mut s, LINE);
+    assert_eq!(ok(&mut s, ENDBLK), "\"*U1\"");
+}
