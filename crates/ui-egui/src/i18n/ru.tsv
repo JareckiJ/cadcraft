@@ -1013,7 +1013,6 @@
 	Take Snapshot...	Создать снимок...
 	Name the drawing as it is now, unsaved changes included, and keep it as a milestone	Назовите чертёж таким, как он есть сейчас, вместе с несохранёнными изменениями, и сохраните его как веху
 	Refresh	Обновить
-	Time	Время
 	Kind	Тип
 	Size	Размер
 	Milestone	Веха
@@ -1027,7 +1026,6 @@
 	Open this version as a drawing of its own	Открыть эту версию как отдельный чертёж
 	Lay this version under the drawing in red and report what changed	Подложить эту версию под чертёж красным и показать, что изменилось
 	Saved by {user}	Сохранено: {user}
-	Restore	Восстановить
 	Restore Version	Восстановить версию
 	Put this version back into the drawing as an unsaved change; UNDO goes back	Вернуть эту версию в чертёж как несохранённое изменение; UNDO возвращает назад
 	Unsaved changes since the last save	Есть несохранённые изменения после последнего сохранения

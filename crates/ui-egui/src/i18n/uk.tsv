@@ -1335,7 +1335,6 @@
 	Take Snapshot...	Створити знімок...
 	Name the drawing as it is now, unsaved changes included, and keep it as a milestone	Назвіть креслення таким, як воно є зараз, разом із незбереженими змінами, і збережіть його як віху
 	Refresh	Оновити
-	Time	Час
 	Kind	Тип
 	Size	Розмір
 	Milestone	Віха
@@ -1349,7 +1348,6 @@
 	Open this version as a drawing of its own	Відкрити цю версію як окреме креслення
 	Lay this version under the drawing in red and report what changed	Підкласти цю версію під креслення червоним і показати, що змінилося
 	Saved by {user}	Збережено: {user}
-	Restore	Відновити
 	Restore Version	Відновити версію
 	Put this version back into the drawing as an unsaved change; UNDO goes back	Повернути цю версію в креслення як незбережену зміну; UNDO повертає назад
 	Unsaved changes since the last save	Є незбережені зміни після останнього збереження
