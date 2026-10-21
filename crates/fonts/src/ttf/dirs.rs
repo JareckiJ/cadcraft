@@ -163,8 +163,9 @@ struct Element<'a> {
     text: String,
 }
 
-/// The `<dir>` and `<include>` elements of a configuration file with text, in order; comments
-/// are skipped. A bounded scan over the text: fontconfig files are small and regular.
+/// The `<dir>` and `<include>` elements of a configuration file with text, in order, with their
+/// `prefix` attribute; comments are skipped. A bounded scan over the text: fontconfig files are
+/// small and regular.
 fn elements(xml: &str) -> Vec<Element<'_>> {
     let mut out = Vec::new();
     let mut rest = xml;
@@ -177,12 +178,11 @@ fn elements(xml: &str) -> Vec<Element<'_>> {
         let Some(end) = tag.find('>') else { break };
         let (head, after) = (tag.get(..end).unwrap_or(""), tag.get(end + 1..).unwrap_or(""));
         rest = after;
-        let mut words = head.split_whitespace();
-        let name = words.next().unwrap_or("");
+        let (name, attrs) = head.split_once(char::is_whitespace).unwrap_or((head, ""));
         if !matches!(name, "dir" | "include") {
             continue;
         }
-        let prefix = words.find_map(|w| w.strip_prefix("prefix=")).map(|v| v.trim_matches(['"', '\'']));
+        let prefix = attribute(attrs, "prefix");
         let text = unescape(after.split('<').next().unwrap_or("").trim());
         if !text.is_empty() {
             out.push(Element { name, prefix, text });
@@ -192,6 +192,27 @@ fn elements(xml: &str) -> Vec<Element<'_>> {
         }
     }
     out
+}
+
+/// The value of the attribute `name` in a start tag's attribute list: name, optional whitespace,
+/// `=`, optional whitespace, a single- or double-quoted value, in any order. `None` when absent
+/// or not well-formed up to it.
+fn attribute<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
+    let mut rest = attrs;
+    loop {
+        rest = rest.trim_start();
+        let key_end = rest.find(|c: char| c == '=' || c.is_whitespace())?;
+        let key = rest.get(..key_end)?;
+        rest = rest.get(key_end..)?.trim_start().strip_prefix('=')?.trim_start();
+        let quote = rest.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        rest = rest.get(1..)?;
+        let value_end = rest.find(quote)?;
+        let value = rest.get(..value_end)?;
+        if key == name {
+            return Some(value);
+        }
+        rest = rest.get(value_end + 1..)?;
+    }
 }
 
 fn unescape(s: &str) -> String {
@@ -352,6 +373,27 @@ mod tests {
     }
 
     #[test]
+    fn prefix_attributes_with_whitespace_around_equals() {
+        // Legal XML: whitespace, newlines included, on either side of '=', attributes in any
+        // order. /cfg is not on the configuration path, so a relative include or directory is
+        // found only through its prefix.
+        let files = [
+            (
+                "/cfg/fonts.conf",
+                "<fontconfig>\n<dir prefix = \"relative\">extra-fonts</dir>\n<dir\n  prefix\n  =\n  'xdg'\n>more-fonts</dir>\n\
+                 <include ignore_missing = \"yes\" prefix = \"xdg\">fontconfig/fonts.conf</include>\n\
+                 <include\n\tignore_missing=\"yes\"\n\tprefix\n\t=\n\t\"relative\"\n>site.conf</include>\n</fontconfig>\n",
+            ),
+            ("/home/u/.config/fontconfig/fonts.conf", "<fontconfig><dir>/xdg-included</dir></fontconfig>"),
+            ("/cfg/site.conf", "<fontconfig><dir>/site-included</dir></fontconfig>"),
+        ];
+        let env = env_of(&[("HOME", "/home/u"), ("XDG_DATA_HOME", "/data"), ("FONTCONFIG_FILE", "/cfg/fonts.conf")]);
+        let d = font_dirs(env, reader(&files, &[]));
+        let tail: Vec<PathBuf> = d.iter().skip(XDG.len() + 2).cloned().collect();
+        assert_eq!(tail, paths(&["/cfg/extra-fonts", "/data/more-fonts", "/xdg-included", "/site-included"]));
+    }
+
+    #[test]
     fn include_cycles_and_depth_are_bounded() {
         let files = [
             ("/etc/fonts/fonts.conf", "<fontconfig><dir>/d0</dir><include>/etc/fonts/b.conf</include></fontconfig>"),
@@ -403,6 +445,19 @@ mod tests {
         assert!(elements("<dir").is_empty());
         let huge: String = "<dir>/a</dir>".repeat(MAX_ELEMENTS * 2);
         assert_eq!(elements(&huge).len(), MAX_ELEMENTS);
+    }
+
+    #[test]
+    fn attributes_in_any_order_and_spacing() {
+        let prefix = |xml: &str| elements(xml).first().and_then(|e| e.prefix).map(str::to_string);
+        assert_eq!(prefix("<dir salt=\"x\" prefix='xdg'>f</dir>"), Some("xdg".into()));
+        assert_eq!(prefix("<dir prefix=\"relative\" salt=\"x\">f</dir>"), Some("relative".into()));
+        assert_eq!(prefix("<dir salt = 'prefix=\"xdg\"' prefix = \"cwd\">f</dir>"), Some("cwd".into()), "a value is not an attribute");
+        assert_eq!(prefix("<include\nignore_missing = \"yes\"\nprefix\n=\n\"xdg\"\n>f</include>"), Some("xdg".into()));
+        assert_eq!(prefix("<dir prefix=xdg>f</dir>"), None, "an unquoted value is not well-formed");
+        assert_eq!(prefix("<dir prefix>f</dir>"), None);
+        assert_eq!(prefix("<dir prefix=\"unterminated>f</dir>"), None);
+        assert_eq!(prefix("<dir salt=\"x\">f</dir>"), None);
     }
 
     #[test]
