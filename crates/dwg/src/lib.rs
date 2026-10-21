@@ -132,12 +132,15 @@ mod native {
         let version = doc.version.to_dxf_string().to_string();
         let header_vars = unwritten_header_vars(&doc.header).to_vec();
         drop(doc);
-        let _ = out.flush();
+        // The buffer's tail reaches the sink here; a sink that fails on it (a full disk, a parser
+        // that rejects the last chunk) must fail the rendition, not pass as a short one.
+        let flushed = out.flush();
         let (capped, _) = out.into_parts();
         if capped.exceeded {
             return Err(rendition_too_large(bytes, limits));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
+        flushed.map_err(|e| format!("DWG→DXF: {e}"))?;
         Ok(Rendition { sink: capped.inner, bytes: capped.written, notes, version, header_vars })
     }
 
