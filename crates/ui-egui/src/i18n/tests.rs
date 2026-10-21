@@ -89,6 +89,7 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
     let catalog = catalog(language).unwrap();
     let sources = [
         include_str!("../xrefs.rs"),
+        include_str!("../history.rs"),
         include_str!("../canvas.rs"),
         include_str!("../chrome.rs"),
         include_str!("../cmdline.rs"),

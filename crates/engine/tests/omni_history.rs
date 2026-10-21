@@ -3,6 +3,7 @@
 //! of a revision, the overlay diff laid under the drawing (recoloured, toggleable, detachable),
 //! the native change report, and spatial notes.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use cadcraft_engine::Session;
@@ -52,15 +53,29 @@ fn history(dir: &Path) -> PathBuf {
 }
 
 fn snapshots(dir: &Path) -> Vec<String> {
-    let mut out: Vec<String> =
-        std::fs::read_dir(history(dir)).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    let mut out: Vec<String> = std::fs::read_dir(history(dir))
+        .map(|d| d.flatten().filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
     out.sort();
     out
 }
 
-/// The name a snapshot of `plan.dxf` gets: `<date>.<time>_<ms>_<user>_<description>_plan.dxf`.
+/// A version's bytes as they went in: versions are stored gzipped, so the tests unpack them the
+/// way the overlay reference does.
+fn unpack(path: &str) -> Vec<u8> {
+    let raw = std::fs::read(path).unwrap();
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(&raw[..]).read_to_end(&mut out).unwrap();
+    out
+}
+
+/// The name a version of `plan.dxf` gets:
+/// `<date>.<time>_<ms>_<user>_<description>_plan.dxf.gz`.
 fn named(name: &str, description: &str) -> bool {
-    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    let Some(plain) = name.strip_suffix(".gz") else {
+        return false;
+    };
+    let (stem, ext) = plain.rsplit_once('.').unwrap_or((plain, ""));
     let f: Vec<&str> = stem.split('_').collect();
     let time = f.first().copied().unwrap_or_default();
     let (d, t) = time.split_once('.').unwrap_or(("", ""));
@@ -90,11 +105,13 @@ fn a_snapshot_is_the_drawing_as_it_is_now_not_the_file_on_disk() {
     assert_eq!(r["description"], "walls-done", "the reply says what the file name says, spaces folded into dashes");
     assert_eq!(r["snapshots"], 1);
     let name = r["file"].as_str().unwrap().to_string();
-    assert!(name.ends_with("_walls-done_plan.dxf"), "{name}: a description's spaces become dashes");
+    assert!(name.ends_with("_walls-done_plan.dxf.gz"), "{name}: a description's spaces become dashes, and the version is stored gzipped");
     assert!(named(&name, "walls-done"), "{name}: the name carries date, time, milliseconds, user and description");
+    assert_eq!(r["compressed"], json!(true));
+    assert!(r["size"].as_u64().unwrap() > 0, "the reply says how big it was before compression");
 
     // The snapshot holds the unsaved circle; the drawing's own file still doesn't.
-    let snap = cadcraft_io::read(&std::fs::read(r["path"].as_str().unwrap()).unwrap(), &name).unwrap();
+    let snap = cadcraft_io::read(&unpack(r["path"].as_str().unwrap()), name.trim_end_matches(".gz")).unwrap();
     assert_eq!(snap.model.len(), 2, "the snapshot is the drawing, not the file");
     let disk = cadcraft_io::read(&std::fs::read(&plan_path).unwrap(), "plan.dxf").unwrap();
     assert_eq!(disk.model.len(), 1, "taking a snapshot does not touch the drawing's file");
@@ -114,9 +131,8 @@ fn snapshots_are_dxf_or_dwg_after_the_drawing_they_came_from() {
         s.execute("line", &json!({ "points": [[0, 5], [10, 5]] })).unwrap();
         let r = s.execute("omni-snap", &json!({ "description": "two walls" })).unwrap();
         let file = r["file"].as_str().unwrap();
-        assert!(file.ends_with(&format!("_two-walls_plan.{ext}")), "{file}: a DWG history stays DWG");
-        let bytes = std::fs::read(r["path"].as_str().unwrap()).unwrap();
-        let back = cadcraft_io::read(&bytes, file).unwrap();
+        assert!(file.ends_with(&format!("_two-walls_plan.{ext}.gz")), "{file}: a DWG history stays DWG");
+        let back = cadcraft_io::read(&unpack(r["path"].as_str().unwrap()), file.trim_end_matches(".gz")).unwrap();
         assert_eq!(back.model.len(), 2, "{ext}: the snapshot reads back");
     }
 }
@@ -151,11 +167,12 @@ fn log_lists_newest_first_and_opens_a_revision() {
     assert_eq!(s.docs.len(), 3);
     assert_eq!(s.doc().unwrap().model.len(), 1, "the older revision has one object");
 
-    // The revision is the open drawing now, so a call without `path` asks about *its* history:
-    // a snapshot in `_OMNI_HISTORY` has its own, in `_OMNI_HISTORY/_OMNI_HISTORY`.
+    // The revision is the open drawing now, and it belongs to the history it came from: a call
+    // without `path` lists the plan's versions, not a history of its own inside the history folder.
     let r = s.execute("omni-log", &json!({})).unwrap();
-    assert_eq!(r["count"], 0);
+    assert_eq!(r["count"], 2);
     assert!(r["folder"].as_str().unwrap().ends_with("_OMNI_HISTORY"), "{}", r["folder"]);
+    assert!(!r["folder"].as_str().unwrap().contains(".cache"), "{}", r["folder"]);
 
     // Naming the drawing puts the calls back on its history, by file name and by path alike.
     let r = s.execute("omni-log", &json!({ "path": plan })).unwrap();
@@ -415,7 +432,10 @@ fn hostile_input_never_panics_and_never_guesses() {
 
 /// A snapshot of a long description still has a parseable name (its parts are cut, not merged).
 fn named_or_lenient(name: &str) -> bool {
-    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    let Some(plain) = name.strip_suffix(".gz") else {
+        return false;
+    };
+    let (stem, ext) = plain.rsplit_once('.').unwrap_or((plain, ""));
     let f: Vec<&str> = stem.split('_').collect();
     f.len() >= 5 && ext == "dxf" && f[0].len() == 15 && f[1].len() == 3 && !f[2].is_empty() && !f[3].is_empty()
 }
@@ -430,10 +450,162 @@ fn a_history_survives_on_a_drawing_without_a_file_name_yet() {
     assert!(s.execute("omni-snap", &json!({ "description": "wip" })).is_err());
     let r = s.execute("omni-snap", &json!({ "description": "wip", "path": dir.join("wip.dxf").to_string_lossy() })).unwrap();
     assert_eq!(r["snapshots"], 1);
-    assert!(r["file"].as_str().unwrap().ends_with("_wip_wip.dxf"), "{}", r["file"]);
+    assert!(r["file"].as_str().unwrap().ends_with("_wip_wip.dxf.gz"), "{}", r["file"]);
     assert!(history(&dir).join(r["file"].as_str().unwrap()).is_file());
     // The list can be read back by the file name alone.
     let r = s.execute("omni-log", &json!({ "path": dir.join("wip.dxf").to_string_lossy() })).unwrap();
     assert_eq!(r["count"], 1);
     assert_eq!(r["snapshots"][0]["drawing"], "wip.dxf");
+}
+
+/// A drawing of `n` wall lines, big enough for a DXF to be worth compressing.
+fn many_lines(n: usize) -> Drawing {
+    let mut d = Drawing::new_metric();
+    for i in 0..n {
+        let h = d.new_handle();
+        let x = i as f64;
+        let a = Vec3::new(x, 0.0, 0.0);
+        let b = Vec3::new(x, 10.0, 0.0);
+        d.model.push(cadcraft_engine::doc::Entity::new(h, EntityKind::Line(Line { a, b })));
+    }
+    d
+}
+
+#[test]
+fn a_save_leaves_a_version_behind_and_an_unchanged_save_leaves_none() {
+    hooks();
+    let dir = folder("saved");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+
+    // Nothing changed since the file was read: a save leaves no version.
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(snapshots(&dir).len(), 0);
+    assert_eq!(s.execute("omni-versions", &json!({})).unwrap()["count"], 0);
+
+    // A change does.
+    s.execute("circle", &json!({ "center": [1, 1], "radius": 2 })).unwrap();
+    s.execute("qsave", &json!({})).unwrap();
+    let r = s.execute("omni-versions", &json!({})).unwrap();
+    assert_eq!(r["count"], 1);
+    assert_eq!(r["versions"][0]["kind"], "save", "a save's version is not a named milestone");
+    assert_eq!(r["versions"][0]["description"], "save");
+    assert_eq!(r["versions"][0]["compressed"], json!(true));
+    assert!(r["versions"][0]["file"].as_str().unwrap().ends_with("_save_plan.dxf.gz"), "{}", r["versions"][0]["file"]);
+    assert_eq!(snapshots(&dir).len(), 1);
+
+    // Saving again with nothing changed again adds nothing.
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(s.execute("omni-versions", &json!({})).unwrap()["count"], 1, "a clean save is not a version");
+
+    // A named milestone is listed beside the saves, and told apart from them.
+    s.execute("omni-snap", &json!({ "description": "before the roof" })).unwrap();
+    let r = s.execute("omni-versions", &json!({})).unwrap();
+    assert_eq!(r["count"], 2);
+    assert_eq!(r["versions"][0]["kind"], "milestone", "newest first");
+    assert_eq!(r["versions"][1]["kind"], "save");
+    let saves = s.execute("omni-versions", &json!({ "kind": "save" })).unwrap();
+    assert_eq!(saves["count"], 1, "the palette can ask for the saves alone");
+    assert_eq!(saves["versions"][0]["kind"], "save");
+    assert!(s.execute("omni-versions", &json!({ "kind": "sideways" })).is_err());
+}
+
+#[test]
+fn versions_are_stored_gzipped_and_read_back_exactly() {
+    hooks();
+    let dir = folder("gzip");
+    let plan_path = dir.join("plan.dxf");
+    save(&many_lines(400), &plan_path);
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    let r = s.execute("omni-snap", &json!({ "description": "big" })).unwrap();
+    let on_disk = r["bytes"].as_u64().unwrap();
+    let unpacked = r["size"].as_u64().unwrap();
+    assert!(unpacked > 40_000, "{unpacked}: a drawing of 400 walls is a verbose DXF");
+    assert!(on_disk * 3 < unpacked, "{on_disk} for {unpacked}: DXF text shrinks about tenfold when gzipped");
+
+    // What is stored is the drawing itself, byte for byte, once unpacked.
+    let bytes = unpack(r["path"].as_str().unwrap());
+    assert_eq!(bytes.len() as u64, unpacked, "the reply says how big it was before compression");
+    let back = cadcraft_io::read(&bytes, "plan.dxf").unwrap();
+    assert_eq!(back.model.len(), 400, "gzip is lossless: the version is the drawing");
+
+    // A version is compared and restored through the same unpacking.
+    let file = r["file"].as_str().unwrap().to_string();
+    s.execute("circle", &json!({ "center": [1, 1], "radius": 2 })).unwrap();
+    let r = s.execute("omni-diff", &json!({ "mode": "report", "snapshot": file })).unwrap();
+    assert_eq!(r["counts"]["added"], 1, "the circle is not in the version");
+    let r = s.execute("omni-restore", &json!({ "snapshot": file })).unwrap();
+    assert_eq!(r["restored"], json!(file));
+    assert_eq!(s.doc().unwrap().model.len(), 400, "the restored version, without the circle");
+}
+
+#[test]
+fn a_plain_snapshot_from_an_older_build_is_still_listed_and_compared() {
+    hooks();
+    let dir = folder("legacy");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    // What an older build wrote: a full copy, not gzipped, in the same folder.
+    let hist = history(&dir);
+    std::fs::create_dir_all(&hist).unwrap();
+    let old = "20260101.120000_000_tester_legacy_plan.dxf";
+    std::fs::write(hist.join(old), cadcraft_io::write(&plan(), "plan.dxf").unwrap()).unwrap();
+
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    let r = s.execute("omni-versions", &json!({})).unwrap();
+    assert_eq!(r["count"], 1, "a plain copy is not hidden from the list");
+    assert_eq!(r["versions"][0]["compressed"], json!(false));
+    assert_eq!(r["versions"][0]["kind"], "milestone");
+    assert_eq!(r["versions"][0]["drawing"], "plan.dxf");
+    s.execute("circle", &json!({ "center": [3, 3], "radius": 1 })).unwrap();
+    let r = s.execute("omni-diff", &json!({ "mode": "report", "snapshot": old })).unwrap();
+    assert_eq!(r["counts"]["added"], 1, "an old plain revision compares like a new one");
+    assert_eq!(snapshots(&dir).len(), 1, "and is left where it is");
+}
+
+#[test]
+fn a_version_restores_into_the_drawing_undoably() {
+    hooks();
+    let dir = folder("restore");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    s.execute("circle", &json!({ "center": [1, 1], "radius": 2 })).unwrap();
+    s.execute("qsave", &json!({})).unwrap();
+    s.execute("circle", &json!({ "center": [9, 9], "radius": 1 })).unwrap();
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().model.len(), 3);
+
+    // The older save had two objects; restoring it replaces the drawing and leaves it unsaved.
+    let r = s.execute("omni-restore", &json!({ "snapshot": 2 })).unwrap();
+    assert_eq!(r["dirty"], json!(true));
+    assert_eq!(s.doc().unwrap().model.len(), 2);
+    assert!(s.state().unwrap().is_dirty(), "the drawing differs from its file now");
+    let disk = cadcraft_io::read(&std::fs::read(&plan_path).unwrap(), "plan.dxf").unwrap();
+    assert_eq!(disk.model.len(), 3, "restoring never writes the drawing's file");
+
+    // UNDO is the way back.
+    assert_eq!(s.undo().unwrap().as_deref(), Some("restore version"));
+    assert_eq!(s.doc().unwrap().model.len(), 3);
+    assert_eq!(s.redo().unwrap().as_deref(), Some("restore version"));
+
+    // Restoring the newest version and saving it again is not a change: no version appears.
+    s.execute("omni-restore", &json!({ "snapshot": 1 })).unwrap();
+    let before = s.execute("omni-versions", &json!({})).unwrap()["count"].as_u64().unwrap();
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(
+        s.execute("omni-versions", &json!({})).unwrap()["count"].as_u64().unwrap(),
+        before,
+        "a save of what the newest version already holds leaves none"
+    );
+
+    // A version has to be named: restoring the newest by accident is not what a bare call means.
+    assert!(s.execute("omni-restore", &json!({})).is_err());
+    assert!(s.execute("omni-restore", &json!({ "snapshot": 99 })).is_err());
+    assert!(s.execute("omni-restore", &json!({ "snapshot": "no/such.dxf" })).is_err());
 }

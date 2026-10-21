@@ -634,6 +634,7 @@ dependencies = [
  "cadcraft-geom",
  "cadcraft-io",
  "cadcraft-render",
+ "flate2",
  "log",
  "rstar",
  "serde",

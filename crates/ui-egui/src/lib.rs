@@ -25,6 +25,7 @@ pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
+pub mod history;
 pub mod xrefs;
 
 pub mod dyngrips;

@@ -1,13 +1,27 @@
 //! Drawing history — the OMNI toolkit, native.
 //!
-//! A *snapshot* is a full copy of the drawing written into `_OMNI_HISTORY` next to it, named
-//! `<date>.<time>_<milliseconds>_<user>_<description>_<file>.<ext>`. `OMNI-SNAP` takes one from
-//! the drawing as it is right now (unsaved changes included; the file on disk is not touched),
-//! `OMNI-LOG` lists them and opens one, `OMNI-DIFF` lays one under the current drawing as an
-//! overlay reference recoloured to a single colour (red by default) and can also *report* what
+//! A *version* is a full copy of the drawing written into `_OMNI_HISTORY` next to it, named
+//! `<date>.<time>_<milliseconds>_<user>_<description>_<file>.<ext>`. Versions arrive two ways:
+//!
+//! - **Every save leaves one behind**, without being asked. `SAVE`/`QSAVE`/`SAVEAS` write one
+//!   when the drawing differs from what its file held (the unsaved-changes flag is the test), so
+//!   a history is a timeline of the saves the user already makes. Those are filed under the
+//!   description `save`. A save of an unchanged drawing adds nothing.
+//! - **`OMNI-SNAP` takes a named milestone** of the drawing as it is right now — unsaved changes
+//!   included, the file on disk untouched — for a state the user wants to name and come back to.
+//!
+//! `OMNI-LOG` lists the versions and opens one, `OMNI-DIFF` lays one under the current drawing as
+//! an overlay reference recoloured to a single colour (red by default) and can also *report* what
 //! changed between the two as numbers instead of pixels, `OMNI-TOGGLE` hides and shows that
-//! overlay, `OMNI-CLEAR` detaches it again, and `OMNI-NOTE` drops a marker and a comment on the
-//! drawing.
+//! overlay, `OMNI-CLEAR` detaches it again, `OMNI-RESTORE` puts a version back into the drawing
+//! (undoably — the file on disk is never touched), and `OMNI-NOTE` drops a marker and a comment on
+//! the drawing. `OMNI-VERSIONS` is the listing the Drawing History palette draws.
+//!
+//! Versions are gzipped on disk (`…_plan.dxf.gz`): a DXF is verbose text and shrinks about
+//! tenfold, so a long history does not cost what a folder of plain copies would. A plain
+//! `.dxf`/`.dwg` left by an older build is still listed, read and compared; an older version is
+//! unpacked into `_OMNI_HISTORY/.cache` only when it has to be a file on disk (the overlay
+//! reference reads it back through the io hooks).
 //!
 //! The AutoLISP original this comes from only ever ran inside AutoCAD on DWG files and shelled
 //! out to its `-XREF`/`-LAYER` command line. Here everything is native and format-agnostic: a
@@ -25,12 +39,16 @@
 //! than hiding: the host builds keep every warning.
 #![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use cadcraft_color::Color;
 use cadcraft_doc::{Common, Drawing, EntityKind, XrefStatus};
 use cadcraft_geom::Vec2;
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use serde_json::{Value, json};
 
 use super::super::blocks::xref::load::has_prefix;
@@ -44,6 +62,18 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 /// The history folder created next to a drawing (the AutoLISP toolkit's folder name, so an
 /// existing history keeps working).
 const HISTORY_DIR: &str = "_OMNI_HISTORY";
+/// Where versions are unpacked when something needs them as a file (the overlay reference) —
+/// inside the history folder, so it travels with it and never pollutes the drawing's own folder.
+#[cfg(not(target_arch = "wasm32"))]
+const CACHE_DIR: &str = ".cache";
+/// Versions are stored gzipped; the suffix says so.
+const COMPRESSED_EXT: &str = "gz";
+/// The description an automatic version — the one a save leaves behind — is filed under.
+const SAVE_DESCRIPTION: &str = "save";
+/// The largest a single version may unpack to: a history file is input, and input is hostile
+/// (a gzip bomb costs memory before anything else can refuse it).
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_UNPACKED: u64 = 512 * 1024 * 1024;
 /// Overlay references are named with this prefix, so OMNI-CLEAR and OMNI-TOGGLE touch only their
 /// own and leave the user's external references alone.
 const OVERLAY_PREFIX: &str = "OMNI_";
@@ -56,8 +86,7 @@ const NOTE_HEIGHT: f64 = 25.0;
 const MAX_TEXT: usize = 255;
 /// Characters of one name part (a description, a user name) kept in a file name.
 const MAX_PART: usize = 48;
-/// Snapshots read from a folder in one go; a folder with more says so.
-#[cfg(not(target_arch = "wasm32"))]
+/// Versions read from a folder in one go; a folder with more says so.
 const MAX_SNAPSHOTS: usize = 2000;
 /// Snapshot files are DXF and DWG drawings, never anything else that happens to be in the folder.
 const DRAWING_EXTS: [&str; 2] = ["dxf", "dwg"];
@@ -71,15 +100,21 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("omni-snap", "Save Snapshot", run_snap)
             .menu(&["Tools", "Drawing History", "Save Snapshot"])
             .alias(&["omnisnap"])
-            .params("{description? (default \"snapshot\"; folded into the file name, where anything but letters, digits and `-` becomes `-`), path? (the DXF/DWG file this history belongs to)} → {file, path, folder, bytes, time, user, description, snapshots}")
+            .params("{description? (default \"snapshot\"; folded into the file name, where anything but letters, digits and `-` becomes `-`), path? (the DXF/DWG file this history belongs to)} → {file, path, folder, bytes, size, time, user, description, snapshots}")
             .noundo()
             .interactive(|_| Ok(Box::new(SnapM))),
         CommandSpec::new("omni-log", "Snapshot History...", run_log)
             .menu(&["Tools", "Drawing History", "Snapshot History..."])
-            .alias(&["omnilog", "omni"])
-            .params("{path?, open? (a listed number, a file name or a path), limit?} → {folder, count, capped, snapshots: [{n, file, path, time, user, description, drawing, bytes}], opened?}")
+            .alias(&["omnilog", "omni", "versions", "history"])
+            .params("{path?, open? (a listed number, a file name or a path), limit?} → {folder, count, capped, snapshots: [{n, file, path, time, user, description, kind, drawing, bytes, compressed}], opened?}")
             .noundo()
             .interactive(|_| Ok(Box::new(LogM))),
+        CommandSpec::new("omni-versions", "Version History", run_versions)
+            .params("{path?, limit? (default 200), kind?: save|milestone|all (default all)} → {folder, count, capped, versions: [{n, file, path, time, user, description, kind, drawing, bytes, compressed}]}: what the Drawing History palette lists, without echoing it to the command line")
+            .noundo(),
+        CommandSpec::new("omni-restore", "Restore Version", run_restore)
+            .params("{snapshot: a listed number or a file name, path?} → {restored, description, kind, time, versions}: put that version back into the drawing as an unsaved change (undoable; the file on disk is untouched, so nothing is lost by looking)")
+            .noundo(),
         CommandSpec::new("omni-diff", "Compare with Snapshot", run_diff)
             .menu(&["Tools", "Drawing History", "Compare with Snapshot"])
             .alias(&["omnidiff"])
@@ -154,6 +189,25 @@ fn user() -> String {
     "web".to_string()
 }
 
+/// The drawing a version file belongs to. A version lives in `<folder>/_OMNI_HISTORY` (or in its
+/// `.cache`), so opening an old revision keeps browsing the timeline it came from instead of
+/// offering the snapshot a history of its own inside the history folder.
+#[cfg(not(target_arch = "wasm32"))]
+fn history_host(file: &Path) -> Option<PathBuf> {
+    let name = file.file_name()?.to_string_lossy().into_owned();
+    if !is_snapshot(&name) {
+        return None;
+    }
+    let parent = file.parent()?;
+    let history = match parent.file_name()?.to_string_lossy() {
+        d if d.eq_ignore_ascii_case(HISTORY_DIR) => parent.to_path_buf(),
+        d if d.eq_ignore_ascii_case(CACHE_DIR) => parent.parent()?.to_path_buf(),
+        _ => return None,
+    };
+    let drawing = parse(&name, file.to_path_buf(), 0).drawing;
+    (!drawing.is_empty()).then(|| history.parent().unwrap_or(parent).join(drawing))
+}
+
 /// The drawing file a history belongs to: the open drawing's own file, or `path` when it has none
 /// yet. A file that is neither DXF nor DWG is refused rather than guessed at.
 fn drawing_file(s: &Session, cmd: &str, p: &Value) -> Result<PathBuf> {
@@ -162,12 +216,17 @@ fn drawing_file(s: &Session, cmd: &str, p: &Value) -> Result<PathBuf> {
         .or_else(|| s.state().ok().and_then(|st| st.path.clone()))
         .ok_or_else(|| bad(cmd, "the drawing has no file name yet: pass `path`, the DXF or DWG file this history belongs to"))?;
     let file = PathBuf::from(path.trim());
-    if file.file_name().is_none() {
+    let Some(name) = file.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         return Err(bad(cmd, format!("`path` must name a file, not \"{}\"", path.trim())));
-    }
-    let ext = ext_of(&file);
-    if !DRAWING_EXTS.contains(&ext.as_str()) {
+    };
+    // The extension a version is *read* as: a stored one carries the compression suffix on top.
+    let plain = name.strip_suffix(&format!(".{COMPRESSED_EXT}")).unwrap_or(&name);
+    if !DRAWING_EXTS.contains(&ext_of(Path::new(plain)).as_str()) {
         return Err(bad(cmd, format!("\"{}\" is not a DXF or DWG drawing", file.display())));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(host) = history_host(&file) {
+        return Ok(host);
     }
     Ok(file)
 }
@@ -257,11 +316,15 @@ fn stamp_epoch(stamp: &str) -> Option<i64> {
     Some(days_from_civil(y, mo, da) * 86_400 + h * 3600 + mi * 60 + sd)
 }
 
-/// One snapshot on disk: what its name says about it, and where it is.
+/// One version on disk: what its name says about it, and where it is.
 #[derive(Clone, Debug, PartialEq)]
 struct Snap {
     file: String,
     path: PathBuf,
+    /// The name without the compression suffix — what the drawing inside is called.
+    inner: String,
+    /// Stored gzipped.
+    compressed: bool,
     /// When it was taken (UTC seconds), `None` when the name doesn't follow the pattern.
     epoch: Option<i64>,
     millis: u32,
@@ -269,6 +332,7 @@ struct Snap {
     description: String,
     /// The drawing file it was taken from.
     drawing: String,
+    /// On disk, so a compressed version compares as what it costs.
     bytes: u64,
 }
 
@@ -280,6 +344,10 @@ impl Snap {
             None => Value::Null,
         }
     }
+    /// An automatic version (one a save left behind) or a named milestone (OMNI-SNAP).
+    fn kind(&self) -> &'static str {
+        if self.description.eq_ignore_ascii_case(SAVE_DESCRIPTION) { "save" } else { "milestone" }
+    }
     fn json(&self, n: usize) -> Value {
         json!({
             "n": n,
@@ -288,18 +356,22 @@ impl Snap {
             "time": self.time(),
             "user": self.user,
             "description": self.description,
+            "kind": self.kind(),
             "drawing": self.drawing,
             "bytes": self.bytes,
+            "compressed": self.compressed,
         })
     }
 }
 
-/// Read a snapshot's metadata out of its file name. The description is one `_`-free field and the
+/// Read a version's metadata out of its file name. The description is one `_`-free field and the
 /// drawing's own name is everything after it, so the drawing is recovered exactly however many
 /// separators the name parts before it had; a file that doesn't follow the pattern is still
 /// listed, with what its name didn't say left empty.
 fn parse(file: &str, path: PathBuf, bytes: u64) -> Snap {
-    let (stem, ext) = split_ext(file);
+    let compressed = file.to_ascii_lowercase().ends_with(&format!(".{COMPRESSED_EXT}"));
+    let inner = if compressed { &file[..file.len() - COMPRESSED_EXT.len() - 1] } else { file };
+    let (stem, ext) = split_ext(inner);
     let f: Vec<&str> = stem.split('_').collect();
     let epoch = f.first().copied().and_then(stamp_epoch);
     let millis = f.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
@@ -307,11 +379,13 @@ fn parse(file: &str, path: PathBuf, bytes: u64) -> Snap {
     let drawing = match (epoch.is_some(), tail.is_empty(), ext.is_empty()) {
         (true, false, false) => format!("{tail}.{ext}"),
         (true, false, true) => tail,
-        _ => file.to_string(),
+        _ => inner.to_string(),
     };
     Snap {
         file: file.to_string(),
         path,
+        inner: inner.to_string(),
+        compressed,
         epoch,
         millis,
         user: f.get(2).copied().unwrap_or_default().to_string(),
@@ -321,10 +395,12 @@ fn parse(file: &str, path: PathBuf, bytes: u64) -> Snap {
     }
 }
 
-/// Whether a file name is a snapshot's (a DXF or DWG drawing in the history folder), whatever
-/// case the extension is written in.
+/// Whether a file name is a version's (a DXF or DWG drawing in the history folder, stored plain by
+/// an older build or gzipped now), whatever case the extensions are written in.
 fn is_snapshot(file: &str) -> bool {
-    DRAWING_EXTS.contains(&split_ext(file).1.to_ascii_lowercase().as_str())
+    let lower = file.to_ascii_lowercase();
+    let plain = lower.strip_suffix(&format!(".{COMPRESSED_EXT}")).unwrap_or(&lower);
+    DRAWING_EXTS.contains(&split_ext(plain).1)
 }
 
 /// The snapshots in `dir`, newest first — the name starts with a zero-padded UTC stamp, so a plain
@@ -356,6 +432,51 @@ fn snapshots(dir: &Path) -> (Vec<Snap>, bool) {
         let _ = dir;
         (Vec::new(), false)
     }
+}
+
+// ---------------------------------------------------------------- compression
+
+/// A version's bytes, gzipped: a DXF is verbose text, so this is roughly a tenth of the size.
+#[cfg(not(target_arch = "wasm32"))]
+fn gzip(cmd: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    e.write_all(bytes).and_then(|()| e.finish()).map_err(|e| bad(cmd, format!("compressing the version: {e}")))
+}
+
+/// A version's bytes as they went in. Bounded: a version file is input, and input is hostile.
+#[cfg(not(target_arch = "wasm32"))]
+fn gunzip(cmd: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut d = GzDecoder::new(bytes).take(MAX_UNPACKED);
+    d.read_to_end(&mut out).map_err(|e| bad(cmd, format!("unpacking the version: {e}")))?;
+    Ok(out)
+}
+
+/// The bytes of a version, unpacked when it is stored gzipped.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_snap(snap: &Snap, cmd: &str) -> Result<Vec<u8>> {
+    let raw = std::fs::read(&snap.path).map_err(|e| bad(cmd, format!("{}: {e}", snap.path.display())))?;
+    if snap.compressed { gunzip(cmd, &raw) } else { Ok(raw) }
+}
+
+/// The version as a file on disk, unpacking it into the history's cache when it is stored
+/// compressed — the overlay reference reads a snapshot back through the io hooks, which take a
+/// path. Unpacked once and reused: the cache file is named after the version, so it never goes
+/// stale, and it lives inside the history folder so it travels with it.
+#[cfg(not(target_arch = "wasm32"))]
+fn materialize(snap: &Snap, cmd: &str) -> Result<PathBuf> {
+    if !snap.compressed {
+        return Ok(snap.path.clone());
+    }
+    let dir = snap.path.parent().ok_or_else(|| bad(cmd, format!("{}: no folder", snap.path.display())))?.join(CACHE_DIR);
+    let out = dir.join(&snap.inner);
+    if out.is_file() {
+        return Ok(out);
+    }
+    let bytes = read_snap(snap, cmd)?;
+    std::fs::create_dir_all(&dir).map_err(|e| bad(cmd, format!("{}: {e}", dir.display())))?;
+    store(&out.to_string_lossy(), &bytes)?;
+    Ok(out)
 }
 
 /// The snapshot a value names: a number as listed (1 = the newest), or a file name or path.
@@ -409,19 +530,24 @@ fn run_snap(s: &mut Session, p: &Value) -> Result<Value> {
     let drawing = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     // The stamp's milliseconds keep two snapshots taken in the same second apart.
     let name = format!("{stamp}_{ms:03}_{}_{}_{}", slug(&me, "-_"), description, drawing);
+    let name = format!("{name}.{COMPRESSED_EXT}");
     let target = dir.join(&name);
     let target = target.to_string_lossy().into_owned();
     // The snapshot is the drawing as it is now, unsaved changes included: it goes through the
     // same writer a save uses, never through a copy of the file on disk (which would be older).
-    let bytes = write_bytes(s, "omni-snap", &target, &SaveAs::default())?;
-    store(&target, &bytes)?;
+    let plain = dir.join(name.strip_suffix(&format!(".{COMPRESSED_EXT}")).unwrap_or(&name));
+    let bytes = write_bytes(s, "omni-snap", &plain.to_string_lossy(), &SaveAs::default())?;
+    let packed = gzip("omni-snap", &bytes)?;
+    store(&target, &packed)?;
     let (list, _) = snapshots(&dir);
     s.echo(format!("[OMNI] Snapshot saved: {name} ({} in {HISTORY_DIR}).", list.len()));
     Ok(json!({
         "file": name,
         "path": target,
         "folder": dir.to_string_lossy(),
-        "bytes": bytes.len(),
+        "bytes": packed.len(),
+        "size": bytes.len(),
+        "compressed": true,
         "time": iso(secs, ms),
         "user": me,
         "description": description,
@@ -431,6 +557,138 @@ fn run_snap(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(target_arch = "wasm32")]
 fn run_snap(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(bad("omni-snap", NO_FILES))
+}
+
+/// A save leaves a version behind. The save path calls this once the drawing's own file is
+/// written; nothing here may fail the save — a history that cannot be written is a warning on the
+/// command line, never a lost drawing.
+///
+/// Returns what was written (or `None` when the version would repeat the newest one).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn after_save(s: &mut Session, path: &str, bytes: &[u8]) -> Option<Value> {
+    let file = Path::new(path);
+    if !DRAWING_EXTS.contains(&ext_of(file).as_str()) {
+        return None;
+    }
+    match version_of_save(s, file, bytes) {
+        Ok(v) => v,
+        Err(msg) => {
+            s.echo(format!("[OMNI] The save left no version: {msg}"));
+            None
+        }
+    }
+}
+#[cfg(target_arch = "wasm32")]
+pub fn after_save(_s: &mut Session, _path: &str, _bytes: &[u8]) -> Option<Value> {
+    None
+}
+
+/// The version file a save writes, or `None` when it would be a copy of the newest.
+#[cfg(not(target_arch = "wasm32"))]
+fn version_of_save(s: &mut Session, file: &Path, bytes: &[u8]) -> std::result::Result<Option<Value>, String> {
+    let dir = history_dir(&folder_of(file));
+    let (list, _) = snapshots(&dir);
+    let packed = gzip("omni-snap", bytes).map_err(|e| e.to_string())?;
+    // An edit and its undo, or a restore of the newest version, come back to what the history
+    // already holds: that is not a change the user made since the last save, so it leaves no
+    // version behind. A compressed version is compared as it is stored (gzip is deterministic),
+    // a plain one left by an older build as it is.
+    if let Some(newest) = list.first() {
+        let same = if newest.compressed {
+            newest.bytes as usize == packed.len() && std::fs::read(&newest.path).is_ok_and(|b| b == packed)
+        } else {
+            read_snap(newest, "omni-snap").is_ok_and(|b| b == bytes)
+        };
+        if same {
+            return Ok(None);
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let (stamp, secs, ms) = now();
+    let drawing = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = format!("{stamp}_{ms:03}_{}_{}_{}.{COMPRESSED_EXT}", slug(&user(), "-_"), SAVE_DESCRIPTION, drawing);
+    let target = dir.join(&name);
+    store(&target.to_string_lossy(), &packed).map_err(|e| e.to_string())?;
+    s.echo(format!("[OMNI] Version saved: {name} ({} → {}).", size(bytes.len() as u64), size(packed.len() as u64)));
+    Ok(Some(json!({
+        "file": name,
+        "path": target.to_string_lossy(),
+        "folder": dir.to_string_lossy(),
+        "time": iso(secs, ms),
+        "bytes": packed.len(),
+        "size": bytes.len(),
+        "description": SAVE_DESCRIPTION,
+        "kind": "save",
+        "versions": snapshots(&dir).0.len(),
+    })))
+}
+
+/// OMNI-VERSIONS: what the Drawing History palette lists, without the command-line echo and with
+/// the kind filter the palette offers. A drawing that was never saved has no history — that is an
+/// empty list rather than an error, so the palette still opens on an untitled drawing.
+fn run_versions(s: &mut Session, p: &Value) -> Result<Value> {
+    let kind = str_param(p, "kind").unwrap_or("all").trim().to_ascii_lowercase();
+    if !["all", "save", "milestone"].contains(&kind.as_str()) {
+        return Err(bad("omni-versions", format!("`kind` must be all, save or milestone, not \"{kind}\"")));
+    }
+    let limit = p.get("limit").and_then(Value::as_u64).map(|l| l as usize).unwrap_or(200).min(MAX_SNAPSHOTS);
+    let (folder, list, capped) = match history_of(s, "omni-versions", p) {
+        Ok(v) => v,
+        Err(EngineError::BadParams { msg, .. }) if str_param(p, "path").is_none() => {
+            return Ok(json!({ "folder": Value::Null, "count": 0, "capped": false, "versions": [], "note": msg }));
+        }
+        Err(e) => return Err(e),
+    };
+    let versions: Vec<Snap> = list.into_iter().filter(|x| kind == "all" || x.kind() == kind).collect();
+    Ok(json!({
+        "folder": folder.to_string_lossy(),
+        "count": versions.len(),
+        "capped": capped,
+        "versions": versions.iter().take(limit).enumerate().map(|(i, x)| x.json(i + 1)).collect::<Vec<_>>(),
+    }))
+}
+
+/// OMNI-RESTORE: put a version back into the drawing. The drawing's own file is not touched, the
+/// step undoes like any other change, and the next save writes it and leaves a version of its own,
+/// so looking at an old revision costs nothing: the timeline carries on from it.
+fn run_restore(s: &mut Session, p: &Value) -> Result<Value> {
+    let want = p
+        .get("snapshot")
+        .filter(|v| !v.is_null())
+        .cloned()
+        .ok_or_else(|| bad("omni-restore", "say which version to restore: `snapshot`, a listed number or a file name"))?;
+    let (_dir, list, _) = history_of(s, "omni-restore", p)?;
+    let snap = chosen(&list, &want).ok_or_else(|| bad("omni-restore", format!("no version {want}")))?;
+    if s.state()?.block_edit.is_some() {
+        return Err(bad("omni-restore", "close the Block Editor first: it is editing a block of this drawing"));
+    }
+    let hooks = io().ok_or_else(|| bad("omni-restore", "file formats are not available in this build"))?;
+    let bytes = read_snap(&snap, "omni-restore")?;
+    let restored = (hooks.read)(&bytes, &snap.inner).map_err(|e| bad("omni-restore", format!("{}: {e}", snap.file)))?;
+    let st = s.state_mut()?;
+    let before = crate::Snapshot { label: "restore version".to_string(), doc: st.drawing().clone(), selection: st.selection.clone() };
+    st.doc = Arc::new(restored);
+    st.selection.clear();
+    // A layout the restored version doesn't have sends the view back to the model tab, and the
+    // tiled viewports belong to the version that had them.
+    if let cadcraft_doc::Space::Paper(name) = &st.space
+        && !st.doc.layouts.iter().any(|l| &l.name == name)
+    {
+        st.space = cadcraft_doc::Space::Model;
+    }
+    st.mspace = None;
+    st.tiles = Default::default();
+    st.revision += 1;
+    st.push_undo(before);
+    s.echo(format!("[OMNI] Restored {}. The file on disk is untouched; UNDO goes back.", snap.file));
+    Ok(json!({
+        "restored": snap.file,
+        "time": snap.time(),
+        "description": snap.description,
+        "kind": snap.kind(),
+        "dirty": true,
+        "versions": list.len(),
+    }))
 }
 
 /// The listing OMNI-LOG and OMNI-DIFF show.
@@ -449,9 +707,12 @@ fn echo_list(s: &mut Session, dir: &Path, list: &[Snap], limit: usize) {
     }
 }
 
-/// Open a snapshot as a drawing of its own (OMNI-LOG).
+/// Open a snapshot as a drawing of its own (OMNI-LOG). A version stored gzipped is opened from
+/// the history's cache, where it is unpacked once; the history it belongs to stays the drawing's
+/// own (`history_host`), so browsing the timeline carries on in the opened revision.
 fn open_snapshot(s: &mut Session, snap: &Snap) -> Result<Value> {
-    s.execute("open", &json!({ "path": snap.path.to_string_lossy() }))?;
+    let file = materialize(snap, "omni-log")?;
+    s.execute("open", &json!({ "path": file.to_string_lossy() }))?;
     s.echo(format!("[OMNI] Opened {}.", snap.file));
     Ok(json!(snap.file))
 }
@@ -497,13 +758,15 @@ fn overlays(d: &Drawing) -> Vec<String> {
 }
 
 /// The path an overlay stores for `snap`: relative to the drawing's folder when the snapshot is
-/// where OMNI-SNAP put it, written with `/` so the drawing resolves it on every platform.
+/// inside its history folder or the folder's cache, written with `/` so the drawing resolves it
+/// on every platform.
 fn overlay_path(host: &Path, snap: &Path) -> String {
     let dir = history_dir(&folder_of(host));
-    if let Some(name) = snap.file_name()
-        && dir.join(name) == snap
-    {
-        return format!("{HISTORY_DIR}/{}", name.to_string_lossy());
+    if let Ok(rel) = snap.strip_prefix(&dir) {
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if !rel.is_empty() {
+            return format!("{HISTORY_DIR}/{rel}");
+        }
     }
     snap.to_string_lossy().into_owned()
 }
@@ -523,9 +786,10 @@ fn attach_overlay(s: &mut Session, snap: &Snap, color: Color) -> Result<(String,
         }
     } else {
         let host = s.state()?.path.clone();
+        let file = materialize(snap, "omni-diff")?;
         let path = match host.as_deref() {
-            Some(h) => overlay_path(Path::new(h), &snap.path),
-            None => snap.path.to_string_lossy().into_owned(),
+            Some(h) => overlay_path(Path::new(h), &file),
+            None => file.to_string_lossy().into_owned(),
         };
         s.execute("xattach", &json!({ "path": path, "name": name, "overlay": true, "at": [0.0, 0.0] }))?;
     }
@@ -581,8 +845,8 @@ fn overlay_handles(d: &Drawing, space: &cadcraft_doc::Space) -> Vec<cadcraft_doc
 #[cfg(not(target_arch = "wasm32"))]
 fn report(s: &Session, snap: &Snap) -> Result<Value> {
     let hooks = io().ok_or_else(|| bad("omni-diff", "file formats are not available in this build"))?;
-    let bytes = std::fs::read(&snap.path).map_err(|e| bad("omni-diff", format!("{}: {e}", snap.path.display())))?;
-    let other = (hooks.read)(&bytes, &snap.path.to_string_lossy()).map_err(|e| bad("omni-diff", format!("{}: {e}", snap.file)))?;
+    let bytes = read_snap(snap, "omni-diff")?;
+    let other = (hooks.read)(&bytes, &snap.inner).map_err(|e| bad("omni-diff", format!("{}: {e}", snap.file)))?;
     let st = s.state()?;
     let (cur, space) = (st.doc.clone(), st.space.clone());
     let mut d = compare::diff(&cur, &other, &space);

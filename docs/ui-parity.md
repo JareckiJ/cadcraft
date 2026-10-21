@@ -160,6 +160,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Tool Sets palette (Drafting, Modeling, … with flyouts) | yes | yes for 2D groups |
 | Properties Inspector, Quick Properties | yes | yes (every control acts or is visibly unavailable, #182); block references show read-only Position X/Y/Z from their stored insertion point; coordinate editing is still missing |
 | Layer Properties Manager (filters, states, VP overrides) | yes | yes |
+| Drawing History palette (versions a save leaves behind, milestones, open/compare/restore) | — (the OMNI.lsp toolkit this replaces worked in the folder, not in a palette) | yes, docked palette (Window ▸ Drawing History) |
 | Blocks palette, Content | yes | Blocks window (click to insert, #28) |
 | Status bar toggles | ~25 | most toggles; Annotation Visibility and Workspace do nothing |
 | ViewCube | interactive 3D | clickable for 2D (Top/Home → extents); dragging does nothing (#7) |
