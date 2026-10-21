@@ -330,7 +330,7 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             ]
         };
-        if let Some(bytes) = installed(candidates).iter().find_map(|path| read_capped(path, MAX_UI_FONT_BYTES)) {
+        if let Some(bytes) = installed(candidates).find_map(|path| read_capped(&path, MAX_UI_FONT_BYTES)) {
             fonts.font_data.insert("system-ui".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
             if let Some(f) = fonts.families.get_mut(&FontFamily::Proportional) {
                 f.insert(0, "system-ui".into());
@@ -424,16 +424,21 @@ fn read_capped(path: &std::path::Path, max: u64) -> Option<Vec<u8>> {
 /// fonts (NixOS, Guix and Flatpak keep them outside /usr/share/fonts; the fonts crate looks where
 /// fontconfig does, #674).
 #[cfg(not(target_arch = "wasm32"))]
-fn installed(candidates: &[&str]) -> Vec<std::path::PathBuf> {
-    let mut out: Vec<std::path::PathBuf> = candidates.iter().map(std::path::PathBuf::from).filter(|p| p.is_file()).collect();
-    for stem in candidates.iter().filter_map(|c| std::path::Path::new(c).file_stem()?.to_str()) {
-        if let Some(p) = cadcraft_fonts::ttf::installed_font_path(stem)
-            && !out.contains(&p)
-        {
-            out.push(p);
-        }
-    }
-    out
+fn installed<'a>(candidates: &'a [&'a str]) -> impl Iterator<Item = std::path::PathBuf> + 'a {
+    // The usual places first: the font database is only asked when a caller needs more than they
+    // hold, because its first use walks every font directory on the machine.
+    let direct = candidates.iter().map(std::path::PathBuf::from).filter(|p| p.is_file());
+    let mut seen: Vec<std::path::PathBuf> = Vec::new();
+    let by_stem =
+        candidates.iter().filter_map(|c| std::path::Path::new(c).file_stem()?.to_str()).filter_map(cadcraft_fonts::ttf::installed_font_path).filter(
+            move |p| {
+                !candidates.iter().any(|c| std::path::Path::new(c) == p) && !seen.contains(p) && {
+                    seen.push(p.clone());
+                    true
+                }
+            },
+        );
+    direct.chain(by_stem)
 }
 
 /// An installed font with Chinese characters, for the Chinese interface; fonts are never bundled
@@ -461,7 +466,7 @@ pub fn cjk_font() -> Option<&'static std::path::Path> {
                         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
                     ]
                 };
-                installed(candidates).into_iter().next()
+                installed(candidates).next()
             })
             .as_deref()
     }
@@ -504,7 +509,7 @@ pub fn arabic_font() -> Option<&'static std::path::Path> {
                         "/usr/share/fonts/truetype/kacst/KacstOne.ttf",
                     ]
                 };
-                installed(candidates).into_iter().next()
+                installed(candidates).next()
             })
             .as_deref()
     }
@@ -532,7 +537,7 @@ fn japanese_font() -> Option<&'static std::path::Path> {
                         "/usr/share/fonts/vl-gothic/VL-PGothic-Regular.ttf",
                     ]
                 };
-                installed(candidates).into_iter().next()
+                installed(candidates).next()
             })
             .as_deref()
     }
