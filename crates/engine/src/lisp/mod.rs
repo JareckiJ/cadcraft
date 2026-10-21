@@ -58,6 +58,9 @@ pub struct Env {
     pub order: Option<(usize, Arc<Vec<Handle>>)>,
     /// `tblnext`'s place in each table.
     pub tblnext: HashMap<String, usize>,
+    /// A block definition `entmake` has begun (a BLOCK list) and not yet ended (ENDBLK): the
+    /// entities made meanwhile go into it, numbered when it ends.
+    pub pending_block: Option<(cadcraft_doc::Block, Vec<cadcraft_doc::Entity>)>,
     /// The command history's length after LISP last printed a line: when something else wrote since
     /// (a prompt, a command's echo), a leading newline only ends that line.
     pub printed_at: Option<usize>,
@@ -75,6 +78,7 @@ impl Default for Env {
             deleted: HashMap::new(),
             order: None,
             tblnext: HashMap::new(),
+            pending_block: None,
             printed_at: None,
         };
         builtins::install(&mut e);
@@ -611,3 +615,6 @@ fn file_key(name: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod block_tests;

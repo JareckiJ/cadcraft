@@ -334,10 +334,28 @@ fn entity_from_list(ctx: &Ctx<'_>, list: &Value) -> Result<(String, cadcraft_doc
 pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     arity(&a, 0, 1)?;
     let Some(list) = a.first().filter(|v| !v.is_nil()) else { return Ok(Flow::Value(Value::Nil)) };
+    // A block definition is a BLOCK list, its entities, then an ENDBLK list (#1662).
+    match list_to_groups(list) {
+        Ok((k, tags)) if k == "BLOCK" => return Ok(Flow::Value(begin_block(ctx, list, &tags))),
+        Ok((k, _)) if k == "ENDBLK" => return Ok(Flow::Value(end_block(ctx))),
+        _ => {}
+    }
     let (_, common, kind) = match entity_from_list(ctx, list) {
         Ok(x) => x,
         Err(_) => return Ok(Flow::Value(Value::Nil)),
     };
+    if let Some((_, ents)) = ctx.env.pending_block.as_mut() {
+        // Into the block being defined; it is added to the drawing, with handles, at ENDBLK.
+        if ents.len() >= MAX_PENDING_BLOCK_ENTITIES {
+            return Ok(Flow::Value(Value::Nil));
+        }
+        let layer = common.layer.clone();
+        ents.push(Entity { handle: Handle(0), common, kind });
+        if let Ok(d) = ctx.s.doc_mut() {
+            d.ensure_layer(&layer);
+        }
+        return Ok(Flow::Value(list.clone()));
+    }
     let space = ctx.s.space();
     let Ok(d) = ctx.s.doc_mut() else { return Ok(Flow::Value(Value::Nil)) };
     // A layer entmake names that doesn't exist yet is created.
@@ -349,6 +367,66 @@ pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
         }
         Err(_) => Ok(Flow::Value(Value::Nil)),
     }
+}
+
+/// `entmake` of a BLOCK list (2 name, 70 flags, 10 base point, 4 description): begin a block
+/// definition. Flag 1 makes an anonymous block (`*U…`, named at ENDBLK); xrefs (flag 4) can't be
+/// made this way. nil, and the definition already begun kept, when one is open.
+fn begin_block(ctx: &mut Ctx<'_>, list: &Value, tags: &[Tag]) -> Value {
+    if ctx.env.pending_block.is_some() {
+        return Value::Nil;
+    }
+    let group = |code: i32| tags.iter().find(|t| t.code == code);
+    let flags = group(70).map(Tag::i64).unwrap_or(0);
+    let name = group(2).map(|t| t.str().trim().to_string()).unwrap_or_default();
+    let anonymous = flags & 1 != 0;
+    if flags & 4 != 0 || !(anonymous && name.starts_with('*') || crate::cmd::blocks::valid_block_name(&name)) {
+        return Value::Nil;
+    }
+    let mut b = cadcraft_doc::Block::new(&name);
+    b.anonymous = anonymous;
+    b.base = cadcraft_geom::Vec3::new(
+        group(10).map(Tag::f64).unwrap_or(0.0),
+        group(20).map(Tag::f64).unwrap_or(0.0),
+        group(30).map(Tag::f64).unwrap_or(0.0),
+    );
+    if !b.base.is_finite() {
+        return Value::Nil;
+    }
+    b.description = group(4).map(Tag::str).unwrap_or_default();
+    ctx.env.pending_block = Some((b, Vec::new()));
+    list.clone()
+}
+
+/// The most entities one `entmake` block definition takes (a runaway loop can't fill memory).
+const MAX_PENDING_BLOCK_ENTITIES: usize = 1_000_000;
+
+/// `entmake` of an ENDBLK list: add the block begun to the drawing (redefining one of the same
+/// name) and return its name, generated for an anonymous block. nil without one begun, or when
+/// its entities reference the block itself.
+fn end_block(ctx: &mut Ctx<'_>) -> Value {
+    let Some((mut b, ents)) = ctx.env.pending_block.take() else { return Value::Nil };
+    let Ok(d) = ctx.s.doc_mut() else { return Value::Nil };
+    if b.anonymous {
+        let prefix: String = b.name.chars().take(2).collect();
+        b.name = d.anonymous_block_name(if prefix.chars().count() == 2 { &prefix } else { "*U" });
+    } else {
+        // Block names are case-insensitive: a redefinition keeps the existing name.
+        if let Some(existing) = d.blocks.keys().find(|k| k.eq_ignore_ascii_case(&b.name)) {
+            b.name = existing.clone();
+        }
+        if crate::cmd::blocks::references_block(d, &ents, &b.name) {
+            return Value::Nil;
+        }
+    }
+    for mut e in ents {
+        e.handle = d.new_handle();
+        b.entities.push(e);
+    }
+    let name = b.name.clone();
+    d.blocks.insert(name.clone(), Arc::new(b));
+    ctx.s.touch();
+    Value::str(&name)
 }
 
 pub fn entmod(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
