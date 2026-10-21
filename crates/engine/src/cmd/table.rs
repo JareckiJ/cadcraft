@@ -1,11 +1,15 @@
 //! TABLE: create tables and edit cells, rows, columns and merges; cell styles, formulas
 //! (`formula`), TABLEDIT and TABLEEXPORT (`cells`).
 
+mod borders;
 mod breaks;
 mod cells;
 mod clip;
-mod content;
+mod format;
 pub(crate) mod formula;
+mod pick;
+mod size;
+mod tinsert;
 
 pub(crate) use cells::{recalc, tablestyle_cell_style};
 
@@ -39,7 +43,10 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
     .into_iter()
     .chain(cells::specs())
-    .chain(content::specs())
+    .chain(tinsert::specs())
+    .chain(borders::specs())
+    .chain(size::specs())
+    .chain(format::specs())
     .chain(clip::specs())
     .chain(breaks::specs())
     .collect()

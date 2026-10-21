@@ -335,7 +335,7 @@ fn cellformat_at_the_command_line() {
     s.cmdline("").unwrap();
     s.cmdline("90").unwrap();
     let t = table(&s, &h);
-    assert!(t.cells.iter().flatten().all(|c| c.look.is_some_and(|l| l.align == Some(2) && l.rotation == Some(90))));
+    assert!(t.cells.iter().flatten().all(|c| c.look.is_some_and(|l| l.align == Some(2) && l.rotation == Some(cadcraft_doc::CellTurn::Up))));
     assert!(t.cells.iter().flatten().all(|c| c.text_height == Some(2.5)));
 }
 

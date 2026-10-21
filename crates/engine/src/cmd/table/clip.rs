@@ -5,7 +5,8 @@
 use cadcraft_doc::{Table, TableCell};
 use serde_json::{Value, json};
 
-use super::{MAX_COLS, MAX_ROWS, anchors, cell_at, edit, find, formula, normalize, usize_param};
+use super::breaks::parse_csv;
+use super::{MAX_ROWS, anchors, cell_at, edit, find, formula, normalize, usize_param};
 use crate::Result;
 use crate::Session;
 use crate::cmd::{CommandSpec, bad, bool_or, str_param};
@@ -67,56 +68,15 @@ fn tsv_field(cell: &TableCell) -> String {
     if t.contains(['\t', '\n', '\r', '"']) { format!("\"{}\"", t.replace('"', "\"\"")) } else { t }
 }
 
-/// Tab-separated rows (quoted fields may hold tabs and line breaks) as cell texts; a trailing
-/// line break ends the last row. At most [`MAX_ROWS`] × [`MAX_COLS`].
+/// Tab-separated rows (quoted fields may hold tabs and line breaks) as cell texts, a line break
+/// inside a field as the cell text's `\P`. At most [`MAX_ROWS`] × [`MAX_COLS`].
 fn parse_tsv(text: &str) -> Vec<Vec<String>> {
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut row: Vec<String> = Vec::new();
-    let mut field = String::new();
-    let mut chars = text.chars().take(MAX_PASTE_TEXT).peekable();
-    let mut quoted = false;
-    let mut at_start = true;
-    while let Some(ch) = chars.next() {
-        if quoted {
-            match ch {
-                '"' if chars.peek() == Some(&'"') => {
-                    chars.next();
-                    field.push('"');
-                }
-                '"' => quoted = false,
-                '\r' => {}
-                '\n' => field.push_str("\\P"),
-                c => field.push(c),
-            }
-            continue;
+    let text: String = text.chars().take(MAX_PASTE_TEXT).collect();
+    let mut rows = parse_csv(&text, '\t');
+    for field in rows.iter_mut().flatten() {
+        if field.contains(['\r', '\n']) {
+            *field = field.replace("\r\n", "\\P").replace(['\r', '\n'], "\\P");
         }
-        match ch {
-            '"' if at_start => quoted = true,
-            '\t' => {
-                row.push(std::mem::take(&mut field));
-                at_start = true;
-                continue;
-            }
-            '\r' => {}
-            '\n' => {
-                row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
-                if rows.len() >= MAX_ROWS {
-                    break;
-                }
-                at_start = true;
-                continue;
-            }
-            c => field.push(c),
-        }
-        at_start = false;
-    }
-    if !field.is_empty() || !row.is_empty() {
-        row.push(field);
-        rows.push(row);
-    }
-    for r in &mut rows {
-        r.truncate(MAX_COLS);
     }
     rows
 }
@@ -227,6 +187,7 @@ fn run_clear(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::MAX_COLS;
     use super::*;
 
     #[test]

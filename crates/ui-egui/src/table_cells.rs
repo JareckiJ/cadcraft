@@ -614,7 +614,7 @@ mod tests {
         act(&mut a, "borders:outside:0.7");
         let c = cells(&a, h);
         let l = c[1][0].look.unwrap_or_default();
-        assert_eq!((l.align, l.rotation), (Some(5), Some(90)));
+        assert_eq!((l.align, l.rotation), (Some(5), Some(cadcraft_doc::CellTurn::Up)));
         assert!(c[0][0].look.is_none() && c[1][2].look.is_none(), "outside the range");
         let top = c[1][0].edges.and_then(|e| e.top).map(|b| b.lineweight);
         assert_eq!(top, Some(cadcraft_doc::Lineweight::Mm100(70)));

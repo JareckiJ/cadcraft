@@ -86,6 +86,62 @@ impl CellEdges {
     }
 }
 
+/// A quarter turn of a cell's text: it reads along the cell, upwards, upside down or downwards.
+/// Stored in files as degrees (0, 90, 180, 270); any other number reads as no override.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u16", into = "u16")]
+pub enum CellTurn {
+    #[default]
+    Horizontal,
+    /// Reading upwards (90°).
+    Up,
+    UpsideDown,
+    /// Reading downwards (270°).
+    Down,
+}
+
+impl CellTurn {
+    /// The turn for `degrees` (0, 90, 180 or 270).
+    pub fn from_degrees(degrees: u16) -> Option<CellTurn> {
+        match degrees {
+            0 => Some(CellTurn::Horizontal),
+            90 => Some(CellTurn::Up),
+            180 => Some(CellTurn::UpsideDown),
+            270 => Some(CellTurn::Down),
+            _ => None,
+        }
+    }
+
+    pub fn degrees(self) -> u16 {
+        match self {
+            CellTurn::Horizontal => 0,
+            CellTurn::Up => 90,
+            CellTurn::UpsideDown => 180,
+            CellTurn::Down => 270,
+        }
+    }
+}
+
+impl TryFrom<u16> for CellTurn {
+    type Error = String;
+
+    fn try_from(degrees: u16) -> Result<Self, String> {
+        CellTurn::from_degrees(degrees).ok_or_else(|| format!("invalid rotation {degrees} (0, 90, 180, 270)"))
+    }
+}
+
+impl From<CellTurn> for u16 {
+    fn from(t: CellTurn) -> u16 {
+        t.degrees()
+    }
+}
+
+/// A rotation read leniently: a number that is no quarter turn leaves the cell style's.
+fn lenient_turn<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<CellTurn>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| v.as_u64()).and_then(|r| u16::try_from(r).ok()).and_then(CellTurn::from_degrees))
+}
+
 /// A cell's own look over its cell style's: alignment, margins and text rotation. `None`
 /// values follow the cell style.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -100,9 +156,9 @@ pub struct CellLook {
     /// Margin across the text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub margin_v: Option<f64>,
-    /// Text rotation in degrees: 0, 90 (reading upwards), 180 or 270.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rotation: Option<u16>,
+    /// Text rotation.
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "lenient_turn")]
+    pub rotation: Option<CellTurn>,
 }
 
 impl CellLook {
@@ -112,14 +168,14 @@ impl CellLook {
     }
 
     /// A copy with every value in range (hostile input from files and JSON): alignments
-    /// 1..=9, finite non-negative margins, quarter-turn rotations.
+    /// 1..=9, finite non-negative margins.
     pub fn sanitized(self) -> CellLook {
         let margin = |m: Option<f64>| m.filter(|v| v.is_finite() && *v >= 0.0).map(|v| v.min(1e9));
         CellLook {
             align: self.align.filter(|a| (1..=9).contains(a)),
             margin_h: margin(self.margin_h),
             margin_v: margin(self.margin_v),
-            rotation: self.rotation.filter(|r| [0, 90, 180, 270].contains(r)),
+            rotation: self.rotation,
         }
     }
 }

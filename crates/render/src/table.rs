@@ -338,7 +338,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             l.align.unwrap_or(cs.align).clamp(1, 9),
             l.margin_h.map_or(cs.margin_h, |m| m * k),
             l.margin_v.map_or(cs.margin_v, |m| m * k),
-            l.rotation.unwrap_or(0),
+            l.rotation.map_or(0, cadcraft_doc::CellTurn::degrees),
         )
     };
     for a in &anchors {
