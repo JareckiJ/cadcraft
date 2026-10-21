@@ -114,10 +114,10 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Stretch grips per object type | yes | lines (midpoint moves), arcs (start/mid/end), ellipses (axes), polylines (vertices; segment midpoints move or reshape the bulge), dimensions (text and definition points), MLEADER, viewport, wipeout, spline (`grips.rs:79-270`) |
 | Text/MText grips | position, width, column grips | move the whole object |
 | Hot-grip modes with Space/Enter cycling | Stretch, Move, Rotate, Scale, Mirror | yes (`canvas.rs:58-67`) |
-| Hot-grip options: Base point, Copy, Undo, Reference, eXit | yes | **advertised in the prompt but not parsed**; the engine's JSON grip commands accept `copy`, the UI never passes it |
-| Several hot grips at once (Shift-click) | yes | **no** (one handle) |
-| Multifunctional grip hover menus (Add Vertex, Remove Vertex, Convert to Arc, Lengthen …) | yes | **no** |
-| Grip dimensional input (length/angle fields) | yes | no |
+| Hot-grip options: Base point, Copy, Undo, Reference, eXit | yes | yes (`griphot.rs`, Base point, Copy, Undo, Reference, eXit parsed and tested #425) |
+| Several hot grips at once (Shift-click) | yes | yes (Shift-click toggles hot grips, STRETCH moves all hot grips together, #425) |
+| Multifunctional grip hover menus (Add Vertex, Remove Vertex, Convert to Arc, Lengthen …) | yes | yes on right-click (`canvas.rs:2389`), hover menu pending |
+| Grip dimensional input (length/angle fields) | yes | yes (`grip_dyn.rs`, DYNDIGRIP / DYNDIVIS, length and angle fields while stretching) |
 | Dynamic block grips | yes | no (no dynamic blocks) |
 | Grip appearance (GRIPSIZE, colours, hover) | yes | GRIPSIZE, GRIPS and GRIPOBJLIMIT honoured (Options ▸ Selection); no grip colours |
 
