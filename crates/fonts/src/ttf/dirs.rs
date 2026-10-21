@@ -238,7 +238,9 @@ pub(super) fn read_config(path: &Path) -> Option<Include> {
     (xml.len() as u64 <= MAX_CONFIG_BYTES).then_some(Include::File(xml))
 }
 
-#[cfg(test)]
+/// The tests build configurations from POSIX paths such as `/usr/share/fonts`, which only a Unix
+/// `Path` takes as absolute, so they run on Unix only; the resolver itself builds everywhere.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
