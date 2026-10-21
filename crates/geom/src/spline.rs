@@ -135,15 +135,16 @@ impl Spline {
 
     /// The box round the curve, from as many samples as `tessellate` takes at a tolerance
     /// relative to the spline's own size (1e-3 of its control box's diagonal), spread over the
-    /// knot spans in proportion to their length with at least four per span (its ends included),
+    /// knot spans in proportion to their length with at least eight per span (its ends included),
     /// so a narrow span, which one grid over the whole domain can step over entirely, is seen
-    /// too. The box can fall short of an extreme by the sag between two samples, far under 1% of
-    /// the spline's size, whatever the drawing's units (zoom extents and selection pre-filtering
+    /// too. The box can fall short of an extreme by the sag between two samples: under 1e-3 of
+    /// the spline's size where the budget sets the count, under 1% in a very narrow span held
+    /// to the eight-segment floor, whatever the drawing's units (zoom extents and selection pre-filtering
     /// tolerate that; the sampled box was never exact). A fixed absolute tolerance sampled the
     /// 4000-point cap on every spline of a drawing in millimetres, a third of the time a large
     /// drawing took to open (#1076); a typical spline now takes a few hundred evaluations. The
-    /// cap holds over all spans: the floor drops to two or three per span when four would exceed
-    /// it, and a spline with more spans than two each allow is sampled on the grid. A degree-1
+    /// cap holds over all spans: the floor drops below eight per span when that would exceed it,
+    /// and a spline with more spans than two each allow is sampled on the grid. A degree-1
     /// spline is its control polygon, so its control box is exact; a degenerate spline gets its
     /// control box, which contains the curve (the box of the finite control points when one is
     /// not finite: `hull` skips it, but it would poison every sample).
@@ -162,7 +163,7 @@ impl Spline {
             return Bounds2::from_points(self.samples(MAX_SAMPLES));
         }
         let (lo, hi) = self.domain();
-        let floor = 4.min(MAX_SAMPLES / spans);
+        let floor = 8.min(MAX_SAMPLES / spans);
         // The span's share of the domain first: huge knots (1e308, from a hostile edit) would
         // overflow `budget * (b - a)` to infinity and the cast to a boundless count.
         let segments = |budget: usize, (a, b): (f64, f64)| floor.max((budget as f64 * ((b - a) / (hi - lo))) as usize).min(MAX_SAMPLES);
@@ -420,6 +421,27 @@ mod tests {
     fn narrow_span() -> Spline {
         let control = (0..7).map(|i| Vec2::new(i as f64, if i == 3 { 100.0 } else { 0.0 })).collect();
         Spline { degree: 2, knots: vec![0.0, 0.0, 0.0, 0.5003, 0.5003, 0.5004, 0.5004, 1.0, 1.0, 1.0], control, ..Spline::default() }
+    }
+
+    /// A span held to the floor samples its peak off the grid: the sag stays under 1% of the
+    /// spline's size, which is what `bounds` promises for it.
+    #[test]
+    fn an_off_grid_peak_in_a_narrow_span_is_within_a_percent() {
+        let mut s = narrow_span();
+        // y(s) = 200 s (1 - s) + 30 s² on the narrow span: its maximum is at s = 10 / 17, between
+        // the samples of an eight-segment grid.
+        s.control[4].y = 30.0;
+        assert!(s.is_valid());
+        let (a, b) = (0.5003, 0.5004);
+        let peak = (0..=10_000).map(|i| s.eval(a + (b - a) * i as f64 / 10_000.0)).fold(Vec2::ZERO, |m, p| if p.y > m.y { p } else { m });
+        assert!(peak.y > 58.0 && peak.y < 59.0, "{peak:?}");
+        let hull = Bounds2::from_points(s.control.iter().copied());
+        let diag = hull.min.dist(hull.max);
+        let got = s.bounds();
+        assert!(got.max.y <= peak.y + 1e-9 * diag && got.max.y >= peak.y - 1e-2 * diag, "{got:?} vs peak {peak:?}");
+        // Four segments, the floor before, missed it by more than that.
+        let four = (0..=4).map(|i| s.eval(a + (b - a) * i as f64 / 4.0)).fold(f64::MIN, |m, p| m.max(p.y));
+        assert!(four < peak.y - 1e-2 * diag, "{four} vs {peak:?}");
     }
 
     #[test]
