@@ -250,7 +250,12 @@ impl Field {
     /// The value to keep for `v`: numbers formatted by the field's format.
     fn make_value(&self, d: &Drawing, v: Val) -> FieldValue {
         match v {
-            Val::Text(text) => FieldValue::Text { text: format_text(&text, self.format().unwrap_or("")) },
+            Val::Text(text) => {
+                // A case change can lengthen the text (`İ` lower-cases to two characters).
+                let mut capped = String::new();
+                push_capped(&mut capped, &format_text(&text, self.format().unwrap_or("")));
+                FieldValue::Text { text: capped }
+            }
             Val::Num(n) => {
                 let n = if n == 0.0 { 0.0 } else { n };
                 match self.format() {
@@ -934,5 +939,9 @@ mod tests {
         }
         f.update(&d, Handle(1));
         assert_eq!(f.value.text().len(), MAX_FIELD_TEXT);
+        // Lower-casing `İ` (2 bytes) gives 3 bytes: the formatted text is capped too.
+        let lower = field("AcObjProp", "\\AcObjProp Object(%<\\_ObjIdx 0>%).Name \\f \"%tc2\"", Vec::new());
+        let v = lower.make_value(&d, Val::Text("İ".repeat(MAX_FIELD_TEXT / 2)));
+        assert!(v.text().len() <= MAX_FIELD_TEXT && v.text().starts_with('i'), "{}", v.text().len());
     }
 }
