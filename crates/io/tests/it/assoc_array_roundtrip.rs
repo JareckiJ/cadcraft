@@ -200,3 +200,27 @@ fn path_arrays_too_large_for_xdata_are_saved_as_plain_blocks() {
     // The other array in the drawing keeps its parameters.
     assert!(back.block("*U2").unwrap().array.is_some());
 }
+
+#[test]
+fn the_xdata_budget_counts_escaped_characters() {
+    // Every item replaced by a block with a 40-character CJK name: about 9 KB of UTF-8 JSON, but
+    // each character is written as a 7-byte \U+XXXX escape, so the xdata passes the budget.
+    let name: String = "图块".repeat(20);
+    let (mut d, mut p) = path_array_drawing(vec![Vec2::ZERO, Vec2::new(100.0, 0.0)], 60);
+    let mut other = Block::new(&name);
+    let h = d.new_handle();
+    other.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) })));
+    d.blocks.insert(name.clone(), Arc::new(other));
+    p.replaced = (0..60).map(|i| ReplacedItem { i, j: 0, level: 0, block: name.clone() }).collect();
+    let json_bytes = serde_json::to_string(&p).unwrap().len();
+    assert!(json_bytes < 12_000, "{json_bytes}");
+    let mut arr = Block::new("*U3");
+    for e in p.item_entities(&mut d).unwrap() {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p);
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 60);
+}
