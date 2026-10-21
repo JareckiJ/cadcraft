@@ -71,8 +71,14 @@ impl Spline {
         if !self.is_valid() {
             return self.control.first().copied().unwrap_or_default();
         }
-        let n = self.control.len() - 1;
         let (lo, hi) = self.domain();
+        self.eval_valid(t, lo, hi)
+    }
+
+    /// `eval` on a spline `is_valid` has accepted, given its `domain()`, so sampling many points
+    /// validates once (`is_valid` walks the knot vector).
+    fn eval_valid(&self, t: f64, lo: f64, hi: f64) -> Vec2 {
+        let n = self.control.len().saturating_sub(1);
         let t = t.clamp(lo, hi);
         let span = find_span(n, self.degree, t, &self.knots);
         let (mut nb, mut left, mut right) = ([0.0; MAX_STACK_DEGREE + 1], [0.0; MAX_STACK_DEGREE + 1], [0.0; MAX_STACK_DEGREE + 1]);
@@ -106,7 +112,7 @@ impl Spline {
         let poly: f64 = self.control.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
         let n = ((poly / tol.max(1e-9)).sqrt() * 2.0).clamp(8.0, 2000.0) as usize * self.degree.max(1);
         let n = n.min(4000);
-        (0..=n).map(|i| self.eval(lo + (hi - lo) * i as f64 / n as f64)).collect()
+        (0..=n).map(|i| self.eval_valid(lo + (hi - lo) * i as f64 / n as f64, lo, hi)).collect()
     }
 
     pub fn bounds(&self) -> Bounds2 {
