@@ -623,3 +623,74 @@ fn typed_primitives_follow_their_prompts() {
     s.input(Input::Text("1".into())).unwrap();
     assert!(s.running.is_none() && count(&s) > 0);
 }
+
+fn fill_groups(s: &mut Session, n: usize, member: Handle) {
+    let d = s.doc_mut().unwrap();
+    for i in 0..n {
+        d.groups.push(cadcraft_engine::doc::Group { name: format!("G{i}"), description: String::new(), selectable: true, members: vec![member] });
+    }
+}
+
+#[test]
+fn a_full_group_table_refuses_before_anything_changes() {
+    const MAX_GROUPS: usize = 100_000;
+    // No room for even one more group: BOX and single-profile EXTRUDE leave the drawing alone.
+    let mut s = Session::new();
+    let a = s.add_entity(rect(0.0, 0.0, 4.0, 4.0)).unwrap();
+    let before = count(&s);
+    fill_groups(&mut s, MAX_GROUPS, a);
+    for (cmd, p) in [
+        ("box", json!({ "corner": [0, 0], "corner2": [2, 2], "height": 1 })),
+        ("cylinder", json!({ "center": [0, 0], "radius": 1, "height": 1 })),
+        ("wedge", json!({ "corner": [0, 0], "corner2": [2, 2], "height": 1 })),
+        ("cone", json!({ "center": [0, 0], "radius": 1, "height": 1 })),
+        ("pyramid", json!({ "center": [0, 0], "radius": 1, "height": 1 })),
+        ("sphere", json!({ "center": [0, 0], "radius": 1 })),
+        ("torus", json!({ "center": [0, 0], "radius": 3, "tubeRadius": 1 })),
+        ("extrude", json!({ "handles": [a.hex()], "height": 1, "erase": true })),
+    ] {
+        assert!(s.execute(cmd, &p).unwrap_err().to_string().contains("too many groups"), "{cmd}");
+        assert_eq!(count(&s), before, "{cmd}: no faces left behind");
+        assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS, "{cmd}: no group added");
+    }
+    assert!(s.doc().unwrap().model.iter().any(|e| e.handle == a), "the profile was not erased");
+
+    // Room for one group but two profiles: the second would fail, so the first must not start.
+    let mut s = Session::new();
+    let a = s.add_entity(rect(0.0, 0.0, 4.0, 4.0)).unwrap();
+    let b = s.add_entity(rect(10.0, 0.0, 4.0, 4.0)).unwrap();
+    let before = count(&s);
+    fill_groups(&mut s, MAX_GROUPS - 1, a);
+    let e = s.execute("extrude", &json!({ "handles": [a.hex(), b.hex()], "height": 1, "erase": true })).unwrap_err().to_string();
+    assert!(e.contains("too many groups"), "{e}");
+    assert_eq!(count(&s), before, "no faces left behind and no profile erased");
+    assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS - 1);
+    // One profile still fits.
+    s.execute("extrude", &json!({ "handles": [a.hex()], "height": 1 })).unwrap();
+    assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS);
+}
+
+#[test]
+fn a_refused_fourth_point_can_be_retried() {
+    let mut s = Session::new();
+    s.start("3dface").unwrap();
+    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+    s.input(Input::Keyword("Invisible".into())).unwrap();
+    s.input(Input::Point(Vec2::new(1.0, 0.0))).unwrap();
+    s.input(Input::Point(Vec2::new(2.0, 0.0))).unwrap();
+    // Collinear: the face has no area, the point and its Invisible flag are dropped, the prompt stays.
+    s.input(Input::Keyword("Invisible".into())).unwrap();
+    let _ = s.input(Input::Point(Vec2::new(3.0, 0.0)));
+    assert!(s.running.is_some());
+    assert!(s.prompt_text().contains("fourth point"), "{}", s.prompt_text());
+    assert_eq!(count(&s), 0);
+    s.input(Input::Point(Vec2::new(2.0, 2.0))).unwrap();
+    assert!(s.running.is_none());
+    assert_eq!(count(&s), 1);
+    let f = match &s.doc().unwrap().model.iter().last().unwrap().kind {
+        EntityKind::Face3d(f) => (f.corners, f.hidden_edges),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(f.0[3], Vec3::new(2.0, 2.0, 0.0), "the retried point is the fourth corner");
+    assert_eq!(f.1, 2, "only the first Invisible survives; the refused point's flag was dropped");
+}
