@@ -1,8 +1,8 @@
 {
-  description = "CadCraft — computer-aided design, a free alternative to AutoCAD, in pure Rust";
+  description = "CADCraft — computer-aided design, a free alternative to AutoCAD, in pure Rust";
 
   inputs = {
-    # CadCraft needs edition 2024 and rustc ≥ 1.90, so the flake tracks unstable. Consumers on a
+    # CADCraft needs edition 2024 and rustc ≥ 1.90, so the flake tracks unstable. Consumers on a
     # release channel can retarget it: `inputs.cadcraft.inputs.nixpkgs.follows = "nixpkgs";`
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

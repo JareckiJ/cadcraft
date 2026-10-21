@@ -1,4 +1,4 @@
-# CadCraft — the desktop app (`cadcraft`) and the CLI/MCP server (`cadcraft-cli`), built from this
+# CADCraft — the desktop app (`cadcraft`) and the CLI/MCP server (`cadcraft-cli`), built from this
 # repository:
 #
 #   nix build          # → ./result/bin/cadcraft, ./result/bin/cadcraft-cli
@@ -7,7 +7,7 @@
 #   * `Cargo.lock` drives the dependencies (`cargoLock`), so there is no vendorHash to bump. The
 #     git sources (storytold/craft-libs) are fetched at the revision the lock file pins;
 #   * the desktop file, hicolor icons, MIME types and AppStream metadata are the same files the
-#     .deb/.rpm ship (packaging/linux/), so `apt` and NixOS users see one identical CadCraft;
+#     .deb/.rpm ship (packaging/linux/), so `apt` and NixOS users see one identical CADCraft;
 #   * `CRAFT_FONTS_DIR` embeds the fonts from storytold/craft-fonts (the `craft-fonts` flake input, pinned to
 #     the revision the release workflow uses); without it everything builds and runs, but some
 #     scripts (e.g. Japanese, Chinese) have no glyphs;
@@ -197,7 +197,7 @@ rustPlatform.buildRustPackage {
   meta = {
     description = "Computer-aided design application";
     longDescription = ''
-      CadCraft is a computer-aided design application for 2D drafting with DWG/DXF interchange.
+      CADCraft is a computer-aided design application for 2D drafting with DWG/DXF interchange.
       It ships with cadcraft-cli, a headless converter, command runner and MCP server for AI agents.
     '';
     homepage = "https://getartcraft.com/apps/cadcraft";
