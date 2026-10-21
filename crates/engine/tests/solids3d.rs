@@ -484,3 +484,44 @@ fn the_typed_3dface_honours_invisible_and_three_sided_faces() {
     assert!(s.running.is_none(), "the fourth point finishes the face");
     assert_eq!(count(&s), 2);
 }
+
+fn fill_groups(s: &mut Session, n: usize, member: Handle) {
+    let d = s.doc_mut().unwrap();
+    for i in 0..n {
+        d.groups.push(cadcraft_engine::doc::Group { name: format!("G{i}"), description: String::new(), selectable: true, members: vec![member] });
+    }
+}
+
+#[test]
+fn a_full_group_table_refuses_before_anything_changes() {
+    const MAX_GROUPS: usize = 100_000;
+    // No room for even one more group: BOX and single-profile EXTRUDE leave the drawing alone.
+    let mut s = Session::new();
+    let a = s.add_entity(rect(0.0, 0.0, 4.0, 4.0)).unwrap();
+    let before = count(&s);
+    fill_groups(&mut s, MAX_GROUPS, a);
+    for (cmd, p) in [
+        ("box", json!({ "corner": [0, 0], "corner2": [2, 2], "height": 1 })),
+        ("cylinder", json!({ "center": [0, 0], "radius": 1, "height": 1 })),
+        ("extrude", json!({ "handles": [a.hex()], "height": 1, "erase": true })),
+    ] {
+        assert!(s.execute(cmd, &p).unwrap_err().to_string().contains("too many groups"), "{cmd}");
+        assert_eq!(count(&s), before, "{cmd}: no faces left behind");
+        assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS, "{cmd}: no group added");
+    }
+    assert!(s.doc().unwrap().model.iter().any(|e| e.handle == a), "the profile was not erased");
+
+    // Room for one group but two profiles: the second would fail, so the first must not start.
+    let mut s = Session::new();
+    let a = s.add_entity(rect(0.0, 0.0, 4.0, 4.0)).unwrap();
+    let b = s.add_entity(rect(10.0, 0.0, 4.0, 4.0)).unwrap();
+    let before = count(&s);
+    fill_groups(&mut s, MAX_GROUPS - 1, a);
+    let e = s.execute("extrude", &json!({ "handles": [a.hex(), b.hex()], "height": 1, "erase": true })).unwrap_err().to_string();
+    assert!(e.contains("too many groups"), "{e}");
+    assert_eq!(count(&s), before, "no faces left behind and no profile erased");
+    assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS - 1);
+    // One profile still fits.
+    s.execute("extrude", &json!({ "handles": [a.hex()], "height": 1 })).unwrap();
+    assert_eq!(s.doc().unwrap().groups.len(), MAX_GROUPS);
+}

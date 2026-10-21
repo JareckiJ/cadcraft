@@ -54,12 +54,21 @@ fn number_req(cmd: &str, p: &Value, key: &str) -> Result<f64> {
     f64_req(cmd, p, key)
 }
 
+/// Fail before anything changes when `n` more groups would not fit in the drawing.
+fn ensure_group_room(s: &Session, n: usize, cmd: &str) -> Result<()> {
+    if s.doc()?.groups.len().saturating_add(n) > super::groups::MAX_GROUPS {
+        return Err(err(cmd, "the drawing has too many groups"));
+    }
+    Ok(())
+}
+
 /// The new faces as 3DFACE objects in one group. `src` gives them the properties of the profile
 /// they came from (layer, colour, linetype…); without it they take the current ones.
 fn add_solid(s: &mut Session, faces: &[Face], src: Option<&Common>, what: &str) -> Result<(Vec<Handle>, String)> {
     if faces.len() > MAX_FACES {
         return Err(err(what, "the solid would have too many faces"));
     }
+    ensure_group_room(s, 1, what)?;
     let mut hs = Vec::with_capacity(faces.len());
     for f in faces {
         let h = s.add_entity(EntityKind::Face3d(Face3d { corners: f.corners, hidden_edges: f.hidden }))?;
@@ -459,6 +468,9 @@ fn extrude_handles(s: &mut Session, hs: &[Handle], holes: &[Handle], height: f64
         }
         built.push((*h, prof.common.clone(), faces));
     }
+    // Nothing has changed yet: refuse now if the groups would not fit, so no faces are left
+    // behind and no profile is erased.
+    ensure_group_room(s, built.len(), "extrude")?;
     let mut all = Vec::new();
     let mut groups = Vec::new();
     for (src, common, faces) in &built {
