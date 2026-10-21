@@ -345,15 +345,12 @@ pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
         Err(_) => return Ok(Flow::Value(Value::Nil)),
     };
     if let Some((_, ents)) = ctx.env.pending_block.as_mut() {
-        // Into the block being defined; it is added to the drawing, with handles, at ENDBLK.
+        // Into the block being defined; it is added to the drawing, with handles and the layers
+        // its entities name, at ENDBLK (a refused or dropped definition leaves nothing behind).
         if ents.len() >= MAX_PENDING_BLOCK_ENTITIES {
             return Ok(Flow::Value(Value::Nil));
         }
-        let layer = common.layer.clone();
         ents.push(Entity { handle: Handle(0), common, kind });
-        if let Ok(d) = ctx.s.doc_mut() {
-            d.ensure_layer(&layer);
-        }
         return Ok(Flow::Value(list.clone()));
     }
     let space = ctx.s.space();
@@ -428,6 +425,7 @@ fn end_block(ctx: &mut Ctx<'_>) -> Value {
         return Value::Nil;
     }
     for mut e in ents {
+        d.ensure_layer(&e.common.layer);
         e.handle = d.new_handle();
         b.entities.push(e);
     }

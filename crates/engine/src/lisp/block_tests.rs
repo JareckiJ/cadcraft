@@ -210,3 +210,27 @@ fn an_anonymous_block_that_inserts_itself_is_refused() {
     ok(&mut s, LINE);
     assert_eq!(ok(&mut s, ENDBLK), "\"*U1\"");
 }
+
+/// The layers a definition's entities name are created only when the block is added: a refused
+/// definition, or one a failed routine drops, leaves no layer behind.
+#[test]
+fn a_definition_that_isnt_added_leaves_no_layer() {
+    let mut s = session();
+    let has = |s: &Session, n: &str| s.doc().unwrap().layers.iter().any(|l| l.name.eq_ignore_ascii_case(n));
+    // Refused at ENDBLK: it inserts itself.
+    ok(&mut s, r#"(entmake '((0 . "BLOCK") (2 . "SELF") (70 . 0) (10 0.0 0.0 0.0)))"#);
+    ok(&mut s, r#"(entmake '((0 . "LINE") (8 . "ORPHAN1") (10 0.0 0.0 0.0) (11 1.0 0.0 0.0)))"#);
+    ok(&mut s, r#"(entmake '((0 . "INSERT") (8 . "ORPHAN1") (2 . "SELF") (10 0.0 0.0 0.0)))"#);
+    assert!(!has(&s, "ORPHAN1"), "nothing before ENDBLK");
+    assert_eq!(ok(&mut s, ENDBLK), "nil");
+    assert!(!has(&s, "ORPHAN1"), "a refused block leaves no layer");
+    // Dropped: the routine fails.
+    assert!(eval(&mut s, r#"(progn (entmake '((0 . "BLOCK") (2 . "GONE") (70 . 0) (10 0.0 0.0 0.0))) (entmake '((0 . "LINE") (8 . "ORPHAN2") (10 0.0 0.0 0.0) (11 1.0 0.0 0.0))) (car 1))"#).is_err());
+    assert!(!has(&s, "ORPHAN2"), "a dropped definition leaves no layer");
+    // Added: its layers are created.
+    ok(&mut s, BLOCK_EB);
+    ok(&mut s, CIRCLE);
+    assert!(!has(&s, "PARTS"));
+    assert_eq!(ok(&mut s, ENDBLK), "\"EB\"");
+    assert!(has(&s, "PARTS"), "the block's layer exists once it is added");
+}
