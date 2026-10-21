@@ -647,6 +647,28 @@ fn a_plain_snapshot_from_an_older_build_is_still_listed_and_compared() {
 }
 
 #[test]
+fn a_listed_name_with_the_compression_suffix_names_the_overlay() {
+    hooks();
+    let dir = folder("listed-name");
+    let plan_path = dir.join("plan.dxf");
+    save(&plan(), &plan_path);
+    let mut s = Session::new();
+    open(&mut s, &plan_path);
+    s.execute("omni-snap", &json!({ "description": "revision" })).unwrap();
+    s.execute("omni-diff", &json!({})).unwrap();
+    // The name `OMNI-VERSIONS` lists, which is the name the palette hands back.
+    let listed = s.execute("omni-versions", &json!({})).unwrap()["versions"][0]["file"].as_str().unwrap().to_string();
+    assert!(listed.ends_with(".dxf.gz"), "{listed}");
+    // The overlay reads the file `.cache` unpacks, `…_plan.dxf`, and the call still finds it.
+    let hidden = s.execute("omni-toggle", &json!({ "show": false, "snapshot": listed })).unwrap();
+    assert_eq!(hidden["shown"], json!(false), "{hidden}");
+    assert_eq!(hidden["overlay"].as_array().map(|a| a.len()), Some(1), "the listing's name names the overlay: {hidden}");
+    let cleared = s.execute("omni-clear", &json!({})).unwrap();
+    assert_eq!(cleared["cleared"].as_array().map(|a| a.len()), Some(1), "{cleared}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_version_restores_into_the_drawing_undoably() {
     hooks();
     let dir = folder("restore");

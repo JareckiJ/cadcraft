@@ -97,7 +97,16 @@ pub(super) fn snapshots(dir: &Path) -> (Vec<Snap>, bool) {
             out.push(parse(&file, dir.join(&file), bytes));
         }
     }
-    out.sort_by(|a, b| b.file.cmp(&a.file));
+    // Newest first by the moment in the name, not by the name itself: a file in the folder whose
+    // name carries no stamp (`notes.dxf`, a rename) has no time to sort by, and text order would
+    // put it before every version — where `1`, OMNI-DIFF's default, and the duplicate check in the
+    // save's version would all pick it as the newest. It goes last instead.
+    out.sort_by(|a, b| match (a.epoch, b.epoch) {
+        (Some(x), Some(y)) => y.cmp(&x).then_with(|| b.millis.cmp(&a.millis)).then_with(|| b.file.cmp(&a.file)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.file.cmp(&a.file),
+    });
     let capped = out.len() > MAX_SNAPSHOTS;
     out.truncate(MAX_SNAPSHOTS);
     (out, capped)
@@ -192,6 +201,27 @@ mod tests {
         assert_eq!(overlay_path(host, &other), other.to_string_lossy());
         let theirs = PathBuf::from("other").join(HISTORY_DIR).join("plan.dxf");
         assert_eq!(overlay_path(host, &theirs), theirs.to_string_lossy());
+    }
+
+    #[test]
+    fn a_file_without_a_stamp_is_never_the_newest_version() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-omni-stray-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // One version, and two drawings someone put in the folder (or renamed). Text order alone
+        // would list them first — and `1`, OMNI-DIFF's default, would then compare against one.
+        std::fs::write(dir.join("20261014.083512_482_u_save_plan.dxf.gz"), b"").unwrap();
+        std::fs::write(dir.join("notes.dxf"), b"").unwrap();
+        std::fs::write(dir.join("zzz.dxf"), b"").unwrap();
+        let (list, _) = snapshots(&dir);
+        assert_eq!(
+            list.first().map(|s| s.file.as_str()),
+            Some("20261014.083512_482_u_save_plan.dxf.gz"),
+            "{:?}",
+            list.iter().map(|s| &s.file).collect::<Vec<_>>()
+        );
+        assert_eq!(list.last().map(|s| s.file.as_str()), Some("notes.dxf"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

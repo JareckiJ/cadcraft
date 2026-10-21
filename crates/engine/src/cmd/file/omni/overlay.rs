@@ -62,9 +62,14 @@ pub(super) fn overlays_named(s: &Session, p: &Value, cmd: &str) -> Result<Vec<St
         .filter(|n| match pattern {
             None => true,
             Some(f) => {
+                // A listing shows a compressed version as `…_plan.dxf.gz`, while the reference
+                // reads the file `.cache` unpacks — `…_plan.dxf`. A name copied from the listing
+                // is the one the user means, so the compression suffix does not count.
+                let f = f.trim();
+                let plain = f.strip_suffix(".gz").or_else(|| f.strip_suffix(".GZ")).unwrap_or(f);
                 let file = d.block(n).and_then(|b| b.xref_path.clone()).unwrap_or_default();
                 let name = file.rsplit(['/', '\\']).next().unwrap_or_default();
-                n == f || has_prefix(n, f) || file == f || name == f
+                n == f || has_prefix(n, f) || file == f || name == f || name.eq_ignore_ascii_case(plain)
             }
         })
         .collect();

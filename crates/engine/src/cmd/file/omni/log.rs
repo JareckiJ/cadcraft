@@ -154,6 +154,9 @@ impl Interactive for LogM {
             Input::Cancel => return Ok(Step::Cancel),
             _ => return Ok(Step::Continue),
         };
+        if t == "0" {
+            return Ok(Step::Done);
+        }
         let Ok((_, list, _)) = history_of(s, "omni-log", &json!({})) else { return Ok(Step::Done) };
         match chosen(&list, &json!(t)) {
             Some(snap) => {
