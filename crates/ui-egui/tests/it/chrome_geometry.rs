@@ -173,3 +173,18 @@ fn ribbon_home_tab_starts_line() {
     h.run_steps(3);
     assert!(h.state().session.running.is_some(), "LINE should be prompting");
 }
+
+#[test]
+fn the_in_window_menu_bar_sits_above_the_ribbon() {
+    let mut h = harness(1200.0, 760.0, 1.0, false, true);
+    // Windows and Linux draw the menu bar in the window (macOS uses the system one).
+    h.state_mut().ui.in_window_menu = true;
+    h.run_steps(5);
+    let mut texts = Vec::new();
+    for shape in &h.output().shapes {
+        visible_text(&shape.shape, shape.clip_rect, &mut texts);
+    }
+    let top = |label: &str| texts.iter().find(|(text, _)| text == label).map(|(_, rect)| rect.top()).unwrap_or_else(|| panic!("no {label:?} drawn"));
+    // The menu bar's File, then the Ribbon's Home tab under it.
+    assert!(top("File") < top("Home"), "File at {}, Home at {}", top("File"), top("Home"));
+}

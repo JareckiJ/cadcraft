@@ -831,11 +831,12 @@ impl CadApp {
         control::begin_frame(ui.ctx());
         let t = theme::Tokens::get();
         chrome::title_and_toolbar(self, ui);
-        if self.ui.show_ribbon {
-            ribbon::ribbon(self, ui);
-        }
+        // Top panels stack in call order: the menu bar sits above the Ribbon, as on Windows.
         if self.ui.in_window_menu {
             menus::menu_bar(self, ui);
+        }
+        if self.ui.show_ribbon {
+            ribbon::ribbon(self, ui);
         }
         if self.ui.show_status_bar {
             chrome::status_bar(self, ui);
