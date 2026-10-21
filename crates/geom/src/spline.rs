@@ -75,7 +75,15 @@ impl Spline {
         let (lo, hi) = self.domain();
         let t = t.clamp(lo, hi);
         let span = find_span(n, self.degree, t, &self.knots);
-        let b = basis(span, t, self.degree, &self.knots);
+        let (mut nb, mut left, mut right) = ([0.0; MAX_STACK_DEGREE + 1], [0.0; MAX_STACK_DEGREE + 1], [0.0; MAX_STACK_DEGREE + 1]);
+        let heap;
+        let b: &[f64] = if self.degree <= MAX_STACK_DEGREE {
+            basis_into(span, t, self.degree, &self.knots, &mut nb, &mut left, &mut right);
+            nb.get(..=self.degree).unwrap_or(&[])
+        } else {
+            heap = basis(span, t, self.degree, &self.knots);
+            &heap
+        };
         let mut p = Vec2::ZERO;
         let mut wsum = 0.0;
         for (k, nb) in b.iter().enumerate() {
@@ -141,10 +149,25 @@ pub(crate) fn find_span(n: usize, p: usize, u: f64, knots: &[f64]) -> usize {
     mid
 }
 
+/// Highest degree `eval` works out on the stack. The DXF reader and the SPLINE command cap the
+/// degree at 10; a higher one (a programmatic spline) takes a heap buffer.
+pub(crate) const MAX_STACK_DEGREE: usize = 10;
+
+/// The `p + 1` non-zero basis functions of degree `p` at `u` in `span`.
 pub(crate) fn basis(span: usize, u: f64, p: usize, knots: &[f64]) -> Vec<f64> {
     let mut n = vec![0.0; p + 1];
     let mut left = vec![0.0; p + 1];
     let mut right = vec![0.0; p + 1];
+    basis_into(span, u, p, knots, &mut n, &mut left, &mut right);
+    n
+}
+
+/// `basis` into `n[..=p]`, with `left` and `right` as scratch; each must hold `p + 1` values or
+/// `n` stays as it was.
+fn basis_into(span: usize, u: f64, p: usize, knots: &[f64], n: &mut [f64], left: &mut [f64], right: &mut [f64]) {
+    if n.len() <= p || left.len() <= p || right.len() <= p {
+        return;
+    }
     if let Some(x) = n.get_mut(0) {
         *x = 1.0;
     }
@@ -161,7 +184,6 @@ pub(crate) fn basis(span: usize, u: f64, p: usize, knots: &[f64]) -> Vec<f64> {
         }
         n[j] = saved;
     }
-    n
 }
 
 /// Gaussian elimination with partial pivoting.
@@ -191,4 +213,104 @@ pub(crate) fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Option<Vec<f64>> {
         x[r] = (b[r] - s) / a[r][r];
     }
     Some(x)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `basis` before it evaluated on the stack, kept as the reference.
+    fn basis_ref(span: usize, u: f64, p: usize, knots: &[f64]) -> Vec<f64> {
+        let mut n = vec![0.0; p + 1];
+        let mut left = vec![0.0; p + 1];
+        let mut right = vec![0.0; p + 1];
+        n[0] = 1.0;
+        for j in 1..=p {
+            let k = |i: isize| knots.get(i.max(0) as usize).copied().unwrap_or(0.0);
+            left[j] = u - k(span as isize + 1 - j as isize);
+            right[j] = k(span as isize + j as isize) - u;
+            let mut saved = 0.0;
+            for r in 0..j {
+                let den = right[r + 1] + left[j - r];
+                let tmp = if den.abs() > 1e-300 { n[r] / den } else { 0.0 };
+                n[r] = saved + right[r + 1] * tmp;
+                saved = left[j - r] * tmp;
+            }
+            n[j] = saved;
+        }
+        n
+    }
+
+    /// `eval` before it evaluated on the stack, kept as the reference.
+    fn eval_ref(s: &Spline, t: f64) -> Vec2 {
+        let n = s.control.len() - 1;
+        let (lo, hi) = s.domain();
+        let t = t.clamp(lo, hi);
+        let span = find_span(n, s.degree, t, &s.knots);
+        let b = basis_ref(span, t, s.degree, &s.knots);
+        let mut p = Vec2::ZERO;
+        let mut wsum = 0.0;
+        for (k, nb) in b.iter().enumerate() {
+            let idx = span + k - s.degree;
+            let w = if s.weights.is_empty() { 1.0 } else { s.weights[idx] };
+            p += s.control[idx] * (nb * w);
+            wsum += nb * w;
+        }
+        if wsum.abs() > 1e-300 { p / wsum } else { p }
+    }
+
+    /// Deterministic pseudo-random numbers in `0..1`.
+    fn noise(seed: &mut u64) -> f64 {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (*seed >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Splines of degree 1..=11 over 14 control points: clamped and unclamped (uniform) knots,
+    /// unit and random weights.
+    fn samples() -> Vec<Spline> {
+        let mut seed = 7;
+        let mut out = Vec::new();
+        for degree in 1..=11 {
+            let control: Vec<Vec2> = (0..14).map(|i| Vec2::new(i as f64 * 3.0 + noise(&mut seed), 10.0 * noise(&mut seed) - 5.0)).collect();
+            let weights: Vec<f64> = (0..14).map(|_| 0.5 + 1.5 * noise(&mut seed)).collect();
+            let clamped = Spline::from_control(control.clone(), degree);
+            let uniform = Spline { knots: (0..control.len() + degree + 1).map(|i| i as f64 * 0.25).collect(), ..clamped.clone() };
+            for base in [clamped, uniform] {
+                out.push(Spline { weights: weights.clone(), ..base.clone() });
+                out.push(base);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn stack_basis_matches_the_heap_basis_bit_for_bit() {
+        for s in samples() {
+            assert!(s.is_valid());
+            let (lo, hi) = s.domain();
+            for i in -20..=1020 {
+                let t = lo + (hi - lo) * i as f64 / 1000.0;
+                let got = s.eval(t);
+                let want = eval_ref(&s, t);
+                assert_eq!(
+                    (got.x.to_bits(), got.y.to_bits()),
+                    (want.x.to_bits(), want.y.to_bits()),
+                    "degree {} at {t}: {got:?} vs {want:?}",
+                    s.degree
+                );
+                let span = find_span(s.control.len() - 1, s.degree, t.clamp(lo, hi), &s.knots);
+                let b = basis(span, t.clamp(lo, hi), s.degree, &s.knots);
+                let r = basis_ref(span, t.clamp(lo, hi), s.degree, &s.knots);
+                assert!(b.iter().zip(&r).all(|(a, b)| a.to_bits() == b.to_bits()) && b.len() == r.len(), "degree {}", s.degree);
+            }
+        }
+    }
+
+    #[test]
+    fn basis_into_needs_room_for_every_function() {
+        let knots = clamped_uniform_knots(6, 3);
+        let (mut n, mut left, mut right) = ([0.5; 3], [0.0; 4], [0.0; 4]);
+        basis_into(3, 0.5, 3, &knots, &mut n, &mut left, &mut right);
+        assert_eq!(n, [0.5; 3]);
+    }
 }
