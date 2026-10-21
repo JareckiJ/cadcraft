@@ -1094,7 +1094,10 @@ impl AttdefM {
             preset: bool_or(a, "preset", false),
             lock_position: bool_or(a, "lockPosition", false),
         };
-        self.prompt = Some(if self.constant { String::new() } else { str_param(a, "prompt").unwrap_or("").to_string() });
+        // A blank prompt is the tag, as AutoCAD asks for it at INSERT (and as the JSON form does).
+        let tag = self.tag.clone().unwrap_or_default();
+        self.prompt =
+            Some(if self.constant { String::new() } else { str_param(a, "prompt").filter(|p| !p.trim().is_empty()).map_or(tag, str::to_string) });
         self.default = Some(str_param(a, "default").unwrap_or("").to_string());
         if let Some(j) = str_param(a, "justify") {
             self.justify = Some(super::draw::justify(j).ok_or_else(|| bad("attdef", JUSTIFY_ERROR))?);
@@ -1246,7 +1249,9 @@ impl Interactive for AttdefM {
             return Ok(Step::Continue);
         }
         if self.prompt.is_none() && !self.constant {
-            self.prompt = text;
+            // Enter (or blanks): the tag is the prompt, as in AutoCAD.
+            let tag = self.tag.clone().unwrap_or_default();
+            self.prompt = text.map(|t| if t.trim().is_empty() { tag } else { t });
             return Ok(Step::Continue);
         }
         if self.default.is_none() {

@@ -354,3 +354,27 @@ fn the_dialog_on_screen_asks_align_and_fit_for_both_endpoints() {
     assert!(near(e.text.rotation, std::f64::consts::FRAC_PI_2));
     assert!((drawn_width(&s, e) - 20.0).abs() < 1e-6, "{}", drawn_width(&s, e));
 }
+
+#[test]
+fn a_blank_prompt_is_the_tag_typed_and_from_the_dialog() {
+    let mut s = Session::new();
+    s.start("-attdef").unwrap();
+    for i in [Input::Enter, Input::Text("room".into()), Input::Enter, Input::Text("101".into())] {
+        s.input(i).unwrap();
+    }
+    for i in [Input::Point(Vec2::new(0.0, 0.0)), Input::Enter, Input::Enter] {
+        s.input(i).unwrap();
+    }
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(attdefs(&s)[0].prompt, "ROOM", "Enter at the prompt question: INSERT asks for the tag, not a bare value");
+    // The dialog's empty (or blank) prompt field the same; a constant attribute keeps none.
+    for (answers, expected) in
+        [(json!({"tag": "floor", "prompt": " ", "default": "1"}), "FLOOR"), (json!({"tag": "k", "constant": true, "default": "x"}), "")]
+    {
+        s.attdef_answers = Some(answers);
+        s.start("-attdef").unwrap();
+        s.input(Input::Point(Vec2::new(0.0, 10.0))).unwrap();
+        assert!(s.running.is_none(), "{}", s.prompt_text());
+        assert_eq!(attdefs(&s).last().unwrap().prompt, expected);
+    }
+}
