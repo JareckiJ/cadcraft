@@ -2637,35 +2637,52 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
 /// Write DXF Reference group 91 on every CLASS record. Count records after `dxf_raw::finish`
 /// restores foreign classes and objects so every class gets its actual instance count.
 fn add_class_instance_counts(tags: &mut Vec<Tag>) {
-    let mut counts: HashMap<String, i64> = HashMap::new();
-    for t in tags.iter().filter(|t| t.code == 0) {
-        let kind = t.str();
-        if kind != "CLASS" {
-            *counts.entry(kind.to_ascii_uppercase()).or_default() += 1;
+    // Record types are text: compared and counted without a copy of every record's type (FF6).
+    fn kind(t: &Tag) -> std::borrow::Cow<'_, str> {
+        match &t.value {
+            cadcraft_dxf::Value::Str(s) | cadcraft_dxf::Value::Hex(s) => std::borrow::Cow::Borrowed(s),
+            _ => std::borrow::Cow::Owned(t.str()),
         }
     }
-
+    let is_class = |t: &Tag| t.code == 0 && kind(t) == "CLASS";
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for t in tags.iter().filter(|t| t.code == 0 && !is_class(t)) {
+        *counts.entry(kind(t).to_ascii_uppercase()).or_default() += 1;
+    }
+    // Groups 91 to add, by the index of the group they go before. They are put in by one pass
+    // over the list: inserting each one moved every group after it, a pass over the whole drawing
+    // for every class (FF6).
+    let mut inserts: Vec<(usize, Tag)> = Vec::new();
     let mut start = 0;
     while start < tags.len() {
-        if tags.get(start).is_none_or(|t| t.code != 0 || t.str() != "CLASS") {
+        if !tags.get(start).is_some_and(is_class) {
             start += 1;
             continue;
         }
-        let end = tags[start + 1..].iter().position(|t| t.code == 0).map_or(tags.len(), |i| start + 1 + i);
-        let name = tags[start + 1..end].iter().find(|t| t.code == 1).map(Tag::str).unwrap_or_default().to_ascii_uppercase();
+        let end = tags.get(start + 1..).and_then(|r| r.iter().position(|t| t.code == 0)).map_or(tags.len(), |i| start + 1 + i);
+        let Some(body) = tags.get_mut(start + 1..end) else { break };
+        let name = body.iter().find(|t| t.code == 1).map(Tag::str).unwrap_or_default().to_ascii_uppercase();
         let count = counts.get(&name).copied().unwrap_or(0);
-        let inserted = if let Some(i) = tags[start + 1..end].iter().position(|t| t.code == 91) {
-            tags[start + 1 + i] = Tag::i(91, count);
-            false
-        } else if let Some(i) = tags[start + 1..end].iter().position(|t| t.code == 90) {
-            tags.insert(start + 2 + i, Tag::i(91, count));
-            true
-        } else {
-            false
-        };
-        // Inserting the group shifts the next record's start by one.
-        start = end + usize::from(inserted);
+        if let Some(t) = body.iter_mut().find(|t| t.code == 91) {
+            *t = Tag::i(91, count);
+        } else if let Some(i) = body.iter().position(|t| t.code == 90) {
+            inserts.push((start + 2 + i, Tag::i(91, count)));
+        }
+        start = end;
     }
+    if inserts.is_empty() {
+        return;
+    }
+    let old = std::mem::take(tags);
+    tags.reserve(old.len() + inserts.len());
+    let mut inserts = inserts.into_iter().peekable();
+    for (i, t) in old.into_iter().enumerate() {
+        while let Some((_, g)) = inserts.next_if(|(at, _)| *at == i) {
+            tags.push(g);
+        }
+        tags.push(t);
+    }
+    tags.extend(inserts.map(|(_, g)| g));
 }
 
 /// Xref blocks (DXF Reference, BLOCK): bit 4 of group 70 and the external drawing's path in
