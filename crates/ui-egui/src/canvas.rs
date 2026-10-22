@@ -257,8 +257,14 @@ fn preview_options(scale: f64) -> cadcraft_render::Options {
 /// command's rubber band and rebuilt copies of existing objects. They carry CLAYER's properties,
 /// not the objects', so they are drawn opaque (the GPU drag of the objects themselves keeps their
 /// transparency, see [`draw_drag_gpu`]).
-fn rebuilt_preview<'a>(doc: &cadcraft_doc::Drawing, ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>, scale: f64) -> DisplayList {
-    cadcraft_render::build_entities(doc, ents, &preview_options(scale))
+fn rebuilt_preview<'a>(
+    doc: &cadcraft_doc::Drawing,
+    ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>,
+    scale: f64,
+    orbit: cadcraft_render::Orbit3d,
+) -> DisplayList {
+    let options = cadcraft_render::Options { orbit, ..preview_options(scale) };
+    cadcraft_render::build_entities(doc, ents, &options)
 }
 
 fn color32(c: Rgb) -> Color32 {
@@ -1932,6 +1938,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if (!app.session.prompting() || grip_edit)
         && app.session.shows_grips(sel.len())
         && let Ok(st) = app.session.state()
+        && (!matches!(st.edit_space(), cadcraft_doc::Space::Model) || st.orbit.is_top())
     {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
@@ -1960,6 +1967,17 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
     }
+    let current_orbit = app
+        .session
+        .state()
+        .map(|s| {
+            if matches!(s.space, cadcraft_doc::Space::Paper(_)) && s.mspace.is_none() {
+                cadcraft_render::Orbit3d::default()
+            } else {
+                s.orbit
+            }
+        })
+        .unwrap_or_default();
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
     let drag = match (app.canvas.cursor, app.canvas.gpu.is_some()) {
@@ -1971,7 +1989,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             let serial = app.session.clipboard_source.as_ref().map_or(0, |c| c.serial);
             let transparency = app.session.settings.transparency_display;
             draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
-            let list = rebuilt_preview(&st.doc, extra.iter(), scale);
+            let list = rebuilt_preview(&st.doc, extra.iter(), scale, current_orbit);
             draw_list(&painter, &xf, &list, bg, false);
         }
     } else if let (Some(c), true) = (app.canvas.cursor, app.session.prompting()) {
@@ -1979,7 +1997,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if !ents.is_empty()
             && let Ok(st) = app.session.state()
         {
-            let list = rebuilt_preview(&st.doc, ents.iter(), scale);
+            let list = rebuilt_preview(&st.doc, ents.iter(), scale, current_orbit);
             draw_list(&painter, &xf, &list, bg, false);
         }
     }
@@ -2009,17 +2027,6 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
-    let current_orbit = app
-        .session
-        .state()
-        .map(|s| {
-            if matches!(s.space, cadcraft_doc::Space::Paper(_)) && s.mspace.is_none() {
-                cadcraft_render::Orbit3d::default()
-            } else {
-                s.orbit
-            }
-        })
-        .unwrap_or_default();
     if app.ui.show_ucs_icon {
         draw_ucs_icon(&painter, rect, current_orbit);
         crate::viewcube::ucs_icon(app, ui, rect);
@@ -2103,6 +2110,7 @@ fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
 fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
     let t = Tokens::get();
     let bg = Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b());
+    let orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
     for (r, tile) in tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0) {
         let p = ui.painter_at(*r);
         let xf = tile_xf(*r, tile);
@@ -2111,7 +2119,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r, cadcraft_render::Orbit3d::default());
+        viewport_label(&p, *r, orbit);
     }
     let p = ui.painter();
     for (r, tile) in tiles {
@@ -2245,7 +2253,9 @@ fn tooltip(p: &egui::Painter, at: Pos2, text: &str) {
 fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let st = app.session.state().ok()?;
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
-    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    let edit_space = st.edit_space();
+    let orbit = if matches!(edit_space, cadcraft_doc::Space::Model) { st.orbit } else { cadcraft_render::Orbit3d::default() };
+    let h = cadcraft_engine::select::pick_in_orbit(&st.doc, &edit_space, orbit, w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
 }
 
@@ -2726,6 +2736,9 @@ fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
 fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)> {
     let hp = hover?;
     let st = app.session.state().ok()?;
+    if matches!(st.edit_space(), cadcraft_doc::Space::Model) && !st.orbit.is_top() {
+        return None;
+    }
     let gs = app.session.settings.gripsize as f32 + 3.0;
     let sel = app.session.selection();
     if !app.session.shows_grips(sel.len()) {
@@ -2807,7 +2820,7 @@ pub(crate) mod tests {
         // Built with transparency, the preview would take CLAYER's 40 %.
         let with = cadcraft_render::build_entities(doc, ents.iter(), &cadcraft_render::Options { transparency: true, ..preview_options(1.0) });
         assert!(with.prims.iter().all(|p| p.transparency == 40));
-        let list = rebuilt_preview(doc, ents.iter(), 1.0);
+        let list = rebuilt_preview(doc, ents.iter(), 1.0, cadcraft_render::Orbit3d::default());
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
         s.cancel();
         // MOVE's base-to-cursor rubber band (a drag extra).
@@ -2818,7 +2831,7 @@ pub(crate) mod tests {
         s.cmdline("0,0").unwrap();
         let (_, extra) = s.drag(Vec2::new(4.0, 4.0)).unwrap();
         assert!(!extra.is_empty());
-        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0);
+        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0, cadcraft_render::Orbit3d::default());
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
     }
 

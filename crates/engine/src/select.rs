@@ -181,6 +181,215 @@ pub(crate) fn candidates<'a>(
     }
 }
 
+/// One entity's cached 3D-projected display list and bounds for orbit picking and window selection.
+struct OrbitEnt {
+    ptr: usize,
+    handle: Handle,
+    infinite: bool,
+    bounds: Bounds2,
+    list: cadcraft_render::DisplayList,
+}
+
+type OrbitTreeItem = rstar::primitives::GeomWithData<rstar::primitives::Rectangle<[f64; 2]>, usize>;
+
+/// Cached 3D-projected primitives and spatial index for non-Top orbit selection.
+struct OrbitIndex {
+    store: cadcraft_doc::EntityStore,
+    blocks: std::collections::BTreeMap<String, std::sync::Arc<cadcraft_doc::Block>>,
+    layers: Vec<cadcraft_doc::Layer>,
+    linetypes: Vec<cadcraft_doc::Linetype>,
+    text_styles: Vec<cadcraft_doc::TextStyle>,
+    dim_styles: Vec<cadcraft_doc::DimStyle>,
+    mleader_styles: Vec<cadcraft_doc::MLeaderStyle>,
+    table_styles: Vec<cadcraft_doc::TableStyle>,
+    mline_styles: Vec<cadcraft_doc::MLineStyle>,
+    header: cadcraft_doc::Header,
+    hidden_objects: std::collections::BTreeSet<Handle>,
+    anno: (u64, bool),
+    orbit_key: u64,
+    tol_band: i32,
+    ents: Vec<std::sync::Arc<OrbitEnt>>,
+    tree: rstar::RTree<OrbitTreeItem>,
+    infinite: Vec<usize>,
+}
+
+/// Snap a tessellation tolerance to its power-of-two band so hover, click and cycling reuse the
+/// same cached projected primitives within a zoom band.
+fn orbit_tol_band(tol: f64) -> (i32, f64) {
+    let band = tol.clamp(1e-18, 1e18).log2().floor() as i32;
+    (band, 2f64.powi(band))
+}
+
+impl OrbitIndex {
+    /// Whether the drawing's non-entity context, orbit and tolerance band match this index.
+    fn same_context(&self, d: &Drawing, orbit: cadcraft_render::Orbit3d, tol_band: i32) -> bool {
+        self.orbit_key == orbit.hash_key()
+            && self.tol_band == tol_band
+            && self.blocks.len() == d.blocks.len()
+            && self.blocks.iter().zip(&d.blocks).all(|((ka, a), (kb, b))| ka == kb && std::sync::Arc::ptr_eq(a, b))
+            && self.layers == d.layers
+            && self.linetypes == d.linetypes
+            && self.text_styles == d.text_styles
+            && self.dim_styles == d.dim_styles
+            && self.mleader_styles == d.mleader_styles
+            && self.table_styles == d.table_styles
+            && self.mline_styles == d.mline_styles
+            && self.header == d.header
+            && self.hidden_objects == d.hidden_objects
+            && self.anno == (d.current_anno_scale().factor().to_bits(), d.anno_all_visible())
+    }
+
+    /// Whether this index can be reused as-is for `d`, `store`, `orbit` and `tol_band`.
+    fn matches(&self, d: &Drawing, store: &cadcraft_doc::EntityStore, orbit: cadcraft_render::Orbit3d, tol_band: i32) -> bool {
+        self.store.same_as(store) && self.same_context(d, orbit, tol_band)
+    }
+
+    /// Build a projected spatial index, reusing unchanged entity projections from `prev` when the
+    /// context matches.
+    fn build_from(
+        d: &Drawing,
+        store: &cadcraft_doc::EntityStore,
+        orbit: cadcraft_render::Orbit3d,
+        tol_band: i32,
+        tolerance: f64,
+        prev: Option<&OrbitIndex>,
+    ) -> OrbitIndex {
+        let old: std::collections::HashMap<usize, std::sync::Arc<OrbitEnt>> = prev
+            .filter(|p| p.same_context(d, orbit, tol_band))
+            .map(|p| p.ents.iter().map(|e| (e.ptr, e.clone())).collect())
+            .unwrap_or_default();
+        let opts = cadcraft_render::Options { tolerance, orbit, ..Default::default() };
+        let mut ents = Vec::new();
+        let mut items = Vec::new();
+        let mut infinite = Vec::new();
+        for e in store.iter() {
+            if !selectable(d, e) {
+                continue;
+            }
+            let ptr = std::sync::Arc::as_ptr(e) as usize;
+            let ent = match old.get(&ptr) {
+                Some(cached) => cached.clone(),
+                None => {
+                    let list = cadcraft_render::build_entities(d, std::iter::once(e.as_ref()), &opts);
+                    let inf = is_infinite(e)
+                        || list.prims.iter().any(|p| matches!(p.kind, cadcraft_render::Kind::Infinite { .. }));
+                    std::sync::Arc::new(OrbitEnt { ptr, handle: e.handle, infinite: inf, bounds: list.bounds, list })
+                }
+            };
+            let idx = ents.len();
+            if ent.infinite {
+                infinite.push(idx);
+            }
+            let b = ent.bounds;
+            if !b.is_empty() && b.min.is_finite() && b.max.is_finite() {
+                items.push(rstar::primitives::GeomWithData::new(
+                    rstar::primitives::Rectangle::from_corners([b.min.x, b.min.y], [b.max.x, b.max.y]),
+                    idx,
+                ));
+            }
+            ents.push(ent);
+        }
+        OrbitIndex {
+            store: store.clone(),
+            blocks: d.blocks.clone(),
+            layers: d.layers.clone(),
+            linetypes: d.linetypes.clone(),
+            text_styles: d.text_styles.clone(),
+            dim_styles: d.dim_styles.clone(),
+            mleader_styles: d.mleader_styles.clone(),
+            table_styles: d.table_styles.clone(),
+            mline_styles: d.mline_styles.clone(),
+            header: d.header.clone(),
+            hidden_objects: d.hidden_objects.clone(),
+            anno: (d.current_anno_scale().factor().to_bits(), d.anno_all_visible()),
+            orbit_key: orbit.hash_key(),
+            tol_band,
+            ents,
+            tree: rstar::RTree::bulk_load(items),
+            infinite,
+        }
+    }
+
+    /// Candidate indices into `self.ents` (in ascending draw order) whose projected bounds touch `b`.
+    fn query(&self, b: &Bounds2, with_infinite: bool) -> Vec<usize> {
+        if b.is_empty() {
+            return if with_infinite { self.infinite.clone() } else { Vec::new() };
+        }
+        if !(b.min.is_finite() && b.max.is_finite()) {
+            return (0..self.ents.len()).collect();
+        }
+        let pad = (b.width() + b.height()) * 1e-9 + (b.min.x.abs() + b.min.y.abs() + b.max.x.abs() + b.max.y.abs()) * 1e-12 + 1e-300;
+        let env = rstar::AABB::from_corners([b.min.x - pad, b.min.y - pad], [b.max.x + pad, b.max.y + pad]);
+        let mut out: Vec<usize> = self.tree.locate_in_envelope_intersecting(&env).map(|it| it.data).collect();
+        if with_infinite {
+            out.extend_from_slice(&self.infinite);
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+}
+
+static ORBIT_CACHE: std::sync::Mutex<Vec<std::sync::Arc<OrbitIndex>>> = std::sync::Mutex::new(Vec::new());
+
+/// Retrieve or build the cached [`OrbitIndex`] for `space` under `orbit` at tolerance `tol`.
+fn orbit_index(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, tol: f64) -> Option<std::sync::Arc<OrbitIndex>> {
+    let store = d.space(space)?;
+    let (tol_band, snapped_tol) = orbit_tol_band(tol);
+    {
+        let mut cache = ORBIT_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = cache.iter().position(|ix| ix.matches(d, store, orbit, tol_band)) {
+            let ix = cache.remove(pos);
+            cache.push(ix.clone());
+            return Some(ix);
+        }
+    }
+    let prev = ORBIT_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).last().cloned();
+    let ix = std::sync::Arc::new(OrbitIndex::build_from(d, store, orbit, tol_band, snapped_tol, prev.as_deref()));
+    let mut cache = ORBIT_CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    while cache.len() >= 4 {
+        cache.remove(0);
+    }
+    cache.push(ix.clone());
+    Some(ix)
+}
+
+/// Shortest distance from projected point `p` to any primitive in `list`.
+fn display_list_distance(list: &cadcraft_render::DisplayList, p: Vec2) -> f64 {
+    let mut best = f64::INFINITY;
+    for prim in &list.prims {
+        let pts = list.points(prim);
+        let dist = match prim.kind {
+            cadcraft_render::Kind::Polyline => dist_to_polyline(pts, p),
+            cadcraft_render::Kind::Point => pts.first().map_or(f64::INFINITY, |q| q.dist(p)),
+            cadcraft_render::Kind::Infinite { ray } => match (pts.first(), pts.get(1)) {
+                (Some(&b), Some(&dir)) => {
+                    let far = 1e9;
+                    let a = if ray { b } else { b - dir * far };
+                    Line::new(a, b + dir * far).dist(p)
+                }
+                _ => f64::INFINITY,
+            },
+            cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => {
+                let mut d_tri = f64::INFINITY;
+                for tri in pts.as_chunks::<3>().0 {
+                    if point_in_polygon(tri, p) {
+                        d_tri = 0.0;
+                        break;
+                    }
+                    d_tri = d_tri.min(dist_to_polyline(&[tri[0], tri[1], tri[2], tri[0]], p));
+                }
+                d_tri
+            }
+        };
+        best = best.min(dist);
+        if best == 0.0 {
+            break;
+        }
+    }
+    best
+}
+
 /// The topmost entity within `aperture` of `p` under the given 3D `orbit` projection.
 pub fn pick_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, p: Vec2, aperture: f64) -> Option<Handle> {
     if orbit.is_top() || matches!(space, Space::Paper(_)) {
@@ -194,51 +403,18 @@ pub fn pick_all_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orb
     if orbit.is_top() || matches!(space, Space::Paper(_)) {
         return pick_all(d, space, p, aperture);
     }
-    let Some(store) = d.space(space) else { return Vec::new() };
-    let opts = cadcraft_render::Options { tolerance: aperture / 4.0, orbit, ..Default::default() };
+    let Some(ix) = orbit_index(d, space, orbit, aperture / 4.0) else { return Vec::new() };
+    let probe = Bounds2::new(p, p).expand(aperture);
+    let cands = ix.query(&probe, true);
     let mut hits: Vec<(f64, Handle)> = Vec::new();
-    let ents: Vec<&Entity> = store.iter().map(|e| e.as_ref()).collect();
-    for e in ents.into_iter().rev() {
-        if !selectable(d, e) {
+    for idx in cands.into_iter().rev() {
+        let Some(ent) = ix.ents.get(idx) else { continue };
+        if !ent.infinite && !ent.bounds.is_empty() && !ent.bounds.expand(aperture).contains(p) {
             continue;
         }
-        let list = cadcraft_render::build_entities(d, std::iter::once(e), &opts);
-        if !list.bounds.is_empty() && !list.bounds.expand(aperture).contains(p) {
-            continue;
-        }
-        let mut best = f64::INFINITY;
-        for prim in &list.prims {
-            let pts = list.points(prim);
-            let dist = match prim.kind {
-                cadcraft_render::Kind::Polyline => dist_to_polyline(pts, p),
-                cadcraft_render::Kind::Point => pts.first().map_or(f64::INFINITY, |q| q.dist(p)),
-                cadcraft_render::Kind::Infinite { ray } => match (pts.first(), pts.get(1)) {
-                    (Some(&b), Some(&dir)) => {
-                        let far = 1e9;
-                        let a = if ray { b } else { b - dir * far };
-                        Line::new(a, b + dir * far).dist(p)
-                    }
-                    _ => f64::INFINITY,
-                },
-                cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => {
-                    let mut d_tri = f64::INFINITY;
-                    for tri in pts.as_chunks::<3>().0 {
-                        if point_in_polygon(tri, p) {
-                            d_tri = 0.0;
-                            break;
-                        }
-                        d_tri = d_tri.min(dist_to_polyline(&[tri[0], tri[1], tri[2], tri[0]], p));
-                    }
-                    d_tri
-                }
-            };
-            best = best.min(dist);
-            if best == 0.0 {
-                break;
-            }
-        }
+        let best = display_list_distance(&ent.list, p);
         if best <= aperture {
-            hits.push((best, e.handle));
+            hits.push((best, ent.handle));
         }
     }
     hits.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -306,6 +482,70 @@ fn seg_hits_box(a: Vec2, b: Vec2, bx: &Bounds2) -> bool {
     }
     let c = bx.corners();
     (0..4).any(|i| cadcraft_geom::line_line(&Line::new(a, b), &Line::new(c[i], c[(i + 1) % 4])).is_some())
+}
+
+/// Window selection (entirely inside) or crossing selection (inside or touching) under the given
+/// 3D `orbit` projection.
+pub fn select_window_in_orbit(
+    d: &Drawing,
+    space: &Space,
+    orbit: cadcraft_render::Orbit3d,
+    bx: Bounds2,
+    crossing: bool,
+) -> Vec<Handle> {
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return select_window(d, space, bx, crossing);
+    }
+    let tol = window_tol(&bx);
+    let Some(ix) = orbit_index(d, space, orbit, tol) else { return Vec::new() };
+    let cands = ix.query(&bx, crossing);
+    cands
+        .into_iter()
+        .filter_map(|i| ix.ents.get(i))
+        .filter(|ent| in_orbit_window(ent, &bx, crossing))
+        .map(|ent| ent.handle)
+        .collect()
+}
+
+/// Whether a window or crossing box selects a projected [`OrbitEnt`].
+fn in_orbit_window(ent: &OrbitEnt, bx: &Bounds2, crossing: bool) -> bool {
+    if !ent.infinite && !ent.bounds.is_empty() && bx.contains_box(&ent.bounds) {
+        return true;
+    }
+    if !crossing || (!ent.infinite && (ent.bounds.is_empty() || !ent.bounds.intersects(bx))) {
+        return false;
+    }
+    for prim in &ent.list.prims {
+        let pts = ent.list.points(prim);
+        let hit = match prim.kind {
+            cadcraft_render::Kind::Polyline => {
+                if pts.len() == 1 {
+                    pts.first().is_some_and(|p| bx.contains(*p))
+                } else {
+                    pts.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(a, b)| seg_hits_box(*a, *b, bx)))
+                }
+            }
+            cadcraft_render::Kind::Point => pts.first().is_some_and(|p| bx.contains(*p)),
+            cadcraft_render::Kind::Infinite { ray } => match (pts.first(), pts.get(1)) {
+                (Some(&b), Some(&dir)) => {
+                    let far = 1e9;
+                    let a = if ray { b } else { b - dir * far };
+                    seg_hits_box(a, b + dir * far, bx)
+                }
+                _ => false,
+            },
+            cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => pts.as_chunks::<3>().0.iter().any(|tri| {
+                seg_hits_box(tri[0], tri[1], bx)
+                    || seg_hits_box(tri[1], tri[2], bx)
+                    || seg_hits_box(tri[2], tri[0], bx)
+                    || bx.corners().iter().any(|&c| point_in_polygon(tri, c))
+            }),
+        };
+        if hit {
+            return true;
+        }
+    }
+    false
 }
 
 /// Window selection (entirely inside) or crossing selection (inside or touching).

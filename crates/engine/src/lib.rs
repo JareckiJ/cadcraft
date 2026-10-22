@@ -1140,12 +1140,12 @@ impl Session {
         match input {
             Input::Point(p) => {
                 let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
+                let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
                 if let Some(pw) = self.pending_window.take() {
                     let crossing = p.x < pw.corner.x;
-                    let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+                    let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
-                let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
                 match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
                     Some(h) => Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h])))),
                     None => {
@@ -1686,9 +1686,10 @@ impl Session {
     pub fn idle_click(&mut self, p: Vec2, shift: bool) -> Result<()> {
         let space = self.space();
         let pickadd = self.settings.pickadd;
+        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         if let Some(pw) = self.pending_window.take() {
             let crossing = p.x < pw.corner.x;
-            let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+            let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
             let hs = cmd::groups::expand(self, hs);
             let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
             if shift && pickadd {
@@ -1700,7 +1701,6 @@ impl Session {
             return Ok(());
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
             Some(h) => self.idle_pick(h, shift),
             None => self.pending_window = Some(PendingWindow { corner: p, during_command: false }),
