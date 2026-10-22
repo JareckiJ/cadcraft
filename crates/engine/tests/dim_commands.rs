@@ -258,6 +258,9 @@ fn marks_follow_move_and_rotate_and_hostile_values_do_not_panic() {
     let _ = dim_of(&s, &h);
 }
 
+/// Regression: bare `DIMSTYLE` at the command line prompts for a style name instead of failing on
+/// the missing `name` parameter; the accepted name becomes current, and an unknown name is refused
+/// with the prompt still running.
 #[test]
 fn dimstyle_from_the_command_line_prompts_and_sets_the_current_style() {
     let mut s = Session::new();
