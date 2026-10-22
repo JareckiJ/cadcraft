@@ -81,6 +81,7 @@ fn write_file(cmd: &str, path: &str, bytes: &[u8]) -> Result<()> {
     {
         crate::file_access::check_write(path).map_err(|e| bad(cmd, e))?;
         let tmp = format!("{path}.cadcraft-tmp");
+        crate::file_access::check_write(&tmp).map_err(|e| bad(cmd, e))?;
         std::fs::write(&tmp, bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
         std::fs::rename(&tmp, path).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
         Ok(())

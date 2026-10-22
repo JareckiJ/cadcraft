@@ -408,6 +408,7 @@ fn store(path: &str, bytes: &[u8]) -> Result<()> {
     {
         crate::file_access::check_write(path).map_err(|e| bad("save", e))?;
         let tmp = format!("{path}.cadcraft-tmp");
+        crate::file_access::check_write(&tmp).map_err(|e| bad("save", e))?;
         std::fs::write(&tmp, bytes).map_err(|e| bad("save", format!("{path}: {e}")))?;
         std::fs::rename(&tmp, path).map_err(|e| bad("save", format!("{path}: {e}")))?;
         Ok(())
