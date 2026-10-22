@@ -1581,6 +1581,8 @@ fn rect_kind(first: Vec2, w: f64, h: f64, rot: f64, fillet: f64, chamfer: (f64, 
     k
 }
 
+/// Draws a rectangle from the JSON form: `p1` is a corner, or the centre when `center` is
+/// true, and the size comes from `p2`, `dimensions` or `area` plus `length`/`breadth`.
 pub(crate) fn run_rectang2(s: &mut Session, p: &Value) -> Result<Value> {
     let a = point_req("rectang", p, "p1")?;
     // Centre mode: `p1` is the rectangle's centre, so the rectangle spans it evenly.
@@ -1672,6 +1674,8 @@ pub(crate) struct RectM2 {
 }
 
 impl RectM2 {
+    /// Adds the rectangle of full size `w` × `h` with the collected options, drawing it from
+    /// the centre when centre mode is on, then applies the requested thickness.
     fn make(&self, s: &mut Session, w: f64, h: f64) -> Result<Step> {
         let Some(a) = self.first else { return Ok(Step::Cancel) };
         if w.abs() < 1e-12 || h.abs() < 1e-12 {
@@ -1691,6 +1695,9 @@ impl RectM2 {
         let a = self.first?;
         Some(if self.center { a - Vec2::new(w / 2.0, h / 2.0).rotate(self.rotation) } else { a })
     }
+    /// The rectangle's signed full size implied by the picked point `p`: explicit `dims` only
+    /// take their quadrant from `p`, otherwise `p` is a corner, doubled about the centre in
+    /// centre mode.
     fn other_corner(&self, p: Vec2) -> Option<(f64, f64)> {
         let a = self.first?;
         let loc = (p - a).rotate(-self.rotation);
@@ -1707,6 +1714,8 @@ impl Interactive for RectM2 {
     fn name(&self) -> &'static str {
         "RECTANG"
     }
+    /// Asks for the pending option's value, or for the first and second points; in centre mode
+    /// the first prompt asks for the centre instead of a corner.
     fn prompt(&self, _s: &Session) -> Prompt {
         let num = |m: &str, d: f64| Prompt::new(m, Accept::NUMBER).default(format!("{d:.4}"));
         if let Some(a) = self.asking {
@@ -1739,6 +1748,8 @@ impl Interactive for RectM2 {
             Some(p) => Prompt::new("Specify other corner point", Accept::POINT).kw(&["Area", "Dimensions", "Rotation"]).corner(p),
         }
     }
+    /// Consumes one input: option keywords (`Center` only switches the first point's meaning
+    /// to the centre and asks nothing), option values, and the points that size the rectangle.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Some(a) = self.asking {
             let val = |i: &Input, default: f64| -> Result<f64> {
@@ -1843,6 +1854,8 @@ impl Interactive for RectM2 {
             _ => Ok(Step::Continue),
         }
     }
+    /// The rubber-band rectangle for the cursor at `c`, mapped through the same size-and-origin
+    /// rules as the committed entity so centre mode previews where it will land.
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.asking.is_some() {
             return Vec::new();

@@ -566,6 +566,7 @@ fn xline_options_command_line() {
 
 // ---------------- RECTANG ----------------
 
+/// The corners of the rectangle just added, so a test can assert its bounds.
 fn rect_pts(s: &Session) -> Vec<Vec2> {
     match last(s) {
         EntityKind::LwPolyline(p) => p.vertices.iter().map(|v| v.p).collect(),
@@ -622,6 +623,9 @@ fn rectang_options_command_line() {
     }
 }
 
+/// Guards the JSON `center: true` form for every sizing route: a picked corner mirrored about
+/// the centre, full-size `dimensions`, full `area`, rotation about the centre, that the default
+/// corner mode is untouched, and that centre mode without a size is rejected.
 #[test]
 fn rectang_center_mode_json() {
     let mut s = Session::new();
@@ -653,6 +657,8 @@ fn rectang_center_mode_json() {
     assert!(s.execute("rectang", &json!({"center": true, "p1": [10, 10]})).is_err());
 }
 
+/// Guards that fillet, chamfer, width and thickness still apply in centre mode, and that an
+/// oversized fillet falls back to sharp corners without moving the rectangle off centre.
 #[test]
 fn rectang_center_mode_honours_options() {
     let mut s = Session::new();
@@ -676,6 +682,9 @@ fn rectang_center_mode_honours_options() {
     assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
 }
 
+/// Guards the `Center` keyword at the command line, before or after other options, with
+/// dimensions and area still centred, the prompt wording and centred rubber band, and that the
+/// default corner mode is unchanged.
 #[test]
 fn rectang_center_mode_command_line() {
     let mut s = Session::new();

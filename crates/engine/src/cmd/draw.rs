@@ -11,6 +11,8 @@ use super::pline_opts::{Outcome, PlineAsk};
 use super::*;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step, snap};
 
+/// Every draw command's spec: JSON parameters, menu path, aliases and the interactive prompt
+/// machine each command starts.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("line", "Line", run_line)
