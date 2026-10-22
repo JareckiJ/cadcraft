@@ -691,8 +691,14 @@ pub fn select_polygon_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_rende
             })
         });
         let mut pts = polys.iter().flatten();
+        let in_tri = ent
+            .list
+            .prims
+            .iter()
+            .filter(|pr| matches!(pr.kind, cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask))
+            .any(|pr| ent.list.points(pr).as_chunks::<3>().0.iter().any(|tri| poly.iter().any(|&v| point_in_polygon(tri, v))));
         let hit = if crossing {
-            crosses || pts.any(|p| point_in_polygon(poly, *p))
+            crosses || pts.any(|p| point_in_polygon(poly, *p)) || in_tri
         } else {
             !crosses && !polys.is_empty() && pts.all(|p| point_in_polygon(poly, *p))
         };

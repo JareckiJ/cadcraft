@@ -919,13 +919,14 @@ fn draw_drag_gpu(
     clipboard: (&[cadcraft_doc::Entity], u64),
     bg: Rgb,
     transparency: bool,
+    orbit: cadcraft_render::Orbit3d,
 ) {
     // Tessellate for a power-of-two zoom band so zooming mid-drag rebuilds only every 2x.
     let band = xf.scale.max(1e-300).log2().round() as i32;
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (c.key, band, bg.0, bg.1, bg.2, &drag.handles, transparency).hash(&mut h);
+        (c.key, band, bg.0, bg.1, bg.2, &drag.handles, transparency, orbit.hash_key()).hash(&mut h);
         if drag.clipboard {
             clipboard.1.hash(&mut h);
         }
@@ -933,7 +934,7 @@ fn draw_drag_gpu(
     };
     if c.drag_key != Some(key) {
         let band_scale = 2f64.powi(band);
-        let opts = cadcraft_render::Options { transparency, ..preview_options(band_scale) };
+        let opts = cadcraft_render::Options { transparency, orbit, ..preview_options(band_scale) };
         let list = if drag.clipboard {
             cadcraft_render::build_entities(doc, clipboard.0.iter(), &opts)
         } else {
@@ -1990,7 +1991,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if let Ok(st) = app.session.state() {
             let serial = app.session.clipboard_source.as_ref().map_or(0, |c| c.serial);
             let transparency = app.session.settings.transparency_display;
-            draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
+            draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency, current_orbit);
             let list = rebuilt_preview(&st.doc, extra.iter(), scale, current_orbit);
             draw_list(&painter, &xf, &list, bg, false);
         }
@@ -2599,9 +2600,9 @@ fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d)
     let px = to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0));
     let py = to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0));
     let pz = to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len));
-    let col_x = Color32::from_rgb(0xe8, 0x45, 0x45);
-    let col_y = Color32::from_rgb(0x3a, 0xc9, 0x58);
-    let col_z = Color32::from_rgb(0x42, 0x87, 0xf5);
+    let col_x = t.ucs_x;
+    let col_y = t.ucs_y;
+    let col_z = t.ucs_z;
     p.line_segment([o, px], Stroke::new(2.0, col_x));
     p.line_segment([o, py], Stroke::new(2.0, col_y));
     p.line_segment([o, pz], Stroke::new(2.0, col_z));
@@ -2612,9 +2613,10 @@ fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d)
 
 /// Draw the green 3D Orbit arcball overlay and pivot triad while `3DORBIT` is active.
 fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
+    let t = Tokens::get();
     let c = rect.center();
     let r = (rect.width().min(rect.height()) * 0.34).clamp(90.0, 260.0);
-    let green = Color32::from_rgb(0x35, 0xc4, 0x55);
+    let green = t.orbit_arcball;
     p.circle_stroke(c, r, Stroke::new(1.8, green));
     for d in [vec2(0.0, -r), vec2(0.0, r), vec2(-r, 0.0), vec2(r, 0.0)] {
         p.circle_stroke(c + d, 6.5, Stroke::new(1.4, green));
@@ -2625,9 +2627,9 @@ fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orb
         let pr = orbit.project_vec(v);
         pos2(c.x + pr.x as f32, c.y - pr.y as f32)
     };
-    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0))], Stroke::new(1.8, Color32::from_rgb(0xe8, 0x45, 0x45)));
-    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0))], Stroke::new(1.8, Color32::from_rgb(0x3a, 0xc9, 0x58)));
-    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len))], Stroke::new(1.8, Color32::from_rgb(0x42, 0x87, 0xf5)));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0))], Stroke::new(1.8, t.ucs_x));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0))], Stroke::new(1.8, t.ucs_y));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len))], Stroke::new(1.8, t.ucs_z));
 }
 
 /// Draw the top-left viewport controls label showing current view orientation and visual style.
@@ -2792,7 +2794,7 @@ pub(crate) mod tests {
         // One canvas across the toggle: the cached drag mesh must be rebuilt.
         let mut c = CanvasState::default();
         let mut alpha = |transparency: bool| {
-            draw_drag_gpu(&mut c, &painter, &xf, &d, &drag, (&[], 0), Rgb(0, 0, 0), transparency);
+            draw_drag_gpu(&mut c, &painter, &xf, &d, &drag, (&[], 0), Rgb(0, 0, 0), transparency, cadcraft_render::Orbit3d::default());
             let mesh = c.drag_slot.lock().unwrap().take().unwrap();
             // The first line vertex's colour alpha (after its 2 × f32 position).
             mesh.lines[11]
