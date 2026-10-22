@@ -528,6 +528,12 @@ mod native {
         if name.is_empty() { default.to_string() } else { name.to_string() }
     }
 
+    /// A drawing variable's value as text, or `default` when the header holds a value the
+    /// variable doesn't accept (a hostile file can put any integer in it).
+    fn variable_value(value: i16, valid: &[i16], default: i16) -> String {
+        if valid.contains(&value) { value.to_string() } else { default.to_string() }
+    }
+
     /// Add the drawing variables dictionary AutoCAD always writes into the named object
     /// dictionary, with the variables it keeps there, when the drawing has none (#1813).
     /// Vectric Aspire 10.5 reads a 2004 (AC1018) DWG without it as empty ("No data was imported
@@ -550,13 +556,14 @@ mod native {
             _ => return,
         }
         // The variables AutoCAD writes for a drawing with default styles and a 1:1 annotation
-        // scale; HIDETEXT, DIMASSOC, LAYEREVAL and LAYERNOTIFY have no DXF header variable.
+        // scale. DIMASSOC and HIDETEXT keep the drawing's own header values; LAYEREVAL and
+        // LAYERNOTIFY have no DXF header variable.
         let variables = [
             ("CMLEADERSTYLE", name_or_default(&doc.header.current_mleader_style_name, "Standard")),
             ("CTABLESTYLE", name_or_default(&doc.header.current_table_style_name, "Standard")),
             ("CANNOSCALE", name_or_default(&doc.header.current_annotation_scale, "1:1")),
-            ("DIMASSOC", "2".to_string()),
-            ("HIDETEXT", "1".to_string()),
+            ("DIMASSOC", variable_value(doc.header.dimension_associativity, &[0, 1, 2], 2)),
+            ("HIDETEXT", variable_value(doc.header.hide_text, &[0, 1], 1)),
             ("LAYEREVAL", "0".to_string()),
             ("LAYERNOTIFY", "0".to_string()),
         ];

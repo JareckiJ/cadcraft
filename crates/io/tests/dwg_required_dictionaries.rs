@@ -86,6 +86,34 @@ fn an_ac1018_dwg_gets_the_variable_dictionary_autocad_always_writes() {
     assert_eq!(back.model.len(), 1);
 }
 
+/// The dictionary must carry the drawing's own `$DIMASSOC` and `$HIDETEXT`, not AutoCAD's
+/// defaults: a drawing that turned text hiding off or stores dimensions non-associatively keeps
+/// those settings for every consumer that reads them from the dictionary.
+#[test]
+fn the_dictionary_keeps_the_drawings_dimassoc_and_hidetext() {
+    let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DIMASSOC\n70\n1\n9\n$HIDETEXT\n70\n0\n0\nENDSEC\n0\nEOF\n";
+    let dwg = cadcraft_dwg::dxf_to_dwg_as(dxf.as_bytes(), "AC1018").expect("write the DWG");
+    let doc = read_dwg(&dwg);
+    let vars = variable_dictionary(&doc).expect("AC1018 DWG: the named object dictionary has an AcDbVariableDictionary");
+    assert_eq!(value(&vars, "DIMASSOC"), Some("1"), "DIMASSOC in {vars:?}");
+    assert_eq!(value(&vars, "HIDETEXT"), Some("0"), "HIDETEXT in {vars:?}");
+    // The DWG's own header settings match the dictionary, so both kinds of consumer agree.
+    assert_eq!(doc.header.dimension_associativity, 1);
+    assert_eq!(doc.header.hide_text, 0);
+}
+
+/// A header variable holding a value the variable doesn't accept is written with AutoCAD's
+/// default, as a hostile file can put any integer there.
+#[test]
+fn impossible_header_values_fall_back_to_the_defaults() {
+    let dxf = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DIMASSOC\n70\n9\n9\n$HIDETEXT\n70\n7\n0\nENDSEC\n0\nEOF\n";
+    let dwg = cadcraft_dwg::dxf_to_dwg_as(dxf.as_bytes(), "AC1018").expect("write the DWG");
+    let doc = read_dwg(&dwg);
+    let vars = variable_dictionary(&doc).expect("AC1018 DWG: the named object dictionary has an AcDbVariableDictionary");
+    assert_eq!(value(&vars, "DIMASSOC"), Some("2"), "DIMASSOC in {vars:?}");
+    assert_eq!(value(&vars, "HIDETEXT"), Some("1"), "HIDETEXT in {vars:?}");
+}
+
 /// The AC1032 (AutoCAD 2018) path is deliberately unchanged: those DWGs read in Vectric Aspire
 /// without the dictionary, so no dictionary is injected and the existing output stays as it was.
 #[test]
