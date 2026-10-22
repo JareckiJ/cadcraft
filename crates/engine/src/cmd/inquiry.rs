@@ -10,6 +10,7 @@ use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 mod regions;
 mod shapes;
+mod usage;
 
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = vec![
@@ -45,6 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{type?, layer?, selected?: bool (default false; true = current selection in active space), window?: [[x,y],[x,y]], crossing?: bool (default true; false = entirely inside), limit?, offset?} → {count (all matches), returned, offset, entities}")
             .noundo(),
         CommandSpec::new("shapes", "Analyze Shapes", shapes::run).params(shapes::PARAMS).noundo(),
+        CommandSpec::new("usage", "Analyze Usage", usage::run).params(usage::PARAMS).noundo(),
         CommandSpec::new("texts", "Query Texts", run_texts)
             .params("{contains?: text (any case), layer?, window?: [[x,y],[x,y]] (by insertion point), limit? (default 200), offset?} → {count (all matches), returned, offset, texts: [{handle, type, layer, text, at, height, rotation (degrees), style, tag? (attributes)}]}: the readable text of TEXT, MTEXT (formatting removed), block attributes and multileaders")
             .noundo(),
