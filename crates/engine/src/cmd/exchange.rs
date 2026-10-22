@@ -79,7 +79,9 @@ fn extension(path: &str) -> String {
 fn write_file(cmd: &str, path: &str, bytes: &[u8]) -> Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        crate::file_access::check_write(path).map_err(|e| bad(cmd, e))?;
         let tmp = format!("{path}.cadcraft-tmp");
+        crate::file_access::check_write(&tmp).map_err(|e| bad(cmd, e))?;
         std::fs::write(&tmp, bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
         std::fs::rename(&tmp, path).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
         Ok(())
@@ -185,6 +187,7 @@ fn import_drawing(s: &mut Session, src: &Drawing, at: Vec2, scale: f64, file: &s
 fn read_file(_path: &str) -> Result<Vec<u8>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        crate::file_access::check_read(_path).map_err(|e| bad("import", e))?;
         std::fs::read(_path).map_err(|e| bad("import", format!("{_path}: {e}")))
     }
     #[cfg(target_arch = "wasm32")]

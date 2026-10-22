@@ -14,6 +14,7 @@ pub mod autosave;
 pub mod blockedit;
 pub mod cmd;
 pub mod doc_path;
+pub mod file_access;
 mod finite;
 pub mod grip_dims;
 pub mod grips;

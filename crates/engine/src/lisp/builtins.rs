@@ -922,7 +922,7 @@ fn open(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
             }
             None => return Ok(Flow::Value(Value::Nil)),
         }
-    } else if !can_write(&path) {
+    } else if !can_write(&path) || crate::file_access::check_write(&path).is_err() {
         return Ok(Flow::Value(Value::Nil));
     }
     let id = ctx.env.next_file;
@@ -963,6 +963,7 @@ fn findfile(a: &[Value]) -> R {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_text_file(path: &str) -> Option<String> {
+    crate::file_access::check_read(path).ok()?;
     let bytes = std::fs::read(path).ok()?;
     // Cap what a routine can pull into memory.
     if bytes.len() > 64 * 1024 * 1024 {
@@ -985,6 +986,9 @@ fn can_write(_path: &str) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 fn write_text_file(path: &str, text: &str, append: bool) {
     use std::io::Write;
+    if crate::file_access::check_write(path).is_err() {
+        return;
+    }
     let f = std::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(path);
     if let Ok(mut f) = f {
         let _ = f.write_all(text.as_bytes());
@@ -994,7 +998,7 @@ fn write_text_file(path: &str, text: &str, append: bool) {
 fn write_text_file(_path: &str, _text: &str, _append: bool) {}
 #[cfg(not(target_arch = "wasm32"))]
 fn file_exists(path: &str) -> bool {
-    std::path::Path::new(path).is_file()
+    crate::file_access::check_read(path).is_ok() && std::path::Path::new(path).is_file()
 }
 #[cfg(target_arch = "wasm32")]
 fn file_exists(_path: &str) -> bool {
