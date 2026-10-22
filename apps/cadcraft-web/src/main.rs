@@ -36,6 +36,10 @@ mod web {
     );
 
     impl eframe::App for Shell {
+        /// Runs one frame: takes in files dropped on or picked for the page, drains the background
+        /// uploads, follows the browser's reduced-motion setting, runs the app, sends the viewport
+        /// title when it changed (so the tab and an embedding page name the open drawing), and
+        /// reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
@@ -228,6 +232,8 @@ fn main() {
 mod tests {
     use super::{document_title, title_to_send, wants_cpu};
 
+    /// Guards the `?cpu` URL flag: only a whole `cpu` query parameter (bare or with a value)
+    /// selects the CPU canvas, so `?sample` and `?gpucpu` stay on the GPU path.
     #[test]
     fn cpu_flag_is_detected() {
         assert!(wants_cpu("?cpu"));
@@ -239,6 +245,8 @@ mod tests {
         assert!(!wants_cpu("?gpucpu"));
     }
 
+    /// Guards the tab title text: a drawing contributes its name and, when dirty, a trailing
+    /// bullet; a blank or missing name leaves the app name alone and never shows a bullet.
     #[test]
     fn viewport_title_names_the_document_and_marks_unsaved_changes() {
         assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — CADCraft");
@@ -249,6 +257,8 @@ mod tests {
         assert_eq!(document_title(Some("   "), true), "CADCraft");
     }
 
+    /// Guards the change signal: a title is sent on open, rename, dirty change and close, but
+    /// never twice in a row, so an idle tab is not repainted by a repeated title command.
     #[test]
     fn viewport_title_follows_open_rename_and_dirty_changes_only() {
         let mut sent = None;
