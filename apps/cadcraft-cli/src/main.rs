@@ -28,7 +28,7 @@ macro_rules! outln {
 
 use std::process::ExitCode;
 
-use cadcraft_engine::doc::Space;
+use cadcraft_engine::doc::{Handle, Space};
 use cadcraft_engine::geom::{Bounds2, Vec2};
 use cadcraft_engine::{Session, View};
 use serde_json::{Value, json};
@@ -73,7 +73,15 @@ image framing (png 2400x1600, svg, pdf; always model space):
                            scaled to fit the image without distortion.
   --view extents           always fit the drawing extents.
   --view current           the current view (as last set by zoom/pan/view.set; a freshly
-                           opened drawing's view is its extents plus a 10% margin).";
+                           opened drawing's view is its extents plus a 10% margin).
+
+--cmd chaining (run):
+  A --cmd parameter value of exactly \"{last}\" is replaced with the last object handle an
+  earlier --cmd in the same run returned, so a command can act on what the previous one made:
+    --cmd 'mview {\"p1\":[20,20],\"p2\":[200,150]}'        prints {\"viewports\":[\"100\"]}
+    --cmd 'viewport.set {\"handle\":\"{last}\",\"scale\":1}' changes viewport 100
+  It works in any parameter, at any depth (e.g. \"handles\":[\"{last}\"]); every other string is
+  passed unchanged. With no earlier returned handle the run fails and says so.";
 
 /// What part of model space an image export shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -314,6 +322,59 @@ fn skipped_message(d: &cadcraft_engine::doc::Drawing, path: &str) -> Option<Stri
     Some(format!("{path}: {n} {records} could not be read and are left out ({})", list.join(", ")))
 }
 
+/// A `--cmd` parameter value of exactly `{last}` is filled in with the last object handle an
+/// earlier `--cmd` in the same run returned: `mview` answers `{"viewports":["100"]}`, so
+/// `viewport.set {"handle":"{last}","scale":1}` changes viewport 100. Any other string is passed
+/// through unchanged, and `--script` text is never rewritten.
+const LAST_HANDLE: &str = "{last}";
+
+/// How deep [`result_handles`] walks a command result (results are the engine's own JSON).
+const RESULT_DEPTH: usize = 16;
+
+/// The object handles a command result mentions, in the order it lists them. Only strings that
+/// name an entity of the active drawing count, so counts, names (even a hex-looking layer name)
+/// and other values are skipped.
+fn result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
+    if depth > RESULT_DEPTH {
+        return;
+    }
+    match v {
+        Value::String(t) => {
+            if let Some(h) = Handle::parse_hex(t)
+                && s.doc().is_ok_and(|d| d.entity(h).is_some())
+            {
+                out.push(h);
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|x| result_handles(s, x, depth + 1, out)),
+        Value::Object(m) => m.values().for_each(|x| result_handles(s, x, depth + 1, out)),
+        _ => {}
+    }
+}
+
+/// The last handle `r` returned: what a later `{last}` stands for.
+fn returned_handle(s: &Session, r: &Value) -> Option<Handle> {
+    let mut hs = Vec::new();
+    result_handles(s, r, 0, &mut hs);
+    hs.last().copied()
+}
+
+/// Every `{last}` in `p`, at any depth, replaced by `h`. With no handle to fill in it is an
+/// error, never a token reaching the command as a (bad) handle.
+fn fill_last(p: &Value, h: Option<Handle>) -> Result<Value, String> {
+    match p {
+        Value::String(t) if t.as_str() == LAST_HANDLE => match h {
+            Some(h) => Ok(Value::String(h.hex())),
+            None => Err(format!("`{LAST_HANDLE}` needs an earlier --cmd in this run to have returned a handle")),
+        },
+        Value::Array(a) => a.iter().map(|x| fill_last(x, h)).collect::<Result<Vec<_>, _>>().map(Value::Array),
+        Value::Object(m) => {
+            m.iter().map(|(k, x)| Ok((k.clone(), fill_last(x, h)?))).collect::<Result<serde_json::Map<String, Value>, _>>().map(Value::Object)
+        }
+        other => Ok(other.clone()),
+    }
+}
+
 fn run(args: &[String]) -> Result<(), String> {
     let mut s = Session::empty();
     let mut it = args.iter();
@@ -349,13 +410,18 @@ fn run(args: &[String]) -> Result<(), String> {
     }
     check_framed_output(framing, exp.as_deref())?;
     let before = model_views(&s);
+    let mut last_handle: Option<Handle> = None;
     for (kind, body) in steps {
         match kind.as_str() {
             "script" => s.script(&body).map_err(|e| e.to_string())?,
             _ => {
                 let (id, json) = body.split_once(' ').unwrap_or((&body, "{}"));
                 let params: Value = serde_json::from_str(json).map_err(|e| format!("--cmd {id}: {e}"))?;
+                let params = fill_last(&params, last_handle).map_err(|e| format!("--cmd {id}: {e}"))?;
                 let r = s.execute(id, &params).map_err(|e| e.to_string())?;
+                if let Some(h) = returned_handle(&s, &r) {
+                    last_handle = Some(h);
+                }
                 if !r.is_null() {
                     outln!("{r}");
                 }
@@ -778,6 +844,40 @@ mod tests {
         assert!(check_framed_output(Framing::Extents, None).is_err());
         assert!(check_framed_output(Framing::Extents, Some("a.png")).is_ok());
         assert!(check_framed_output(Framing::Auto, Some("a.dxf")).is_ok());
+    }
+
+    #[test]
+    fn last_placeholder_takes_the_previous_handle() {
+        let mut s = sample_session();
+        let r = s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+        let h = returned_handle(&s, &r).expect("LINE returns its handle");
+        assert_eq!(fill_last(&json!({"handle": "{last}"}), Some(h)), Ok(json!({"handle": h.hex()})));
+        // Nested, as in a selection list.
+        assert_eq!(fill_last(&json!({"handles": ["{last}", "1"]}), Some(h)), Ok(json!({"handles": [h.hex(), "1"]})));
+        // Only the exact token: a name or a sentence that merely contains it stays as written.
+        for p in [json!("last"), json!("{last} "), json!({"name": "last"})] {
+            assert_eq!(fill_last(&p, Some(h)), Ok(p.clone()));
+        }
+        // Nothing returned yet: an error, not a token passed to the command as a bad handle.
+        assert!(fill_last(&json!({"handle": "{last}"}), None).unwrap_err().contains("{last}"));
+    }
+
+    /// Handles are read from a result by looking the strings up in the drawing: counts and names
+    /// are not mistaken for handles, and `mview`'s `viewports` works like `handle`/`handles`.
+    #[test]
+    fn returned_handle_reads_only_real_handles() {
+        let mut s = Session::empty();
+        s.new_drawing(false);
+        s.execute("layout.set", &json!({"name": "Layout1"})).unwrap();
+        let r = s.execute("mview", &json!({"p1": [20, 20], "p2": [200, 150]})).unwrap();
+        let h = returned_handle(&s, &r).expect("mview returns its viewport handle");
+        assert!(r["viewports"].as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some(h.hex().as_str()))), "{r}");
+        assert_eq!(returned_handle(&s, &json!({"changed": 3, "name": "A1"})), None);
+        // The most recent of several.
+        let a = s.execute("line", &json!({"points": [[0, 0], [1, 0]]})).unwrap();
+        let b = s.execute("line", &json!({"points": [[0, 0], [2, 0]]})).unwrap();
+        let (ha, hb) = (returned_handle(&s, &a).unwrap(), returned_handle(&s, &b).unwrap());
+        assert_eq!(returned_handle(&s, &json!({"handles": [ha.hex(), hb.hex()]})), Some(hb));
     }
 
     #[test]
