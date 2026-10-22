@@ -267,6 +267,32 @@ fn polyline_segment_converts_to_arc_and_back() {
 }
 
 #[test]
+fn polyline_arc_segment_add_vertex_preserves_arc() {
+    let mut s = Session::new();
+    let h = pline(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], false);
+    s.set_selection(vec![h]);
+    let mid = grip_index(&s, h, 5.0, 0.0);
+    s.start_grip_edit(&[(h, mid)]).unwrap();
+    // Convert first segment (0,0)->(10,0) to a semi-circle bulge=-1.0 through (5,5)
+    typed(&mut s, &["V", "5,5"]);
+    let v_before = vertices(&s, h);
+    assert!((v_before[0].1.abs() - 1.0).abs() < 1e-6, "bulge magnitude is 1.0: {}", v_before[0].1);
+
+    // Now add a vertex along this arc segment at (5, 5)
+    let arc_mid = grip_index(&s, h, 5.0, 5.0);
+    s.start_grip_edit(&[(h, arc_mid)]).unwrap();
+    typed(&mut s, &["A", "5,5"]);
+
+    let v_after = vertices(&s, h);
+    assert_eq!(v_after.len(), 4);
+    assert!(near(v_after[1].0, 5.0, 5.0), "new vertex at (5,5): {:?}", v_after[1].0);
+    // Both split segments should retain the arc curvature (bulge ~ -tan(pi/8) ~ -0.4142)
+    let expected_sub_bulge = -(std::f64::consts::FRAC_PI_4 / 2.0).tan(); // -tan(pi/8) ≈ -0.41421356
+    assert!((v_after[0].1 - expected_sub_bulge).abs() < 1e-4, "sub-bulge 1: {}", v_after[0].1);
+    assert!((v_after[1].1 - expected_sub_bulge).abs() < 1e-4, "sub-bulge 2: {}", v_after[1].1);
+}
+
+#[test]
 fn line_and_arc_lengthen_and_radius() {
     let mut s = Session::new();
     let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);

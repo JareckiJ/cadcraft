@@ -406,10 +406,38 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
             if at >= p.vertices.len() {
                 return None;
             }
+            let n = p.vertices.len();
+            let next_idx = (at + 1) % n;
+            let (p_start, orig_bulge) = {
+                let v = p.vertices.get(at)?;
+                (v.p, v.bulge)
+            };
+            let p_end = p.vertices.get(next_idx)?.p;
+
+            let (b1, b2) = if orig_bulge.abs() > 1e-12 {
+                if let Some((arc, ccw)) = cadcraft_geom::bulge_to_arc(p_start, p_end, orig_bulge) {
+                    let sw = arc.sweep();
+                    let ang_start = arc.center.angle_to(p_start);
+                    let ang_to = arc.center.angle_to(to);
+                    let sw1 = if ccw { cadcraft_geom::norm_angle(ang_to - ang_start) } else { cadcraft_geom::norm_angle(ang_start - ang_to) };
+                    if sw1 > 1e-9 && sw1 < sw - 1e-9 {
+                        let sw2 = sw - sw1;
+                        let sign = if ccw { 1.0 } else { -1.0 };
+                        (cadcraft_geom::arc_to_bulge(sign * sw1), cadcraft_geom::arc_to_bulge(sign * sw2))
+                    } else {
+                        // Point picked off arc: calculate bulges through the picked point
+                        (crate::cmd::curves::bulge_through(p_start, to, p_end), 0.0)
+                    }
+                } else {
+                    (0.0, 0.0)
+                }
+            } else {
+                (0.0, 0.0)
+            };
+
             let v = p.vertices.get_mut(at)?;
-            // The segment is split in two straight ones.
-            v.bulge = 0.0;
-            let nv = cadcraft_geom::PolyVertex { p: to, bulge: 0.0, ..*v };
+            v.bulge = b1;
+            let nv = cadcraft_geom::PolyVertex { p: to, bulge: b2, ..*v };
             p.vertices.insert(at + 1, nv);
         }
         (EntityKind::LwPolyline(p), GripAction::RemoveVertex) => {
