@@ -1371,7 +1371,9 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
         }
         return raw;
     }
-    let work_raw = orbit.unproject_xy(raw);
+    let Some(work_raw) = orbit.unproject_xy(raw) else {
+        return raw;
+    };
     let (now, shift) = ctx.input(|i| (i.time, i.modifiers.shift));
     let q =
         snap::tracking::CursorQuery { base, deferred, corner, aperture: app.session.settings.aperture / xf.scale, tol: 6.0 / xf.scale, now, shift };
@@ -1648,7 +1650,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
     let raw_world = hover_pos.filter(|_| inside).map(|p| xf.to_world(p));
     let dyn_frame = crate::cmdline::dyn_frame(app);
-    if let Some(w) = raw_world {
+    let edge_on_work_point = current_orbit.is_edge_on()
+        && app.session.current_prompt().as_ref().is_some_and(cadcraft_engine::pointmod::accepts)
+        && app.session.pending_window.is_none()
+        && app.session.select_mode.is_none()
+        && !app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom"));
+    if let Some(w) = raw_world.filter(|_| !edge_on_work_point) {
         let mut eff = effective_point(app, w, &xf, current_orbit, ui.ctx());
         // A locked Dynamic Input value (`40,` or `40<` typed) holds the cursor and overrides snaps.
         if let Some(f) = dyn_frame
@@ -2336,13 +2343,15 @@ fn snap_cycle(app: &mut CadApp, raw: Vec2, ap: f64) -> Option<usize> {
 fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render::Orbit3d) {
     let over = app.session.snap_override();
     let ap = app.session.settings.aperture / xf.scale;
-    let work_raw = orbit.unproject_xy(raw);
-    let cycle = snap_cycle(app, work_raw, ap);
+    let cycle = snap_cycle(app, raw, ap);
     let prompt = app.session.current_prompt();
     let wants_point = app.session.accepts_work_point();
     if (over.is_none() && cycle.is_none()) || !wants_point {
         return;
     }
+    let Some(work_raw) = orbit.unproject_xy(raw) else {
+        return;
+    };
     let base = prompt.as_ref().and_then(|p| p.base);
     let deferred = prompt.as_ref().is_some_and(|p| p.deferred);
     let s = &app.session.settings;
@@ -2350,10 +2359,10 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
     let Ok(st) = app.session.state() else { return };
     let hit = match cycle {
         Some(i) => {
-            let cands = cadcraft_engine::pointmod::snap_candidates(&st.doc, &st.edit_space(), work_raw, ap, osmode, base, deferred);
+            let cands = cadcraft_engine::pointmod::snap_candidates_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred);
             cands.get(i % cands.len().max(1)).copied()
         }
-        None => snap::osnap(&st.doc, &st.edit_space(), work_raw, ap, osmode, base, deferred),
+        None => snap::osnap_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred),
     };
     let p = match (hit, app.canvas.snap) {
         (Some(h), _) => {

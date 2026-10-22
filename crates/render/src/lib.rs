@@ -253,21 +253,36 @@ impl Orbit3d {
         cadcraft_geom::Mat3 { a, b, c, d, e, f }
     }
 
+    /// Whether the 3D orbit looks along the `z = 0` work plane edge-on (`cos(pitch)` ≈ 0, e.g.
+    /// Front, Back, Left, or Right views), so 2D view-plane points cannot be unprojected onto `z = 0`.
+    pub fn is_edge_on(&self) -> bool {
+        !self.is_top() && self.pitch.cos().abs() < 1e-4
+    }
+
     /// Map a 2D view-plane point `p` back onto the world `z = 0` work plane (the inverse of
-    /// [`Self::project`] at `z = 0`).
-    pub fn unproject_xy(&self, p: Vec2) -> Vec2 {
+    /// [`Self::project`] at `z = 0`), or `None` when the work plane is edge-on ([`Self::is_edge_on`]).
+    pub fn unproject_xy(&self, p: Vec2) -> Option<Vec2> {
+        self.unproject_z(p, 0.0)
+    }
+
+    /// Map a 2D view-plane point `p` back onto the horizontal plane at world elevation `z` (the
+    /// inverse of [`Self::project`] at `z`), or `None` when the plane is edge-on ([`Self::is_edge_on`]).
+    pub fn unproject_z(&self, p: Vec2, z: f64) -> Option<Vec2> {
         if self.is_top() {
-            return p;
+            return p.is_finite().then_some(p);
         }
         let (sy, cy) = self.yaw.sin_cos();
         let (sp, cp) = self.pitch.sin_cos();
+        if cp.abs() < 1e-4 {
+            return None;
+        }
         let x1 = p.x - self.pivot.x;
         let y2 = p.y - self.pivot.y;
-        let cp_safe = if cp.abs() < 1e-6 { 1e-6_f64.copysign(cp) } else { cp };
-        let y1 = (y2 + self.pivot.z * sp) / cp_safe;
+        let y1 = (y2 - (z - self.pivot.z) * sp) / cp;
         let dx = x1 * cy + y1 * sy;
         let dy = -x1 * sy + y1 * cy;
-        Vec2::new(self.pivot.x + dx, self.pivot.y + dy)
+        let out = Vec2::new(self.pivot.x + dx, self.pivot.y + dy);
+        out.is_finite().then_some(out)
     }
 
     /// Conjugate a world-XY 2D affine transform `m` into projected 2D view-plane coordinates
@@ -450,6 +465,9 @@ struct Builder<'a> {
     opts: &'a Options,
     /// Plotting: skip layers marked "do not plot".
     plotting: bool,
+    /// True when building a paper-space layout directly (ordinary paper-space entities stay in
+    /// 2D paper coordinates; only model-space viewport contents use [`Options::orbit`]).
+    paper: bool,
     /// The plot style table drawn with.
     styles: Option<&'a plotstyle::Styler>,
     /// Named plot style (table index) of the entity being drawn.
@@ -467,6 +485,15 @@ struct Builder<'a> {
 pub const MAX_BLOCK_EXPANSION: usize = 2_000_000;
 
 impl Builder<'_> {
+    /// The 3D orbit active for `ctx`: 2D Top for ordinary paper-space geometry, and
+    /// [`Options::orbit`] for model space (including model space seen through a layout viewport).
+    fn active_orbit(&self, ctx: &Ctx) -> Orbit3d {
+        if self.paper && ctx.top != VIEWPORT_CONTENT {
+            Orbit3d::default()
+        } else {
+            self.opts.orbit
+        }
+    }
     /// `color` and `lw` as the plot style table prints them.
     fn styled(&self, color: Ink, lw: f32) -> (Ink, f32) {
         match self.styles {
@@ -503,17 +530,18 @@ impl Builder<'_> {
     }
     /// Project a 2D point `p` with additional local Z offset `extra_z` through `ctx` and the active 3D orbit.
     fn project_pt(&self, ctx: &Ctx, p: Vec2, extra_z: f64) -> Vec2 {
-        if self.opts.orbit.is_top() {
+        let orbit = self.active_orbit(ctx);
+        if orbit.is_top() {
             return ctx.xf.apply(p);
         }
         let z = ctx.z_offset + extra_z * ctx.z_scale;
         let q = ctx.xf.apply(p);
         if ctx.top == VIEWPORT_CONTENT {
             let m = ctx.vp_xf_inv.apply(q);
-            let m_proj = self.opts.orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, z));
+            let m_proj = orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, z));
             ctx.vp_xf.apply(m_proj)
         } else {
-            self.opts.orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, z))
+            orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, z))
         }
     }
     /// Append a 3D polyline primitive projected through the current context and 3D orbit.
@@ -571,17 +599,18 @@ impl Builder<'_> {
         self.note_pen(color);
         let (color, _) = self.styled(color, 0.0);
         let start = self.list.tris.len() as u32;
+        let orbit = self.active_orbit(ctx);
         for p in tris {
-            let q = if self.opts.orbit.is_top() {
+            let q = if orbit.is_top() {
                 xf.apply(*p)
             } else {
                 let q0 = xf.apply(*p);
                 if ctx.top == VIEWPORT_CONTENT {
                     let m = ctx.vp_xf_inv.apply(q0);
-                    let m_proj = self.opts.orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, ctx.z_offset));
+                    let m_proj = orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, ctx.z_offset));
                     ctx.vp_xf.apply(m_proj)
                 } else {
-                    self.opts.orbit.project(cadcraft_geom::Vec3::new(q0.x, q0.y, ctx.z_offset))
+                    orbit.project(cadcraft_geom::Vec3::new(q0.x, q0.y, ctx.z_offset))
                 }
             };
             self.list.bounds.add(q);
@@ -665,10 +694,11 @@ impl Builder<'_> {
         let start = self.list.verts.len() as u32;
         self.list.verts.push(self.project_pt(ctx, base, 0.0));
         let d2 = ctx.xf.apply_vec(dir);
-        let d_proj = if self.opts.orbit.is_top() {
+        let orbit = self.active_orbit(ctx);
+        let d_proj = if orbit.is_top() {
             d2.normalized()
         } else {
-            self.opts.orbit.project_vec(cadcraft_geom::Vec3::new(d2.x, d2.y, 0.0)).normalized()
+            orbit.project_vec(cadcraft_geom::Vec3::new(d2.x, d2.y, 0.0)).normalized()
         };
         self.list.verts.push(d_proj);
         self.list.prims.push(DPrim {
@@ -729,12 +759,12 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
 fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> DisplayList {
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, plotting).map(|t| plotstyle::Styler::new(d, t));
-    let mut b = Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let paper = matches!(space, Space::Paper(_));
+    let mut b = Builder { list: DisplayList::default(), opts, plotting, paper, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
     if let Space::Paper(name) = space {
         b.list.sheet = paper::sheet(d, name);
     }
     if let Some(store) = d.space(space) {
-        let paper = matches!(space, Space::Paper(_));
         #[cfg(not(target_arch = "wasm32"))]
         if !paper && !plotting && b.styles.is_none() && store.len() >= 2 * PARALLEL_CHUNK {
             build_parallel(&mut b, d, store);
@@ -780,8 +810,16 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
     let parts: Vec<DisplayList> = ents
         .par_chunks(PARALLEL_CHUNK)
         .map(|chunk| {
-            let mut part =
-                Builder { list: DisplayList::default(), opts, plotting, styles: None, named: None, shared_budget: Some(&budget), transparency: 0 };
+            let mut part = Builder {
+                list: DisplayList::default(),
+                opts,
+                plotting,
+                paper: false,
+                styles: None,
+                named: None,
+                shared_budget: Some(&budget),
+                transparency: 0,
+            };
             for e in chunk {
                 entity(&mut part, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
             }
@@ -908,8 +946,16 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
     }
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, false).map(|t| plotstyle::Styler::new(d, t));
-    let mut b =
-        Builder { list: DisplayList::default(), opts, plotting: false, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        paper: false,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+    };
     contents(&mut b, d, vp, area, &Clip::Rect(area), paper::unit_mm_of(d, handle));
     b.list
 }
@@ -952,6 +998,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         list: DisplayList::default(),
         opts: b.opts,
         plotting: b.plotting,
+        paper: false,
         styles: b.styles,
         named: None,
         shared_budget: None,
@@ -976,6 +1023,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
                         list: DisplayList::default(),
                         opts,
                         plotting: false,
+                        paper: false,
                         styles: None,
                         named: None,
                         shared_budget: Some(&budget),
@@ -1126,7 +1174,16 @@ pub fn build_entities<'a, I: IntoIterator<Item = &'a Entity>>(d: &Drawing, ents:
     } else {
         opts
     };
-    let mut b = Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        paper: false,
+        styles: None,
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+    };
     for e in ents {
         entity(&mut b, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
     }
@@ -1256,6 +1313,24 @@ fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
 }
 
+/// The planar Z elevation of an entity `kind` when rendered or tested in a 3D orbit (0.0 for
+/// non-planar 3D entities that carry per-vertex Z coordinates).
+pub fn entity_elevation(kind: &EntityKind) -> f64 {
+    match kind {
+        EntityKind::LwPolyline(p) => p.elevation,
+        EntityKind::Hatch(h) => h.elevation,
+        EntityKind::Circle(c) => c.center.z,
+        EntityKind::Arc(a) => a.center.z,
+        EntityKind::Ellipse(el) => el.center.z,
+        EntityKind::Text(t) => t.insert.z,
+        EntityKind::MText(t) => t.insert.z,
+        EntityKind::Point(p) => p.p.z,
+        EntityKind::Dimension(d) => d.defpt.z,
+        EntityKind::Line(l) if (l.a.z - l.b.z).abs() <= 1e-12 => l.a.z,
+        _ => 0.0,
+    }
+}
+
 /// Emit the primitives for entity `e` into `b` under `ctx`.
 fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     // A top-level annotative object draws at the view's annotation scale: a viewport's scale for
@@ -1283,23 +1358,8 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     if b.opts.transparency {
         b.transparency = transparency(e.common.transparency, layer_transparency, ctx.block_transparency);
     }
-    let ent_z = if b.opts.orbit.is_top() {
-        0.0
-    } else {
-        match &e.kind {
-            EntityKind::LwPolyline(p) => p.elevation,
-            EntityKind::Hatch(h) => h.elevation,
-            EntityKind::Circle(c) => c.center.z,
-            EntityKind::Arc(a) => a.center.z,
-            EntityKind::Ellipse(el) => el.center.z,
-            EntityKind::Text(t) => t.insert.z,
-            EntityKind::MText(t) => t.insert.z,
-            EntityKind::Point(p) => p.p.z,
-            EntityKind::Dimension(d) => d.defpt.z,
-            EntityKind::Line(l) if (l.a.z - l.b.z).abs() <= 1e-12 => l.a.z,
-            _ => 0.0,
-        }
-    };
+    let orbit = b.active_orbit(ctx);
+    let ent_z = if orbit.is_top() { 0.0 } else { entity_elevation(&e.kind) };
     let ctx_z = Ctx { z_offset: ctx.z_offset + ent_z * ctx.z_scale, ..ctx.clone() };
     let ctx = &ctx_z;
     // A plot style's linetype replaces the object's.
@@ -1514,10 +1574,10 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                 b.polyline(ctx, rgb, lw, l);
             }
         }
-        EntityKind::Line(l) if !b.opts.orbit.is_top() && (l.a.z - l.b.z).abs() > 1e-12 => {
+        EntityKind::Line(l) if !orbit.is_top() && (l.a.z - l.b.z).abs() > 1e-12 => {
             b.polyline_3d(ctx, rgb, lw, &[l.a, l.b]);
         }
-        EntityKind::Polyline3d(p) if !b.opts.orbit.is_top() => {
+        EntityKind::Polyline3d(p) if !orbit.is_top() => {
             let mut pts = p.points.clone();
             if p.closed
                 && let Some(first) = p.points.first().copied()
@@ -1526,7 +1586,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             }
             b.polyline_3d(ctx, rgb, lw, &pts);
         }
-        EntityKind::Face3d(f) if !b.opts.orbit.is_top() => {
+        EntityKind::Face3d(f) if !orbit.is_top() => {
             let c = &f.corners;
             b.polyline_3d(ctx, rgb, lw, &[c[0], c[1], c[2], c[3], c[0]]);
         }

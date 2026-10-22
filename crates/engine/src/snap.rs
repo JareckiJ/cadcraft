@@ -158,6 +158,240 @@ pub fn osnap(d: &Drawing, space: &Space, cursor: Vec2, aperture: f64, osmode: u3
     osnap_with(d, space, &ix, cursor, aperture, osmode, base, deferred)
 }
 
+/// Find the best object snap near the 2D view-plane `view_cursor` within `aperture` under `orbit`.
+#[allow(clippy::too_many_arguments)]
+pub fn osnap_in_orbit(
+    d: &Drawing,
+    space: &Space,
+    orbit: cadcraft_render::Orbit3d,
+    view_cursor: Vec2,
+    aperture: f64,
+    osmode: u32,
+    base: Option<Vec2>,
+    deferred: bool,
+) -> Option<SnapHit> {
+    osnap_in_orbit_with_proj(d, space, orbit, view_cursor, aperture, osmode, base, deferred).map(|(h, _)| h)
+}
+
+/// Like [`osnap_in_orbit`], returning both the [`SnapHit`] and its projected 2D view-plane position.
+#[allow(clippy::too_many_arguments)]
+pub fn osnap_in_orbit_with_proj(
+    d: &Drawing,
+    space: &Space,
+    orbit: cadcraft_render::Orbit3d,
+    view_cursor: Vec2,
+    aperture: f64,
+    osmode: u32,
+    base: Option<Vec2>,
+    deferred: bool,
+) -> Option<(SnapHit, Vec2)> {
+    if osmode == 0 || osmode & mode::OFF != 0 || !view_cursor.is_finite() || !(aperture.is_finite() && aperture > 0.0) {
+        return None;
+    }
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return osnap(d, space, view_cursor, aperture, osmode, base, deferred).map(|h| (h, h.point));
+    }
+    let store = d.space(space)?;
+    let probe = Bounds2::new(view_cursor, view_cursor).expand(aperture);
+    let mut cands3: Vec<(u32, Vec2, f64)> = Vec::new();
+    let mut near_prims: Vec<Prim> = Vec::new();
+    let mut count = 0usize;
+    let mut budget = MAX_BLOCK_LEAVES;
+    for e in store.iter() {
+        if !d.is_visible(e) {
+            continue;
+        }
+        count += 1;
+        if count > 2000 {
+            break;
+        }
+        let elev = cadcraft_render::entity_elevation(&e.kind);
+        if osmode & mode::INS != 0 {
+            match &e.kind {
+                EntityKind::Text(t) => cands3.push((mode::INS, t.justify_point(), t.insert.z)),
+                EntityKind::MText(t) => cands3.push((mode::INS, t.insert.xy(), t.insert.z)),
+                EntityKind::Tolerance(t) => cands3.push((mode::INS, t.insert.xy(), t.insert.z)),
+                EntityKind::Insert(i) => {
+                    cands3.push((mode::INS, i.insert.xy(), i.insert.z));
+                    cands3.extend(i.attribs.iter().filter(|a| !a.invisible).map(|a| (mode::INS, a.text.justify_point(), a.text.insert.z)));
+                }
+                EntityKind::AttDef(a) => cands3.push((mode::INS, a.text.justify_point(), a.text.insert.z)),
+                EntityKind::MLeader(m) => {
+                    cands3.extend(m.text.iter().map(|t| (mode::INS, t.insert.xy(), t.insert.z)));
+                    cands3.extend(m.block.iter().map(|b| (mode::INS, b.insert.xy(), b.insert.z)));
+                }
+                _ => {}
+            }
+        }
+        match &e.kind {
+            EntityKind::Line(l) if (l.a.z - l.b.z).abs() > 1e-12 => {
+                if osmode & mode::END != 0 {
+                    cands3.push((mode::END, l.a.xy(), l.a.z));
+                    cands3.push((mode::END, l.b.xy(), l.b.z));
+                }
+                if osmode & mode::MID != 0 {
+                    let mid = (l.a + l.b) * 0.5;
+                    cands3.push((mode::MID, mid.xy(), mid.z));
+                }
+                continue;
+            }
+            EntityKind::Polyline3d(pl) => {
+                if osmode & mode::END != 0 {
+                    for p in &pl.points {
+                        cands3.push((mode::END, p.xy(), p.z));
+                    }
+                }
+                if osmode & mode::MID != 0 {
+                    for w in pl.points.windows(2) {
+                        if let [a, b] = w {
+                            let m = (*a + *b) * 0.5;
+                            cands3.push((mode::MID, m.xy(), m.z));
+                        }
+                    }
+                    if pl.closed
+                        && let (Some(first), Some(last)) = (pl.points.first(), pl.points.last())
+                    {
+                        let m = (*first + *last) * 0.5;
+                        cands3.push((mode::MID, m.xy(), m.z));
+                    }
+                }
+                continue;
+            }
+            EntityKind::Face3d(f) => {
+                if osmode & mode::END != 0 {
+                    for c in &f.corners {
+                        cands3.push((mode::END, c.xy(), c.z));
+                    }
+                }
+                continue;
+            }
+            EntityKind::Solid(s) | EntityKind::Trace(s) if osmode & mode::END != 0 => {
+                for c in &s.corners {
+                    cands3.push((mode::END, c.xy(), c.z));
+                }
+            }
+            _ => {}
+        }
+        let mut flat: Vec<(u32, Vec2)> = Vec::new();
+        let mut ent_prims: Vec<Prim> = Vec::new();
+        let all = Bounds2::new(Vec2::new(-1e18, -1e18), Vec2::new(1e18, 1e18));
+        let mut sink = Sink { osmode, aperture, probe: all, cands: &mut flat, near: &mut ent_prims };
+        sink.object(&e.kind, None);
+        if let EntityKind::Insert(ins) = &e.kind {
+            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, &[], &mut |k, m| sink.object(k, Some(m)));
+        }
+        if let EntityKind::Dimension(dm) = &e.kind {
+            sink.dimension(d, dm, &mut budget, &[]);
+        }
+        cands3.extend(flat.into_iter().map(|(m, p)| (m, p, elev)));
+        near_prims.extend(ent_prims);
+    }
+    if osmode & (mode::INT | mode::APP) != 0 {
+        let segs: Vec<Vec<Segment>> = near_prims.iter().take(200).map(prim_segments).collect();
+        let real = if osmode & mode::INT != 0 { mode::INT } else { mode::APP };
+        for i in 0..segs.len() {
+            for j in i + 1..segs.len() {
+                let extend = osmode & mode::APP != 0 && [i, j].iter().all(|k| near_prims.get(*k).is_some_and(extendable));
+                for a in segs.get(i).into_iter().flatten() {
+                    for b in segs.get(j).into_iter().flatten() {
+                        for x in intersect_ext(&fix_circle(a), &fix_circle(b), false) {
+                            if orbit.project(x.to3(0.0)).dist(view_cursor) <= aperture {
+                                cands3.push((real, x, 0.0));
+                            }
+                        }
+                        if extend {
+                            for x in intersect_ext(a, b, true) {
+                                if x.is_finite() && orbit.project(x.to3(0.0)).dist(view_cursor) <= aperture {
+                                    cands3.push((mode::APP, x, 0.0));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(bp) = base {
+        for p in &near_prims {
+            if osmode & mode::PER != 0 {
+                match p {
+                    Prim::Seg(Segment::Line(l)) => cands3.push((mode::PER, l.project(bp), 0.0)),
+                    Prim::Seg(Segment::Arc { arc, .. }) => cands3.push((mode::PER, Circle::new(arc.center, arc.radius).closest(bp), 0.0)),
+                    Prim::Circle(c) => cands3.push((mode::PER, c.closest(bp), 0.0)),
+                    Prim::Infinite { base: b0, dir, .. } => cands3.push((mode::PER, *b0 + *dir * (bp - *b0).dot(*dir), 0.0)),
+                    Prim::Ellipse(e) => cands3.extend(curves::ellipse_perpendiculars(e, bp).into_iter().map(|q| (mode::PER, q, 0.0))),
+                    Prim::Spline(s) => cands3.extend(curves::spline_perpendiculars(s, bp).into_iter().map(|q| (mode::PER, q, 0.0))),
+                    _ => {}
+                }
+            }
+            if osmode & mode::TAN != 0 {
+                let pts = match p {
+                    Prim::Seg(Segment::Arc { arc, .. }) => Circle::new(arc.center, arc.radius).tangent_points(bp),
+                    Prim::Circle(c) => c.tangent_points(bp),
+                    Prim::Ellipse(e) => curves::ellipse_tangents(e, bp),
+                    Prim::Spline(s) => curves::spline_tangents(s, bp),
+                    _ => Vec::new(),
+                };
+                cands3.extend(pts.into_iter().map(|t| (mode::TAN, t, 0.0)));
+            }
+        }
+    }
+    let best = cands3
+        .into_iter()
+        .filter_map(|(m, w, z)| {
+            if !w.is_finite() || !z.is_finite() {
+                return None;
+            }
+            let pr = orbit.project(w.to3(z));
+            (pr.is_finite() && pr.dist(view_cursor) <= aperture).then_some((m, w, pr))
+        })
+        .min_by(|a, b| {
+            let da = snap_score(a.0, a.2, view_cursor, aperture);
+            let db = snap_score(b.0, b.2, view_cursor, aperture);
+            da.total_cmp(&db)
+        });
+    if let Some((m, w, pr)) = best {
+        return Some((SnapHit { point: w, mode: m, name: name_of(m), viewport: None, deferred: None }, pr));
+    }
+    if let Some(work_cursor) = orbit.unproject_xy(view_cursor) {
+        if base.is_none()
+            && deferred
+            && let Some(h) = deferred_hit(&near_prims, work_cursor, aperture, osmode, None)
+        {
+            let pr = orbit.project(h.point.to3(0.0));
+            if pr.dist(view_cursor) <= aperture {
+                return Some((h, pr));
+            }
+        }
+        if osmode & mode::NEA != 0 {
+            let mut nb: Option<(f64, Vec2, Vec2)> = None;
+            let mut consider = |c: Vec2| {
+                if !c.is_finite() {
+                    return;
+                }
+                let pr = orbit.project(c.to3(0.0));
+                let dd = pr.dist(view_cursor);
+                if dd <= aperture && nb.is_none_or(|(bd, ..)| dd < bd) {
+                    nb = Some((dd, c, pr));
+                }
+            };
+            for p in &near_prims {
+                for s in prim_segments(p) {
+                    consider(fix_circle(&s).closest(work_cursor));
+                }
+                if let Prim::Circle(c) = p {
+                    consider(c.closest(work_cursor));
+                }
+            }
+            if let Some((_, p, pr)) = nb {
+                return Some((SnapHit { point: p, mode: mode::NEA, name: "Nearest", viewport: None, deferred: None }, pr));
+            }
+        }
+    }
+    let _ = probe;
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn osnap_with(
     d: &Drawing,

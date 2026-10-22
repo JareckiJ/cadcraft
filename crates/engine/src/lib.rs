@@ -1409,9 +1409,17 @@ impl Session {
     }
 
     /// Whether the current prompt collects points on the model work plane (`z = 0`) rather than
-    /// picking objects or selection areas in the 2D view plane.
+    /// picking objects or selection areas in the 2D view plane. Returns `false` when the `z = 0`
+    /// work plane is viewed edge-on ([`cadcraft_render::Orbit3d::is_edge_on`]).
     pub fn accepts_work_point(&self) -> bool {
         if self.pending_window.is_some() || self.select_mode.is_some() {
+            return false;
+        }
+        if self
+            .state()
+            .ok()
+            .is_some_and(|st| matches!(st.edit_space(), Space::Model) && st.orbit.is_edge_on())
+        {
             return false;
         }
         if let Some(r) = &self.running {

@@ -279,7 +279,8 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
         }
         k => {
             let g = k.grips();
-            if g.first().is_some_and(|p| inside3(p.to3(0.0))) {
+            let elev = cadcraft_render::entity_elevation(k);
+            if g.first().is_some_and(|p| inside3(p.to3(elev))) {
                 k.transform(&Mat3::translate(d));
             }
         }
@@ -568,10 +569,10 @@ impl Interactive for StretchM {
             .ok()
             .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
             .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
-        let vline = |p: Vec2, q: Vec2| line(orbit.unproject_xy(p), orbit.unproject_xy(q));
-        let rect = |a: Vec2| {
+        let vline = |p: Vec2, q: Vec2| Some(line(orbit.unproject_xy(p)?, orbit.unproject_xy(q)?));
+        let rect = |a: Vec2| -> Vec<EntityKind> {
             let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
-            vec![vline(a, b), vline(b, c), vline(c, d), vline(d, a)]
+            [vline(a, b), vline(b, c), vline(c, d), vline(d, a)].into_iter().flatten().collect()
         };
         if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
             let Some(first) = m.pts.first().copied() else { return Vec::new() };
@@ -579,10 +580,10 @@ impl Interactive for StretchM {
                 return rect(first);
             }
             // The fence or polygon so far, on to the cursor; a polygon closes back to its start.
-            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| Some(vline(*w.first()?, *w.get(1)?))).collect();
-            out.extend(m.pts.last().map(|l| vline(*l, c)));
+            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| vline(*w.first()?, *w.get(1)?)).collect();
+            out.extend(m.pts.last().and_then(|l| vline(*l, c)));
             if m.kind != SelectKind::Fence && m.pts.len() >= 2 {
-                out.push(vline(c, first));
+                out.extend(vline(c, first));
             }
             return out;
         }
