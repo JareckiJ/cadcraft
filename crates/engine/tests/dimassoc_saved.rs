@@ -6,6 +6,7 @@ use cadcraft_engine::Session;
 use cadcraft_engine::doc::{EntityKind, Handle};
 use serde_json::{Value, json};
 
+/// The entity handle a command result reports, from its `handle` field.
 fn handle(r: &Value) -> Handle {
     Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap()
 }
@@ -50,6 +51,8 @@ fn dimassoc(text: &str, dim: Handle) -> Option<Vec<(i32, String)>> {
         .find(|r| r.iter().rfind(|(c, _)| *c == 330).is_some_and(|(_, v)| v.eq_ignore_ascii_case(&hex)))
 }
 
+/// The `AcDbOsnapPointRef` blocks of a DIMASSOC record, in file order: one per reference the
+/// dimension makes to its geometry.
 fn point_refs(rec: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
     let mut out = Vec::new();
     let mut cur: Option<Vec<(i32, String)>> = None;
@@ -69,14 +72,21 @@ fn point_refs(rec: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
     out
 }
 
+/// The first integer value of a group code in a record (72 the osnap type, 90 the flags).
 fn int(rec: &[(i32, String)], code: i32) -> Option<i64> {
     rec.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.parse().ok())
 }
 
+/// The first string value of a group code in a record (331 the referenced entity, 332 the other
+/// entity of an intersection).
 fn string(rec: &[(i32, String)], code: i32) -> Option<&str> {
     rec.iter().find(|(c, _)| *c == code).map(|(_, v)| v.as_str())
 }
 
+/// #1651's repro through the commands: after DIMREASSOCIATE, every dimension the session calls
+/// associated (diameter, radius, angular and a linear control) is written with a DIMASSOC whose
+/// references name real geometry. Guards the saving side, where radial and diametric dimensions
+/// used to fall through the kind-to-slot match and be written without any DIMASSOC object.
 #[test]
 fn the_issue_repro_saves_every_associated_dimension_with_dimassoc() {
     let mut s = Session::new();

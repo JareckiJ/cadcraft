@@ -1017,6 +1017,11 @@ fn damaged_dwg_opens_partially_and_says_what_it_left_out() {
     assert!(partial > 0, "no damaged copy read partially");
 }
 
+/// A dimension's standard DIMASSOC objects carry the same associations as CADCraft's xdata, so
+/// a file from another writer (xdata stripped) still follows its geometry: a linear dimension's
+/// two origins, a polyline's vertex named by its segment (#1049), and since #1651 a radial
+/// dimension's circle, whose centre comes back as a `Center` link and its rim point as
+/// `OnCircle`.
 #[test]
 fn dimension_associativity_roundtrips() {
     let mut d = Drawing::new_imperial();

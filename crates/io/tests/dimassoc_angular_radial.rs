@@ -6,6 +6,9 @@ use cadcraft_doc::{AssocSnap, Circle, Common, DimAssoc, DimKind, Dimension, Draw
 use cadcraft_geom::Vec3;
 use cadcraft_io::{Version, read, read_dxf, write_dxf};
 
+/// A dimension entity of the given kind with all its definition points and associations, for
+/// adding straight to a drawing; the style and text are left at defaults since only the
+/// geometry and associations are under test.
 fn dim(kind: DimKind, defpt: Vec3, p13: Vec3, p14: Vec3, p15: Vec3, p16: Vec3, assoc: Vec<DimAssoc>) -> EntityKind {
     EntityKind::Dimension(Dimension {
         kind,
@@ -162,10 +165,13 @@ fn point_refs(rec: &[(i32, String)]) -> Vec<Vec<(i32, String)>> {
     out
 }
 
+/// The first integer value of a group code in a record (72 the osnap type, 90 the flags).
 fn int(rec: &[(i32, String)], code: i32) -> Option<i64> {
     rec.iter().find(|(c, _)| *c == code).and_then(|(_, v)| v.parse().ok())
 }
 
+/// The first string value of a group code in a record (331 the referenced entity, 332 the other
+/// entity of an intersection).
 fn string(rec: &[(i32, String)], code: i32) -> Option<&str> {
     rec.iter().find(|(c, _)| *c == code).map(|(_, v)| v.as_str())
 }
@@ -188,6 +194,7 @@ fn without_cadcraft_xdata(text: &str) -> String {
     out
 }
 
+/// The associations a read-back dimension carries, or none if the handle is not a dimension.
 fn assoc_of(d: &Drawing, h: Handle) -> Vec<DimAssoc> {
     match d.entity(h).map(|e| &e.kind) {
         Some(EntityKind::Dimension(dm)) => dm.assoc.clone(),
@@ -195,6 +202,7 @@ fn assoc_of(d: &Drawing, h: Handle) -> Vec<DimAssoc> {
     }
 }
 
+/// Whether two angles name the same direction, allowing for a whole turn and rounding.
 fn same_angle(a: f64, b: f64) -> bool {
     let turn = std::f64::consts::TAU;
     let d = (a - b).rem_euclid(turn);
@@ -228,6 +236,11 @@ fn assert_standard_assoc(c: &Case, d: &Drawing, what: &str) {
     assert!(matches!(lin[1].snap, AssocSnap::End), "{what}: {lin:?}");
 }
 
+/// The writer half of #1651: the DXF of the repro's drawing has one DIMASSOC per dimension, with
+/// the references AutoCAD writes for each kind -- one centre reference (flag 2) for radius and
+/// diameter, three for an angular dimension (both leg ends and the lines' intersection), and the
+/// two origins of the linear control. Guards the kind-to-slot table and the radial/diametric
+/// branch in `std_assoc_refs`, which used to emit no reference for those kinds at all.
 #[test]
 fn angular_diameter_and_radius_dimensions_are_saved_with_dimassoc() {
     let c = case();
@@ -259,6 +272,10 @@ fn angular_diameter_and_radius_dimensions_are_saved_with_dimassoc() {
     assert!(string(&refs[2], 332).is_some_and(|h| h.eq_ignore_ascii_case(&c.l2.hex())), "angular: the intersection's other line");
 }
 
+/// The reader half of #1651, and the one that matters for interchange: with CADCraft's xdata
+/// stripped, the standard DIMASSOC objects alone must rebuild the same associations, both from
+/// DXF and through the DWG bridge. Guards the dimension-kind slot table and the radial centre
+/// reference in `dxf_read::dimassoc`, plus the curve start/end osnap semantics in `infer_snap`.
 #[test]
 fn standard_dimassoc_associates_in_dxf_and_dwg() {
     let c = case();

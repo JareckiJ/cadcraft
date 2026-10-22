@@ -1613,7 +1613,8 @@ fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
 /// The single standard reference of a radial or diametric dimension: the circle or arc it
 /// measures, by its centre, with associativity flag 2. AutoCAD writes radial and diametric
 /// dimensions that way: the one reference names the geometry, whose radius or diameter the
-/// dimension then follows.
+/// dimension then follows. Returns no flags and no references when the association does not name
+/// a circle or arc, so such a dimension is saved unassociated rather than pointing at nothing.
 fn radial_ref(d: &Drawing, assoc: &[DimAssoc]) -> (i64, Vec<OsnapRef>) {
     for a in assoc {
         let Some(ent) = d.entity(a.handle) else { continue };

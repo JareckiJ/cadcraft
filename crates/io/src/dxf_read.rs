@@ -2109,7 +2109,12 @@ impl Objects {
     }
 }
 
-/// Associativity from a DIMASSOC object (files from other writers).
+/// Associativity from a DIMASSOC object (files from other writers). The dimension kind decides
+/// which definition points the references name, in the order AutoCAD writes them: `p13`/`p14`
+/// for linear, aligned and arc-length dimensions, both ends of both lines (`p13`..`p16`) for
+/// angular dimensions, the three points of an angular-3-point dimension, `p13` for ordinate
+/// dimensions, and for radial or diametric dimensions the single circle reference
+/// ([`radial_links`]). CADCraft's own xdata links, when present, win.
 fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
     let start = tags.iter().position(|x| x.code == 100 && x.str() == "AcDbDimAssoc").unwrap_or(0);
     let tail = tags.get(start..).unwrap_or(&[]);
@@ -2194,7 +2199,8 @@ fn radial_links(d: &Drawing, dm: &Dimension, tail: &[Tag]) -> Vec<DimAssoc> {
     Vec::new()
 }
 
-/// The centre of a circle or arc.
+/// The planar centre of a circle or arc, or `None` for any other entity: the point a radial or
+/// diametric dimension's single DIMASSOC reference names.
 fn circle_centre(d: &Drawing, h: Handle) -> Option<Vec2> {
     match &d.entity(h)?.kind {
         EntityKind::Circle(c) => Some(c.center.xy()),
@@ -2205,7 +2211,10 @@ fn circle_centre(d: &Drawing, h: Handle) -> Option<Vec2> {
 
 /// A CADCraft snap from a DIMASSOC object snap type and point, and for a polyline the segment
 /// the point is an end of: AutoCAD writes no usable point there (10/20 are 0, #1049), the segment
-/// and the osnap (1 its end, 13 its start) name the vertex.
+/// and the osnap (1 its end, 13 its start) name the vertex. For a line or arc the osnap alone
+/// says which end: 13 is the start and 1 the end, whatever the stored point (the point is
+/// 0,0,0 for curves, and choosing by distance gave the wrong end for arcs). A point entity has
+/// only one position, so both codes mean it.
 fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: Vec2, segment: Option<i64>) -> Option<AssocSnap> {
     let e = d.entity(main)?;
     if let (EntityKind::LwPolyline(p), Some(k), 1 | 13) = (&e.kind, segment, osnap) {
