@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (Command Aliases dialog for ALIASEDIT: U12 and E5 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (extents skip entity boxes that overflow, #166; mid-command redraw tests, #44: S4 narrowed) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -118,7 +118,7 @@ Detail: [localization-parity.md](localization-parity.md).
 | S1 | No CI runs `cargo xtask ci` on pull requests (only packaging lint and release builds) | `.github/workflows/` | 2–3 |
 | S2 | ~~`cargo fmt --check` fails on main~~ fixed on main (8fceaaf) | — | 0 |
 | S3 | 40 open PRs, many community bug fixes awaiting review | `gh pr list` | 10–20 |
-| S4 | Open correctness issues: extents union far-apart geometry (#166), lines not visible mid-command (#44), browser plot shows raw PDF bytes (#134) (closing a tab and browser saves fixed, #76, #133) | issues | 4–6 |
+| S4 | Open correctness issues: browser plot shows raw PDF bytes (#134) (closing a tab and browser saves fixed, #76, #133; lines not visible mid-command fixed by #22, UI regression test added, #44; extents leave out entity boxes that overflow, far-apart geometry still counts as in ZOOM Extents, #166) | issues | 2–3 |
 | S5 | No smoke test of every command through the UI (PR #42 proposes one) | — | 6–10 |
 
 ## Platforms
@@ -150,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | `Drawing::extents` leaves out entity boxes with non-finite corners, so one hostile entity no longer makes ZOOM Extents and the extents fit of exports and plots show nothing (#166); UI regression tests that LINE and PLINE segments are drawn while the command runs (#44): S4 narrowed |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
 | 2026-10-16 | minor | MLEDIT Merged Tee (MT): the first multiline's outer elements stop at the second one's near side, which opens, and its inner elements run on to the second one's inner element: F21 narrowed, hours unchanged |
