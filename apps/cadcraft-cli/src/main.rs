@@ -667,6 +667,7 @@ fn main() -> ExitCode {
 
 fn cli() -> ExitCode {
     install_io();
+    cadcraft_engine::plotstyle_library::init_plot_style_library();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
     let r = match args.first().map(String::as_str) {
