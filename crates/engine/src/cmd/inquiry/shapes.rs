@@ -77,7 +77,9 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let Some(store) = d.space(&st.space) else { return Ok(empty()) };
     let extents = d.extents(&st.space);
-    let extents_area = if extents.is_empty() { 0.0 } else { extents.width() * extents.height() };
+    // No visible extents means no bound to compare an area against (`implausible` skips an
+    // infinite bound).
+    let extents_area = if extents.is_empty() { f64::INFINITY } else { extents.width() * extents.height() };
     let tol = tolerance.unwrap_or_else(|| {
         let diag = if extents.is_empty() { 0.0 } else { extents.min.dist(extents.max) };
         (diag * 1e-9).max(1e-12)

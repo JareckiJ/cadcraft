@@ -88,6 +88,24 @@ fn massprop_self_check_reports_skipped_objects() {
     assert_eq!(sc["implausible"], json!([]));
 }
 
+/// Make `hd` invisible: it no longer counts towards the drawing extents.
+fn hide(s: &mut Session, hd: Handle) {
+    s.doc_mut().unwrap().modify_entity(hd, |e| e.common.visible = false).unwrap();
+}
+
+/// #1440 review: with no visible extents (the only region is invisible) there is no drawing bound
+/// to compare an area against, so it is not flagged as larger than the extents.
+#[test]
+fn massprop_does_not_flag_area_without_visible_extents() {
+    let mut s = Session::new();
+    let a = rect_region(&mut s, [0.0, 0.0], [10.0, 4.0]);
+    hide(&mut s, a);
+    assert!(s.doc().unwrap().extents(&Space::Model).is_empty());
+    let m = s.execute("massprop", &json!({"handles": [a.hex()]})).unwrap();
+    assert_eq!(m["regions"][0]["area"], json!(40.0));
+    assert_eq!(m["selfCheck"]["implausible"], json!([]), "no extents means no area bound: {m}");
+}
+
 /// SUBTRACT cuts a hole where a region lies inside another, and UNION adds an island when a region
 /// sits inside that hole; the loops, area and containment follow, and the removed region is gone.
 #[test]

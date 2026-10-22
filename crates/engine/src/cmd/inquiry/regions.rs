@@ -260,7 +260,9 @@ fn run_massprop(s: &mut Session, p: &Value) -> Result<Value> {
     let mut check = SelfCheck::new();
     let d = s.doc()?;
     let extents = d.extents(&s.space());
-    let extents_area = if extents.is_empty() { 0.0 } else { extents.width() * extents.height() };
+    // No visible extents means no bound to compare an area against (`implausible` skips an
+    // infinite bound).
+    let extents_area = if extents.is_empty() { f64::INFINITY } else { extents.width() * extents.height() };
     for h in &hs {
         check.found(1);
         match d.entity(*h).map(|e| &e.kind) {

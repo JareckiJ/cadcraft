@@ -85,6 +85,10 @@ fn fmt_a(s: &Session, v: f64) -> String {
 /// rename or a changed meaning bumps it.
 pub(super) const SELF_CHECK_SCHEMA: u64 = 1;
 
+/// How far past its bound a value may be before it is implausible: a relative slack for the
+/// rounding of two ways of measuring the same thing.
+const IMPLAUSIBLE_TOLERANCE: f64 = 1e-9;
+
 /// How many objects of one type an analysis skipped, and every distinct reason it gave.
 #[derive(Default)]
 struct SkipTally {
@@ -132,9 +136,13 @@ impl SelfCheck {
         self.caps.insert(name.to_string(), value);
     }
 
-    /// Flag `value` as implausible when it is past `bound`, with the rule that makes it so.
+    /// Flag `value` as implausible when it is past `bound`, with the rule that makes it so. A
+    /// non-finite `bound` means no bound applies (an empty drawing has no extents). Values within
+    /// `IMPLAUSIBLE_TOLERANCE` of the bound are not flagged: they are the rounding of two ways
+    /// of measuring the same thing (a border rectangle's shoelace area against the extents'
+    /// `width * height`), not a bug.
     pub(super) fn implausible(&mut self, handle: Handle, ty: &str, field: &str, value: f64, bound: f64, rule: &str) {
-        if value.is_finite() && bound.is_finite() && value > bound {
+        if value.is_finite() && bound.is_finite() && value > bound + bound.abs() * IMPLAUSIBLE_TOLERANCE {
             self.implausible.push(json!({
                 "handle": handle.hex(),
                 "type": ty,
@@ -994,5 +1002,30 @@ impl Interactive for AreaM {
         let mut v: Vec<cadcraft_geom::PolyVertex> = self.pts.iter().map(|p| cadcraft_geom::PolyVertex::new(*p)).collect();
         v.push(cadcraft_geom::PolyVertex::new(c));
         vec![super::helpers::lwpoly(v, true)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1440 review: a value one ulp past its bound (a border rectangle's shoelace area against
+    /// the extents' `width * height`) is rounding, not a bug; a value clearly past it still is.
+    #[test]
+    fn implausible_allows_rounding_but_not_a_real_excess() {
+        let bound: f64 = 100.0;
+
+        let mut check = SelfCheck::new();
+        check.implausible(Handle::default(), "Polyline", "area", bound.next_up(), bound, "past the bound");
+        assert!(check.implausible.is_empty(), "one ulp past the bound is rounding: {}", check.to_json());
+
+        let mut check = SelfCheck::new();
+        check.implausible(Handle::default(), "Polyline", "area", bound * (1.0 + 1e-6), bound, "past the bound");
+        assert_eq!(check.implausible.len(), 1, "a real excess is still flagged: {}", check.to_json());
+
+        // A bound that is not finite means no bound applies: the value is not flagged.
+        let mut check = SelfCheck::new();
+        check.implausible(Handle::default(), "Region", "area", 1e9, f64::INFINITY, "past the bound");
+        assert!(check.implausible.is_empty(), "an infinite bound applies to nothing: {}", check.to_json());
     }
 }

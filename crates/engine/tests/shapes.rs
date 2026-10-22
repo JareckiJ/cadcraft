@@ -232,3 +232,35 @@ fn self_check_flags_implausible_geometry() {
     assert!(area["reason"].as_str().unwrap().contains("drawing extents"), "{area}");
     assert!(area["value"].as_f64().unwrap() > area["bound"].as_f64().unwrap());
 }
+
+/// #1440 review: a border rectangle that fills the drawing extents has an area equal to them in
+/// exact arithmetic, so it is not implausible; a shape clearly larger than the extents still is.
+#[test]
+fn self_check_does_not_flag_an_extents_filling_rectangle() {
+    let mut s = Session::new();
+    square(&mut s); // the extents are its own 10 x 10 box, area 100.
+    let r = shapes(&mut s, json!({}));
+    assert_eq!(r["selfCheck"]["implausible"], json!([]), "an extents-filling rectangle is not a bug: {r}");
+
+    // The same rectangle a millionth larger, invisible so it lies outside the extents: clearly
+    // past the tolerance, so it is still flagged.
+    pline(&mut s, &[(0.0, 0.0, 0.0), (10.000001, 0.0, 0.0), (10.000001, 10.000001, 0.0), (0.0, 10.000001, 0.0)], true);
+    hide_last(&mut s);
+    let r = shapes(&mut s, json!({}));
+    let flags = r["selfCheck"]["implausible"].as_array().unwrap();
+    let area = flags.iter().find(|f| f["field"] == "area").unwrap_or_else(|| panic!("no area flag: {r}"));
+    assert!(area["value"].as_f64().unwrap() > area["bound"].as_f64().unwrap() * (1.0 + 1e-9), "{area}");
+}
+
+/// #1440 review: with no visible extents (the only shape is invisible) there is no drawing bound
+/// to compare an area against, so it is not flagged as larger than the extents.
+#[test]
+fn self_check_has_no_area_bound_without_visible_extents() {
+    let mut s = Session::new();
+    square(&mut s);
+    hide_last(&mut s);
+    assert!(s.doc().unwrap().extents(&Space::Model).is_empty());
+    let r = shapes(&mut s, json!({}));
+    assert_eq!(r["count"], 1);
+    assert_eq!(r["selfCheck"]["implausible"], json!([]), "no extents means no area bound: {r}");
+}
