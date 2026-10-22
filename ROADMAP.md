@@ -119,6 +119,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Entry |
 |---|---|
+| 2026-10-19 | DWG read: the DXF rendition limit follows the machine's free memory (a sixteenth of what is free, never under the fixed 1 GB of before; `CADCRAFT_MEMORY_GB` sets it), and the message names the memory it assumes, so a plain 238 MB plan opens on a workstation and a damaged file can't take more than the machine has. |
 | 2026-10-14 | HATCHEDIT adds boundaries from internal points or closed objects and removes selected loops in the dialog, command line and JSON command; associative links and undo are covered by tests. |
 | 2026-10-12 | TRIM: a pick after a closed polyline's last cut keeps only the complementary run instead of an extra circuit of the outline (#726) |
 | 2026-10-12 | HATCHEDIT refuses an explicit bad `scale` or `angle` before it edits anything, so a rejected request leaves the drawing, undo and redo as they were (#724) |

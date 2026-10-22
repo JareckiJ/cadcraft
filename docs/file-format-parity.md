@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (the DWG rendition limit follows the machine's free memory) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -55,8 +55,13 @@ Everything lost in the DXF read/write paths below is also lost through DWG, plus
 report #57: a 10 MB DWG failed after about two minutes; limits now stop runaway conversions
 early (#175), but the throughput problem remains. DGN line style components that no line style
 definition uses (leftovers of DGN imports, hundreds of thousands in some drawings) are left out
-on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG ≈ 30% read,
-≈ 15% write.**
+on read with a note, so such files no longer exceed the DXF limit (#1482). That limit follows the
+machine's free memory: the rendition may take a sixteenth of it (opening took 8.6 and 15.8 bytes
+of memory per byte of rendition on two 238 MB plans), never less than the fixed 1 GB of before,
+which assumes 16 GB free; the message names the memory assumed. Linux reads
+`MemAvailable`, `CADCRAFT_MEMORY_GB` sets it anywhere, and without either the fixed limit stays. So
+a plain 238 MB architect's plan (2.4 GB of rendition) opens on a workstation, and a damaged file
+can't take more than the machine has. **DWG ≈ 30% read, ≈ 15% write.**
 
 ## DXF, version by version
 
@@ -138,6 +143,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | DWG read: the DXF rendition limit follows the machine's free memory (a sixteenth of `MemAvailable` on Linux, `CADCRAFT_MEMORY_GB` anywhere, never under the fixed 1 GB); the limit message names the memory it assumes; the group-code limit of a rendition follows its size |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |
