@@ -467,7 +467,7 @@ fn apply(
         // Index this action's vertex lists by handle once, and skip handles already handled in
         // this action's selection, so a selection that repeats a handle does not re-scan the
         // vertex list and re-clone its index vector per occurrence (CWE-400).
-        let vtx_by_handle: HashMap<Handle, &Vec<i32>> = vertices.iter().map(|(vh, i)| (*vh, i)).collect();
+        let vtx_by_handle: HashMap<Handle, &Vec<i32>> = vertices.iter().rev().map(|(vh, i)| (*vh, i)).collect();
         let mut handled: HashSet<Handle> = HashSet::new();
         for h in &a.selection {
             if !handled.insert(*h) {
