@@ -30,9 +30,18 @@ const MAX_TRIES: u32 = 32;
 /// are written through the retained handle and flushed, and the temporary is then renamed over
 /// `path`. On any failure the temporary is removed and the original `path` is left untouched.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let permissions = match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_file() => Some(meta.permissions()),
+        Ok(_) => None,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e),
+    };
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let (mut file, tmp) = create_temp(&dir)?;
     let write = (|| {
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
         file.write_all(bytes)?;
         file.flush()?;
         file.sync_all()
@@ -61,7 +70,7 @@ fn create_temp(dir: &Path) -> io::Result<(File, PathBuf)> {
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         let tmp = dir.join(format!(".cadcraft-tmp-{pid}-{seq}-{nanos}"));
-        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        match create_exclusive(&tmp) {
             Ok(file) => return Ok((file, tmp)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 last_err = Some(e);
@@ -71,6 +80,10 @@ fn create_temp(dir: &Path) -> io::Result<(File, PathBuf)> {
         }
     }
     Err(last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "could not create a unique temporary file")))
+}
+
+fn create_exclusive(path: &Path) -> io::Result<File> {
+    OpenOptions::new().write(true).create_new(true).open(path)
 }
 
 #[cfg(test)]
@@ -86,7 +99,8 @@ mod tests {
         write_atomic(&dest, b"new bytes").unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"new bytes");
         // No temporary files left behind.
-        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().starts_with(".cadcraft-tmp")).collect();
+        let leftovers: Vec<_> =
+            std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().starts_with(".cadcraft-tmp")).collect();
         assert!(leftovers.is_empty(), "left temp files: {leftovers:?}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -95,20 +109,31 @@ mod tests {
     #[test]
     fn does_not_follow_a_planted_temp_symlink() {
         use std::os::unix::fs::symlink;
-        // Simulate the attack: the destination directory already holds a symlink whose name we
-        // might otherwise reuse, pointing at a victim file. The exclusive create must not write
-        // through it. We cannot predict the random temp name, so instead assert the victim file is
-        // untouched after a normal write and that the write still succeeds.
         let dir = std::env::temp_dir().join(format!("cadcraft-aw-sym-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         let victim = dir.join("victim");
         std::fs::write(&victim, b"precious").unwrap();
         let planted = dir.join(".cadcraft-tmp-plant");
         symlink(&victim, &planted).unwrap();
+        assert_eq!(create_exclusive(&planted).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         let dest = dir.join("drawing.dxf");
         write_atomic(&dest, b"drawing bytes").unwrap();
         assert_eq!(std::fs::read(&victim).unwrap(), b"precious", "victim file was overwritten");
         assert_eq!(std::fs::read(&dest).unwrap(), b"drawing bytes");
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn replacement_preserves_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cadcraft-aw-mode-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("private.adt");
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_atomic(&dest, b"private report").unwrap();
+        assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(std::fs::read(&dest).unwrap(), b"private report");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
