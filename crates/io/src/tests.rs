@@ -2568,6 +2568,10 @@ fn proxy_file() -> Vec<u8> {
         vec![
             p("0", "ACAD_PROXY_OBJECT"),
             p("5", h),
+            // An application's 102 group before the proxy's own groups holds a 91 of its own.
+            p("102", "{MYAPP"),
+            p("91", "7"),
+            p("102", "}"),
             p("330", "AAA0"),
             p("100", "AcDbProxyObject"),
             p("90", "499"),
@@ -2630,8 +2634,11 @@ fn proxies_keep_their_class_when_classes_are_rewritten() {
     let pairs = dxf_pairs(&text);
     let classes: Vec<String> = dxf_records(&pairs, "CLASS").iter().map(|r| group(r, "1").unwrap().to_string()).collect();
     let class_of = |n: &str| classes.get(n.parse::<usize>().unwrap() - 500).cloned();
+    // The proxy's own 91 (after its subclass marker); the application group's stays as it was.
+    let own_91 = |r: &[(String, String)]| r.iter().skip_while(|q| q.1 != "AcDbProxyObject").find(|q| q.0 == "91").map(|q| q.1.clone()).unwrap();
     let objects: Vec<(String, Option<String>)> =
-        dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| (group(r, "310").unwrap().to_string(), class_of(group(r, "91").unwrap()))).collect();
+        dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| (group(r, "310").unwrap().to_string(), class_of(&own_91(r)))).collect();
+    assert!(dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().all(|r| group(r, "91") == Some("7")), "the application's 91 changed");
     assert_eq!(
         objects,
         [("AA".to_string(), Some("VISUALSTYLE".to_string())), ("BB".to_string(), Some("WIDGETX".to_string()))],
@@ -2646,6 +2653,6 @@ fn proxies_keep_their_class_when_classes_are_rewritten() {
     let pairs = dxf_pairs(&again);
     let classes: Vec<String> = dxf_records(&pairs, "CLASS").iter().map(|r| group(r, "1").unwrap().to_string()).collect();
     let names: Vec<String> =
-        dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| classes[group(r, "91").unwrap().parse::<usize>().unwrap() - 500].clone()).collect();
+        dxf_records(&pairs, "ACAD_PROXY_OBJECT").iter().map(|r| classes[own_91(r).parse::<usize>().unwrap() - 500].clone()).collect();
     assert_eq!(names, ["VISUALSTYLE", "WIDGETX"]);
 }
