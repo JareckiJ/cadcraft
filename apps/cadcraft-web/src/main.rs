@@ -31,7 +31,14 @@ mod web {
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.1.take_dropped(ctx);
-            self.1.drain(&mut self.0);
+            // A drawing the page embedding CADCraft sent opens here; the frame drawn just after
+            // shows it, so answer that page once with what happened (#1666).
+            let opened = self.1.drain(&mut self.0);
+            if let Some((bridge, _)) = &self.2 {
+                for reply in &opened {
+                    bridge.post_open(reply);
+                }
+            }
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
             if let Some((bridge, reported)) = &self.2 {
@@ -177,6 +184,42 @@ fn wants_cpu(query: &str) -> bool {
     query.trim_start_matches('?').split('&').any(|p| p == "cpu" || p.starts_with("cpu="))
 }
 
+/// The answer owed to the page embedding CADCraft for a drawing it sent (`?host=parent`): the
+/// drawing opened, or it didn't and why (#1666). The hub waits for this instead of guessing.
+///
+/// The message shapes are pure so they can be tested without a browser; [`crate::host::Bridge`]
+/// turns the fields into a `postMessage`.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenReply {
+    /// The drawing's name, as the parent sent it (made safe to open).
+    name: String,
+    /// Why it couldn't be opened; `None` once it is loaded and showing.
+    error: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl OpenReply {
+    /// What to report for the drawing `name`: opened (`error` `None`) or failed with `error`.
+    pub fn new(name: &str, error: Option<&str>) -> Self {
+        Self { name: name.to_string(), error: error.map(str::to_string) }
+    }
+
+    /// The message's `type`: `cadcraft:opened`, or `cadcraft:open-failed` with a reason.
+    pub fn kind(&self) -> &'static str {
+        if self.error.is_some() { "cadcraft:open-failed" } else { "cadcraft:opened" }
+    }
+
+    /// The message's fields, in posting order: `type`, `name`, and `error` when it failed.
+    pub fn fields(&self) -> Vec<(&'static str, &str)> {
+        let mut fields = vec![("type", self.kind()), ("name", self.name.as_str())];
+        if let Some(error) = &self.error {
+            fields.push(("error", error.as_str()));
+        }
+        fields
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 mod upload;
 
@@ -192,7 +235,18 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::wants_cpu;
+    use super::{OpenReply, wants_cpu};
+
+    /// #1666: the page embedding CADCraft hears `cadcraft:opened` once the drawing it sent is
+    /// loaded and showing, or `cadcraft:open-failed` with the reason.
+    #[test]
+    fn host_open_replies_name_the_drawing_and_the_failure() {
+        let opened = OpenReply::new("Bracket.dxf", None);
+        assert_eq!(opened.fields(), vec![("type", "cadcraft:opened"), ("name", "Bracket.dxf")]);
+
+        let failed = OpenReply::new("Bracket.dxf", Some("Open: not a drawing"));
+        assert_eq!(failed.fields(), vec![("type", "cadcraft:open-failed"), ("name", "Bracket.dxf"), ("error", "Open: not a drawing")]);
+    }
 
     #[test]
     fn cpu_flag_is_detected() {
