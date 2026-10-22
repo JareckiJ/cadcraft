@@ -962,7 +962,11 @@ pub fn distof(_ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
 pub fn angtof(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     arity(&a, 1, 2)?;
     let s = string(&a[0])?;
-    Ok(Flow::Value(ctx.s.angle_settings().direction(&s).map(Value::Real).unwrap_or_default()))
+    let mut settings = ctx.s.angle_settings();
+    if let Some(Value::Int(u)) = a.get(1) {
+        settings.aunits = i64::from(*u);
+    }
+    Ok(Flow::Value(settings.direction(&s).map(Value::Real).unwrap_or_default()))
 }
 
 /// `(trans pt from to [disp])`: points are in the world system throughout (no UCS yet).
