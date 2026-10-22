@@ -268,6 +268,7 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], orbit: cadcraft_render::
     }
 }
 
+/// Run the programmatic `stretch` command.
 fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
     let d = delta_of("stretch", p)?;
     let space = s.space();
@@ -385,6 +386,7 @@ impl StretchM {
         Ok(())
     }
 
+    /// Handle one selection-phase input for interactive `STRETCH`.
     fn select(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Some(mut m) = self.mode.take() {
             match &i {
@@ -481,6 +483,7 @@ impl StretchM {
         Ok(Step::Continue)
     }
 
+    /// Apply the stretch displacement `d` to all selected objects and finish the command.
     fn apply(&self, s: &mut Session, d: Vec2) -> Result<Step> {
         let orbit = s
             .state()
@@ -545,6 +548,7 @@ impl Interactive for StretchM {
             _ => Ok(Step::Continue),
         }
     }
+    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         let rect = |a: Vec2| {
             let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
@@ -2153,6 +2157,7 @@ impl Interactive for SelectThen {
             _ => Ok(Step::Continue),
         }
     }
+    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.op == Op::Rotate && self.reference {
             return self.rotate_reference_preview(s, c);
@@ -2463,6 +2468,7 @@ impl Interactive for OffsetM {
             _ => Ok(Step::Continue),
         }
     }
+    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if let Some(base) = self.distance_first
             && c.is_finite()
@@ -3020,6 +3026,7 @@ impl Interactive for DisplaceM {
         }
         self.inner.input(s, i)
     }
+    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.displacement {
             return Vec::new();

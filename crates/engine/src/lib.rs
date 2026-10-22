@@ -150,6 +150,7 @@ pub struct DocState {
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl DocState {
+    /// Create a fresh document state for `doc` with the given tab `title` and optional file `path`.
     pub fn new(doc: Drawing, title: &str, path: Option<String>) -> Self {
         let doc = Arc::new(doc);
         DocState {

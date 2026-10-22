@@ -326,6 +326,7 @@ impl Options {
 }
 
 impl Default for Options {
+    /// Default render options (2D Top orbit, text and fills enabled).
     fn default() -> Self {
         Options {
             tolerance: 0.001,
@@ -453,6 +454,7 @@ impl Builder<'_> {
         let (color, _) = self.styled(color, 0.0);
         self.push_polyline(ctx, color, 0.0, pts);
     }
+    /// Project a 2D point `p` with additional local Z offset `extra_z` through `ctx` and the active 3D orbit.
     fn project_pt(&self, ctx: &Ctx, p: Vec2, extra_z: f64) -> Vec2 {
         if self.opts.orbit.is_top() {
             return ctx.xf.apply(p);
@@ -467,6 +469,7 @@ impl Builder<'_> {
             self.opts.orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, z))
         }
     }
+    /// Append a 3D polyline primitive projected through the current context and 3D orbit.
     fn polyline_3d(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[cadcraft_geom::Vec3]) {
         if pts.len() < 2 {
             return;
@@ -490,6 +493,7 @@ impl Builder<'_> {
             len: pts.len() as u32,
         });
     }
+    /// Push a styled 2D polyline primitive projected through `ctx`.
     fn push_polyline(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[Vec2]) {
         let start = self.list.verts.len() as u32;
         for p in pts {
@@ -508,9 +512,11 @@ impl Builder<'_> {
             len: pts.len() as u32,
         });
     }
+    /// Append filled triangles transformed by `ctx.xf`.
     fn tris(&mut self, ctx: &Ctx, color: Ink, tris: &[Vec2]) {
         self.tris_at(ctx, color, tris, ctx.xf);
     }
+    /// Append filled triangles transformed by `xf` and projected through the active 3D orbit.
     fn tris_at(&mut self, ctx: &Ctx, color: Ink, tris: &[Vec2], xf: Mat3) {
         if tris.len() < 3 {
             return;
@@ -588,6 +594,7 @@ impl Builder<'_> {
             }
         }
     }
+    /// Append a point primitive at `p` projected through `ctx`.
     fn point(&mut self, ctx: &Ctx, color: Ink, p: Vec2) {
         let (color, _) = self.styled(color, 0.0);
         let q = self.project_pt(ctx, p, 0.0);
@@ -605,6 +612,7 @@ impl Builder<'_> {
             len: 1,
         });
     }
+    /// Append an infinite line (`XLINE`) or ray primitive projected through `ctx`.
     fn infinite(&mut self, ctx: &Ctx, color: Ink, base: Vec2, dir: Vec2, ray: bool) {
         let (color, _) = self.styled(color, 0.0);
         let start = self.list.verts.len() as u32;
@@ -648,6 +656,7 @@ pub fn build_plot(d: &Drawing, space: &Space, opts: &Options) -> DisplayList {
     build_space(d, space, opts, true)
 }
 
+/// Construct the root [`Ctx`] for rendering top-level entities or viewport content.
 fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_colors: &'a [(String, Color)]) -> Ctx<'a> {
     Ctx {
         d,
@@ -1200,6 +1209,7 @@ fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
 }
 
+/// Emit the primitives for entity `e` into `b` under `ctx`.
 fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     // A top-level annotative object draws at the view's annotation scale: a viewport's scale for
     // model space seen through it, else the drawing's (CANNOSCALE in model space, 1:1 on paper).
@@ -1692,6 +1702,7 @@ fn align(h: cadcraft_doc::HAlign, v: cadcraft_doc::VAlign) -> (cadcraft_fonts::A
     (ha, va)
 }
 
+/// Construct the child [`Ctx`] for expanding a block reference or sub-entity `e` with transform `m`.
 fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     let layer = if e.common.layer == "0" { ctx.block_layer.clone() } else { Some(e.common.layer.clone()) };
     let color = match e.common.color {

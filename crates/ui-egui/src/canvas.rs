@@ -663,6 +663,7 @@ struct VpHighlight {
 }
 
 impl VpHighlight {
+    /// Rebuild the viewport highlight display list when the drawing, orbit, zoom band or `handles` change.
     fn update(&mut self, st: &cadcraft_engine::DocState, handles: &[Handle], scale: f64) {
         let tolerance = viewport_highlight_tolerance(scale);
         let key = {
@@ -1362,6 +1363,7 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// Render the interactive CAD canvas, overlays, ViewCube, UCS icon, and handle pointer/keyboard input.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
