@@ -13,9 +13,7 @@ fn arc_bomb(arcs: usize) -> Vec<u8> {
         let y = i as i32;
         d.push_str(&format!("M 0 {y} a 1000 500 0 1 1 1 1 "));
     }
-    let svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g transform="scale(1 2)"><path d="{d}"/></g></svg>"#
-    );
+    let svg = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g transform="scale(1 2)"><path d="{d}"/></g></svg>"#);
     svg.into_bytes()
 }
 
@@ -30,5 +28,5 @@ fn a_modest_arc_svg_still_reads() {
 fn an_arc_heavy_svg_is_rejected_by_the_vertex_budget() {
     // ~1000 arcs x up to 10_000 chords each would far exceed the 8M vertex budget.
     let err = read(&arc_bomb(30000), "a.svg");
-    assert!(err.is_err(), "an arc bomb should be rejected, not amplified into memory");
+    assert!(err.unwrap_err().to_string().contains("SVG: too much generated geometry"));
 }
