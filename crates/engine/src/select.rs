@@ -601,6 +601,108 @@ pub(crate) fn in_window(d: &Drawing, e: &Entity, known: Option<Bounds2>, bx: &Bo
     false
 }
 
+/// Extract projected polylines and triangle outlines from an [`OrbitEnt`] for fence and polygon tests.
+fn orbit_ent_polylines(ent: &OrbitEnt) -> Vec<Vec<Vec2>> {
+    let mut polys = Vec::new();
+    for prim in &ent.list.prims {
+        let pts = ent.list.points(prim);
+        match prim.kind {
+            cadcraft_render::Kind::Polyline => {
+                if !pts.is_empty() {
+                    polys.push(pts.to_vec());
+                }
+            }
+            cadcraft_render::Kind::Point => {
+                if let Some(&q) = pts.first() {
+                    polys.push(vec![q, q]);
+                }
+            }
+            cadcraft_render::Kind::Infinite { ray } => {
+                if let (Some(&b), Some(&dir)) = (pts.first(), pts.get(1)) {
+                    let far = 1e9;
+                    let a = if ray { b } else { b - dir * far };
+                    polys.push(vec![a, b + dir * far]);
+                }
+            }
+            cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => {
+                for tri in pts.as_chunks::<3>().0 {
+                    polys.push(vec![tri[0], tri[1], tri[2], tri[0]]);
+                }
+            }
+        }
+    }
+    polys
+}
+
+/// Fence selection under the given 3D `orbit` projection: entities crossed by `fence`.
+pub fn select_fence_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, fence: &[Vec2]) -> Vec<Handle> {
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return select_fence(d, space, fence);
+    }
+    let fb = Bounds2::from_points(fence.iter().copied());
+    let tol = (fb.width() + fb.height()).max(1e-9) / 2000.0;
+    let probe = fb.expand(tol);
+    let Some(ix) = orbit_index(d, space, orbit, tol) else { return Vec::new() };
+    let mut out = Vec::new();
+    for idx in ix.query(&probe, true) {
+        let Some(ent) = ix.ents.get(idx) else { continue };
+        if !ent.infinite && (ent.bounds.is_empty() || !ent.bounds.intersects(&probe)) {
+            continue;
+        }
+        let polys = orbit_ent_polylines(ent);
+        let hit = fence.windows(2).any(|f| {
+            let (Some(a), Some(b)) = (f.first(), f.get(1)) else { return false };
+            let fl = Line::new(*a, *b);
+            polys.iter().any(|pl| {
+                pl.windows(2).any(|w| w.first().zip(w.get(1)).is_some_and(|(p, q)| cadcraft_geom::line_line(&fl, &Line::new(*p, *q)).is_some()))
+            })
+        });
+        if hit {
+            out.push(ent.handle);
+        }
+    }
+    out
+}
+
+/// Window or crossing polygon selection under the given 3D `orbit` projection.
+pub fn select_polygon_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, poly: &[Vec2], crossing: bool) -> Vec<Handle> {
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return select_polygon(d, space, poly, crossing);
+    }
+    let (Some(first), true) = (poly.first(), poly.len() >= 3) else { return Vec::new() };
+    let pb = Bounds2::from_points(poly.iter().copied());
+    let tol = (pb.width() + pb.height()).max(1e-9) / 2000.0;
+    let Some(ix) = orbit_index(d, space, orbit, tol) else { return Vec::new() };
+    let edges: Vec<Line> =
+        poly.windows(2).filter_map(|w| Some(Line::new(*w.first()?, *w.get(1)?))).chain(poly.last().map(|l| Line::new(*l, *first))).collect();
+    let mut out = Vec::new();
+    for idx in ix.query(&pb, crossing) {
+        let Some(ent) = ix.ents.get(idx) else { continue };
+        if ent.infinite && !crossing {
+            continue;
+        }
+        if !ent.infinite && (ent.bounds.is_empty() || if crossing { !ent.bounds.intersects(&pb) } else { !pb.contains_box(&ent.bounds) }) {
+            continue;
+        }
+        let polys = orbit_ent_polylines(ent);
+        let crosses = polys.iter().any(|pl| {
+            pl.windows(2).any(|w| {
+                w.first().zip(w.get(1)).is_some_and(|(p, q)| edges.iter().any(|f| cadcraft_geom::line_line(f, &Line::new(*p, *q)).is_some()))
+            })
+        });
+        let mut pts = polys.iter().flatten();
+        let hit = if crossing {
+            crosses || pts.any(|p| point_in_polygon(poly, *p))
+        } else {
+            !crosses && !polys.is_empty() && pts.all(|p| point_in_polygon(poly, *p))
+        };
+        if hit {
+            out.push(ent.handle);
+        }
+    }
+    out
+}
+
 /// Fence selection: entities crossed by the fence polyline.
 pub fn select_fence(d: &Drawing, space: &Space, fence: &[Vec2]) -> Vec<Handle> {
     let ix = spatial::index(d, space);
@@ -749,16 +851,18 @@ impl SelectMode {
         }
         self.is_box() && self.pts.len() >= 2
     }
-    /// The objects the mode selects, or `None` while it has too few points.
-    pub fn select(&self, d: &Drawing, space: &Space) -> Option<Vec<Handle>> {
+    /// The objects the mode selects under `orbit`, or `None` while it has too few points.
+    pub fn select(&self, d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d) -> Option<Vec<Handle>> {
         match (self.kind, self.pts.as_slice()) {
             (SelectKind::Window | SelectKind::Crossing, [a, b, ..]) => {
-                Some(select_window(d, space, Bounds2::new(*a, *b), self.kind == SelectKind::Crossing))
+                Some(select_window_in_orbit(d, space, orbit, Bounds2::new(*a, *b), self.kind == SelectKind::Crossing))
             }
-            (SelectKind::Box, [a, b, ..]) => Some(select_window(d, space, Bounds2::new(*a, *b), b.x < a.x)),
-            (SelectKind::Fence, pts) if pts.len() >= 2 => Some(select_fence(d, space, pts)),
+            (SelectKind::Box, [a, b, ..]) => {
+                Some(select_window_in_orbit(d, space, orbit, Bounds2::new(*a, *b), b.x < a.x))
+            }
+            (SelectKind::Fence, pts) if pts.len() >= 2 => Some(select_fence_in_orbit(d, space, orbit, pts)),
             (SelectKind::WPolygon | SelectKind::CPolygon, pts) if pts.len() >= 3 => {
-                Some(select_polygon(d, space, pts, self.kind == SelectKind::CPolygon))
+                Some(select_polygon_in_orbit(d, space, orbit, pts, self.kind == SelectKind::CPolygon))
             }
             _ => None,
         }

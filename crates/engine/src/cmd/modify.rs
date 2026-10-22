@@ -353,7 +353,12 @@ impl StretchM {
     /// of two) the mode is dropped.
     fn finish_mode(&mut self, s: &mut Session, m: SelectMode) -> Result<()> {
         let space = s.space();
-        let Some(hs) = m.select(s.doc()?, &space) else { return Ok(()) };
+        let orbit = s
+            .state()
+            .ok()
+            .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
+            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let Some(hs) = m.select(s.doc()?, &space, orbit) else { return Ok(()) };
         let area = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
             (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::Polygon(m.pts)),
             (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, Some((a, b))) => {

@@ -1452,7 +1452,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     {
         if let Some(last) = app.canvas.pan_last {
             let d = hp - last;
-            if mods.shift {
+            if mods.shift
+                && app.session.state().ok().is_some_and(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
+            {
                 let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
             } else if let Ok(st) = app.session.state_mut() {
                 let v = st.view();

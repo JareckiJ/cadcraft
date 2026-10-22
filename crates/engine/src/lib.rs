@@ -1200,17 +1200,22 @@ impl Session {
                 }
             };
         }
+        let orbit = self
+            .state()
+            .ok()
+            .filter(|st| matches!(st.edit_space(), Space::Model))
+            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         match input {
             Input::Point(p) => {
                 if mode.push(p) {
-                    return Ok(mode.select(self.doc()?, &self.space()).map(Input::Pick));
+                    return Ok(mode.select(self.doc()?, &self.space(), orbit).map(Input::Pick));
                 }
             }
             Input::Keyword(k) if k == "Undo" => {
                 mode.pts.pop();
             }
             // Enter ends a fence or polygon; with too few points the mode is dropped.
-            Input::Enter => return Ok(mode.select(self.doc()?, &self.space()).map(Input::Pick)),
+            Input::Enter => return Ok(mode.select(self.doc()?, &self.space(), orbit).map(Input::Pick)),
             Input::Cancel | Input::Pick(_) => return Ok(Some(input)),
             _ => self.echo("Invalid point."),
         }
@@ -1873,8 +1878,9 @@ pub fn is_bare_lisp_prefix(t: &str) -> bool {
 
 /// Whether `op` is a LISP prefix operator that accepts space-separated arguments on the command line.
 pub fn is_bare_lisp_operator(op: &str) -> bool {
+    let op = op.to_ascii_lowercase();
     matches!(
-        op,
+        op.as_str(),
         "+" | "-"
             | "*"
             | "/"
