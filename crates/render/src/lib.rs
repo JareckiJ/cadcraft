@@ -236,6 +236,53 @@ impl Orbit3d {
         Vec2::new(x1, y2)
     }
 
+    /// The 2D affine transform mapping a point `(x, y)` on the world `z = 0` work plane to its
+    /// projected 2D view-plane coordinates ([`Self::project`] at `z = 0`).
+    pub fn xy_mat3(&self) -> cadcraft_geom::Mat3 {
+        if self.is_top() {
+            return cadcraft_geom::Mat3::IDENTITY;
+        }
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        let a = cy;
+        let c = -sy;
+        let b = sy * cp;
+        let d = cy * cp;
+        let e = self.pivot.x - a * self.pivot.x - c * self.pivot.y;
+        let f = self.pivot.y - self.pivot.z * sp - b * self.pivot.x - d * self.pivot.y;
+        cadcraft_geom::Mat3 { a, b, c, d, e, f }
+    }
+
+    /// Map a 2D view-plane point `p` back onto the world `z = 0` work plane (the inverse of
+    /// [`Self::project`] at `z = 0`).
+    pub fn unproject_xy(&self, p: Vec2) -> Vec2 {
+        if self.is_top() {
+            return p;
+        }
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        let x1 = p.x - self.pivot.x;
+        let y2 = p.y - self.pivot.y;
+        let cp_safe = if cp.abs() < 1e-6 { 1e-6_f64.copysign(cp) } else { cp };
+        let y1 = (y2 + self.pivot.z * sp) / cp_safe;
+        let dx = x1 * cy + y1 * sy;
+        let dy = -x1 * sy + y1 * cy;
+        Vec2::new(self.pivot.x + dx, self.pivot.y + dy)
+    }
+
+    /// Conjugate a world-XY 2D affine transform `m` into projected 2D view-plane coordinates
+    /// (`P * m * P^-1`), matching the result of applying `m` in world XY before projecting.
+    pub fn project_mat3(&self, m: cadcraft_geom::Mat3) -> cadcraft_geom::Mat3 {
+        if self.is_top() {
+            return m;
+        }
+        let p = self.xy_mat3();
+        match p.inverse() {
+            Some(inv) => p.then_before(m).then_before(inv),
+            None => m,
+        }
+    }
+
     /// Stable hash key for display-list caching (`0` in 2D Top view).
     pub fn hash_key(&self) -> u64 {
         if self.is_top() {

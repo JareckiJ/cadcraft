@@ -202,27 +202,45 @@ fn run_mirror(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
-/// An area whose vertices STRETCH moves: a window's box, or a polygon closed back to its first
-/// point.
+/// The 2D shape of a STRETCH selection area in projected view coordinates.
 #[derive(Clone)]
-enum StretchArea {
+enum StretchShape {
     Box(cadcraft_geom::Bounds2),
     Polygon(Vec<Vec2>),
 }
 
+/// An area whose vertices STRETCH moves: a window's box, or a polygon closed back to its first
+/// point, paired with the [`cadcraft_render::Orbit3d`] active when the area was selected.
+#[derive(Clone)]
+struct StretchArea {
+    shape: StretchShape,
+    orbit: cadcraft_render::Orbit3d,
+}
+
 impl StretchArea {
-    fn contains(&self, p: Vec2) -> bool {
-        match self {
-            StretchArea::Box(bx) => bx.contains(p),
-            StretchArea::Polygon(poly) => cadcraft_geom::point_in_polygon(poly, p),
+    /// Construct a rectangular stretch area selected under `orbit`.
+    fn r#box(bx: cadcraft_geom::Bounds2, orbit: cadcraft_render::Orbit3d) -> Self {
+        Self { shape: StretchShape::Box(bx), orbit }
+    }
+
+    /// Construct a polygonal stretch area selected under `orbit`.
+    fn polygon(poly: Vec<Vec2>, orbit: cadcraft_render::Orbit3d) -> Self {
+        Self { shape: StretchShape::Polygon(poly), orbit }
+    }
+
+    /// True when 3D world point `p` projects inside this stretch area under its stored orbit.
+    fn contains(&self, p: cadcraft_geom::Vec3) -> bool {
+        let q = self.orbit.project(p);
+        match &self.shape {
+            StretchShape::Box(bx) => bx.contains(q),
+            StretchShape::Polygon(poly) => cadcraft_geom::point_in_polygon(poly, q),
         }
     }
 }
 
-/// Move the vertices of `e` that lie inside any of the areas `wins` under `orbit` by `d` (STRETCH).
-fn stretch_entity(e: &mut Entity, wins: &[StretchArea], orbit: cadcraft_render::Orbit3d, d: Vec2) {
-    let inside = |p: Vec2| wins.iter().any(|a| a.contains(p));
-    let inside3 = |p: cadcraft_geom::Vec3| inside(orbit.project(p));
+/// Move the vertices of `e` that lie inside any of the areas `wins` by `d` (STRETCH).
+fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
+    let inside3 = |p: cadcraft_geom::Vec3| wins.iter().any(|a| a.contains(p));
     let mv = |p: &mut cadcraft_geom::Vec3| {
         if inside3(*p) {
             p.x += d.x;
@@ -291,18 +309,18 @@ fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({ "stretched": moved.len() }));
     }
     let (mut hs, area) = if let Some(poly) = listed("polygon", 3)? {
-        (crate::select::select_polygon_in_orbit(s.doc()?, &space, orbit, &poly, true), StretchArea::Polygon(poly))
+        (crate::select::select_polygon_in_orbit(s.doc()?, &space, orbit, &poly, true), StretchArea::polygon(poly, orbit))
     } else {
         let w = points_param(p, "window").ok_or_else(|| bad("stretch", "`window` [[x,y],[x,y]], `polygon` or `fence` is required"))?;
         let (Some(a), Some(b)) = (w.first(), w.get(1)) else { return Err(bad("stretch", "window needs 2 corners")) };
         let bx = cadcraft_geom::Bounds2::new(*a, *b);
-        (crate::select::select_window_in_orbit(s.doc()?, &space, orbit, bx, true), StretchArea::Box(bx))
+        (crate::select::select_window_in_orbit(s.doc()?, &space, orbit, bx, true), StretchArea::r#box(bx, orbit))
     };
     hs.retain(|h| !super::curves::is_locked(s, *h));
     let doc = s.doc_mut()?;
     let areas = [area];
     for h in &hs {
-        doc.modify_entity(*h, |e| stretch_entity(e, &areas, orbit, d))?;
+        doc.modify_entity(*h, |e| stretch_entity(e, &areas, d))?;
     }
     Ok(json!({ "stretched": hs.len() }))
 }
@@ -371,9 +389,9 @@ impl StretchM {
             .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         let Some(hs) = m.select(s.doc()?, &space, orbit) else { return Ok(()) };
         let area = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
-            (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::Polygon(m.pts)),
+            (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::polygon(m.pts, orbit)),
             (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, Some((a, b))) => {
-                Some(StretchArea::Box(cadcraft_geom::Bounds2::new(*a, *b)))
+                Some(StretchArea::r#box(cadcraft_geom::Bounds2::new(*a, *b), orbit))
             }
             // A fence marks no area: what it crosses moves whole.
             _ => None,
@@ -425,7 +443,7 @@ impl StretchM {
                         let space = s.space();
                         let hs = crate::select::select_window_in_orbit(s.doc()?, &space, orbit, bx, p.x < c.x);
                         if !self.removing {
-                            self.windows.push(StretchArea::Box(bx));
+                            self.windows.push(StretchArea::r#box(bx, orbit));
                         }
                         self.add(s, hs, false);
                     }
@@ -485,18 +503,13 @@ impl StretchM {
 
     /// Apply the stretch displacement `d` to all selected objects and finish the command.
     fn apply(&self, s: &mut Session, d: Vec2) -> Result<Step> {
-        let orbit = s
-            .state()
-            .ok()
-            .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         let whole: Vec<Handle> = self.objs.iter().filter(|h| self.whole.contains(h)).copied().collect();
         transform_entities(s, &whole, &Mat3::translate(d), false)?;
         let doc = s.doc_mut()?;
         for h in self.objs.iter().filter(|h| !self.whole.contains(h)) {
             let locked = doc.entity(*h).and_then(|e| doc.layer(&e.common.layer)).is_some_and(|l| l.locked);
             if !locked {
-                doc.modify_entity(*h, |e| stretch_entity(e, &self.windows, orbit, d))?;
+                doc.modify_entity(*h, |e| stretch_entity(e, &self.windows, d))?;
             }
         }
         s.set_selection(Vec::new());
@@ -550,9 +563,15 @@ impl Interactive for StretchM {
     }
     /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+        let orbit = s
+            .state()
+            .ok()
+            .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
+            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let vline = |p: Vec2, q: Vec2| line(orbit.unproject_xy(p), orbit.unproject_xy(q));
         let rect = |a: Vec2| {
             let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
-            vec![line(a, b), line(b, c), line(c, d), line(d, a)]
+            vec![vline(a, b), vline(b, c), vline(c, d), vline(d, a)]
         };
         if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
             let Some(first) = m.pts.first().copied() else { return Vec::new() };
@@ -560,10 +579,10 @@ impl Interactive for StretchM {
                 return rect(first);
             }
             // The fence or polygon so far, on to the cursor; a polygon closes back to its start.
-            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| Some(line(*w.first()?, *w.get(1)?))).collect();
-            out.extend(m.pts.last().map(|l| line(*l, c)));
+            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| Some(vline(*w.first()?, *w.get(1)?))).collect();
+            out.extend(m.pts.last().map(|l| vline(*l, c)));
             if m.kind != SelectKind::Fence && m.pts.len() >= 2 {
-                out.push(line(c, first));
+                out.push(vline(c, first));
             }
             return out;
         }
@@ -571,11 +590,6 @@ impl Interactive for StretchM {
             (StretchPhase::Select, Some(a), _) => rect(a),
             (StretchPhase::Second, _, Some(base)) => {
                 let Ok(doc) = s.doc() else { return Vec::new() };
-                let orbit = s
-                    .state()
-                    .ok()
-                    .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-                    .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
                 let m = Mat3::translate(c - base);
                 let mut out: Vec<EntityKind> = self
                     .objs
@@ -587,7 +601,7 @@ impl Interactive for StretchM {
                         if self.whole.contains(&e.handle) {
                             e.kind.transform(&m);
                         } else {
-                            stretch_entity(&mut e, &self.windows, orbit, c - base);
+                            stretch_entity(&mut e, &self.windows, c - base);
                         }
                         e.kind
                     })

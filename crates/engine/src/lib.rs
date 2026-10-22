@@ -1408,6 +1408,29 @@ impl Session {
         }
     }
 
+    /// Whether the current prompt collects points on the model work plane (`z = 0`) rather than
+    /// picking objects or selection areas in the 2D view plane.
+    pub fn accepts_work_point(&self) -> bool {
+        if self.pending_window.is_some() || self.select_mode.is_some() {
+            return false;
+        }
+        if let Some(r) = &self.running {
+            if r.id.starts_with("zoom") {
+                return false;
+            }
+            if r.id == "stretch" && self.point_mods.is_empty() {
+                let msg = r.machine.prompt(self).message;
+                if !matches!(
+                    msg.as_str(),
+                    "Specify base point" | "Specify displacement" | "Specify second point or <use first point as displacement>"
+                ) {
+                    return false;
+                }
+            }
+        }
+        self.current_prompt().as_ref().is_some_and(pointmod::accepts)
+    }
+
     /// Whether the object under the cursor is highlighted (SELECTIONPREVIEW): the cursor picks
     /// objects ([`Self::picking_objects`]) and the bit for a command asking for them (2) or for
     /// no command (1) is on.
