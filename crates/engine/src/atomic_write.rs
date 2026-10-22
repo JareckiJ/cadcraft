@@ -12,7 +12,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, Permissions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,7 +37,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         Err(e) => return Err(e),
     };
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let (mut file, tmp) = create_temp(&dir)?;
+    let (mut file, tmp) = create_temp(&dir, permissions.as_ref())?;
     let write = (|| {
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;
@@ -63,14 +63,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// `create_new(true)` opens with `O_CREAT | O_EXCL`, which refuses to follow or reuse an existing
 /// entry (including a symlink), closing the plant-a-symlink race. Names are unpredictable enough to
 /// avoid collisions in practice, and genuine collisions are retried with a new name.
-fn create_temp(dir: &Path) -> io::Result<(File, PathBuf)> {
+fn create_temp(dir: &Path, permissions: Option<&Permissions>) -> io::Result<(File, PathBuf)> {
     let pid = std::process::id();
     let mut last_err = None;
     for _ in 0..MAX_TRIES {
         let seq = SEQ.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
         let tmp = dir.join(format!(".cadcraft-tmp-{pid}-{seq}-{nanos}"));
-        match create_exclusive(&tmp) {
+        match create_exclusive(&tmp, permissions) {
             Ok(file) => return Ok((file, tmp)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 last_err = Some(e);
@@ -82,8 +82,19 @@ fn create_temp(dir: &Path) -> io::Result<(File, PathBuf)> {
     Err(last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "could not create a unique temporary file")))
 }
 
-fn create_exclusive(path: &Path) -> io::Result<File> {
-    OpenOptions::new().write(true).create_new(true).open(path)
+fn create_exclusive(path: &Path, permissions: Option<&Permissions>) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(permissions) = permissions {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        // Restrict access in the create syscall: chmod afterwards leaves a window in which a
+        // different user can open the inode and retain read access to bytes written later.
+        options.mode(permissions.mode() & 0o777);
+    }
+    #[cfg(not(unix))]
+    let _ = permissions;
+    options.open(path)
 }
 
 #[cfg(test)]
@@ -115,7 +126,7 @@ mod tests {
         std::fs::write(&victim, b"precious").unwrap();
         let planted = dir.join(".cadcraft-tmp-plant");
         symlink(&victim, &planted).unwrap();
-        assert_eq!(create_exclusive(&planted).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(create_exclusive(&planted, None).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         let dest = dir.join("drawing.dxf");
         write_atomic(&dest, b"drawing bytes").unwrap();
         assert_eq!(std::fs::read(&victim).unwrap(), b"precious", "victim file was overwritten");
@@ -134,6 +145,19 @@ mod tests {
         write_atomic(&dest, b"private report").unwrap();
         assert_eq!(std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read(&dest).unwrap(), b"private report");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn private_temp_is_restricted_from_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cadcraft-aw-create-mode-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("private-temp");
+        let permissions = Permissions::from_mode(0o600);
+        let file = create_exclusive(&path, Some(&permissions)).unwrap();
+        assert_eq!(file.metadata().unwrap().permissions().mode() & 0o077, 0);
+        drop(file);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
