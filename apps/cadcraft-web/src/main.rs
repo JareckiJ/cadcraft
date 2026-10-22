@@ -26,7 +26,7 @@ mod web {
     /// The app, the files File > Open… and drag and drop read for it in the background, the
     /// page embedding it (`?host=parent`), the browser's `prefers-reduced-motion` (it stays
     /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change),
-    /// and the viewport title last sent to the page.
+    /// and the document title last written to the page.
     struct Shell(
         CadApp,
         crate::upload::Inbox,
@@ -37,18 +37,16 @@ mod web {
 
     impl eframe::App for Shell {
         /// Runs one frame: takes in files dropped on or picked for the page, drains the background
-        /// uploads, follows the browser's reduced-motion setting, runs the app, sends the viewport
-        /// title when it changed (so the tab and an embedding page name the open drawing), and
-        /// reports unsaved changes to that page.
+        /// uploads, follows the browser's reduced-motion setting, runs the app, writes the browser
+        /// document title when it changed (so the tab and an embedding page name the open
+        /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.1.take_dropped(ctx);
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
             let drawing = self.0.session.state().ok();
-            if let Some(title) = crate::title_to_send(&mut self.4, drawing.map(|d| d.title.as_str()), drawing.is_some_and(|d| d.is_dirty())) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-            }
+            crate::push_title(&mut self.4, drawing.map(|d| d.title.as_str()), drawing.is_some_and(|d| d.is_dirty()), set_page_title);
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
@@ -70,6 +68,16 @@ mod web {
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
+        }
+    }
+
+    /// Writes the browser's document title, which names the tab and is what an embedding page
+    /// (`?host=parent`) reads. eframe's web runner ignores [`egui::ViewportCommand::Title`], so
+    /// the title has to reach the DOM directly.
+    fn set_page_title(title: &str) {
+        match web_sys::window().and_then(|window| window.document()) {
+            Some(document) => document.set_title(title),
+            None => log::warn!("cannot set the page title to {title:?}: there is no document"),
         }
     }
 
@@ -203,8 +211,8 @@ fn document_title(name: Option<&str>, dirty: bool) -> String {
     }
 }
 
-/// The title to send this frame, or `None` while the page already shows it: a viewport title
-/// command asks for a repaint, so resending an unchanged title would keep an idle tab drawing.
+/// The title to write this frame, or `None` while the page already shows it: the browser needs
+/// the document title only when it changes, not on every frame.
 #[cfg(any(target_arch = "wasm32", test))]
 fn title_to_send(sent: &mut Option<String>, name: Option<&str>, dirty: bool) -> Option<String> {
     let title = document_title(name, dirty);
@@ -213,6 +221,21 @@ fn title_to_send(sent: &mut Option<String>, name: Option<&str>, dirty: bool) -> 
     }
     *sent = Some(title.clone());
     Some(title)
+}
+
+/// Writes a changed title through `write` (on the web, the browser's document title) and reports
+/// whether it wrote one. Split from [`title_to_send`] so the change decision and the write are
+/// both testable: eframe's web backend ignores `egui::ViewportCommand::Title`, so a title that is
+/// computed but not written leaves the tab on `CADCraft`.
+#[cfg(any(target_arch = "wasm32", test))]
+fn push_title(sent: &mut Option<String>, name: Option<&str>, dirty: bool, write: impl FnOnce(&str)) -> bool {
+    match title_to_send(sent, name, dirty) {
+        Some(title) => {
+            write(&title);
+            true
+        }
+        None => false,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -230,7 +253,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{document_title, title_to_send, wants_cpu};
+    use super::{document_title, push_title, title_to_send, wants_cpu};
 
     /// Guards the `?cpu` URL flag: only a whole `cpu` query parameter (bare or with a value)
     /// selects the CPU canvas, so `?sample` and `?gpucpu` stay on the GPU path.
@@ -274,5 +297,22 @@ mod tests {
         // Closing the last drawing leaves the app name only.
         assert_eq!(title_to_send(&mut sent, None, false).as_deref(), Some("CADCraft"));
         assert_eq!(title_to_send(&mut sent, None, false), None);
+    }
+
+    /// Guards the title write: every changed title reaches the writer (on the web, the browser
+    /// document title) exactly once, and an unchanged one is not written again. Without the write
+    /// the tab and an embedding page stay on `CADCraft` however the drawing changes.
+    #[test]
+    fn changed_title_reaches_the_document_title_writer_once() {
+        let mut sent = None;
+        let mut written: Vec<String> = Vec::new();
+        assert!(push_title(&mut sent, Some("drawing.dwg"), false, |title| written.push(title.to_owned())));
+        // Unchanged: nothing is written again.
+        assert!(!push_title(&mut sent, Some("drawing.dwg"), false, |title| written.push(title.to_owned())));
+        // Unsaved changes are written.
+        assert!(push_title(&mut sent, Some("drawing.dwg"), true, |title| written.push(title.to_owned())));
+        // Closing the drawing writes the app name.
+        assert!(push_title(&mut sent, None, false, |title| written.push(title.to_owned())));
+        assert_eq!(written, ["drawing.dwg — CADCraft", "drawing.dwg • — CADCraft", "CADCraft"]);
     }
 }
