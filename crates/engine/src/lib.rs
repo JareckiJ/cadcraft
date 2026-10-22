@@ -448,6 +448,14 @@ pub struct Settings {
     pub polardist: f64,
     /// OBJECTISOLATIONMODE: 0 (default) isolation lasts for the session; 1 isolation is saved with the drawing.
     pub objectisolationmode: u8,
+    /// AUTOSNAP bit 1: display AutoSnap marker.
+    pub autosnap_marker: bool,
+    /// AUTOSNAP bit 2: turn AutoSnap magnet on (cursor snaps to osnap point).
+    pub autosnap_magnet: bool,
+    /// AUTOSNAP bit 4: display AutoSnap tooltip.
+    pub autosnap_tooltip: bool,
+    /// AUTOSNAP bit 32: display polar/object tracking tooltips.
+    pub autosnap_track_tooltip: bool,
 }
 
 impl Default for Settings {
@@ -507,6 +515,10 @@ impl Default for Settings {
             polarsnap: false,
             polardist: 0.0,
             objectisolationmode: 0,
+            autosnap_marker: true,
+            autosnap_magnet: false,
+            autosnap_tooltip: true,
+            autosnap_track_tooltip: true,
         }
     }
 }

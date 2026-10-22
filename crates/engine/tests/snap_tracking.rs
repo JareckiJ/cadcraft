@@ -311,6 +311,7 @@ fn sysvars_polarmode_polaraddang_autosnap() {
     assert_eq!(get(&s, "POLARMODE"), json!(6));
     setvar(&mut s, "POLARADDANG", json!("15;22.5"));
     assert_eq!(get(&s, "POLARADDANG"), json!("15;22.5"));
+    // Default: marker(1) + tooltip(4) + polarmode(8) + otrack(16) + track_tooltip(32) = 61
     assert_eq!(get(&s, "AUTOSNAP"), json!(61));
     s.execute("otrack", &json!({})).unwrap();
     assert!(!s.settings.otrack, "F11 toggles tracking");

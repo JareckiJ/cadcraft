@@ -1051,67 +1051,70 @@ fn selection_area_fill(s: &cadcraft_engine::Settings, crossing: bool) -> Option<
     s.selectionarea.then(|| Color32::from_rgb(c.0, c.1, c.2).gamma_multiply(f32::from(s.selectionareaopacity.min(100)) / 100.0))
 }
 
-fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
+fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit, marker: bool, tooltip_on: bool) {
     let t = Tokens::get();
     let s = crate::theme::snap_marker_half();
     let st = Stroke::new(2.0, t.snap);
     use snap::mode;
-    match hit.mode {
-        mode::END => {
-            p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
-        }
-        mode::MID => {
-            p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, s * 0.8), at + vec2(-s, s * 0.8)], st));
-        }
-        mode::CEN | mode::GCEN => {
-            p.circle_stroke(at, s, st);
-        }
-        mode::QUA => {
-            p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, 0.0), at + vec2(0.0, s), at + vec2(-s, 0.0)], st));
-        }
-        mode::INT | mode::APP => {
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
-            p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
-            if hit.mode == mode::APP {
+    if marker {
+        match hit.mode {
+            mode::END => {
                 p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
             }
-        }
-        mode::PER => {
-            p.line(vec![at + vec2(-s, -s), at + vec2(-s, s), at + vec2(s, s)], st);
-            p.line(vec![at + vec2(-s, 0.0), at + vec2(0.0, 0.0), at + vec2(0.0, s)], st);
-        }
-        mode::TAN => {
-            p.circle_stroke(at, s * 0.8, st);
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, -s)], st);
-        }
-        mode::NOD => {
-            p.circle_stroke(at, s, st);
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
-            p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
-        }
-        mode::INS => {
-            p.line(
-                vec![
-                    at + vec2(-s, -s),
-                    at + vec2(0.0, -s),
-                    at + vec2(0.0, 0.0),
-                    at + vec2(s, 0.0),
-                    at + vec2(s, s),
-                    at + vec2(-s, s),
-                    at + vec2(-s, -s),
-                ],
-                st,
-            );
-        }
-        _ => {
-            p.line(vec![at + vec2(-s, -s), at + vec2(s, -s), at + vec2(-s, s), at + vec2(s, s), at + vec2(-s, -s)], st);
+            mode::MID => {
+                p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, s * 0.8), at + vec2(-s, s * 0.8)], st));
+            }
+            mode::CEN | mode::GCEN => {
+                p.circle_stroke(at, s, st);
+            }
+            mode::QUA => {
+                p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, 0.0), at + vec2(0.0, s), at + vec2(-s, 0.0)], st));
+            }
+            mode::INT | mode::APP => {
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
+                p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
+                if hit.mode == mode::APP {
+                    p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
+                }
+            }
+            mode::PER => {
+                p.line(vec![at + vec2(-s, -s), at + vec2(-s, s), at + vec2(s, s)], st);
+                p.line(vec![at + vec2(-s, 0.0), at + vec2(0.0, 0.0), at + vec2(0.0, s)], st);
+            }
+            mode::TAN => {
+                p.circle_stroke(at, s * 0.8, st);
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, -s)], st);
+            }
+            mode::NOD => {
+                p.circle_stroke(at, s, st);
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
+                p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
+            }
+            mode::INS => {
+                p.line(
+                    vec![
+                        at + vec2(-s, -s),
+                        at + vec2(0.0, -s),
+                        at + vec2(0.0, 0.0),
+                        at + vec2(s, 0.0),
+                        at + vec2(s, s),
+                        at + vec2(-s, s),
+                        at + vec2(-s, -s),
+                    ],
+                    st,
+                );
+            }
+            _ => {
+                p.line(vec![at + vec2(-s, -s), at + vec2(s, -s), at + vec2(-s, s), at + vec2(s, s), at + vec2(-s, -s)], st);
+            }
         }
     }
-    p.text(at + vec2(12.0, 12.0), egui::Align2::LEFT_TOP, crate::i18n::t(hit.name), crate::theme::small(), Color32::BLACK);
-    let galley = p.layout_no_wrap(crate::i18n::t(hit.name).to_string(), crate::theme::small(), Color32::BLACK);
-    let r = Rect::from_min_size(at + vec2(10.0, 10.0), galley.size() + vec2(6.0, 2.0));
-    p.rect_filled(r, 2.0, Color32::from_rgb(0xff, 0xff, 0xe1));
-    p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
+    if tooltip_on {
+        let galley = p.layout_no_wrap(crate::i18n::t(hit.name).to_string(), crate::theme::small(), Color32::BLACK);
+        let r = Rect::from_min_size(at + vec2(10.0, 10.0), galley.size() + vec2(6.0, 2.0));
+        p.rect_filled(r, 2.0, Color32::from_rgb(0xff, 0xff, 0xe1));
+        p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
+    }
 }
 
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
@@ -1892,11 +1895,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
-    if app.canvas.cursor.is_some() {
+    if app.canvas.cursor.is_some() && app.session.settings.autosnap_track_tooltip {
         draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
+        let marker = app.session.settings.autosnap_marker;
+        let tooltip_on = app.session.settings.autosnap_tooltip;
+        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit, marker, tooltip_on);
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.

@@ -82,8 +82,15 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "POLARADDANG" => json!(format_angle_list(&st.polaraddang)),
         "POLARDIST" => json!(st.polardist),
         "SNAPTYPE" => json!(i32::from(st.polarsnap)),
-        // Marker, tooltip and tracking tooltip always on (1 + 4 + 32); polar 8, tracking 16.
-        "AUTOSNAP" => json!(37 + 8 * u32::from(st.polarmode) + 16 * u32::from(st.otrack)),
+        "AUTOSNAP" => {
+            let bits = u32::from(st.autosnap_marker)
+                | (u32::from(st.autosnap_magnet) << 1)
+                | (u32::from(st.autosnap_tooltip) << 2)
+                | (u32::from(st.polarmode) << 3)
+                | (u32::from(st.otrack) << 4)
+                | (u32::from(st.autosnap_track_tooltip) << 5);
+            json!(bits)
+        }
         "POLARANG" => json!(st.polarang.to_degrees()),
         "GRIDMODE" => json!(i32::from(st.gridmode)),
         "SNAPMODE" => json!(i32::from(st.snapmode)),
@@ -282,8 +289,12 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         "SNAPTYPE" => st.polarsnap = as_i(v).filter(|b| (0..=1).contains(b)).ok_or_else(bad)? == 1,
         "AUTOSNAP" => {
             let bits = as_i(v).filter(|b| (0..=63).contains(b)).ok_or_else(bad)?;
+            st.autosnap_marker = bits & 1 != 0;
+            st.autosnap_magnet = bits & 2 != 0;
+            st.autosnap_tooltip = bits & 4 != 0;
             st.polarmode = bits & 8 != 0;
             st.otrack = bits & 16 != 0;
+            st.autosnap_track_tooltip = bits & 32 != 0;
         }
         "QNEWTEMPLATE" => crate::cmd::file::set_qnew_template(v.as_str().ok_or_else(bad)?),
         "POLARANG" => st.polarang = as_f64(v).filter(|a| *a > 0.0).ok_or_else(bad)?.to_radians(),

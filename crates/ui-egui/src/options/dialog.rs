@@ -251,6 +251,7 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
 
 fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, start: &mut Option<&'static str>) {
     let t = Tokens::get();
+    let st = &app.session.settings;
     grid(ui, "options_drafting", |ui| {
         ui.label(crate::tl!("Object snap marker size"));
         ui.horizontal(|ui| {
@@ -264,7 +265,7 @@ fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, s
 
         ui.label(crate::tl!("Object snap aperture"));
         ui.horizontal(|ui| {
-            let mut aperture = app.session.settings.aperture;
+            let mut aperture = st.aperture;
             if ui.add(egui::Slider::new(&mut aperture, 1.0..=50.0).integer().suffix(" px")).changed() {
                 changes.insert("APERTURE".into(), json!(aperture));
             }
@@ -273,6 +274,33 @@ fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, s
         ui.end_row();
     });
     hint(ui, crate::tl!("The aperture is how near the cursor must come to a point for an object snap to find it."));
+    ui.add_space(6.0);
+    ui.label(RichText::new(crate::tl!("AutoSnap")).strong());
+    let autosnap_bits = u32::from(st.autosnap_marker)
+        | (u32::from(st.autosnap_magnet) << 1)
+        | (u32::from(st.autosnap_tooltip) << 2)
+        | (u32::from(st.polarmode) << 3)
+        | (u32::from(st.otrack) << 4)
+        | (u32::from(st.autosnap_track_tooltip) << 5);
+    let emit_autosnap = |new_bits: u32, changes: &mut Map<String, Value>| {
+        changes.insert("AUTOSNAP".into(), json!(new_bits));
+    };
+    let mut marker = st.autosnap_marker;
+    if ui.checkbox(&mut marker, crate::tl!("Display AutoSnap marker")).changed() {
+        emit_autosnap((autosnap_bits & !1) | u32::from(marker), changes);
+    }
+    let mut magnet = st.autosnap_magnet;
+    if ui.checkbox(&mut magnet, crate::tl!("AutoSnap magnet (jump cursor to snap point)")).changed() {
+        emit_autosnap((autosnap_bits & !2) | (u32::from(magnet) << 1), changes);
+    }
+    let mut tooltip_on = st.autosnap_tooltip;
+    if ui.checkbox(&mut tooltip_on, crate::tl!("Display AutoSnap tooltip")).changed() {
+        emit_autosnap((autosnap_bits & !4) | (u32::from(tooltip_on) << 2), changes);
+    }
+    let mut track_tip = st.autosnap_track_tooltip;
+    if ui.checkbox(&mut track_tip, crate::tl!("Display polar / tracking tooltips")).changed() {
+        emit_autosnap((autosnap_bits & !32) | (u32::from(track_tip) << 5), changes);
+    }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(crate::tl!("Snap, grid, polar tracking and Dynamic Input:"));

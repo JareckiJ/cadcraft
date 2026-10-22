@@ -982,6 +982,11 @@
 	Object snap marker size	Розмір маркера об'єктної прив'язки
 	Objects on locked layers	Об'єкти на заблокованих шарах
 	Open and Save	Відкриття та збереження
+	AutoSnap	АвтоПрив'язка
+	AutoSnap magnet (jump cursor to snap point)	Магніт АвтоПрив'язки (прив'язати курсор до точки)
+	Display AutoSnap marker	Показувати маркер АвтоПрив'язки
+	Display AutoSnap tooltip	Показувати підказку АвтоПрив'язки
+	Display polar / tracking tooltips	Показувати підказки полярного/об'єктного стеження
 	Options	Параметри
 	Options...	Параметри...
 	Pickbox size	Розмір прицілу вибору
