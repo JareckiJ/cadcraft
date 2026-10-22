@@ -69,10 +69,12 @@ mod web {
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.0.ui(ui);
-            // The pass just showed the active drawing: answer the upload that opened it, and
-            // report an upload a later one superseded before this pass (#1666).
+            // The pass just showed a page: answer the upload that opened its drawing, and report
+            // an upload a later one superseded before this pass (#1666). The Start page displays
+            // no drawing, so replies stay queued until a drawing page is shown.
             let shown = self.0.session.state().ok().map(|st| st.uid);
-            let replies = self.4.presented(shown);
+            let page = if self.0.ui.start_tab { crate::ShownPage::Start } else { crate::ShownPage::Drawing(shown) };
+            let replies = self.4.presented(page);
             if let Some((bridge, _)) = &self.2 {
                 for reply in &replies {
                     bridge.post_open(reply);
@@ -244,6 +246,18 @@ impl OpenReply {
 #[cfg(any(target_arch = "wasm32", test))]
 const SUPERSEDED_OPEN: &str = "Open: superseded by another drawing before it was shown";
 
+/// The page a UI pass displayed (#1666): host opens are answered only after the pass that showed
+/// their drawing. The Start page displays no drawing even while the session still holds an active
+/// one, so replies wait there for the pass that shows a drawing page.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownPage {
+    /// The Start page: no drawing is displayed.
+    Start,
+    /// A drawing page, displaying the session's active drawing (its uid, when it has one).
+    Drawing(Option<u64>),
+}
+
 /// Success replies owed to the page embedding CADCraft for drawings it sent, each held until the
 /// UI pass that presents its drawing (#1666).
 ///
@@ -269,13 +283,18 @@ impl PendingOpens {
         self.waiting.is_empty()
     }
 
-    /// Answer every held success after a UI pass showed the drawing `shown`: `cadcraft:opened`
-    /// for that drawing, `cadcraft:open-failed` for any earlier one the pass superseded.
-    pub fn presented(&mut self, shown: Option<u64>) -> Vec<OpenReply> {
-        self.waiting
-            .drain(..)
-            .map(|(name, uid)| if shown == Some(uid) { OpenReply::new(&name, None) } else { OpenReply::new(&name, Some(SUPERSEDED_OPEN)) })
-            .collect()
+    /// Answer the held successes after a UI pass displayed `page`: `cadcraft:opened` for the
+    /// drawing the pass showed, `cadcraft:open-failed` for any earlier one it superseded. The
+    /// Start page shows no drawing, so it answers nothing and every reply stays queued.
+    pub fn presented(&mut self, page: ShownPage) -> Vec<OpenReply> {
+        match page {
+            ShownPage::Start => Vec::new(),
+            ShownPage::Drawing(shown) => self
+                .waiting
+                .drain(..)
+                .map(|(name, uid)| if shown == Some(uid) { OpenReply::new(&name, None) } else { OpenReply::new(&name, Some(SUPERSEDED_OPEN)) })
+                .collect(),
+        }
     }
 }
 
@@ -313,7 +332,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{OpenReply, PendingOpens, SUPERSEDED_OPEN, host_open_error, wants_cpu};
+    use super::{OpenReply, PendingOpens, SUPERSEDED_OPEN, ShownPage, host_open_error, wants_cpu};
 
     /// #1666: the page embedding CADCraft hears `cadcraft:opened` once the drawing it sent is
     /// loaded and showing, or `cadcraft:open-failed` with the reason.
@@ -334,12 +353,12 @@ mod tests {
         pending.opened("Bracket.dxf", 7);
         assert!(!pending.is_empty(), "no UI pass yet: the reply is still owed");
 
-        let replies = pending.presented(Some(7));
+        let replies = pending.presented(ShownPage::Drawing(Some(7)));
         assert_eq!(replies, vec![OpenReply::new("Bracket.dxf", None)]);
         assert!(pending.is_empty());
 
         // One reply per open, not one per UI pass.
-        assert!(pending.presented(Some(7)).is_empty());
+        assert!(pending.presented(ShownPage::Drawing(Some(7))).is_empty());
     }
 
     /// #1666: two uploads can drain before one UI pass. Only the last drawing is shown, so the
@@ -350,7 +369,7 @@ mod tests {
         pending.opened("First.dxf", 1);
         pending.opened("Second.dxf", 2);
 
-        let replies = pending.presented(Some(2));
+        let replies = pending.presented(ShownPage::Drawing(Some(2)));
         let fields: Vec<_> = replies.iter().map(OpenReply::fields).collect();
         assert_eq!(
             fields,
@@ -361,17 +380,32 @@ mod tests {
         );
     }
 
+    /// #1666: the Start page displays no drawing although the session still holds the drawing an
+    /// upload opened, so the pass showing it answers nothing and the reply stays queued until the
+    /// drawing page is shown.
+    #[test]
+    fn a_pass_showing_the_start_page_leaves_a_host_open_unanswered() {
+        let mut pending = PendingOpens::default();
+        pending.opened("Bracket.dxf", 7);
+
+        assert!(pending.presented(ShownPage::Start).is_empty(), "the Start page shows no drawing");
+        assert!(!pending.is_empty(), "the reply stays queued for the drawing page");
+
+        assert_eq!(pending.presented(ShownPage::Drawing(Some(7))), vec![OpenReply::new("Bracket.dxf", None)]);
+        assert!(pending.is_empty());
+    }
+
     /// #1666: each success stays associated with the upload that opened it, across drains and
     /// UI passes; a drawing shown by its own pass is not reported again later.
     #[test]
     fn each_drained_upload_keeps_its_own_reply() {
         let mut pending = PendingOpens::default();
         pending.opened("First.dxf", 1);
-        assert_eq!(pending.presented(Some(1)), vec![OpenReply::new("First.dxf", None)]);
+        assert_eq!(pending.presented(ShownPage::Drawing(Some(1))), vec![OpenReply::new("First.dxf", None)]);
 
         pending.opened("Second.dxf", 2);
         pending.opened("Third.dxf", 3);
-        let replies = pending.presented(Some(3));
+        let replies = pending.presented(ShownPage::Drawing(Some(3)));
         assert_eq!(replies.first(), Some(&OpenReply::new("Second.dxf", Some(SUPERSEDED_OPEN))));
         assert_eq!(replies.get(1), Some(&OpenReply::new("Third.dxf", None)));
     }
