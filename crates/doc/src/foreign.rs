@@ -66,6 +66,15 @@ pub struct Foreign {
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,
+    /// The file handle of every record CADCraft writes itself, by role (gap FF7): table records
+    /// and tables (`("LAYER", "WALLS")`, `("TABLE", "LAYER")`), blocks and their ends
+    /// (`("BLOCK", "DOOR")`, `("ENDBLK", "DOOR")`), the named object dictionary and its entries
+    /// (`("NOD", "")`, `("NOD", "ACAD_LAYOUT")`, `("NOD/ACAD_LAYOUT", "LAYOUT1")`), extension
+    /// dictionaries of entities and their entries (`("XDICT", "1A2")`, `("XDICT/1A2",
+    /// "ACAD_DIMASSOC")`) and the attributes and sequence ends of block references
+    /// (`("ATTRIB", "1A2#0")`, `("SEQEND", "1A2")`). Saving gives each record it writes in one of
+    /// these roles the handle it had, when no other written record has that handle.
+    pub handles: BTreeMap<ForeignKey, Handle>,
     /// The file's data store section (ACDSDATA, AutoCAD 2013 and later), as read: its groups
     /// after the section name. It holds the ACIS geometry of 3D solids, regions, bodies and
     /// surfaces, which from 2013 on those entities don't carry themselves: each `ACDSRECORD`
@@ -81,6 +90,7 @@ impl Foreign {
             && self.records.is_empty()
             && self.classes.is_empty()
             && self.targets.is_empty()
+            && self.handles.is_empty()
             && self.data_store.is_empty()
     }
 
