@@ -321,12 +321,19 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
     Ok(json!({"docking": app.ui.docking}))
 }
 
+/// The accessible name of a header's close button. One translated template carries both the
+/// verb and the panel name, so a catalog translates the whole name instead of leaving an
+/// English verb in front of a translated panel label.
+fn close_label(panel: Panel) -> String {
+    crate::tf!("Close {panel}", panel = crate::i18n::t(panel.label()))
+}
+
 /// A visible close button for a panel header. It runs the same action as the tab context
 /// menu's "Close panel"; the accessible name includes the panel so the headers stay distinct.
 fn close_button(ui: &mut egui::Ui, panel: Panel, rect: Rect) -> bool {
     let t = crate::theme::Tokens::get();
     let response = ui.interact(rect, egui::Id::new("cadcraft-docking").with(("close", panel.id())), egui::Sense::click());
-    let label = format!("Close {}", crate::i18n::t(panel.label()));
+    let label = close_label(panel);
     icons::describe_control(ui, &response, &label, None, false);
     if response.hovered() {
         ui.painter().rect_filled(rect.expand(2.0), 2.0, t.control_hover.gamma_multiply(0.6));
