@@ -152,6 +152,18 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        // APPLOAD typed or chosen from a menu: the `.lsp` file picker, starting where the last
+        // one came from. JSON calls carry `path` and never open one; without a picker (the web)
+        // the engine asks for the file name on the command line.
+        "appload" | "ap" if params.is_null() => {
+            let pick = app.services.pick_lisp.as_ref()?;
+            let dir = app.ui.last_lisp_dir.clone().unwrap_or_default();
+            let Some(path) = pick(&dir) else { return Some(Ok(Value::Null)) };
+            if let Some(dir) = std::path::Path::new(&path).parent().and_then(|p| p.to_str()).filter(|d| !d.is_empty()) {
+                app.ui.last_lisp_dir = Some(dir.to_string());
+            }
+            app.run("appload", json!({ "path": path }))
+        }
         // Pick a template (.dwt or .dxf) and start a new drawing from it.
         "ui.newtemplate" => {
             if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
@@ -718,6 +730,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            ..Services::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }
