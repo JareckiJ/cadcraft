@@ -1,5 +1,7 @@
 //! Inquiry: DIST, ID, LIST, AREA, drawing inspection for agents.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use cadcraft_doc::{Entity, EntityKind, Handle};
 use cadcraft_geom::{Polyline, Vec2, Vec3};
 use serde_json::{Value, json};
@@ -71,6 +73,94 @@ fn fmt_d(s: &Session, v: f64) -> String {
 fn fmt_a(s: &Session, v: f64) -> String {
     let h = s.doc().map(|d| (d.header.i64("AUNITS", 0), d.header.i64("AUPREC", 0))).unwrap_or((0, 0));
     format_angle(v, h.0, h.1)
+}
+
+/// Schema of the analysis self-check block (#1440). Fields may be added within a version; a
+/// rename or a changed meaning bumps it.
+pub(super) const SELF_CHECK_SCHEMA: u64 = 1;
+
+#[derive(Default)]
+struct SkipTally {
+    count: u64,
+    reasons: BTreeSet<String>,
+}
+
+/// The self-check every analysis result carries (#1440): how many objects it found, how many it
+/// analysed, what it skipped and why, the caps it hit with their values, and values so
+/// implausible that they point at a bug rather than at the drawing.
+#[derive(Default)]
+pub(super) struct SelfCheck {
+    found: u64,
+    analyzed: u64,
+    skipped: BTreeMap<String, SkipTally>,
+    caps: BTreeMap<String, u64>,
+    implausible: Vec<Value>,
+}
+
+impl SelfCheck {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Count objects the analysis found (matched its filters).
+    pub(super) fn found(&mut self, n: u64) {
+        self.found = self.found.saturating_add(n);
+    }
+
+    /// Count objects the analysis actually analysed.
+    pub(super) fn analyzed(&mut self, n: u64) {
+        self.analyzed = self.analyzed.saturating_add(n);
+    }
+
+    /// Count `n` objects of `ty` skipped, with the reason.
+    pub(super) fn skip(&mut self, ty: &str, reason: &str, n: u64) {
+        let skip = self.skipped.entry(ty.to_string()).or_default();
+        skip.count = skip.count.saturating_add(n);
+        skip.reasons.insert(reason.to_string());
+    }
+
+    /// Record a cap the analysis hit, with its value (e.g. `limit`, 200).
+    pub(super) fn cap(&mut self, name: &str, value: u64) {
+        self.caps.insert(name.to_string(), value);
+    }
+
+    /// Flag `value` as implausible when it is past `bound`, with the rule that makes it so.
+    pub(super) fn implausible(&mut self, handle: Handle, ty: &str, field: &str, value: f64, bound: f64, rule: &str) {
+        if value.is_finite() && bound.is_finite() && value > bound {
+            self.implausible.push(json!({
+                "handle": handle.hex(),
+                "type": ty,
+                "field": field,
+                "value": value,
+                "bound": bound,
+                "reason": rule,
+            }));
+        }
+    }
+
+    /// The skip map in the shape analyses have always reported: type → {count, reason}.
+    pub(super) fn skipped_json(&self) -> Value {
+        Value::Object(
+            self.skipped
+                .iter()
+                .map(|(ty, skip)| {
+                    let reason = skip.reasons.iter().map(String::as_str).collect::<Vec<_>>().join("; ");
+                    (ty.clone(), json!({ "count": skip.count, "reason": reason }))
+                })
+                .collect(),
+        )
+    }
+
+    pub(super) fn to_json(&self) -> Value {
+        json!({
+            "schema": SELF_CHECK_SCHEMA,
+            "found": self.found,
+            "analyzed": self.analyzed,
+            "skipped": self.skipped_json(),
+            "caps": self.caps,
+            "implausible": self.implausible,
+        })
+    }
 }
 
 /// The angle of `d` up from the XY plane.

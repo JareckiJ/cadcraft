@@ -68,6 +68,22 @@ fn region_from_closed_objects_measures() {
     assert!(s.execute("massprop", &json!({"handles": [line.hex()]})).is_err());
 }
 
+/// #1440: MASSPROP says what it measured and what it skipped, and carries a self-check.
+#[test]
+fn massprop_self_check_reports_skipped_objects() {
+    let mut s = Session::new();
+    let a = rect_region(&mut s, [0.0, 0.0], [10.0, 4.0]);
+    s.execute("line", &json!({"points": [[0, 10], [5, 10]]})).unwrap();
+    let line = s.doc().unwrap().model.iter().last().unwrap().handle;
+    let m = s.execute("massprop", &json!({"handles": [a.hex(), line.hex()]})).unwrap();
+    let sc = &m["selfCheck"];
+    assert_eq!(sc["schema"], 1);
+    assert_eq!((sc["found"].clone(), sc["analyzed"].clone()), (json!(2), json!(1)), "{m}");
+    assert_eq!(sc["skipped"]["Line"], json!({ "count": 1, "reason": "not a region" }));
+    assert_eq!(sc["caps"], json!({}));
+    assert_eq!(sc["implausible"], json!([]));
+}
+
 #[test]
 fn booleans_on_separate_and_nested_regions() {
     // Subtract a circle inside a rectangle: a hole.

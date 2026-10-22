@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use super::super::machines::{SelOutcome, SelectPhase, SelectRun};
 use super::super::*;
+use super::SelfCheck;
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -33,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(SelectRun::new("intersect", "INTERSECT")))),
         CommandSpec::new("massprop", "Region/Mass Properties", run_massprop)
             .menu(&["Tools", "Inquiry", "Region/Mass Properties"])
-            .params("{handles?} (regions) → properties of each")
+            .params("{handles?} (regions) → properties of each, plus `selfCheck` (found/analyzed/skipped with reasons, caps, implausible values)")
             .noundo()
             .interactive(|_| Ok(Box::new(SelectRun::new("massprop", "MASSPROP")))),
     ]
@@ -249,12 +250,27 @@ fn run_massprop(s: &mut Session, p: &Value) -> Result<Value> {
     if rs.is_empty() {
         return Err(other("Select one or more regions."));
     }
+    let mut check = SelfCheck::new();
+    let d = s.doc()?;
+    let extents = d.extents(&s.space());
+    let extents_area = if extents.is_empty() { 0.0 } else { extents.width() * extents.height() };
+    for h in &hs {
+        check.found(1);
+        match d.entity(*h).map(|e| &e.kind) {
+            Some(EntityKind::Region(_)) => check.analyzed(1),
+            Some(kind) => check.skip(kind.type_name(), "not a region", 1),
+            None => check.skip("Missing", "no such object", 1),
+        }
+    }
     let f = |v: f64| super::fmt_d(s, v);
     let mut out = Vec::new();
     let mut lines = Vec::new();
     for (h, r) in &rs {
         let m = r.props();
         let c = m.centroid;
+        let diagonal = if m.bounds.is_empty() { 0.0 } else { m.bounds.min.dist(m.bounds.max) };
+        check.implausible(*h, "Region", "perimeter", m.perimeter, diagonal * 10.0, "perimeter is more than 10 x the bounding-box diagonal");
+        check.implausible(*h, "Region", "area", m.area, extents_area, "area is larger than the drawing extents");
         // Moments about the centroid, and the principal moments and directions.
         let [ixc, iyc, ixyc] = m.centroid_moments;
         let mid = (ixc + iyc) / 2.0;
@@ -292,5 +308,5 @@ fn run_massprop(s: &mut Session, p: &Value) -> Result<Value> {
             ang.cos(),
         ));
     }
-    Ok(json!({ "regions": out, "message": lines.join("\n") }))
+    Ok(json!({ "regions": out, "selfCheck": check.to_json(), "message": lines.join("\n") }))
 }
