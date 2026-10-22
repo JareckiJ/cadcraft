@@ -1245,5 +1245,25 @@
 	Analyze Shapes	Analisar formas
 	Run Script...	Executar script...
 	Not a number or distance: {text}	Não é um número nem uma distância: {text}
+	2D Wireframe	Wireframe 2D
 	Select using two clicks only	Selecionar apenas com dois cliques
 	Define each corner of the selection window with a separate click.	Defina cada canto da janela de seleção com um clique separado.
+	Back	Posterior
+	Bottom	Inferior
+	Click a face to align the view; drag to orbit	Clique em uma face para alinhar a vista; arraste para orbitar
+	Compass: drag to turn a 3D view about the Z axis	Bússola: arraste para girar a vista em torno do eixo Z
+	Coordinate system	Sistema de coordenadas
+	Front	Frontal
+	Hide UCS Icon	Ocultar ícone UCS
+	Hide ViewCube	Ocultar cubo de vista
+	Home: zoom to the drawing extents	Início: enquadrar todo o desenho
+	UCS icon: {name}	Ícone do SCU: {name}
+	Unnamed	Sem nome
+	Unnamed UCS	SCU sem nome
+	World (WCS)	Global (WCS)
+	World Coordinate System	Sistema de coordenadas mundial
+
+	View the adjacent face	Ver a face perpendicular
+	Rotate view 90° clockwise	Girar vista 90° no sentido horário
+	Rotate view 90° counterclockwise	Girar vista 90° no sentido anti-horário
+	Click a face, edge or corner to align the view; drag to orbit	Clique em uma face, aresta ou quina para alinhar a vista; arraste para orbitar

@@ -307,6 +307,14 @@ impl ExtractM {
 
     fn finish(&mut self, s: &mut Session, file: Option<&str>) -> Result<Step> {
         let r = extract(s, &json!({}), &self.options(), file, self.at, None)?;
+        if let Some(handle) = r["table"].as_str().and_then(cadcraft_doc::Handle::parse_hex) {
+            let rotation = s.input_ucs().rotation();
+            s.doc_mut()?.modify_entity(handle, |e| {
+                if let EntityKind::Table(table) = &mut e.kind {
+                    table.rotation = rotation;
+                }
+            })?;
+        }
         let n = r["rows"].as_array().map_or(0, Vec::len);
         s.echo(format!("{n} row{} extracted.", if n == 1 { "" } else { "s" }));
         if let Some(f) = r["file"].as_str() {

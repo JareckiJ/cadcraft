@@ -171,11 +171,11 @@ impl MocoroM {
     }
 
     /// The transform under the cursor in an option that drags the objects.
-    fn matrix(&self, c: Vec2) -> Option<Mat3> {
+    fn matrix(&self, s: &Session, c: Vec2) -> Option<Mat3> {
         let b = self.base;
         match self.mode {
             Mode::Move | Mode::Copy => Some(Mat3::translate(c - b)),
-            Mode::Rotate => Some(Mat3::rotate_about(b, b.angle_to(c))),
+            Mode::Rotate => Some(Mat3::rotate_about(b, b.angle_to(c) - s.input_ucs().rotation())),
             Mode::Scale => positive_factor(b.dist(c)).map(|f| Mat3::scale_about(b, f)),
             _ => None,
         }
@@ -254,7 +254,7 @@ impl Interactive for MocoroM {
             (Mode::Move, Input::Point(p)) => self.run(s, Op::Move(p)),
             (Mode::Copy, Input::Point(p)) => self.run(s, Op::Copy(p)),
             (Mode::Base, Input::Point(p)) => self.run(s, Op::Base(p)),
-            (Mode::Rotate, Input::Point(p)) => self.run(s, Op::Rotate(self.base.angle_to(p))),
+            (Mode::Rotate, Input::Point(p)) => self.run(s, Op::Rotate(self.base.angle_to(p) - s.input_ucs().rotation())),
             (Mode::Rotate, Input::Text(t)) => {
                 let a = s.angle_settings().rotation(&t).filter(|a| a.is_finite()).ok_or_else(|| other("Requires an angle or point."))?;
                 self.run(s, Op::Rotate(a))
@@ -271,7 +271,7 @@ impl Interactive for MocoroM {
         }
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
-        let (Some(m), Ok(d)) = (self.matrix(c), s.doc()) else { return Vec::new() };
+        let (Some(m), Ok(d)) = (self.matrix(s, c), s.doc()) else { return Vec::new() };
         let mut out: Vec<EntityKind> = self
             .objs
             .iter()
@@ -286,8 +286,8 @@ impl Interactive for MocoroM {
         out.push(line(self.base, c));
         out
     }
-    fn drag(&self, _s: &Session, c: Vec2) -> Option<Drag> {
-        let matrix = self.matrix(c)?;
+    fn drag(&self, s: &Session, c: Vec2) -> Option<Drag> {
+        let matrix = self.matrix(s, c)?;
         Some(Drag { handles: self.objs.clone(), matrix, extra: vec![line(self.base, c)], clipboard: false })
     }
 }

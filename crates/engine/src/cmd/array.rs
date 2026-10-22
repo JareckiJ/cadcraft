@@ -503,6 +503,7 @@ struct RectM {
     centroid: Vec2,
     /// Unit cell: the first corner, once picked.
     corner: Option<Vec2>,
+    frame: crate::ucs::UcsFrame,
 }
 
 impl RectM {
@@ -512,6 +513,7 @@ impl RectM {
 
     /// Objects are selected: set the defaults (4 columns × 3 rows, 1.5 × the selection size apart).
     fn ready(&mut self, s: &mut Session) -> Result<Step> {
+        self.frame = s.input_ucs();
         let b = bounds(s.doc()?, &self.objs);
         let (w, h) = (b.width(), b.height());
         let size = |v: f64, o: f64| match (v.is_finite() && v > 1e-9, o.is_finite() && o > 1e-9) {
@@ -534,8 +536,8 @@ impl RectM {
             cols: count32(self.cols),
             rows: count32(self.rows),
             col_spacing: self.cs,
-            row_spacing: self.rs,
-            axis_angle: 0.0,
+            row_spacing: if self.frame.reversed() { -self.rs } else { self.rs },
+            axis_angle: self.frame.rotation(),
             row_elevation: self.elev,
         });
         params(kind, if self.assoc { self.levels } else { 1 }, self.ls)
@@ -763,7 +765,8 @@ impl Interactive for RectM {
                     UnitCell
                 }
                 Some(c) => {
-                    let (dx, dy) = (p.x - c.x, p.y - c.y);
+                    let delta = self.frame.vec_to_ucs(*p - c);
+                    let (dx, dy) = (delta.x, delta.y);
                     if dx.abs() <= 1e-12 || dy.abs() <= 1e-12 {
                         return Err(other("The unit cell must have a width and a height."));
                     }

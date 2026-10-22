@@ -178,6 +178,7 @@ fn derived_dimension_fields_are_not_differences() {
         text: String::new(),
         style: "Standard".into(),
         measurement,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,

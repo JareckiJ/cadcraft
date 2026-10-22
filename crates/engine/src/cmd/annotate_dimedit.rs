@@ -160,7 +160,7 @@ impl DimEditM {
     fn run(&self, s: &mut Session, hs: &[Handle], angle: Option<f64>) -> Result<Step> {
         let (mode, extra) = match self.mode {
             Some(Mode::New) => ("new", json!({ "text": self.text.clone().unwrap_or_default() })),
-            Some(Mode::Rotate) => ("rotate", json!({ "angle": angle.unwrap_or(0.0).to_degrees() })),
+            Some(Mode::Rotate) => ("rotate", json!({ "angle": angle.unwrap_or_else(|| s.input_ucs().rotation()).to_degrees() })),
             Some(Mode::Oblique) => ("oblique", json!({ "angle": angle.map(f64::to_degrees) })),
             _ => ("home", json!({})),
         };

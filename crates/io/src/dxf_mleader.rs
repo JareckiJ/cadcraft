@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use cadcraft_doc::{Attrib, Drawing, Entity, EntityKind, Handle, Insert, MLeader, MLeaderStyle, MText};
 use cadcraft_dxf::Tag;
-use cadcraft_geom::Vec3;
+use cadcraft_geom::{Vec2, Vec3};
 
 /// Most leader roots (landings) read per multileader.
 const MAX_ROOTS: usize = 256;
@@ -490,7 +490,8 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
     i(&mut t, 270, 2);
     s(&mut t, 300, "CONTEXT_DATA{");
     f(&mut t, 40, 1.0);
-    p(&mut t, 10, m.landing + Vec3::new(m.dogleg * dir, 0.0, 0.0));
+    let dogleg = m.landing_segment().map(|[a, b]| b - a).unwrap_or(Vec2::new(m.dogleg * dir, 0.0));
+    p(&mut t, 10, m.landing + dogleg.to3(0.0));
     f(&mut t, 41, text.map_or(style.text_height, |x| x.height));
     f(&mut t, 140, m.arrow_size);
     f(&mut t, 145, style.landing_gap);
@@ -552,7 +553,7 @@ pub(crate) fn entity_tags(d: &Drawing, m: &MLeader, r: &Refs) -> Vec<Tag> {
         i(&mut t, 290, 1);
         i(&mut t, 291, 1);
         p(&mut t, 10, m.landing);
-        p(&mut t, 11, Vec3::new(dir, 0.0, 0.0));
+        p(&mut t, 11, dogleg.normalized().to3(0.0));
         i(&mut t, 90, 0);
         f(&mut t, 40, m.dogleg);
         for (n, l) in m.leaders.iter().enumerate() {

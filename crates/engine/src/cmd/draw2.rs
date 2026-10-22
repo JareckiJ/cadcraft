@@ -730,12 +730,12 @@ fn chain_of(s: &Session, h: Handle) -> Result<Chain> {
     Chain::of(&e.kind).ok_or_else(|| other("Cannot divide/measure that object."))
 }
 
-fn place_markers(s: &mut Session, at: &[(Vec2, Vec2)], block: Option<&str>, align: bool) -> Result<Vec<String>> {
+fn place_markers(s: &mut Session, at: &[(Vec2, Vec2)], block: Option<&str>, align: bool, rotation: f64) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for (p, t) in at {
         let h = match block {
-            Some(b) => super::blocks::insert(s, b, *p, 1.0, if align { t.angle() } else { 0.0 }, &serde_json::Map::new())?,
-            None => s.add_entity(EntityKind::Point(Point { p: v3(*p), angle: 0.0 }))?,
+            Some(b) => super::blocks::insert(s, b, *p, 1.0, if align { t.angle() } else { rotation }, &serde_json::Map::new())?,
+            None => s.add_entity(EntityKind::Point(Point { p: v3(*p), angle: rotation }))?,
         };
         out.push(h.hex());
     }
@@ -770,6 +770,9 @@ pub(crate) fn measure_points(c: &Chain, step: f64) -> Vec<(Vec2, Vec2)> {
 }
 
 fn run_divide(s: &mut Session, p: &Value) -> Result<Value> {
+    divide_in(s, p, 0.0)
+}
+fn divide_in(s: &mut Session, p: &Value, rotation: f64) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("divide", "`handle` is required"))?;
     let n = p.get("segments").and_then(Value::as_u64).ok_or_else(|| bad("divide", "`segments` (2..32767) is required"))?;
     if !(2..=32767).contains(&n) {
@@ -779,11 +782,14 @@ fn run_divide(s: &mut Session, p: &Value) -> Result<Value> {
     check_block(s, block.as_deref())?;
     let c = chain_of(s, h)?;
     let pts = divide_points(&c, n as usize);
-    let hs = place_markers(s, &pts, block.as_deref(), bool_or(p, "align", true))?;
+    let hs = place_markers(s, &pts, block.as_deref(), bool_or(p, "align", true), rotation)?;
     Ok(json!({ "handles": hs }))
 }
 
 fn run_measure(s: &mut Session, p: &Value) -> Result<Value> {
+    measure_in(s, p, 0.0)
+}
+fn measure_in(s: &mut Session, p: &Value, rotation: f64) -> Result<Value> {
     let h = targets(s, p)?.first().copied().ok_or_else(|| bad("measure", "`handle` is required"))?;
     let step = f64_req("measure", p, "length")?;
     let mut c = chain_of(s, h)?;
@@ -800,7 +806,7 @@ fn run_measure(s: &mut Session, p: &Value) -> Result<Value> {
         c = c.reversed();
     }
     let pts = measure_points(&c, step);
-    let hs = place_markers(s, &pts, block.as_deref(), bool_or(p, "align", true))?;
+    let hs = place_markers(s, &pts, block.as_deref(), bool_or(p, "align", true), rotation)?;
     Ok(json!({ "handles": hs }))
 }
 
@@ -885,13 +891,13 @@ impl Interactive for DivideM {
                 }
                 if self.measure {
                     params["length"] = json!(v);
-                    run_measure(s, &params)?;
+                    measure_in(s, &params, s.input_ucs().rotation())?;
                 } else {
                     if !(2.0..=32767.0).contains(&v) || v.fract() != 0.0 {
                         return Err(other("Requires an integer between 2 and 32767."));
                     }
                     params["segments"] = json!(v as u64);
-                    run_divide(s, &params)?;
+                    divide_in(s, &params, s.input_ucs().rotation())?;
                 }
                 Ok(Step::Done)
             }
@@ -1034,18 +1040,18 @@ impl RevcloudM {
     fn new(s: &Session, kind: CloudKind) -> Self {
         RevcloudM { kind, pts: Vec::new(), arc_len: default_arc_len(s), asking_arc: false, object: false, calligraphy: false, asking_style: false }
     }
-    fn boundary(&self, extra: Option<Vec2>) -> Vec<Vec2> {
+    fn boundary(&self, s: &Session, extra: Option<Vec2>) -> Vec<Vec2> {
         let mut pts = self.pts.clone();
         pts.extend(extra);
         if self.kind == CloudKind::Rect
             && let (Some(a), Some(b)) = (pts.first().copied(), pts.get(1).copied())
         {
-            return rect_vertices(a, b).into_iter().map(|v| v.p).collect();
+            return s.input_ucs().rectangle(a, b).to_vec();
         }
         pts
     }
     fn finish(&mut self, s: &mut Session) -> Result<Step> {
-        let b = self.boundary(None);
+        let b = self.boundary(s, None);
         match cloud_vertices(&b, self.arc_len, self.kind != CloudKind::Free, false) {
             Some(vs) => {
                 s.add_entity(cloud_entity(vs, self.calligraphy, self.arc_len))?;
@@ -1155,11 +1161,11 @@ impl Interactive for RevcloudM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.pts.is_empty() || self.object {
             return Vec::new();
         }
-        let b = self.boundary(Some(c));
+        let b = self.boundary(s, Some(c));
         match cloud_vertices(&b, self.arc_len, self.kind != CloudKind::Free, false) {
             Some(vs) if vs.len() < 2000 => vec![lwpoly(vs, true)],
             _ => {
@@ -1454,8 +1460,8 @@ impl Interactive for XlineM2 {
             (_, Input::Enter) => Ok(Step::Done),
             (XMode::Two, Input::Keyword(k)) => {
                 self.mode = match k.as_str() {
-                    "Hor" => XMode::Fixed(0.0),
-                    "Ver" => XMode::Fixed(std::f64::consts::FRAC_PI_2),
+                    "Hor" => XMode::Fixed(s.input_ucs().x.xy().angle()),
+                    "Ver" => XMode::Fixed(s.input_ucs().y.xy().angle()),
                     "Ang" => XMode::AngAsk,
                     "Bisect" => XMode::Bisect,
                     _ => XMode::OffDist,
@@ -1692,6 +1698,10 @@ impl Interactive for RectM2 {
     fn name(&self) -> &'static str {
         "RECTANG"
     }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.rotation = s.input_ucs().rotation();
+        Ok(Step::Continue)
+    }
     fn prompt(&self, _s: &Session) -> Prompt {
         let num = |m: &str, d: f64| Prompt::new(m, Accept::NUMBER).default(format!("{d:.4}"));
         if let Some(a) = self.asking {
@@ -1856,13 +1866,14 @@ fn run_3dpoly(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[derive(Default)]
 struct Poly3dM {
-    pts: Vec<Vec2>,
+    /// The vertices: a typed point keeps its Z ([`Session::point_z`]), a picked one is at z = 0.
+    pts: Vec<Vec3>,
     handle: Option<Handle>,
 }
 
 impl Poly3dM {
     fn sync(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        let k = EntityKind::Polyline3d(Polyline3d { points: self.pts.iter().map(|p| v3(*p)).collect(), closed });
+        let k = EntityKind::Polyline3d(Polyline3d { points: self.pts.clone(), closed });
         match (self.handle, self.pts.len() >= 2) {
             (Some(h), true) => s.doc_mut()?.modify_entity(h, |e| e.kind = k)?,
             (None, true) => self.handle = Some(s.add_entity(k)?),
@@ -1883,14 +1894,15 @@ impl Interactive for Poly3dM {
     fn prompt(&self, _s: &Session) -> Prompt {
         match self.pts.len() {
             0 => Prompt::new("Specify start point of polyline", Accept::POINT),
-            1 | 2 => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Undo"]).base_opt(self.pts.last().copied()),
-            _ => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Close", "Undo"]).base_opt(self.pts.last().copied()),
+            1 | 2 => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Undo"]).base_opt(self.pts.last().map(|p| p.xy())),
+            _ => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Close", "Undo"]).base_opt(self.pts.last().map(|p| p.xy())),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
-                if self.pts.last().is_none_or(|l| !l.near(p, 1e-12)) && self.pts.len() < MAX_GEN {
+                let p = p.to3(s.point_z());
+                if self.pts.last().is_none_or(|l| (*l - p).len() > 1e-12) && self.pts.len() < MAX_GEN {
                     self.pts.push(p);
                     self.sync(s, false)?;
                 }
@@ -1910,7 +1922,7 @@ impl Interactive for Poly3dM {
         }
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        self.pts.last().map(|l| vec![line(*l, c)]).unwrap_or_default()
+        self.pts.last().map(|l| vec![line(l.xy(), c)]).unwrap_or_default()
     }
 }
 
@@ -1961,7 +1973,7 @@ impl HelixM {
         if !height.is_finite() || height.abs() > 1e12 {
             return Err(other("Requires a distance."));
         }
-        s.add_entity(helix_kind(c, rb, rt, height, self.turns(), !self.cw, self.start.unwrap_or(0.0)))?;
+        s.add_entity(helix_kind(c, rb, rt, height, self.turns(), !self.cw, self.start.unwrap_or_else(|| s.input_ucs().rotation())))?;
         Ok(Step::Done)
     }
 }
@@ -2085,11 +2097,11 @@ impl Interactive for HelixM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         match (self.center, self.rb, self.rt) {
             (Some(ct), None, _) => vec![circle(ct, ct.dist(c))],
             (Some(ct), Some(rb), None) => {
-                vec![helix_kind(ct, rb, ct.dist(c), 0.0, self.turns(), !self.cw, self.start.unwrap_or(0.0))]
+                vec![helix_kind(ct, rb, ct.dist(c), 0.0, self.turns(), !self.cw, self.start.unwrap_or_else(|| s.input_ucs().rotation()))]
             }
             _ => Vec::new(),
         }
@@ -2218,7 +2230,7 @@ fn center_ext(s: &Session) -> f64 {
     d.map(|d| d.header.f64("CENTEREXE", if metric { 3.5 } else { 0.12 })).unwrap_or(0.12)
 }
 
-fn center_mark(s: &mut Session, h: Handle) -> Result<Vec<String>> {
+fn center_mark(s: &mut Session, h: Handle, frame: crate::ucs::UcsFrame) -> Result<Vec<String>> {
     let e = curves::entity(s, h)?;
     let (c, r) = match &e.kind {
         EntityKind::Circle(c) => (c.center.xy(), c.radius),
@@ -2226,8 +2238,8 @@ fn center_mark(s: &mut Session, h: Handle) -> Result<Vec<String>> {
         _ => return Err(other("Select a circle or arc.")),
     };
     let ext = r + center_ext(s);
-    let h1 = add_center_line(s, c - Vec2::X * ext, c + Vec2::X * ext)?;
-    let h2 = add_center_line(s, c - Vec2::Y * ext, c + Vec2::Y * ext)?;
+    let h1 = add_center_line(s, c - frame.x.xy() * ext, c + frame.x.xy() * ext)?;
+    let h2 = add_center_line(s, c - frame.y.xy() * ext, c + frame.y.xy() * ext)?;
     Ok(vec![h1.hex(), h2.hex()])
 }
 
@@ -2259,7 +2271,7 @@ fn run_centermark(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut out = Vec::new();
     for h in hs {
-        out.extend(center_mark(s, h)?);
+        out.extend(center_mark(s, h, crate::ucs::UcsFrame::WORLD)?);
     }
     Ok(json!({ "handles": out }))
 }
@@ -2295,7 +2307,7 @@ impl Interactive for CenterM {
             Input::Point(p) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
                 if self.mark {
-                    center_mark(s, h)?;
+                    center_mark(s, h, s.input_ucs())?;
                     return Ok(Step::Continue);
                 }
                 match self.first {

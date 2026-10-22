@@ -131,6 +131,7 @@ fn dim(s: &Session, kind: DimKind, defpt: Vec2, p13: Vec2, p14: Vec2, p15: Vec2,
         text: text.into(),
         style: style(s),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
@@ -149,8 +150,26 @@ fn auto_rotation(p1: Vec2, p2: Vec2, at: Vec2) -> f64 {
     if outside_x && !outside_y { std::f64::consts::FRAC_PI_2 } else { 0.0 }
 }
 
-fn linear_kind(p1: Vec2, p2: Vec2, at: Vec2, rotation: Option<f64>, aligned: bool) -> DimKind {
-    if aligned { DimKind::Aligned } else { DimKind::Linear { rotation: rotation.unwrap_or_else(|| auto_rotation(p1, p2, at)) } }
+/// A linear or aligned dimension's kind; without a rotation, horizontal or vertical along axes turned
+/// `ucs` radians (the current UCS's at the command line; the world's for JSON).
+fn dim_ucs(s: &Session, kind: DimKind, defpt: Vec2, p13: Vec2, p14: Vec2, p15: Vec2, p16: Vec2, text: &str) -> EntityKind {
+    let mut entity = dim(s, kind, defpt, p13, p14, p15, p16, text);
+    if let EntityKind::Dimension(dimension) = &mut entity {
+        dimension.horizontal_direction = s.input_ucs().rotation();
+        if matches!(dimension.kind, DimKind::Ordinate { .. }) {
+            dimension.defpt = s.input_ucs().origin;
+        }
+    }
+    entity
+}
+
+fn linear_kind(p1: Vec2, p2: Vec2, at: Vec2, rotation: Option<f64>, aligned: bool, ucs: f64) -> DimKind {
+    if aligned {
+        return DimKind::Aligned;
+    }
+    let ucs = if ucs.is_finite() { ucs } else { 0.0 };
+    let auto = || auto_rotation(p1.rotate(-ucs), p2.rotate(-ucs), at.rotate(-ucs)) + ucs;
+    DimKind::Linear { rotation: rotation.unwrap_or_else(auto) }
 }
 
 /// Add a dimension. With DIMASSOC on, definition points that sit on object endpoints,
@@ -219,7 +238,7 @@ fn run_linear(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let at = point_req("dimlinear", p, "at")?;
     let rot = p.get("rotation").and_then(Value::as_f64).map(f64::to_radians);
-    let k = dim(s, linear_kind(a, b, at, rot, false), at, a, b, Vec2::ZERO, Vec2::ZERO, str_param(p, "text").unwrap_or(""));
+    let k = dim(s, linear_kind(a, b, at, rot, false, 0.0), at, a, b, Vec2::ZERO, Vec2::ZERO, str_param(p, "text").unwrap_or(""));
     Ok(json!({ "handle": add_dim(s, k)?.hex() }))
 }
 
@@ -455,6 +474,16 @@ fn mleader_kind(s: &Session, pts: &[Vec2], text: &str, landing: bool) -> Option<
         spline: false,
         block: None,
     }))
+}
+
+fn mleader_in_ucs(s: &Session, pts: &[Vec2], text: &str, landing: bool, content: &super::mleader_content::Content) -> Result<EntityKind> {
+    let frame = s.input_ucs();
+    let pts: Vec<_> = pts.iter().map(|p| frame.to_ucs(*p)).collect();
+    let kind = mleader_kind(s, &pts, text, landing).ok_or_else(|| EngineError::Other("bad leader".into()))?;
+    let mut kind = super::mleader_content::apply(s, kind, content)?;
+    let matrix = frame.placement();
+    kind.transform(&matrix);
+    Ok(kind)
 }
 
 fn run_mleader(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1054,7 +1083,16 @@ impl Interactive for LinearM {
             }
             (_, Input::Point(at)) => {
                 let (Some(&a), Some(&b)) = (self.pts.first(), self.pts.get(1)) else { return Ok(Step::Continue) };
-                let k = self.text.apply(dim(s, linear_kind(a, b, at, self.rotation, self.aligned), at, a, b, Vec2::ZERO, Vec2::ZERO, ""));
+                let k = self.text.apply(dim_ucs(
+                    s,
+                    linear_kind(a, b, at, self.rotation, self.aligned, s.input_ucs().rotation()),
+                    at,
+                    a,
+                    b,
+                    Vec2::ZERO,
+                    Vec2::ZERO,
+                    "",
+                ));
                 add_dim(s, k)?;
                 if let Some(EntityKind::Dimension(d)) = s.last_dim.and_then(|h| s.doc().ok()?.entity(h).map(|e| e.kind.clone())) {
                     let st = s.doc()?.dim_style(&d.style).cloned().unwrap_or_default();
@@ -1065,8 +1103,8 @@ impl Interactive for LinearM {
             }
             (_, Input::Keyword(k)) => {
                 match k.as_str() {
-                    "Horizontal" => self.rotation = Some(0.0),
-                    "Vertical" => self.rotation = Some(std::f64::consts::FRAC_PI_2),
+                    "Horizontal" => self.rotation = Some(s.input_ucs().rotation()),
+                    "Vertical" => self.rotation = Some(s.input_ucs().rotation() + std::f64::consts::FRAC_PI_2),
                     "Rotated" => self.rotating = true,
                     other => {
                         self.text.keyword(other);
@@ -1081,7 +1119,16 @@ impl Interactive for LinearM {
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         match self.pts.as_slice() {
             [a] => vec![super::helpers::line(*a, c)],
-            [a, b] => vec![self.text.apply(dim(s, linear_kind(*a, *b, c, self.rotation, self.aligned), c, *a, *b, Vec2::ZERO, Vec2::ZERO, ""))],
+            [a, b] => vec![self.text.apply(dim_ucs(
+                s,
+                linear_kind(*a, *b, c, self.rotation, self.aligned, s.input_ucs().rotation()),
+                c,
+                *a,
+                *b,
+                Vec2::ZERO,
+                Vec2::ZERO,
+                "",
+            ))],
             _ => Vec::new(),
         }
     }
@@ -1100,9 +1147,9 @@ impl RadialM {
     fn kind(&self, s: &Session, c: Vec2, r: f64, at: Vec2) -> EntityKind {
         let pt = c + (at - c).normalized() * r;
         let k = self.text.apply(if self.diameter {
-            dim(s, DimKind::Diameter, c + (c - pt), Vec2::ZERO, Vec2::ZERO, pt, Vec2::ZERO, "")
+            dim_ucs(s, DimKind::Diameter, c + (c - pt), Vec2::ZERO, Vec2::ZERO, pt, Vec2::ZERO, "")
         } else {
-            dim(s, DimKind::Radius, c, Vec2::ZERO, Vec2::ZERO, pt, Vec2::ZERO, "")
+            dim_ucs(s, DimKind::Radius, c, Vec2::ZERO, Vec2::ZERO, pt, Vec2::ZERO, "")
         });
         text_at(k, at)
     }
@@ -1235,7 +1282,7 @@ impl Interactive for AngularM {
                         ([h1, h2], None) => angular_from_lines(s, *h1, *h2, at),
                         _ => None,
                     };
-                    let k = k.unwrap_or_else(|| dim(s, DimKind::Angular3P, at, a, b, v, Vec2::ZERO, ""));
+                    let k = k.unwrap_or_else(|| dim_ucs(s, DimKind::Angular3P, at, a, b, v, Vec2::ZERO, ""));
                     add_dim(s, self.text.apply(k))?;
                     Ok(Step::Done)
                 }
@@ -1302,7 +1349,7 @@ impl Interactive for AngularM {
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         self.geometry()
-            .map(|(v, a, b)| vec![self.text.apply(dim(s, DimKind::Angular3P, self.located(v, c), a, b, v, Vec2::ZERO, ""))])
+            .map(|(v, a, b)| vec![self.text.apply(dim_ucs(s, DimKind::Angular3P, self.located(v, c), a, b, v, Vec2::ZERO, ""))])
             .unwrap_or_default()
     }
 }
@@ -1379,7 +1426,7 @@ impl Interactive for ArcLenM {
                 Ok(Step::Continue)
             }
             (Some(g), Input::Point(at)) => {
-                add_dim(s, self.text.apply(dim(s, DimKind::ArcLength, at, g.start_point(), g.end_point(), g.center, Vec2::ZERO, "")))?;
+                add_dim(s, self.text.apply(dim_ucs(s, DimKind::ArcLength, at, g.start_point(), g.end_point(), g.center, Vec2::ZERO, "")))?;
                 Ok(Step::Done)
             }
             (Some(_), Input::Keyword(k)) => {
@@ -1399,7 +1446,7 @@ impl Interactive for ArcLenM {
             return Vec::new();
         }
         self.arc
-            .map(|g| vec![self.text.apply(dim(s, DimKind::ArcLength, c, g.start_point(), g.end_point(), g.center, Vec2::ZERO, ""))])
+            .map(|g| vec![self.text.apply(dim_ucs(s, DimKind::ArcLength, c, g.start_point(), g.end_point(), g.center, Vec2::ZERO, ""))])
             .unwrap_or_default()
     }
 }
@@ -1414,8 +1461,9 @@ struct OrdinateM {
 
 impl OrdinateM {
     fn kind(&self, s: &Session, f: Vec2, l: Vec2) -> EntityKind {
-        let x = self.xtype.unwrap_or((l - f).y.abs() > (l - f).x.abs());
-        self.text.apply(dim(s, DimKind::Ordinate { x_type: x }, Vec2::ZERO, f, l, Vec2::ZERO, Vec2::ZERO, ""))
+        let delta = s.input_ucs().vec_to_ucs(l - f);
+        let x = self.xtype.unwrap_or(delta.y.abs() > delta.x.abs());
+        self.text.apply(dim_ucs(s, DimKind::Ordinate { x_type: x }, Vec2::ZERO, f, l, Vec2::ZERO, Vec2::ZERO, ""))
     }
 }
 
@@ -1613,13 +1661,13 @@ impl MLeaderM {
     }
     /// `p` with the first/second angle constraint applied to the segment it ends (counted from the
     /// first point placed).
-    fn constrained(&self, p: Vec2) -> Vec2 {
+    fn constrained(&self, s: &Session, p: Vec2) -> Vec2 {
         let (Some(&prev), Some(&inc)) = (self.pts.last(), self.angles.get(self.pts.len().wrapping_sub(1))) else { return p };
         let len = prev.dist(p);
         if inc <= 1e-9 || !inc.is_finite() || len <= 1e-12 {
             return p;
         }
-        Vec2::polar(prev, len, ((p - prev).angle() / inc).round() * inc)
+        prev + s.input_ucs().vec_to_wcs(Vec2::from_angle((s.input_ucs().vec_to_ucs(p - prev).angle() / inc).round() * inc) * len)
     }
     /// The text is asked now: right after the content location (Content first) or after the leader.
     fn wants_text(&self) -> bool {
@@ -1634,8 +1682,7 @@ impl MLeaderM {
             return Ok(Step::Cancel);
         }
         let text = self.text.clone().unwrap_or_default();
-        let k = mleader_kind(s, &self.leader(None), &text, self.landing).ok_or_else(|| EngineError::Other("bad leader".into()))?;
-        let k = super::mleader_content::apply(s, k, &self.content_spec())?;
+        let k = mleader_in_ucs(s, &self.leader(None), &text, self.landing, &self.content_spec())?;
         s.add_entity(k)?;
         Ok(Step::Done)
     }
@@ -1787,7 +1834,7 @@ impl Interactive for MLeaderM {
         }
         match i {
             Input::Point(p) => {
-                let p = self.constrained(p);
+                let p = self.constrained(s, p);
                 self.pts.push(p);
                 if self.pts.len() >= self.max_points || self.no_leader() {
                     self.leader_done = true;
@@ -1815,10 +1862,7 @@ impl Interactive for MLeaderM {
             return Vec::new();
         }
         let text = self.text.as_deref().unwrap_or("");
-        mleader_kind(s, &self.leader(Some(self.constrained(c))), text, self.landing)
-            .and_then(|k| super::mleader_content::apply(s, k, &self.content_spec()).ok())
-            .into_iter()
-            .collect()
+        mleader_in_ucs(s, &self.leader(Some(self.constrained(s, c))), text, self.landing, &self.content_spec()).ok().into_iter().collect()
     }
 }
 

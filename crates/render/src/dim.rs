@@ -496,7 +496,8 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
         let l = cadcraft_fonts::layout_mtext_with(text, &params(Vec2::ZERO, 0.0));
         (l.bounds.width(), l.bounds.height())
     };
-    let mut text_angle = 0.0;
+    let horizontal = if d.horizontal_direction.is_finite() { d.horizontal_direction } else { 0.0 };
+    let mut text_angle = horizontal;
     let mut text_mid = d.text_mid.xy();
     // Place an end marker: tick or arrowhead. Returns how far the dimension line stops short.
     let end = |g: &mut DimGeometry, kind: Arrowhead, tip: Vec2, dir: Vec2| -> f64 {
@@ -553,7 +554,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
                 let r = Vec2::from_angle(ang);
                 (tw * r.dot(u).abs() + tht * r.perp().dot(u).abs()) / 2.0
             };
-            let inside_ang = if st.text_inside_horizontal { 0.0 } else { along_ang };
+            let inside_ang = if st.text_inside_horizontal { horizontal } else { along_ang };
             // DIMTVP (with DIMTAD 0) lifts the text off the line once it is 0.7 text heights or more.
             let tvp = if st.text_above == 0 && st.text_vertical_pos.is_finite() { st.text_vertical_pos } else { 0.0 };
             let centred = st.text_above == 0 && tvp.abs() < 0.7;
@@ -580,7 +581,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
                 }
             };
             let text_outside = !text_in;
-            text_angle = if text_outside { if st.text_outside_horizontal { 0.0 } else { along_ang } } else { inside_ang };
+            text_angle = if text_outside { if st.text_outside_horizontal { horizontal } else { along_ang } } else { inside_ang };
             let half = extent(text_angle);
             // DIMSOXD: arrowheads that don't fit inside are left out.
             let outside_arrows = !arrows_inside && !st.suppress_outside_arrows;
@@ -728,7 +729,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             if tpos.dist(center) > r {
                 g.dim(vec![tip, tpos]);
             }
-            text_angle = if st.text_outside_horizontal { 0.0 } else { readable(u.angle()) };
+            text_angle = if st.text_outside_horizontal { horizontal } else { readable(u.angle()) };
             if !d.user_text_pos {
                 let x = Vec2::from_angle(text_angle);
                 let x = if x.dot(u) >= 0.0 { x } else { -x };
@@ -752,9 +753,9 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             // sits on the dimension line, which runs from the text out to the arrowhead (for a
             // diameter it spans the circle, broken around the text). DIMTIH turns it horizontal.
             let inside = d.user_text_pos && text_mid.dist(center) < r;
-            let horizontal = if inside { st.text_inside_horizontal } else { st.text_outside_horizontal };
+            let keep_horizontal = if inside { st.text_inside_horizontal } else { st.text_outside_horizontal };
             if inside {
-                let tr = Vec2::from_angle(if horizontal { 0.0 } else { readable(u.angle()) });
+                let tr = Vec2::from_angle(if keep_horizontal { horizontal } else { readable(u.angle()) });
                 let half = if tw > 0.0 { (tw * tr.dot(u).abs() + tht * tr.perp().dot(u).abs()) / 2.0 + gap } else { 0.0 };
                 let start = if radius { center } else { center - u * r };
                 let (t0, t1) = ((text_mid - start).dot(u) - half, (text_mid - start).dot(u) + half);
@@ -781,7 +782,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
                 // placement leaves between leader end and text.
                 let lead = if !d.user_text_pos {
                     tpos
-                } else if horizontal {
+                } else if keep_horizontal {
                     text_mid - Vec2::new(tw / 2.0 + gap, 0.0) * if u.x >= 0.0 { 1.0 } else { -1.0 }
                 } else {
                     text_mid - u * (tw / 2.0 + gap)
@@ -789,7 +790,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
                 g.dim(vec![tip, lead]);
             }
             end(&mut g, blk2, tip, u);
-            if horizontal {
+            if keep_horizontal {
                 text_angle = 0.0;
                 let sx = if u.x >= 0.0 { 1.0 } else { -1.0 };
                 if !d.user_text_pos {
@@ -859,7 +860,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             let (tw, tht) = measure(&g.mtext);
             let mid = arc.mid_point();
             let radial = (mid - vertex).normalized();
-            text_angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
+            text_angle = if st.text_inside_horizontal { horizontal } else { readable(radial.perp().angle()) };
             if !d.user_text_pos {
                 let tr = Vec2::from_angle(text_angle);
                 let off = gap + (tw * tr.dot(radial).abs() + tht * tr.perp().dot(radial).abs()) / 2.0;
@@ -870,17 +871,19 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             let feature = d.p13.xy();
             let leader_end = d.p14.xy();
             let origin = d.defpt.xy();
-            let meas = if x_type { (feature.x - origin.x).abs() } else { (feature.y - origin.y).abs() };
+            let axis = Vec2::from_angle(horizontal);
+            let delta = feature - origin;
+            let meas = if x_type { delta.dot(axis).abs() } else { delta.dot(axis.perp()).abs() };
             g.mtext = linear_text(meas, d, st, "");
             g.measurement = meas;
             let (tw, _) = measure(&g.mtext);
             g.dim(vec![feature, leader_end]);
             if x_type {
-                text_angle = std::f64::consts::FRAC_PI_2;
+                text_angle = horizontal + std::f64::consts::FRAC_PI_2;
             }
             if !d.user_text_pos {
                 let dirv = (leader_end - feature).normalized();
-                let dirv = if dirv == Vec2::ZERO { if x_type { Vec2::Y } else { Vec2::X } } else { dirv };
+                let dirv = if dirv == Vec2::ZERO { if x_type { axis.perp() } else { axis } } else { dirv };
                 text_mid = leader_end + dirv * (tw / 2.0 + gap);
             }
         }
@@ -902,7 +905,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             end(&mut g, blk2, arc.end_point(), (arc.end_point() - c).perp().normalized());
             let m = arc.mid_point();
             let radial = (m - c).normalized();
-            text_angle = if st.text_inside_horizontal { 0.0 } else { readable(radial.perp().angle()) };
+            text_angle = if st.text_inside_horizontal { horizontal } else { readable(radial.perp().angle()) };
             if !d.user_text_pos {
                 text_mid = m + radial * (gap + th / 2.0);
             }
@@ -1003,6 +1006,7 @@ mod tests {
             text: String::new(),
             style: "Standard".into(),
             measurement: 0.0,
+            horizontal_direction: 0.0,
             text_rotation: 0.0,
             user_text_pos: false,
             block: None,

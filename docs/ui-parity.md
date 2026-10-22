@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (stable dash anchors on filled-object highlights) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (UCS drafting, selection and 3D navigation) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -42,8 +42,8 @@ ignored; there are no context menus. Remaining: **≈ 110–170 Opus 5.5 hours**
 
 | Input | AutoCAD | CADCraft | Evidence |
 |---|---|---|---|
-| `x,y[,z]`, `@dx,dy`, `@d<a`, `d<a`, `#x,y`, bare `@` | yes | yes; `#` equals absolute because there is no UCS; Z parsed then discarded | `prompt.rs:147-180` |
-| `*x,y` (WCS override) | yes | yes (`*x,y`, `*@dx,dy`, `@*dx,dy`); the same as the plain forms because there is no UCS | `prompt.rs` |
+| `x,y[,z]`, `@dx,dy`, `@d<a`, `d<a`, `#x,y`, bare `@` | yes | UCS-aware absolute, relative and polar input; 3D-capable commands retain Z | `prompt.rs`, [UCS/navigation](ucs-navigation.md) |
+| `*x,y` (WCS override) | yes | `*x,y`, `*@dx,dy`, `@*dx,dy` explicitly use world coordinates | `prompt.rs` |
 | Direct distance entry | yes, honours ortho, polar and tracking paths | yes, ortho; polar only through the UI's snapped cursor | `lib.rs:782-793` |
 | Angle forms: `45d30'`, radians, grads, surveyor `N45dE` | yes | yes | `units.rs:141-197` |
 | Architectural/engineering distances `5'6-1/2"` | yes | yes | `units.rs:93-140` |
@@ -125,7 +125,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Feature | AutoCAD | CADCraft |
 |---|---|---|
-| Pick, implied window (left→right) and crossing (right→left) | yes | yes, coloured and dashed rectangles (`lib.rs:576-589`, `canvas.rs:823-836`), filled as SELECTIONAREA, WINDOWAREACOLOR, CROSSINGAREACOLOR and SELECTIONAREAOPACITY say (Visual Effect Settings) |
+| Pick, implied window (left→right) and crossing (right→left) | yes | yes, coloured and dashed rectangles (`lib.rs:576-589`, `canvas.rs:823-836`), filled as SELECTIONAREA, WINDOWAREACOLOR, CROSSINGAREACOLOR and SELECTIONAREAOPACITY say (Visual Effect Settings); TEXT/MTEXT selection boxes use rendered font geometry and automatic wrapping, also in the spatial index |
 | Keywords W, C, WP, CP, F, BOX, AU, SI, M, G (group), CL (class) | yes | yes except CLass: W, C, F, WP, CP (#226); BOX, AUto, SIngle, Multiple, Group, Add, Remove, Undo (#428); ALL, Last, Previous |
 | Press-drag selection windows (PICKDRAG) | yes | clicks or drag (2, default), or two clicks only (0); Options ▸ Selection ▸ Select using two clicks only, saved in the profile; drag-only mode (1) is unavailable |
 | Lasso | yes | **no** |
@@ -163,7 +163,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Layer Properties Manager (filters, states, VP overrides) | yes | yes |
 | Blocks palette, Content | yes | Blocks window (click to insert, #28) |
 | Status bar toggles | ~25 | most toggles; Annotation Visibility and Workspace do nothing |
-| ViewCube | interactive 3D | clickable for 2D (Top/Home → extents); dragging does nothing (#7) |
+| ViewCube | interactive 3D | 26 projected UCS-aligned face/edge/corner targets, hover arrows and quarter turns, cube orbit, WCS compass and hover Home; [UCS/navigation](ucs-navigation.md) |
 | Navigation bar, SteeringWheels | yes | no |
 | Workspaces | Drafting & Annotation, 3D Modeling | no |
 | Options / Preferences dialog | many tabs | **no** (issue #23) |
@@ -182,7 +182,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Trackpad two-finger pan, pinch zoom (macOS) | yes | yes (#58) |
 | Named views (VIEW) | yes | **no** (VIEW table not read or written) |
 | Tiled model-space viewports (VPORTS) | yes | not confirmed: VPORTS maps to paper-space MVIEW |
-| 3D orbit, ViewCube drag, SteeringWheels | yes | no (M11) |
+| 3D orbit, ViewCube drag, SteeringWheels | yes | 3DORBIT, cube dragging and temporary Shift+middle orbit; SteeringWheels unavailable; [UCS/navigation](ucs-navigation.md) |
 
 ## Keyboard and context menus (≈ 25%)
 
@@ -218,3 +218,4 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | 2026-10-11 | minor | Object snap tracking, Extension, Parallel, Apparent Intersection, additional polar angles (#379): tracking 30% → 70%, object snaps 40% → 45%; total 43% → 48% |
 | 2026-10-10 | minor | Dynamic input 15% → 45% (pointer boxes, #60); press-drag windows (#63); total 40% → 43% |
 | 2026-10-10 | major | First UI-parity audit: point entry, snaps, tracking, dynamic input, grips, selection, command line, chrome, navigation, keys |
+| 2026-10-19 | minor | UCS drafting/selection, guarded previews, projected navigation overlays and camera/file integration; readiness estimates not re-measured |

@@ -542,6 +542,7 @@ fn invisible_dimblock_entity_is_ignored_in_dimension_extents() {
                 text: String::new(),
                 style: "Standard".into(),
                 measurement: 1.0,
+                horizontal_direction: 0.0,
                 text_rotation: 0.0,
                 user_text_pos: false,
                 block: Some("*D1".into()),

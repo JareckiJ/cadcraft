@@ -41,6 +41,7 @@ fn dimensions_take_the_viewport_layer_colour() {
         text: String::new(),
         style: "Standard".into(),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,
@@ -62,6 +63,11 @@ fn dimensions_take_the_viewport_layer_colour() {
         layer_colors: vec![("a".into(), Color::Index(3))],
         clip: None,
         on: true,
+        view3d: None,
+        twist: 0.0,
+        ucs: None,
+        ucs_per_viewport: false,
+        extra: Vec::new(),
     };
     d.add(&Space::Paper("Layout1".into()), Common::default(), EntityKind::Viewport(vp)).unwrap();
     let l = build(&d, &Space::Paper("Layout1".into()), &Options::default());

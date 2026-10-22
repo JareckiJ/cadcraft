@@ -2,7 +2,7 @@
 
 **Stage: pre-alpha** · next: alpha, ~2 points (38% → 40% ready for real work) and ~125–190 Opus 5.5 hours away (the four failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (HATCHEDIT boundary add/remove progress) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (UCS drafting, oriented selection and 3D navigation; readiness estimates unchanged) · **Target:** Autodesk AutoCAD 2027
 
 CADCraft targets full parity with AutoCAD (2D drafting first, then annotation, layouts and
 plotting, DWG, parametrics and 3D), plus what AutoCAD doesn't have: agent control over MCP, a
@@ -148,3 +148,5 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 ## Shared UI workspace integration
 
 Tool Sets, Layers and Properties use shared docking with persisted layouts, keyboard focus and compact toolbar overflow. No milestone percentage change.
+
+UCS drafting, guarded placement previews, oriented selection and 3D navigation are described in [UCS/navigation](docs/ucs-navigation.md). The generated menu checklist was refreshed; readiness and effort estimates were not re-assessed.

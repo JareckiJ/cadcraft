@@ -190,11 +190,27 @@ pub struct AngleSettings {
     pub angbase: f64,
     /// ANGDIR 1: positive angles turn clockwise.
     pub clockwise: bool,
+    /// The current UCS's X axis, radians counterclockwise from world +X: directions are measured
+    /// in the UCS (ANGBASE from its X axis, the overrides and bearings too). Sizes of angles
+    /// ([`AngleSettings::amount`], [`AngleSettings::rotation`]) don't depend on it.
+    pub ucs: f64,
+    pub ucs_reversed: bool,
 }
 
 impl AngleSettings {
     pub fn from_header(h: &cadcraft_doc::Header) -> Self {
-        AngleSettings { aunits: h.i64("AUNITS", 0), angbase: h.f64("ANGBASE", 0.0), clockwise: h.i64("ANGDIR", 0) != 0 }
+        AngleSettings {
+            aunits: h.i64("AUNITS", 0),
+            angbase: h.f64("ANGBASE", 0.0),
+            clockwise: h.i64("ANGDIR", 0) != 0,
+            ucs: 0.0,
+            ucs_reversed: false,
+        }
+    }
+
+    /// The same settings with directions measured in the World UCS (`*` coordinates).
+    pub fn world(&self) -> Self {
+        AngleSettings { ucs: 0.0, ucs_reversed: false, ..*self }
     }
 
     /// A typed angle size in radians (included angles, sweeps, angles from an axis): a bare
@@ -213,32 +229,38 @@ impl AngleSettings {
     /// +X counterclockwise whatever ANGBASE and ANGDIR say: `<<a` in degrees, `<<<a` in AUNITS.
     pub fn direction(&self, s: &str) -> Option<f64> {
         let t = s.trim();
+        let ucs = |a: f64| Some(self.ucs + if self.ucs_reversed { -a } else { a }).filter(|v| v.is_finite());
         if let Some(r) = t.strip_prefix("<<<") {
-            return parse_units(r, self.aunits).map(|(a, _)| a);
+            return parse_units(r, self.aunits).and_then(|(a, _)| ucs(a));
         }
         if let Some(r) = t.strip_prefix("<<") {
-            return parse_units(r, 0).map(|(a, _)| a);
+            return parse_units(r, 0).and_then(|(a, _)| ucs(a));
         }
         let (a, absolute) = parse_units(t, self.aunits)?;
         if absolute {
-            return Some(a);
+            return ucs(a);
         }
-        let v = self.angbase + if self.clockwise { -a } else { a };
-        v.is_finite().then_some(v)
+        ucs(self.angbase + if self.clockwise { -a } else { a })
     }
 
     /// Direction `dir` (radians counterclockwise from +X) as the drawing shows directions, in
     /// radians: from ANGBASE in the ANGDIR sense, 0 up to a full turn. (A block turned 2.23°
     /// shows as 87.77 in a drawing measured clockwise from north, as in AutoCAD's Properties.)
     pub fn shown(&self, dir: f64) -> f64 {
-        let a = if self.clockwise { self.angbase - dir } else { dir - self.angbase };
+        let direction = dir - self.ucs;
+        let direction = if self.ucs_reversed { -direction } else { direction };
+        if self.aunits == 4 {
+            return direction.rem_euclid(std::f64::consts::TAU);
+        }
+        let a = if self.clockwise { self.angbase - direction } else { direction - self.angbase };
         a.rem_euclid(std::f64::consts::TAU)
     }
 
     /// The direction (radians counterclockwise from +X) the drawing shows as `v` (radians): the
     /// inverse of [`AngleSettings::shown`].
     pub fn unshown(&self, v: f64) -> f64 {
-        (self.angbase + if self.clockwise { -v } else { v }).rem_euclid(std::f64::consts::TAU)
+        let local = if self.aunits == 4 { v } else { self.angbase + if self.clockwise { -v } else { v } };
+        (self.ucs + if self.ucs_reversed { -local } else { local }).rem_euclid(std::f64::consts::TAU)
     }
 }
 
@@ -317,9 +339,12 @@ fn parse_dms(t: &str) -> Option<f64> {
 }
 
 impl crate::Session {
-    /// How typed angles are read in the current drawing (the defaults without one).
+    /// How typed angles are read in the current drawing (the defaults without one): directions
+    /// are measured in the current UCS.
     pub fn angle_settings(&self) -> AngleSettings {
-        self.doc().map(|d| AngleSettings::from_header(&d.header)).unwrap_or_default()
+        let a = self.doc().map(|d| AngleSettings::from_header(&d.header)).unwrap_or_default();
+        let ucs = self.input_ucs().rotation();
+        AngleSettings { ucs: if ucs.is_finite() { ucs } else { 0.0 }, ucs_reversed: self.input_ucs().reversed(), ..a }
     }
 }
 
@@ -331,7 +356,7 @@ mod tests {
 
     #[test]
     fn directions_show_from_angbase_in_the_angdir_sense() {
-        let north_clockwise = AngleSettings { aunits: 0, angbase: 90f64.to_radians(), clockwise: true };
+        let north_clockwise = AngleSettings { aunits: 0, angbase: 90f64.to_radians(), clockwise: true, ..Default::default() };
         // AutoCAD shows a block turned 2.22729505553431° as 87.77 in such a drawing.
         let shown = north_clockwise.shown(2.22729505553431f64.to_radians()).to_degrees();
         assert!((shown - 87.77270494446569).abs() < 1e-9, "{shown}");
@@ -341,7 +366,7 @@ mod tests {
         let plain = AngleSettings::default();
         assert!((plain.shown(0.5) - 0.5).abs() < 1e-12 && (plain.unshown(0.5) - 0.5).abs() < 1e-12);
         // Counterclockwise from a base of 30°: 45° shows as 15.
-        let based = AngleSettings { aunits: 0, angbase: 30f64.to_radians(), clockwise: false };
+        let based = AngleSettings { aunits: 0, angbase: 30f64.to_radians(), clockwise: false, ..Default::default() };
         assert!((based.shown(45f64.to_radians()).to_degrees() - 15.0).abs() < 1e-9);
     }
 

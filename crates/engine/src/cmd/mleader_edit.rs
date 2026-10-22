@@ -581,17 +581,21 @@ enum Layout {
 }
 
 /// Size and centre of a block reference's extents (the insertion point when it has none).
-fn block_box(s: &Session, ins: &Insert) -> Result<(Vec2, Vec2)> {
+fn block_box(s: &Session, ins: &Insert, frame: crate::ucs::UcsFrame) -> Result<(Vec2, Vec2)> {
     let d = s.doc()?;
-    let probe = Entity { handle: Handle(0), common: Default::default(), kind: EntityKind::Insert(ins.clone()) };
+    let mut probe = Entity { handle: Handle(0), common: Default::default(), kind: EntityKind::Insert(ins.clone()) };
+    let matrix = frame.placement().inverse().ok_or_else(|| bad("mleadercollect", "invalid working frame"))?;
+    probe.kind.transform(&matrix);
     let b = cadcraft_doc::entity_bounds(d, &probe, 0);
     if b.is_empty() || !b.center().is_finite() {
-        return Ok((Vec2::new(0.0, 0.0), ins.insert.xy()));
+        return Ok((Vec2::new(0.0, 0.0), frame.to_ucs(ins.insert.xy())));
     }
     Ok((b.max - b.min, b.center()))
 }
 
-fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Option<f64>) -> Result<Value> {
+fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Option<f64>, frame: crate::ucs::UcsFrame) -> Result<Value> {
+    let world_at = at;
+    let at = frame.to_ucs(at);
     let mut items: Vec<(Handle, MLeader)> = Vec::new();
     for h in hs {
         if items.iter().any(|(x, _)| x == h) || locked(s, *h) {
@@ -616,7 +620,7 @@ fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Op
     let mut placed: Vec<Insert> = Vec::new();
     for (_, m) in &items {
         let Some(b) = &m.block else { continue };
-        let (size, centre) = block_box(s, b)?;
+        let (size, centre) = block_box(s, b, frame)?;
         match layout {
             Layout::Horizontal => {}
             Layout::Vertical => {
@@ -636,7 +640,8 @@ fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Op
         }
         let target = Vec2::new(at.x + x + size.x / 2.0, at.y + y - size.y / 2.0);
         let mut ins = b.clone();
-        ins.insert = Vec3::new(b.insert.x + target.x - centre.x, b.insert.y + target.y - centre.y, b.insert.z);
+        let delta = frame.vec_to_wcs(target - centre);
+        ins.insert = Vec3::new(b.insert.x + delta.x, b.insert.y + delta.y, b.insert.z);
         placed.push(ins);
         x += size.x + gap;
         row_h = row_h.max(size.y);
@@ -644,7 +649,7 @@ fn collect(s: &mut Session, hs: &[Handle], at: Vec2, layout: Layout, spacing: Op
     let (first_h, first) = items[0].clone();
     let mut merged = first;
     merged.leaders = items.iter().flat_map(|(_, m)| m.leaders.iter().cloned()).collect();
-    merged.landing = Vec3::new(at.x, at.y, merged.landing.z);
+    merged.landing = Vec3::new(world_at.x, world_at.y, merged.landing.z);
     merged.dogleg = 0.0;
     merged.text = None;
     let mut rest = placed.split_off(1.min(placed.len()));
@@ -687,7 +692,7 @@ fn run_collect(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Some(_) => return Err(bad("mleadercollect", "`mode` must be horizontal, vertical or wrap")),
     };
-    collect(s, &hs, at, layout, spacing)
+    collect(s, &hs, at, layout, spacing, crate::ucs::UcsFrame::WORLD)
 }
 
 /// MLEADERCOLLECT at the command line: select multileaders, then the location (Vertical /
@@ -765,7 +770,7 @@ impl Interactive for CollectM {
                 Ok(Step::Continue)
             }
             Input::Point(at) => {
-                let r = collect(s, &self.picked, at, self.layout, None)?;
+                let r = collect(s, &self.picked, at, self.layout, None, s.input_ucs())?;
                 s.set_selection(Vec::new());
                 s.echo(format!("{} multileader(s) collected.", r.get("collected").and_then(Value::as_u64).unwrap_or(0)));
                 Ok(Step::Done)

@@ -504,6 +504,7 @@ impl Interactive for LineM {
 struct PlineM {
     verts: Vec<PolyVertex>,
     arc_mode: bool,
+    initial_tangent: Vec2,
     /// Total width at the start and end of the next segment (Width / Halfwidth answers).
     start_w: f64,
     end_w: f64,
@@ -559,7 +560,8 @@ impl PlineM {
     /// The direction the polyline runs in at its last vertex (+X before the second vertex).
     fn tangent(&self) -> Vec2 {
         let n = self.verts.len();
-        let Some(last) = self.verts.last() else { return Vec2::X };
+        let initial = if self.initial_tangent == Vec2::ZERO { Vec2::X } else { self.initial_tangent };
+        let Some(last) = self.verts.last() else { return initial };
         if n >= 2 {
             let prev = self.verts.get(n - 2).copied().unwrap_or_default();
             match bulge_to_arc(prev.p, last.p, prev.bulge) {
@@ -570,7 +572,7 @@ impl PlineM {
                 None => (last.p - prev.p).normalized(),
             }
         } else {
-            Vec2::X
+            initial
         }
     }
     /// Bulge for a tangent-continuing arc from the last vertex to `p`.
@@ -587,6 +589,10 @@ impl PlineM {
 impl Interactive for PlineM {
     fn name(&self) -> &'static str {
         "PLINE"
+    }
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.initial_tangent = s.input_ucs().x.xy();
+        Ok(Step::Continue)
     }
     fn prompt(&self, s: &Session) -> Prompt {
         if self.asking_width > 0 {
@@ -952,6 +958,7 @@ impl Interactive for PolygonM {
                     return Err(crate::EngineError::Other("Value must be positive and nonzero.".into()));
                 }
                 let rp = polygon_typed_radius_point(c, n, r, ins);
+                let rp = c + s.input_ucs().vec_to_wcs(rp - c);
                 s.add_entity(lwpoly(polygon_vertices(c, n, rp, ins), true))?;
                 return Ok(Step::Done);
             }
@@ -1118,7 +1125,7 @@ impl Interactive for EllipseM {
             Input::Keyword(k) if k == "Rotation" && self.pts.len() == 2 => self.rotation = true,
             Input::Point(p) if self.pts.len() < 2 => self.pts.push(p),
             Input::Point(p) if self.rotation => {
-                if let Some(e) = self.axis().and_then(|(c, _)| self.rotated((p - c).angle())) {
+                if let Some(e) = self.axis().and_then(|(c, _)| self.rotated(s.ucs_angle((p - c).angle()))) {
                     return self.place(s, e);
                 }
             }
@@ -1155,7 +1162,7 @@ impl Interactive for EllipseM {
         if self.pts.len() < 2 {
             return self.pts.first().map(|a| vec![line(*a, c)]).unwrap_or_default();
         }
-        let e = if self.rotation { self.axis().and_then(|(ctr, _)| self.rotated((c - ctr).angle())) } else { self.build(c) };
+        let e = if self.rotation { self.axis().and_then(|(ctr, _)| self.rotated(s.ucs_angle((c - ctr).angle()))) } else { self.build(c) };
         e.map(|e| {
             vec![EntityKind::Ellipse(cadcraft_doc::Ellipse {
                 center: v3(e.center),
@@ -1190,7 +1197,7 @@ impl Interactive for PointM {
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
-                s.add_entity(EntityKind::Point(Point { p: v3(p), angle: 0.0 }))?;
+                s.add_entity(EntityKind::Point(Point { p: p.to3(s.point_z()), angle: s.input_ucs().rotation() }))?;
                 Ok(if self.multiple { Step::Continue } else { Step::Done })
             }
             Input::Enter => Ok(Step::Done),
@@ -1507,7 +1514,7 @@ impl Interactive for TextM {
                 self.height = Some(h);
                 s.doc_mut()?.header.set_f64("TEXTSIZE", h);
             }
-            (Some(_), Some(_), None, Input::Enter) => self.rotation = Some(0.0),
+            (Some(_), Some(_), None, Input::Enter) => self.rotation = Some(s.input_ucs().rotation()),
             (Some(a), Some(_), None, Input::Point(p)) => self.rotation = Some(a.angle_to(p)),
             (Some(_), Some(_), None, Input::Text(t)) => {
                 self.rotation = Some(s.angle_settings().direction(&t).ok_or_else(|| crate::EngineError::Other("Requires an angle.".into()))?)

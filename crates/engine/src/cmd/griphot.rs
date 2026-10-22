@@ -149,13 +149,14 @@ impl GripEdit {
     }
 
     /// The transform of the current mode for the point `to` (not STRETCH).
-    fn matrix(&self, to: Vec2) -> Option<Mat3> {
+    fn matrix(&self, s: &Session, to: Vec2) -> Option<Mat3> {
         match self.ask {
             Ask::RefNew(r) if self.mode == GripMode::Rotate => Some(Mat3::rotate_about(self.base, self.base.angle_to(to) - r)),
             Ask::RefNew(r) if self.mode == GripMode::Scale => {
                 let f = self.base.dist(to) / r;
                 (f.is_finite() && f > 1e-12).then(|| Mat3::scale_about(self.base, f))
             }
+            _ if self.mode == GripMode::Rotate => Some(Mat3::rotate_about(self.base, self.base.angle_to(to) - s.input_ucs().rotation())),
             _ => mode_matrix(self.mode, self.base, to),
         }
     }
@@ -272,11 +273,11 @@ impl GripEdit {
                 Ok(Step::Continue)
             }
             Input::Point(p) => {
-                let m = self.matrix(p);
+                let m = self.matrix(s, p);
                 self.edit(s, p, m)
             }
             Input::Deferred(d) => {
-                let m = self.matrix(d.at);
+                let m = self.matrix(s, d.at);
                 self.edit(s, d.at, m)
             }
             Input::Text(t) => match self.mode {
@@ -311,10 +312,10 @@ impl GripEdit {
         match (self.ask, i) {
             (Ask::RefFirst, Input::Point(p)) => self.ask = Ask::RefSecond(p),
             (Ask::RefFirst, Input::Text(t)) => self.ask = Ask::RefNew(value(&t)?),
-            (Ask::RefFirst, Input::Enter) => self.ask = Ask::RefNew(if rotate { 0.0 } else { 1.0 }),
+            (Ask::RefFirst, Input::Enter) => self.ask = Ask::RefNew(if rotate { s.input_ucs().rotation() } else { 1.0 }),
             (Ask::RefSecond(a), Input::Point(p)) => self.ask = Ask::RefNew(between(a, p)?),
             (Ask::RefNew(_), Input::Point(p)) => {
-                let m = self.matrix(p).ok_or_else(|| other("Requires a positive length."))?;
+                let m = self.matrix(s, p).ok_or_else(|| other("Requires a positive length."))?;
                 return self.edit(s, p, Some(m));
             }
             (Ask::RefNew(r), Input::Text(t)) => {
@@ -447,7 +448,7 @@ impl Interactive for GripEdit {
         let mut out: Vec<EntityKind> = if self.mode == GripMode::Stretch {
             super::gripcmds::stretched(s, &self.hot, &self.targets, c - base).into_iter().take(500).map(|(_, k)| k).collect()
         } else {
-            match self.matrix(c) {
+            match self.matrix(s, c) {
                 Some(m) => self
                     .targets
                     .iter()

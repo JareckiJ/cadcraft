@@ -21,6 +21,7 @@ fn linear(a: [f64; 2], b: [f64; 2], at: [f64; 2]) -> Dimension {
         text: String::new(),
         style: "Standard".into(),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,

@@ -225,6 +225,7 @@ impl Default for Table {
     fn default() -> Self {
         Table {
             insert: cadcraft_geom::Vec3::new(0.0, 0.0, 0.0),
+            rotation: 0.0,
             col_widths: Vec::new(),
             row_heights: Vec::new(),
             cells: Vec::new(),

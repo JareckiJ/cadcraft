@@ -1,6 +1,6 @@
 # Geometry parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** trivial (JOIN Close on a single arc or elliptical arc) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (planar UCS frames and orthographic 3D projection) · **Target:** Autodesk AutoCAD 2027
 
 CAD users trust numbers: a trimmed endpoint, an offset, an intersection or an area is either right
 to the last displayed digit or the tool is unusable for production drawings. This document
@@ -12,7 +12,7 @@ in [ui-parity.md](ui-parity.md); dimension and hatch behaviour in [gaps.md](gaps
 from lines, arcs and circles is exact. Ellipses and splines are handled by tessellating them, so
 intersections, offsets, trims and snaps on them are approximations; polyline offsets don't
 recompute arc bulges or clean up loops; tolerances are absolute, so very large or very small
-drawings behave differently from mid-sized ones. 3D geometry doesn't exist. Remaining:
+drawings behave differently from mid-sized ones. 3D faces/polyface meshes and orthographic projection work; solid/surface modeling and arbitrary tilted-plane drafting remain unavailable. Remaining:
 **≈ 90–140 Opus 5.5 hours** for 2D precision and the solver, plus the 3D kernel (M11, see
 [target-app-parity.md](target-app-parity.md)).
 
@@ -165,3 +165,4 @@ Total ≈ 90–140 h; items 1–6 parallelise across two or three agents.
 | 2026-10-11 | minor | FILLET with elliptical arcs and splines; trim/extend section 55% → 65% (#466) |
 | 2026-10-11 | minor | FILLET/CHAMFER with polyline segments (same polyline, end segment with a line); section 65% → 70% (#466) |
 | 2026-10-11 | minor | Constraint solver (#546): DOF report, G2 Smooth, ellipse/spline/block geometry, CONSTRAINTINFER |
+| 2026-10-19 | minor | Planar UCS creation axes, oriented selection, saved constraint axes and 3D projection; geometry estimates not re-measured |

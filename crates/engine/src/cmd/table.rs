@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("table", "Table...", run_table)
             .menu(&["Draw", "Table..."])
             .alias(&["tb"])
-            .params("{at: [x,y], rows (data rows), cols, rowHeight?, colWidth?, cells?: [[text]], title?: text, header?: [text]}")
+            .params("{at: [x,y], rows (data rows), cols, rowHeight?, colWidth?, cells?: [[text]], title?: text, header?: [text], rotation? (world degrees)}")
             .interactive(|s| Ok(Box::new(TableM::new(s)))),
         CommandSpec::new("table.set", "Set Table Cell", run_set)
             .params("{handle, row, col, text? (text starting with = is a formula), formula?: \"=Sum(A2:A5)\"}"),
@@ -70,6 +70,7 @@ pub fn make_table(
     let data_h = row_h.unwrap_or(th * 5.0 / 3.0 + 2.0 * st.margin);
     let mut t = Table {
         insert: v3(at),
+        rotation: 0.0,
         col_widths: vec![col_w.unwrap_or(2.5); cols],
         row_heights: Vec::new(),
         cells: Vec::new(),
@@ -136,7 +137,11 @@ fn run_table(s: &mut Session, p: &Value) -> Result<Value> {
     let header: Option<Vec<String>> =
         p.get("header").and_then(Value::as_array).map(|a| a.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect());
     let st = style_of(s);
-    let t = make_table(&st, at, rows, cols, row_height, col_width, str_param(p, "title"), header, &cells);
+    let mut t = make_table(&st, at, rows, cols, row_height, col_width, str_param(p, "title"), header, &cells);
+    t.rotation = match p.get("rotation") {
+        None => 0.0,
+        Some(_) => f64_req("table", p, "rotation")?.to_radians(),
+    };
     let h = s.add_entity(EntityKind::Table(t))?;
     Ok(json!({ "handle": h.hex() }))
 }
@@ -439,12 +444,14 @@ impl TableM {
     fn new(s: &Session) -> Self {
         TableM { cols: None, rows: None, style: style_of(s) }
     }
-    fn table(&self, at: Vec2) -> Table {
+    fn table(&self, s: &Session, at: Vec2) -> Table {
         let cols = self.cols.unwrap_or(5);
         let rows = self.rows.unwrap_or(1);
         let title = self.style.title.then_some("");
         let header = self.style.header.then(|| vec![String::new(); cols]);
-        make_table(&self.style, at, rows, cols, None, None, title, header, &[])
+        let mut table = make_table(&self.style, at, rows, cols, None, None, title, header, &[]);
+        table.rotation = s.input_ucs().rotation();
+        table
     }
 }
 
@@ -492,7 +499,7 @@ impl Interactive for TableM {
                 Ok(Step::Continue)
             }
             (Some(_), Some(_), Input::Point(p)) => {
-                let t = self.table(*p);
+                let t = self.table(s, *p);
                 s.add_entity(EntityKind::Table(t))?;
                 Ok(Step::Done)
             }
@@ -500,7 +507,7 @@ impl Interactive for TableM {
             _ => Ok(Step::Continue),
         }
     }
-    fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        if self.cols.is_some() && self.rows.is_some() { vec![EntityKind::Table(self.table(c))] } else { Vec::new() }
+    fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
+        if self.cols.is_some() && self.rows.is_some() { vec![EntityKind::Table(self.table(s, c))] } else { Vec::new() }
     }
 }

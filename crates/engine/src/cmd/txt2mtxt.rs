@@ -44,7 +44,11 @@ impl Default for Txt2MtxtOptions {
 /// Converts the TEXT (and, combining, MTEXT) objects among `hs`; objects on locked layers are
 /// left alone. Returns the MTEXT objects made and how many texts were on a locked layer.
 fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<Handle>, usize)> {
+    if hs.len() > super::curves::MAX_GEN {
+        return Err(bad("txt2mtxt", "too many selected texts"));
+    }
     let d = s.doc()?;
+    let mut text_bytes = 0usize;
     let mut locked = 0;
     let mut items: Vec<(Handle, EntityKind, Bounds2)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -62,7 +66,21 @@ fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<H
             locked += 1;
             continue;
         }
-        items.push((*h, e.kind.clone(), entity_bounds(d, e, 0)));
+        let bytes = match &e.kind {
+            EntityKind::Text(t) => t.value.len(),
+            EntityKind::MText(m) => m.contents.len(),
+            _ => 0,
+        };
+        text_bytes = text_bytes.saturating_add(bytes);
+        if text_bytes > 1024 * 1024 {
+            return Err(bad("txt2mtxt", "selected text exceeds the 1 MiB conversion limit"));
+        }
+        let bounds = match &e.kind {
+            EntityKind::Text(t) => cadcraft_render::place_text_entity(d, t, &t.value).1,
+            EntityKind::MText(m) => cadcraft_render::layout_mtext_entity(d, m).bounds,
+            _ => entity_bounds(d, e, 0),
+        };
+        items.push((*h, e.kind.clone(), bounds));
     }
     if !o.combine {
         let mut made = Vec::new();
@@ -74,10 +92,16 @@ fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<H
         }
         return Ok((made, locked));
     }
+    let basis = items.first().map_or(0.0, |(_, kind, _)| match kind {
+        EntityKind::Text(text) => text.rotation,
+        EntityKind::MText(text) => text.rotation,
+        _ => 0.0,
+    });
+    let basis = if basis.is_finite() { basis } else { 0.0 };
     if o.top_down {
         // Highest first; a line shared by several texts reads left to right.
         items.sort_by(|a, b| {
-            let (pa, pb) = (insertion(&a.1), insertion(&b.1));
+            let (pa, pb) = (insertion(&a.1).rotate(-basis), insertion(&b.1).rotate(-basis));
             pb.y.total_cmp(&pa.y).then(pa.x.total_cmp(&pb.x))
         });
     }
@@ -91,8 +115,18 @@ fn convert(s: &mut Session, hs: &[Handle], o: &Txt2MtxtOptions) -> Result<(Vec<H
         EntityKind::MText(m) => (m.height, m.style.clone(), m.rotation),
         _ => return Ok((Vec::new(), locked)),
     };
-    let ext = items.iter().fold(Bounds2::EMPTY, |b, (.., x)| b.union(x));
-    let corner = if ext.is_empty() { insertion(k0) } else { cadcraft_geom::Vec2::new(ext.min.x, ext.max.y) };
+    let local = cadcraft_geom::Mat3::rotate(-basis);
+    let ext = items.iter().fold(Bounds2::EMPTY, |bounds, (_, kind, _)| {
+        let mut kind = kind.clone();
+        kind.transform(&local);
+        let part = match &kind {
+            EntityKind::Text(text) => cadcraft_render::place_text_entity(d, text, &text.value).1,
+            EntityKind::MText(text) => cadcraft_render::layout_mtext_entity(d, text).bounds,
+            _ => Bounds2::EMPTY,
+        };
+        bounds.union(&part)
+    });
+    let corner = if ext.is_empty() { insertion(k0) } else { cadcraft_geom::Vec2::new(ext.min.x, ext.max.y).rotate(basis) };
     let sep = if o.wrap { " " } else { "\\P" };
     let contents = items.iter().map(|(_, k, _)| contents(k, height)).collect::<Vec<_>>().join(sep);
     let width = if o.wrap { items.iter().map(|(_, k, _)| line_width(k)).fold(0.0, f64::max) } else { 0.0 };

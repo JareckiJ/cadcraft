@@ -491,7 +491,12 @@ pub fn validate(d: &Drawing, c: &Constraint) -> Result<(), String> {
 
 /// The current measured value of a dimensional constraint over `refs` (degrees for angular).
 pub fn measure(d: &Drawing, kind: ConstraintKind, refs: &[GeomRef]) -> Result<f64, String> {
-    let c = Constraint { id: 0, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() };
+    measure_in(d, kind, refs, 0.0)
+}
+
+/// Measure horizontal/vertical relations in a saved drawing-plane orientation.
+pub fn measure_in(d: &Drawing, kind: ConstraintKind, refs: &[GeomRef], axis_angle: f64) -> Result<f64, String> {
+    let c = Constraint { id: 0, axis_angle, kind, refs: refs.to_vec(), name: String::new(), expr: String::new() };
     let handles: Vec<Handle> = refs.iter().map(|r| r.handle).collect();
     let mut model = Model::build(d, &handles);
     let b = interpret(&c, &mut model, 1.0)?;

@@ -92,6 +92,7 @@ fn s25(kind: DimKind, p13: Vec3, p14: Vec3, defpt: Vec3) -> Drawing {
         text: String::new(),
         style: "S25".into(),
         measurement: 0.0,
+        horizontal_direction: 0.0,
         text_rotation: 0.0,
         user_text_pos: false,
         block: None,

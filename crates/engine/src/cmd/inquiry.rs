@@ -79,12 +79,17 @@ fn angle_from_xy(d: Vec3) -> f64 {
 }
 
 fn dist_text(s: &Session, a: Vec3, b: Vec3) -> String {
-    let d = b - a;
+    let frame = s.input_ucs();
+    let delta = b - a;
+    let d = Vec3::new(delta.dot(frame.x), delta.dot(frame.y), delta.dot(frame.z()));
+    let inclination = angle_from_xy(d);
+    // Inclination is signed; the ordinary direction formatter wraps negative angles.
+    let inclination_text = if inclination < 0.0 { format!("-{}", fmt_a(s, -inclination)) } else { fmt_a(s, inclination) };
     format!(
         "Distance = {},  Angle in XY Plane = {},  Angle from XY Plane = {}\nDelta X = {},  Delta Y = {},   Delta Z = {}",
         fmt_d(s, (b - a).len()),
         fmt_a(s, d.xy().angle()),
-        fmt_a(s, angle_from_xy(d)),
+        inclination_text,
         fmt_d(s, d.x),
         fmt_d(s, d.y),
         fmt_d(s, d.z)
@@ -95,7 +100,10 @@ fn dist_text(s: &Session, a: Vec3, b: Vec3) -> String {
 /// there ([`z_at`]).
 fn point3_req(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec3> {
     let q = point_req(cmd, p, key)?;
-    let z = p.get(key).and_then(|v| v.get(2)).and_then(Value::as_f64).filter(|z| z.is_finite());
+    let z = match p.get(key).and_then(|v| v.get(2)) {
+        Some(value) => Some(value.as_f64().filter(|z| z.is_finite()).ok_or_else(|| bad(cmd, "point Z must be finite"))?),
+        None => None,
+    };
     Ok(Vec3::new(q.x, q.y, z.unwrap_or_else(|| z_at(s, q))))
 }
 
@@ -103,6 +111,9 @@ fn run_dist(s: &mut Session, p: &Value) -> Result<Value> {
     let a = point3_req(s, "dist", p, "p1")?;
     let b = point3_req(s, "dist", p, "p2")?;
     let d = b - a;
+    if !d.is_finite() || !d.len().is_finite() {
+        return Err(bad("dist", "distance exceeds the finite numeric range"));
+    }
     Ok(json!({
         "distance": d.len(),
         "angle": d.xy().angle().to_degrees(),
@@ -110,18 +121,23 @@ fn run_dist(s: &mut Session, p: &Value) -> Result<Value> {
         "dx": d.x,
         "dy": d.y,
         "dz": d.z,
+        "ucs": {"delta": [d.dot(s.input_ucs().x), d.dot(s.input_ucs().y), d.dot(s.input_ucs().z())]},
         "message": dist_text(s, a, b),
     }))
 }
 
 fn id_text(s: &Session, a: Vec3) -> String {
+    let a = s.input_ucs().to_ucs3(a);
     format!("X = {}     Y = {}     Z = {}", fmt_d(s, a.x), fmt_d(s, a.y), fmt_d(s, a.z))
 }
 
 fn run_id(s: &mut Session, p: &Value) -> Result<Value> {
     let a = point3_req(s, "id", p, "at")?;
     s.last_point = a.xy();
-    Ok(json!({ "x": a.x, "y": a.y, "z": a.z, "message": id_text(s, a) }))
+    s.last_point_z = (a.xy(), a.z);
+    Ok(
+        json!({ "x": a.x, "y": a.y, "z": a.z, "ucs": [s.input_ucs().to_ucs3(a).x, s.input_ucs().to_ucs3(a).y, s.input_ucs().to_ucs3(a).z], "message": id_text(s, a) }),
+    )
 }
 
 /// The Z of what is drawn at `p`: the object a pick finds there, at that point, or the current
@@ -707,7 +723,7 @@ impl Interactive for IdM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Input::Point(p) = i {
-            let m = id_text(s, Vec3::new(p.x, p.y, z_at(s, p)));
+            let m = id_text(s, Vec3::new(p.x, p.y, input_z(s, p)));
             s.echo(m);
         }
         Ok(Step::Done)
@@ -895,4 +911,9 @@ impl Interactive for AreaM {
         v.push(cadcraft_geom::PolyVertex::new(c));
         vec![super::helpers::lwpoly(v, true)]
     }
+}
+
+/// Explicit point input takes precedence over the elevation below the cursor.
+fn input_z(s: &Session, p: Vec2) -> f64 {
+    if s.point_z_explicit { s.point_z() } else { z_at(s, p) }
 }

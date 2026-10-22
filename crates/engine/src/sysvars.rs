@@ -161,6 +161,21 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             json!([v.center.x, v.center.y, 0.0])
         }
         "VIEWSIZE" => json!(s.state().ok()?.view().height),
+        // The current UCS of the space commands act on (paper space has its own per layout),
+        // set by the UCS command.
+        "UCSNAME" | "UCSORG" | "UCSXDIR" | "UCSYDIR" | "WORLDUCS" => {
+            let (u, name) = s.ucs_named();
+            let p = |v: cadcraft_geom::Vec3| json!([v.x, v.y, v.z]);
+            match n.as_str() {
+                "UCSNAME" => json!(name),
+                "UCSORG" => p(u.origin),
+                "UCSXDIR" => p(u.x),
+                "UCSYDIR" => p(u.y),
+                _ => json!(i32::from(u.is_world())),
+            }
+        }
+        // The view twist (DVIEW TWist), in degrees counterclockwise.
+        "VIEWTWIST" => json!(s.state().ok()?.view().twist.to_degrees()),
         "EXTMIN" | "EXTMAX" => {
             let d = s.doc().ok()?;
             let e = d.extents(&s.space());
@@ -205,8 +220,26 @@ fn as_pt(v: &Value) -> Option<cadcraft_geom::Vec2> {
 }
 
 /// Variables `get` reports from session or drawing state that `set` can't change.
-const READ_ONLY: &[&str] =
-    &["CMDNAMES", "DWGNAME", "DBMOD", "BLOCKEDITOR", "CTAB", "LASTPOINT", "VIEWCTR", "VIEWSIZE", "EXTMIN", "EXTMAX", "UNDOCTL", "UNDOMARKS"];
+const READ_ONLY: &[&str] = &[
+    "CMDNAMES",
+    "DWGNAME",
+    "DBMOD",
+    "BLOCKEDITOR",
+    "CTAB",
+    "LASTPOINT",
+    "VIEWCTR",
+    "VIEWSIZE",
+    "VIEWTWIST",
+    "EXTMIN",
+    "EXTMAX",
+    "UNDOCTL",
+    "UNDOMARKS",
+    "UCSNAME",
+    "UCSORG",
+    "UCSXDIR",
+    "UCSYDIR",
+    "WORLDUCS",
+];
 
 pub fn is_read_only(name: &str) -> bool {
     READ_ONLY.iter().any(|r| r.eq_ignore_ascii_case(name.trim())) || table::is_read_only(&name.trim().to_ascii_uppercase())

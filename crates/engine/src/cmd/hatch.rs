@@ -172,18 +172,21 @@ impl OriginMode {
     }
     /// The origin for loops: `current` when the mode keeps it.
     pub(crate) fn origin(self, loops: &[HatchLoop], current: Vec2) -> Vec2 {
-        let b = Bounds2::from_points(loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)).filter(|p| p.is_finite()));
-        if b.is_empty() {
+        self.origin_in(loops, current, crate::ucs::UcsFrame::WORLD)
+    }
+    fn origin_in(self, loops: &[HatchLoop], current: Vec2, frame: crate::ucs::UcsFrame) -> Vec2 {
+        let b = Bounds2::from_points(loops.iter().flat_map(|l| l.vertices.iter().map(|v| frame.to_ucs(v.p))).filter(|p| p.is_finite()));
+        if b.is_empty() || self == OriginMode::Current {
             return current;
         }
-        match self {
-            OriginMode::Current => current,
+        frame.to_wcs(match self {
+            OriginMode::Current => frame.to_ucs(current),
             OriginMode::BottomLeft => b.min,
             OriginMode::BottomRight => Vec2::new(b.max.x, b.min.y),
             OriginMode::TopRight => b.max,
             OriginMode::TopLeft => Vec2::new(b.min.x, b.max.y),
             OriginMode::Center => b.center(),
-        }
+        })
     }
 }
 
@@ -279,11 +282,13 @@ struct HatchSettings {
     separate: bool,
     origin: Vec2,
     origin_mode: OriginMode,
+    origin_frame: crate::ucs::UcsFrame,
     style: u8,
 }
 
 impl HatchSettings {
     fn from(s: &Session, p: &Value, gradient: bool) -> Self {
+        let origin_frame = if bool_or(p, "originUcs", false) { s.input_ucs() } else { crate::ucs::UcsFrame::WORLD };
         let hdr = s.doc().map(|d| (d.header.str("HPNAME", "ANSI31"), d.header.f64("HPSCALE", 1.0), d.header.f64("HPANG", 0.0))).unwrap_or((
             "ANSI31".into(),
             1.0,
@@ -305,8 +310,10 @@ impl HatchSettings {
             associative: bool_or(p, "associative", s.doc().map_or(true, |d| d.header.i64("HPASSOC", 1) != 0)),
             separate: bool_or(p, "separate", s.doc().is_ok_and(|d| d.header.i64("HPSEPARATE", 0) != 0)),
             origin: point_param(p, "origin").filter(|o| o.is_finite()).unwrap_or_else(|| {
-                s.doc().ok().and_then(|d| d.header.point("HPORIGIN")).map(|o| o.xy()).filter(|o| o.is_finite()).unwrap_or(Vec2::ZERO)
+                let local = s.doc().ok().and_then(|d| d.header.point("HPORIGIN")).map(|o| o.xy()).filter(|o| o.is_finite()).unwrap_or(Vec2::ZERO);
+                origin_frame.to_wcs(local)
             }),
+            origin_frame,
             origin_mode: if point_param(p, "origin").is_some() {
                 OriginMode::Current
             } else {
@@ -327,7 +334,7 @@ impl HatchSettings {
         EntityKind::Hatch(Hatch {
             pattern: if self.gradient.is_some() { "SOLID".into() } else { self.pattern.clone() },
             solid,
-            origin: self.origin_mode.origin(&loops, self.origin),
+            origin: self.origin_mode.origin_in(&loops, self.origin, self.origin_frame),
             loops,
             scale: self.scale,
             angle: self.angle,
@@ -545,13 +552,13 @@ struct HatchM {
 
 impl HatchM {
     fn new(s: &Session, gradient: bool) -> Self {
-        HatchM {
-            gradient,
-            settings: HatchSettings::from(s, &Value::Null, gradient),
-            loops: Vec::new(),
-            asking: None,
-            selecting: s.last_used.hatch_select,
+        let frame = s.input_ucs();
+        let mut settings = HatchSettings::from(s, &json!({"originUcs":true}), gradient);
+        settings.angle = frame.vec_to_wcs(Vec2::from_angle(settings.angle)).angle();
+        if let Some(g) = &mut settings.gradient {
+            g.angle = frame.vec_to_wcs(Vec2::from_angle(g.angle)).angle();
         }
+        HatchM { gradient, settings, loops: Vec::new(), asking: None, selecting: s.last_used.hatch_select }
     }
     fn set_mode(&mut self, s: &mut Session, selecting: bool) {
         self.selecting = selecting;
@@ -562,10 +569,11 @@ impl HatchM {
         Ok(Step::Done)
     }
     fn set_origin(&mut self, s: &mut Session, origin: Option<Vec2>, mode: OriginMode) -> Result<()> {
+        let frame = s.input_ucs();
         let h = &mut s.doc_mut()?.header;
         if let Some(o) = origin.filter(|o| o.is_finite()) {
             self.settings.origin = o;
-            h.set("HPORIGIN", cadcraft_doc::HVal::Point(o.to3(0.0)));
+            h.set("HPORIGIN", cadcraft_doc::HVal::Point(frame.to_ucs(o).to3(0.0)));
         }
         self.settings.origin_mode = mode;
         h.set_i64("HPORIGINMODE", mode.index());
@@ -595,7 +603,7 @@ impl HatchM {
             HatchAsk::Angle => {
                 // Turns the pattern from the X axis (not from ANGBASE), clockwise when ANGDIR is 1.
                 if let Some(a) = s.angle_settings().rotation(t).filter(|a| a.is_finite()) {
-                    self.settings.angle = a;
+                    self.settings.angle = s.input_ucs().vec_to_wcs(Vec2::from_angle(a)).angle();
                     s.doc_mut()?.header.set_f64("HPANG", a);
                 }
             }
@@ -642,7 +650,8 @@ impl Interactive for HatchM {
             Some(HatchAsk::Angle) => {
                 let (au, ap) = s.doc().map(|d| (d.header.i64("AUNITS", 0), d.header.i64("AUPREC", 0))).unwrap_or((0, 0));
                 // Offered as it would be typed: clockwise is positive when ANGDIR is 1.
-                let a = if s.angle_settings().clockwise { -self.settings.angle } else { self.settings.angle };
+                let local = s.input_ucs().vec_to_ucs(Vec2::from_angle(self.settings.angle)).angle();
+                let a = if s.angle_settings().clockwise { -local } else { local };
                 let d = crate::units::format_angle(a, au, ap);
                 return Prompt::new("Specify an angle for the hatch pattern", Accept::NUMBER).default(d);
             }

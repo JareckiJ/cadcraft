@@ -802,11 +802,27 @@ pub struct Layout {
     /// Saved paper-space view (centre, height).
     #[serde(default)]
     pub view: Option<(Vec2, f64)>,
+    /// The layout's current paper-space UCS (the LAYOUT object's groups 13, 16, 17 and 345);
+    /// `None`: the World UCS. Its name is empty when it isn't a named UCS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ucs: Option<Ucs>,
+    /// The layout's earlier UCSs for UCS Previous, oldest first: they go with the layout when it
+    /// is renamed and with it when it is deleted. Never written to a file.
+    #[serde(skip)]
+    pub ucs_previous: Vec<Ucs>,
 }
 
 impl Layout {
     pub fn new(name: &str, tab_order: u32) -> Self {
-        Layout { name: name.into(), tab_order, page: PageSetup::default(), entities: EntityStore::new(), view: None }
+        Layout {
+            name: name.into(),
+            tab_order,
+            page: PageSetup::default(),
+            entities: EntityStore::new(),
+            view: None,
+            ucs: None,
+            ucs_previous: Vec::new(),
+        }
     }
 }
 
@@ -821,7 +837,7 @@ pub struct NamedView {
     /// The layer state restored with the view (its layer snapshot).
     #[serde(default)]
     pub layer_state: Option<String>,
-    /// View twist (radians, counterclockwise); kept for files, not applied to the 2D display.
+    /// View twist (radians, counterclockwise); VIEW Restore applies it to the model space view.
     #[serde(default)]
     pub twist: f64,
     /// The layout a paper space view belongs to (`None`: a model space view; an empty name: a
@@ -842,6 +858,12 @@ pub struct VportTile {
     /// Width / height of the tile on screen when it was saved (0: unknown).
     #[serde(default)]
     pub aspect: f64,
+    /// A 3D view of model space (`center` is then in its view coordinates); `None`: plan view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view3d: Option<crate::ViewDir>,
+    /// The tile's view twist (radians, counterclockwise; DXF VPORT group 51 in degrees).
+    #[serde(default)]
+    pub twist: f64,
 }
 
 /// A model space viewport configuration (VPORTS): `*Active` is the one shown, other names are
