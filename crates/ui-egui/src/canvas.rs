@@ -1347,6 +1347,9 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// Draw the drawing canvas for one frame and handle its input: navigation (zoom, pan), picks,
+/// grips, snaps, selection windows and double-clicks (text, hatch, viewport, block reference for
+/// REFEDIT). The UI stays thin: every action goes through `app.run` / `app.session`.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
