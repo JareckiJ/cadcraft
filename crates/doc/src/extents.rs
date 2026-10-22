@@ -76,24 +76,69 @@ fn mtext_box(t: &crate::MText) -> Bounds2 {
 }
 
 pub fn entity_bounds(d: &Drawing, e: &Entity, depth: usize) -> Bounds2 {
-    // A top-level annotative object measures as it draws at the current annotation scale.
-    if depth == 0 {
-        match d.anno_draw(e) {
-            crate::AnnoDraw::Plain => {}
-            crate::AnnoDraw::Hidden => return Bounds2::EMPTY,
-            crate::AnnoDraw::Scaled(f) => return bounds_in(d, &crate::anno_scaled(e, f), 0, &mut HashMap::new()),
-        }
-    }
-    bounds_in(d, e, depth, &mut HashMap::new())
+    BoundsCache::new().entity_bounds(d, e, depth)
 }
 
-/// [`entity_bounds`] with the bounds of block contents (in block coordinates) already computed,
-/// by block name and depth: every further reference to a block at that depth reuses them instead of
-/// expanding the block again, so nested or self-referencing blocks cost at most one pass over each
-/// definition per depth instead of one per reference (which grows exponentially with the nesting
-/// depth). The depth is part of the key because [`MAX_BLOCK_DEPTH`] cuts a deep visit short: its
-/// bounds must not stand in for a shallower reference to the same block (#706).
-fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<(&'a str, usize), Bounds2>) -> Bounds2 {
+/// The bounds of block contents (in block coordinates) measured so far, by nesting depth and block
+/// name: every further reference to a block at that depth reuses them instead of expanding the
+/// block again, so nested or self-referencing blocks cost at most one pass over each definition per
+/// depth instead of one per reference (which grows exponentially with the nesting depth). The depth
+/// is part of the key because [`MAX_BLOCK_DEPTH`] cuts a deep visit short: its bounds must not
+/// stand in for a shallower reference to the same block (#706).
+///
+/// One [`entity_bounds`] call starts with an empty cache. A caller that measures many entities of
+/// the same drawing (the renderer, while culling) keeps one for the whole pass, so repeated
+/// references to a block are measured once instead of once per reference (#1719).
+#[derive(Clone, Debug, Default)]
+pub struct BoundsCache {
+    blocks: HashMap<usize, HashMap<String, Bounds2>>,
+}
+
+impl BoundsCache {
+    /// A cache that has measured nothing yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether no block definition has been measured yet.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// The number of block definitions measured so far (one per block and nesting depth, so at
+    /// most the drawing's blocks times [`MAX_BLOCK_DEPTH`]).
+    pub fn len(&self) -> usize {
+        self.blocks.values().map(HashMap::len).sum()
+    }
+
+    /// [`entity_bounds`] for `e`, reusing the block bounds this cache already measured.
+    pub fn entity_bounds(&mut self, d: &Drawing, e: &Entity, depth: usize) -> Bounds2 {
+        // A top-level annotative object measures as it draws at the current annotation scale.
+        if depth == 0 {
+            match d.anno_draw(e) {
+                crate::AnnoDraw::Plain => {}
+                crate::AnnoDraw::Hidden => return Bounds2::EMPTY,
+                crate::AnnoDraw::Scaled(f) => return bounds_in(d, &crate::anno_scaled(e, f), 0, self),
+            }
+        }
+        bounds_in(d, e, depth, self)
+    }
+
+    /// Block `blk`'s contents at `depth`, measured now when the cache lacks them.
+    fn content(&mut self, d: &Drawing, blk: &crate::Block, depth: usize) -> Bounds2 {
+        if let Some(b) = self.blocks.get(&depth).and_then(|m| m.get(blk.name.as_str())).copied() {
+            return b;
+        }
+        let mut inner = Bounds2::EMPTY;
+        for be in blk.entities.iter().filter(|be| in_block_visible(d, be)) {
+            inner = inner.union(&bounds_in(d, be, depth + 1, self));
+        }
+        self.blocks.entry(depth).or_default().insert(blk.name.clone(), inner);
+        inner
+    }
+}
+
+fn bounds_in(d: &Drawing, e: &Entity, depth: usize, cache: &mut BoundsCache) -> Bounds2 {
     match &e.kind {
         EntityKind::Table(t) if t.is_broken() => t.bounds(),
         EntityKind::Text(t) if blank(&t.value) => Bounds2::EMPTY,
@@ -111,27 +156,32 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
             let mut b = Bounds2::EMPTY;
             if let Some(blk) = d.block(&ins.block) {
                 let m = ins.transform(blk.base.xy());
-                let inner = match blocks.get(&(blk.name.as_str(), depth)) {
-                    Some(b) => *b,
-                    None => {
-                        let mut inner = Bounds2::EMPTY;
-                        for be in blk.entities.iter().filter(|be| in_block_visible(d, be)) {
-                            inner = inner.union(&bounds_in(d, be, depth + 1, blocks));
-                        }
-                        blocks.insert((blk.name.as_str(), depth), inner);
-                        inner
+                let inner = cache.content(d, blk, depth);
+                if !inner.is_empty() {
+                    let corners = inner.corners().map(|c| m.apply(c));
+                    // A transform that overflows leaves no usable bounds: the corners that stayed
+                    // finite cover only part of what draws, which would make culling skip visible
+                    // geometry, so report none (callers keep such a reference unculled) (#1719).
+                    if corners.iter().any(|c| !c.is_finite()) {
+                        return Bounds2::EMPTY;
                     }
-                };
-                b = if inner.is_empty() { Bounds2::EMPTY } else { Bounds2::from_points(inner.corners().map(|c| m.apply(c))) };
-                if ins.cols > 1 || ins.rows > 1 {
+                    b = Bounds2::from_points(corners);
+                }
+                if !b.is_empty() && (ins.cols > 1 || ins.rows > 1) {
                     let off =
                         Vec2::new(ins.col_spacing * f64::from(ins.cols.saturating_sub(1)), ins.row_spacing * f64::from(ins.rows.saturating_sub(1)))
                             .rotate(ins.rotation);
-                    b = b.union(&Bounds2::from_points(b.corners().map(|c| c + off)));
+                    let corners = b.corners().map(|c| c + off);
+                    if corners.iter().any(|c| !c.is_finite()) {
+                        return Bounds2::EMPTY;
+                    }
+                    b = b.union(&Bounds2::from_points(corners));
                 }
             }
             for a in &ins.attribs {
-                if !a.invisible {
+                // ATTMODE 2 (ATTDISP All) draws invisible attributes too, so they measure as well:
+                // culling a block reference on bounds that leave them out would drop them (#1719).
+                if !a.invisible || d.header.i64("ATTMODE", 1) == 2 {
                     b = b.union(&match a.multiline_text() {
                         Some(m) => mtext_box(&m),
                         None => text_box(&a.text, a.text.value.chars().count()),
@@ -166,7 +216,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
                 && depth < MAX_BLOCK_DEPTH
             {
                 for be in blk.entities.iter().filter(|be| in_block_visible(d, be)) {
-                    b = b.union(&bounds_in(d, be, depth + 1, blocks));
+                    b = b.union(&bounds_in(d, be, depth + 1, cache));
                 }
             }
             b
@@ -181,7 +231,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
             }
             if let Some(ins) = &m.block {
                 let be = Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::Insert(ins.clone()) };
-                b = b.union(&bounds_in(d, &be, depth, blocks));
+                b = b.union(&bounds_in(d, &be, depth, cache));
             }
             b
         }

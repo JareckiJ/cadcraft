@@ -26,7 +26,7 @@ pub mod units;
 mod wide;
 
 use cadcraft_color::{Color, Rgb};
-use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Lineweight, Prim, Space};
+use cadcraft_doc::{BoundsCache, Drawing, Entity, EntityKind, Handle, Lineweight, Prim, Space};
 use cadcraft_geom::{Bounds2, Mat3, Polyline, Vec2};
 use pen::Pen;
 
@@ -282,6 +282,9 @@ struct Ctx<'a> {
     /// Extra linetype scale for model space seen through a viewport: 1 / viewport scale when
     /// `PSLTSCALE` is on (dashes keep their paper-space length at any viewport scale), else 1.
     lt_factor: f64,
+    /// The model window a layout viewport draws, in the space `xf` maps to (paper units): block
+    /// entities whose bounds through `xf` miss it are not expanded. `None` when not culling.
+    cull: Option<Bounds2>,
     /// Named plot style (table index) of the block reference being expanded, for `ByBlock`.
     block_pstyle: Option<usize>,
     /// Transparency (percent) of the block reference being expanded, for `ByBlock`.
@@ -311,6 +314,9 @@ struct Builder<'a> {
     shared_budget: Option<&'a std::sync::atomic::AtomicUsize>,
     /// Transparency (percent) of the entity being drawn.
     transparency: u8,
+    /// Bounds of block contents measured while culling this build: repeated references to a block,
+    /// nested ones included, are measured once instead of once per reference (#1719).
+    bounds_cache: BoundsCache,
 }
 
 /// Upper bound on the block contents drawn per display list (each block reference, MINSERT copy
@@ -495,6 +501,10 @@ pub fn build_plot(d: &Drawing, space: &Space, opts: &Options) -> DisplayList {
     build_space(d, space, opts, true)
 }
 
+/// The context for a space's top-level entities: the transform `xf` from their coordinates to the
+/// output space, handle `top` for the primitives built with it, `frozen`/`vp_colors` overrides from
+/// a layout viewport, and no inherited block properties. `lt_factor` is 1 and `cull` is `None`;
+/// `contents` overrides both for model space seen through a viewport.
 fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_colors: &'a [(String, Color)]) -> Ctx<'a> {
     Ctx {
         d,
@@ -508,6 +518,7 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
         frozen,
         vp_colors,
         lt_factor: 1.0,
+        cull: None,
         block_pstyle: None,
         block_transparency: 0,
     }
@@ -516,7 +527,16 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
 fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> DisplayList {
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, plotting).map(|t| plotstyle::Styler::new(d, t));
-    let mut b = Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        bounds_cache: BoundsCache::new(),
+    };
     if let Space::Paper(name) = space {
         b.list.sheet = paper::sheet(d, name);
     }
@@ -567,8 +587,16 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
     let parts: Vec<DisplayList> = ents
         .par_chunks(PARALLEL_CHUNK)
         .map(|chunk| {
-            let mut part =
-                Builder { list: DisplayList::default(), opts, plotting, styles: None, named: None, shared_budget: Some(&budget), transparency: 0 };
+            let mut part = Builder {
+                list: DisplayList::default(),
+                opts,
+                plotting,
+                styles: None,
+                named: None,
+                shared_budget: Some(&budget),
+                transparency: 0,
+                bounds_cache: BoundsCache::new(),
+            };
             for e in chunk {
                 entity(&mut part, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
             }
@@ -695,14 +723,23 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
     }
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, false).map(|t| plotstyle::Styler::new(d, t));
-    let mut b =
-        Builder { list: DisplayList::default(), opts, plotting: false, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        bounds_cache: BoundsCache::new(),
+    };
     contents(&mut b, d, vp, area, &Clip::Rect(area), paper::unit_mm_of(d, handle));
     b.list
 }
 
 /// Model space seen through `vp`, in paper units, appended to `b`'s list clipped to `clip`;
-/// `area` (the clip's bounds on paper) picks the model objects to draw.
+/// `area` (the clip's bounds on paper) picks the model objects to draw, and the model window it
+/// maps to also culls block contents, which are never built when they miss it (#1719).
 fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bounds2, clip: &Clip, unit_mm: f64) {
     if b.list.expanded >= MAX_BLOCK_EXPANSION || !vp.on {
         return;
@@ -721,18 +758,30 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
     let mcenter = vp.view_center + (area.center() - center) / s;
     // Model window with slack: entity bounds are approximate (text, dimensions).
     let win = Bounds2::new(mcenter - mhalf, mcenter + mhalf).expand(mhalf.x.max(mhalf.y) * 0.1);
+    // The same window in paper units, where `xf` maps block coordinates (these are model units):
+    // block contents that cannot reach it are skipped instead of built and clipped away. An
+    // unbounded window (hostile sizes), or one whose corners overflow through `xf` (a finite
+    // centre near `f64::MAX`), leaves culling off rather than dropping everything: a box of the
+    // corners that stayed finite would cover only part of the window (#1719).
+    let corners = win.corners().map(|c| xf.apply(c));
+    let cull = if corners.iter().all(|c| c.is_finite()) {
+        let cull = Bounds2::from_points(corners);
+        (!cull.is_empty()).then_some(cull)
+    } else {
+        None
+    };
     // PSLTSCALE on: model-space dashes are scaled so they measure the same on paper as in
     // paper space, whatever the viewport scale.
     let lt_factor = if d.header.i64("PSLTSCALE", 1) != 0 { 1.0 / s } else { 1.0 };
-    let ctx = || Ctx { lt_factor, ..top_ctx(d, xf, VIEWPORT_CONTENT, &vp.frozen_layers, &vp.layer_colors) };
-    let seen = |me: &Entity| {
+    let ctx = || Ctx { lt_factor, cull, ..top_ctx(d, xf, VIEWPORT_CONTENT, &vp.frozen_layers, &vp.layer_colors) };
+    let seen = |cache: &mut BoundsCache, me: &Entity| {
         if matches!(me.kind, EntityKind::Viewport(_)) {
             return false;
         }
         if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             return true;
         }
-        let eb = cadcraft_doc::entity_bounds(d, me, 0);
+        let eb = cache.entity_bounds(d, me, 0);
         eb.is_empty() || eb.intersects(&win)
     };
     let mut sub = Builder {
@@ -743,6 +792,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         named: None,
         shared_budget: None,
         transparency: 0,
+        bounds_cache: BoundsCache::new(),
     };
     #[cfg(not(target_arch = "wasm32"))]
     let parallel = !b.plotting && b.styles.is_none() && d.model.len() >= 2 * PARALLEL_CHUNK;
@@ -767,9 +817,13 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
                         named: None,
                         shared_budget: Some(&budget),
                         transparency: 0,
+                        bounds_cache: BoundsCache::new(),
                     };
                     let c = ctx();
-                    for me in chunk.iter().filter(|me| seen(me)) {
+                    for me in chunk.iter() {
+                        if !seen(&mut part.bounds_cache, me) {
+                            continue;
+                        }
                         entity(&mut part, &c, me);
                     }
                     part.list
@@ -781,7 +835,10 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         }
     } else {
         let c = ctx();
-        for me in d.model.iter().filter(|me| seen(me)) {
+        for me in d.model.iter() {
+            if !seen(&mut sub.bounds_cache, me) {
+                continue;
+            }
             entity(&mut sub, &c, me);
         }
     }
@@ -913,7 +970,16 @@ pub fn build_entities<'a, I: IntoIterator<Item = &'a Entity>>(d: &Drawing, ents:
     } else {
         opts
     };
-    let mut b = Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: None,
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        bounds_cache: BoundsCache::new(),
+    };
     for e in ents {
         entity(&mut b, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
     }
@@ -1500,6 +1566,10 @@ fn align(h: cadcraft_doc::HAlign, v: cadcraft_doc::VAlign) -> (cadcraft_fonts::A
     (ha, va)
 }
 
+/// The context for the contents of block reference `e` placed through transform `m`: `m` is
+/// composed with the parent's transform, ByBlock/ByLayer colours, lineweights and linetypes
+/// resolve against the reference and its layer, the nesting depth grows by one, and the parent's
+/// linetype factor and cull window carry into the block.
 fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     let layer = if e.common.layer == "0" { ctx.block_layer.clone() } else { Some(e.common.layer.clone()) };
     let color = match e.common.color {
@@ -1529,12 +1599,36 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
         frozen: ctx.frozen,
         vp_colors: ctx.vp_colors,
         lt_factor: ctx.lt_factor,
+        cull: ctx.cull,
         block_pstyle: ctx.block_pstyle,
         // The reference's own, set by the caller (`Builder::transparency` while it draws).
         block_transparency: ctx.block_transparency,
     }
 }
 
+/// Whether a block entity can reach `win` (in the space `xf` maps to) when drawn through `xf`,
+/// measuring its bounds through this build's cache. False only when its bounds are known and miss
+/// the window: approximate bounds (text, dimensions) are safe, and a transform without finite
+/// bounds is not culled.
+fn reaches_window(cache: &mut BoundsCache, win: Option<Bounds2>, d: &Drawing, e: &Entity, xf: &Mat3, depth: usize) -> bool {
+    let Some(win) = win else { return true };
+    let eb = cache.entity_bounds(d, e, depth);
+    if eb.is_empty() {
+        return true;
+    }
+    let corners = eb.corners().map(|c| xf.apply(c));
+    // `Bounds2::add` drops non-finite points: a box built from the corners that stayed finite would
+    // cover only part of the entity (an extreme insert scale), so keep it uncullable (#1719).
+    if corners.iter().any(|c| !c.is_finite()) {
+        return true;
+    }
+    Bounds2::from_points(corners).intersects(&win)
+}
+
+/// Append block reference `ins` to `b`: every array copy and nested block of its definition, in
+/// the colour `rgb` resolved for the reference, followed by its visible attributes. Stops at
+/// `MAX_BLOCK_DEPTH` and once the block-expansion budget is spent; inside a layout viewport,
+/// entities that cannot reach the cull window are skipped instead of built and clipped away.
 fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) {
     if ctx.depth >= cadcraft_doc::MAX_BLOCK_DEPTH {
         return;
@@ -1553,6 +1647,10 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 for be in blk.entities.iter() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {
+                        continue;
+                    }
+                    // A layout viewport only builds what can reach its model window (#1719).
+                    if !reaches_window(&mut b.bounds_cache, ctx.cull, ctx.d, be, &sub.xf, sub.depth) {
                         continue;
                     }
                     if !b.expand() {
