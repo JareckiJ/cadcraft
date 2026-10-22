@@ -185,6 +185,25 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
                 }
             }
         }
+        // Copying an entire group creates a new group for the copied members (AutoCAD standard behavior).
+        let mut new_groups = Vec::new();
+        for g in &d.groups {
+            if !g.members.is_empty() && g.members.iter().all(|m| handle_map.contains_key(m)) {
+                let new_members: Vec<Handle> = g.members.iter().filter_map(|m| handle_map.get(m).copied()).collect();
+                if new_members.len() == g.members.len() {
+                    let mut temp_d = d.clone();
+                    temp_d.groups.extend(new_groups.clone());
+                    let new_name = super::groups::next_unnamed(&temp_d);
+                    new_groups.push(cadcraft_doc::Group {
+                        name: new_name,
+                        description: g.description.clone(),
+                        selectable: g.selectable,
+                        members: new_members,
+                    });
+                }
+            }
+        }
+        d.groups.extend(new_groups);
     } else {
         let mut to_transform = hs.to_vec();
         let mut boundaries_to_sync: Vec<(Handle, Handle)> = Vec::new();

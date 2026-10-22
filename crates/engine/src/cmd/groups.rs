@@ -65,7 +65,7 @@ pub(crate) fn groups_of(d: &Drawing, h: Handle) -> Vec<usize> {
 }
 
 /// The first free unnamed group name: `*A1`, `*A2`…
-fn next_unnamed(d: &Drawing) -> String {
+pub(crate) fn next_unnamed(d: &Drawing) -> String {
     let used: std::collections::HashSet<String> = d.groups.iter().map(|g| g.name.to_ascii_uppercase()).collect();
     (1..=d.groups.len() + 1).map(|n| format!("*A{n}")).find(|n| !used.contains(n)).unwrap_or_else(|| format!("*A{}", d.groups.len() + 1))
 }
