@@ -156,6 +156,67 @@ fn exports_save_at_once_and_closing_saves_without_the_window() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The Save As window is not modal: switching to another drawing tab before pressing Save still
+/// saves the drawing the window was opened for, and closing that drawing meanwhile writes nothing.
+#[test]
+fn save_as_saves_the_drawing_it_was_opened_for() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    install();
+    let d = dir("tabs");
+    let file = d.join("a.dwg");
+    let (mut a, _) = app(Some(file.clone()));
+    a.ui.save_version = "2013".into();
+    let uid_a = a.session.state().unwrap().uid;
+    a.start("saveas");
+    assert_eq!(a.save_dlg.as_ref().map(|d| d.uid), Some(uid_a));
+    // Another drawing becomes active (a new tab) and gets edits of its own before Save.
+    a.session.new_drawing(true);
+    a.cmdline("line 0,0 10,10 ");
+    let uid_b = a.session.state().unwrap().uid;
+    assert_ne!(uid_a, uid_b);
+    assert!(a.session.state().unwrap().is_dirty());
+
+    let mut h = harness(a);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(read(&file), "2013|false", "drawing A is written to the path picked for it");
+    let a = h.state();
+    assert!(a.ui.dialog.is_none() && a.save_dlg.is_none());
+    let doc = |uid: u64| a.session.docs.iter().find(|d| d.uid == uid).unwrap();
+    let file_s = file.to_string_lossy().to_string();
+    assert!(!doc(uid_a).is_dirty());
+    assert_eq!(doc(uid_a).path.as_deref(), Some(file_s.as_str()));
+    assert!(doc(uid_b).is_dirty(), "drawing B keeps its unsaved changes");
+    assert!(doc(uid_b).path.is_none(), "drawing B does not take A's file");
+    assert_eq!(a.session.state().unwrap().uid, uid_b, "the user stays on drawing B");
+
+    // Closing the drawing before Save: the window goes away and nothing is written.
+    let other = d.join("gone.dwg");
+    let (mut a, _) = app(Some(other.clone()));
+    let uid_a = a.session.state().unwrap().uid;
+    a.start("saveas");
+    assert!(a.save_dlg.is_some());
+    a.session.new_drawing(true);
+    a.cmdline("line 0,0 10,10 ");
+    let uid_b = a.session.state().unwrap().uid;
+    let i = a.session.docs.iter().position(|d| d.uid == uid_a).unwrap();
+    a.run("close", serde_json::json!({ "index": i })).unwrap();
+    assert!(a.session.docs.iter().all(|d| d.uid != uid_a));
+    let dlg = a.save_dlg.clone();
+    // In the interface the window drops itself on the next frame.
+    let mut h = harness(a);
+    assert!(h.state().ui.dialog.is_none() && h.state().save_dlg.is_none());
+    // Confirming anyway (programmatically) reports it and writes nothing either.
+    h.state_mut().save_dlg = dlg;
+    assert!(cadcraft_ui_egui::saving::confirm(h.state_mut()).is_err());
+    let a = h.state();
+    assert!(!other.exists(), "nothing is written for a closed drawing");
+    let st = a.session.state().unwrap();
+    assert_eq!(st.uid, uid_b);
+    assert!(st.is_dirty() && st.path.is_none(), "drawing B is untouched");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// Puts FILEDIA back to 1 even when an assertion fails.
 struct FiledIa;
 impl Drop for FiledIa {

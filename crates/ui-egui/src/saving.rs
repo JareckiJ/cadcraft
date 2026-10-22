@@ -11,6 +11,11 @@
 //!
 //! With FILEDIA 0, or a host without a file picker, SAVEAS asks on the command line instead (the
 //! engine's prompt sequence, `cadcraft_engine::cmd::file`). JSON calls never get here.
+//!
+//! The Save As window is not modal, so another drawing tab may be active by the time Save is
+//! pressed: the window remembers the drawing it was opened for and saves that one (then shows the
+//! drawing the user was on again). If that drawing was closed meanwhile, the window goes away and
+//! nothing is written.
 
 use cadcraft_engine::cmd::file::{FileFormat, drawing_version, filedia, set_untitled_save_default};
 use serde_json::{Value, json};
@@ -20,6 +25,8 @@ use crate::{CadApp, SaveFormat, SaveVersion};
 /// The Save As window while open: the file picked and what to save it as.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SaveDlg {
+    /// The drawing the window was opened for ([`cadcraft_engine::DocState::uid`]).
+    pub uid: u64,
     pub path: String,
     pub format: FileFormat,
     pub version: SaveVersion,
@@ -94,24 +101,52 @@ pub fn saveas_params(ui: &crate::UiState, session: &cadcraft_engine::Session, pa
 }
 
 /// Open the Save As window for `path`, on the version and encoding the drawing would get anyway.
+/// Open the Save As window for `path` and the active drawing, on the version and encoding the
+/// drawing would get anyway. Without a drawing there is nothing to save and no window.
 pub fn open(app: &mut CadApp, path: String, format: FileFormat) {
-    let st = app.session.state().ok();
-    let untitled = st.is_some_and(|s| s.path.is_none());
+    let Ok(st) = app.session.state() else { return };
+    let (uid, untitled, binary_dxf) = (st.uid, st.path.is_none(), st.binary_dxf);
     let version = if untitled { SaveVersion::parse(&app.ui.save_version).unwrap_or_default() } else { drawing_version(&app.session, &path) };
-    let binary = format == FileFormat::Dxf && st.is_some_and(|s| s.binary_dxf);
-    app.save_dlg = Some(SaveDlg { path, format, version, binary });
+    let binary = format == FileFormat::Dxf && binary_dxf;
+    app.save_dlg = Some(SaveDlg { uid, path, format, version, binary });
     app.ui.dialog = Some("saveas".into());
 }
 
-/// Save: write the file with the window's choices. Errors are reported on the command line and
-/// the status bar; the drawing keeps its unsaved changes.
+/// Index of the drawing with `uid`, if it is still open.
+fn doc_index(app: &CadApp, uid: u64) -> Option<usize> {
+    app.session.docs.iter().position(|d| d.uid == uid)
+}
+
+/// Save: write the file with the window's choices, for the drawing the window was opened for
+/// (whichever drawing is active now). Errors are reported on the command line and the status bar;
+/// the drawing keeps its unsaved changes. If that drawing was closed meanwhile, nothing is written.
 pub fn confirm(app: &mut CadApp) -> Result<Value, String> {
     let Some(d) = app.save_dlg.take() else { return Ok(Value::Null) };
     if app.ui.dialog.as_deref() == Some("saveas") {
         app.ui.dialog = None;
     }
-    let binary = d.format == FileFormat::Dxf && d.binary;
-    let r = app.run("saveas", json!({ "path": d.path, "version": d.version.year(), "binary": binary }));
+    let Some(i) = doc_index(app, d.uid) else {
+        let file = std::path::Path::new(&d.path).file_name().map_or_else(|| d.path.clone(), |n| n.to_string_lossy().to_string());
+        let msg = format!("Save As: the drawing was closed; {file} was not written.");
+        app.session.echo(msg.clone());
+        app.set_status(msg.clone());
+        return Err(msg);
+    };
+    // SAVEAS saves the active drawing: make it the one the window belongs to, and afterwards show
+    // the drawing the user was on again.
+    let back = app.session.state().ok().map(|s| s.uid).filter(|u| *u != d.uid);
+    let mut r = if app.session.active == i { Ok(Value::Null) } else { app.run("document.switch", json!({ "index": i })) };
+    if r.is_ok() && app.session.state().is_ok_and(|s| s.uid == d.uid) {
+        let binary = d.format == FileFormat::Dxf && d.binary;
+        r = app.run("saveas", json!({ "path": d.path, "version": d.version.year(), "binary": binary }));
+    } else if r.is_ok() {
+        r = Err("Save As: could not switch to the drawing; nothing was written.".to_string());
+    }
+    if let Some(j) = back.and_then(|u| doc_index(app, u))
+        && app.session.active != j
+    {
+        let _ = app.run("document.switch", json!({ "index": j }));
+    }
     if let Err(e) = &r {
         app.set_status(e.clone());
     }
@@ -131,6 +166,13 @@ fn version_label(v: SaveVersion) -> &'static str {
 
 /// The Save As window: the file, its format, the version and (DXF) binary; Save or Cancel.
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    if app.save_dlg.as_ref().is_some_and(|d| doc_index(app, d.uid).is_none()) {
+        // The drawing it was opened for was closed: drop the window (confirm reports it and
+        // writes nothing).
+        let _ = confirm(app);
+        *open = false;
+        return;
+    }
     let Some(d) = app.save_dlg.as_mut() else {
         *open = false;
         return;
