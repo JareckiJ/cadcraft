@@ -10,4 +10,6 @@ workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # MPL-2.0: used as an unmodified dependency only (see plan/adr/0001 and NOTICE).
-acadrust = "0.6.4"
+# 0.6.5 reads a polyline's owned vertex-handle list, so vertices keep the polyline's order
+# instead of coming back sorted by handle (#1856).
+acadrust = "0.6.5"
