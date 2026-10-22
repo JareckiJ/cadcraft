@@ -2,11 +2,13 @@
 //! docked palettes the normal pointer comes back, so the user can see what they are pointing at.
 
 use cadcraft_engine::Session;
+use cadcraft_geom::Vec2;
 use cadcraft_ui_egui::{CadApp, Services};
 use egui::accesskit::Role;
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use serde_json::json;
 
 /// A 1280×760 app with the in-window menu bar shown, stepped a few frames so menus and palettes
 /// have laid out before the test hovers anything.
@@ -115,4 +117,87 @@ fn show_system_cursor_restores_the_arrow_off_the_canvas() {
     harness.get_by_role_and_label(Role::Button, "File").hover();
     harness.run_steps(3);
     assert_eq!(cursor(&harness), egui::CursorIcon::Default, "not the drafting crosshair over the menu bar");
+}
+
+/// Two overlapping lines (SELECTIONCYCLING 2), zoomed to fit: a click where they overlap opens the
+/// selection cycling list beside it.
+fn cycle_harness() -> Harness<'static, CadApp> {
+    let mut session = Session::new();
+    session.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
+    session.execute("line", &json!({ "points": [[0, 0], [20, 0]] })).unwrap();
+    session.execute("setvar", &json!({ "name": "SELECTIONCYCLING", "value": 2 })).unwrap();
+    session.set_selection(Vec::new());
+    let mut app = CadApp::new(session, Services::default());
+    app.ui.in_window_menu = true;
+    app.canvas.zoom_pending = true;
+    let mut harness = Harness::builder().with_size(vec2(1280.0, 760.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        app,
+    );
+    harness.run_steps(5);
+    harness
+}
+
+/// A press and release of the primary button at `at`.
+fn click(harness: &mut Harness<'_, CadApp>, at: egui::Pos2) {
+    harness.event(egui::Event::PointerMoved(at));
+    harness.run_steps(1);
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    harness.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    harness.run_steps(2);
+}
+
+/// Selection cycling's rows are painted on the canvas, so the layer under them is the drawing, but
+/// they are a menu: the OS cursor stays visible over a row, while the drawing around it still
+/// hides the cursor under the crosshair (#1701).
+#[test]
+fn a_selection_cycling_row_keeps_the_os_cursor_visible() {
+    let mut harness = cycle_harness();
+    let at = harness.state().canvas.xf.expect("the canvas is laid out").to_screen(Vec2::new(5.0, 0.0));
+    click(&mut harness, at);
+    let rows = harness.state().canvas.cycle_rows();
+    assert_eq!(rows.len(), 2, "the click over both lines lists them");
+    let row = rows[1].0;
+    assert!(harness.state().canvas.rect.is_some_and(|canvas| canvas.contains(row.center())), "the list lies over the drawing");
+
+    // The drawing beside the list still hides the OS cursor.
+    let beside = egui::pos2(row.left() - 4.0, row.center().y);
+    harness.hover_at(beside);
+    harness.run_steps(3);
+    assert_eq!(cursor(&harness), egui::CursorIcon::None, "the canvas beside the list hides the OS cursor");
+
+    // Over the row itself the pointer must come back, and the row keeps highlighting its object.
+    harness.hover_at(row.center());
+    harness.run_steps(3);
+    assert_ne!(cursor(&harness), egui::CursorIcon::None, "a selection cycling row is a menu and keeps a visible OS cursor");
+    assert_eq!(harness.state().canvas.hover, Some(rows[1].1));
+    assert_eq!(harness.state().canvas.cycle_rows().len(), 2, "the list stays open under the pointer");
+}
+
+/// Dynamic Input's options menu is painted on the canvas too: over one of its rows the OS cursor
+/// stays visible (and the menu stays open, so a click can still pick the row).
+#[test]
+fn a_dynamic_input_options_row_keeps_the_os_cursor_visible() {
+    let mut harness = harness();
+    hover_canvas(&mut harness);
+    assert_eq!(cursor(&harness), egui::CursorIcon::None, "the canvas hides the OS cursor");
+
+    harness.state_mut().cmdline("circle");
+    harness.run_steps(3);
+    harness.key_press(egui::Key::ArrowDown);
+    harness.run_steps(3);
+    let rows = harness.state().cmd.option_rows.clone();
+    assert!(harness.state().cmd.options.is_some() && rows.len() >= 2, "Down Arrow lists the prompt's options over the canvas: {rows:?}");
+    let row = rows[0].0;
+    assert!(harness.state().canvas.rect.is_some_and(|canvas| canvas.contains(row.center())), "the options menu lies over the drawing");
+
+    harness.hover_at(row.center());
+    harness.run_steps(3);
+    assert_ne!(cursor(&harness), egui::CursorIcon::None, "a Dynamic Input options row is a menu and keeps a visible OS cursor");
+    assert!(harness.state().cmd.options.is_some(), "the menu stays open under the pointer");
+    assert!(harness.state().cmd.option_rows.iter().any(|(r, _)| r.contains(row.center())), "the row is still drawn for clicks");
+    assert!(harness.state().canvas.cursor.is_some(), "the canvas keeps tracking the pointer under the menu, so the value boxes stay put");
 }
