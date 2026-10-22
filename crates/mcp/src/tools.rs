@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 
 use crate::backend::Backend;
 
+/// The `tools/list` payload: one definition (name, description, input schema) per MCP tool,
+/// including the UI-only tools when `has_ui` says a window is available.
 pub fn tool_definitions(has_ui: bool) -> Value {
     let mut tools = vec![
         json!({"name": "command_line", "description": "Type one line at the CADCraft command line, exactly as a user would at an AutoCAD-style prompt. Starts commands by name or alias (LINE, L, CIRCLE, C, PLINE, RECTANG, MOVE, TRIM, OFFSET, ZOOM…) and answers the active prompt: points `x,y`, relative `@dx,dy`, polar `@dist<angle`, distances, keywords (e.g. `c` for Close), empty text = Enter. Spaces act as Enter, so `circle 0,0 5` works in one call. Returns the new prompt and command-line output, and `error` when the line was refused.",
@@ -42,10 +44,12 @@ pub fn tool_definitions(has_ui: bool) -> Value {
     json!({ "tools": tools })
 }
 
+/// Wrap a JSON value as a successful MCP result containing pretty-printed text.
 fn text(v: &Value) -> Value {
     json!({"content": [{"type": "text", "text": serde_json::to_string_pretty(v).unwrap_or_default()}]})
 }
 
+/// Wrap an error message as an MCP tool error result (`isError`), not a protocol error.
 fn err_text(e: &str) -> Value {
     json!({"content": [{"type": "text", "text": e}], "isError": true})
 }
