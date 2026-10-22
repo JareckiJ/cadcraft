@@ -32,12 +32,19 @@ fn dwg_with_out_of_order_vertex_handles(version: DxfVersion) -> Vec<u8> {
     acadrust::DwgWriter::write_to_vec(&doc).expect("write the DWG")
 }
 
+/// Reads `dwg` through `cadcraft_io::read` and returns the points of its only 3D polyline, in the
+/// order the reader produced them; panics if the drawing cannot be read or holds no 3D polyline,
+/// since either would mean the test is no longer exercising vertex order.
 fn polyline3d_points(dwg: &[u8]) -> Vec<Vec3> {
     let drawing = cadcraft_io::read(dwg, "x.dwg").expect("read the DWG");
     let polyline = drawing.model.iter().find_map(|e| if let EntityKind::Polyline3d(p) = &e.kind { Some(p) } else { None });
     polyline.expect("one 3D polyline").points.clone()
 }
 
+/// Regression guard for #1856, run for both DWG versions the writer emits (AC1018 and AC1032): the
+/// reader must keep a polyline's vertices in the order the entity's own vertex list lists them,
+/// even when a mid-outline vertex carries the highest handle. Ordering by handle would move the
+/// second point to the end, changing the outline's shape and length.
 #[test]
 fn dwg_read_keeps_polyline_vertex_order() {
     let expected = vec![
