@@ -211,6 +211,57 @@ const STYLE_COMBO_W: f32 = 160.0;
 /// Most height a drop-down's list takes before it scrolls.
 const COMBO_LIST_H: f32 = 320.0;
 
+/// Width of the steps arrow beside Undo and Redo.
+const HISTORY_W: f32 = 13.0;
+/// Most steps the Undo and Redo lists show.
+const HISTORY_MAX: usize = 100;
+
+/// Whether the bar button for `command` has a list of steps beside it (Undo, Redo).
+fn has_history(command: &str) -> bool {
+    matches!(command, "u" | "redo")
+}
+
+/// The Undo (or Redo) steps, newest first, at most [`HISTORY_MAX`], in a scrolling list; hovering
+/// a step highlights it and every step before it. The number of steps picked.
+fn history_list(app: &CadApp, ui: &mut egui::Ui, undo: bool) -> Option<usize> {
+    let Ok(st) = app.session.state() else { return None };
+    let steps: Vec<&str> = if undo {
+        st.undo.iter().rev().map(|s| s.label.as_str()).take(HISTORY_MAX).collect()
+    } else {
+        st.redo.iter().rev().map(|s| s.label.as_str()).take(HISTORY_MAX).collect()
+    };
+    let t = Tokens::get();
+    ui.set_min_width(220.0);
+    if steps.is_empty() {
+        ui.label(RichText::new(if undo { crate::tl!("Nothing to undo") } else { crate::tl!("Nothing to redo") }).color(t.text_dim));
+        return None;
+    }
+    let hover_id = egui::Id::new(("cc_history_hover", undo));
+    let hovered: Option<usize> = ui.data(|d| d.get_temp(hover_id));
+    let mut now_hovered = None;
+    let mut picked = None;
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    egui::ScrollArea::vertical().id_salt(("cc_history", undo)).max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+        for (i, label) in steps.iter().enumerate() {
+            let name = if label.trim().is_empty() { crate::tl!("Change").to_string() } else { label.to_ascii_uppercase() };
+            let on = hovered.is_some_and(|h| i <= h);
+            let r = ui.selectable_label(on, format!("{}  {name}", i + 1));
+            if r.hovered() {
+                now_hovered = Some(i);
+            }
+            if r.clicked() {
+                picked = Some(i + 1);
+            }
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(hover_id, now_hovered));
+    let n = now_hovered.or(hovered).map_or(0, |h| h + 1);
+    let what = if undo { crate::tl!("Undo") } else { crate::tl!("Redo") };
+    ui.separator();
+    ui.label(RichText::new(format!("{what}: {n}")).small().color(t.text_dim));
+    picked
+}
+
 /// Whether `command` is one of the bars' drop-downs (not a command).
 pub fn is_combo(command: &str) -> bool {
     [LAYER_COMBO, TEXTSTYLE_COMBO, DIMSTYLE_COMBO, LINETYPE_COMBO].contains(&command)
@@ -458,6 +509,8 @@ enum Action {
     LayerToggle(String, &'static str, bool),
     /// A style or linetype drop-down's choice: the drop-down and the name.
     SetCurrent(&'static str, String),
+    /// Undo (true) or redo this many steps.
+    History(bool, usize),
 }
 
 /// The bar's right-click menu; `item` is the button it was opened on.
@@ -703,6 +756,8 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
             SEP
         } else if is_combo(item) && !vertical {
             combo_width(item) + GAP
+        } else if has_history(item) && !vertical {
+            BUTTON + HISTORY_W + GAP
         } else {
             BUTTON + GAP
         }
@@ -812,8 +867,27 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
         if resp.drag_stopped() {
             drop_from = Some(index);
         }
+        // Undo and Redo: a narrow arrow beside the button lists the steps to go back (or forward) to.
+        let mut extra = 0.0;
+        if has_history(tool.command) && !vertical {
+            let hr = slot(pos + len, HISTORY_W, BUTTON);
+            let hresp = ui.interact(hr, id.with(("tb_history", tool.command)), Sense::click());
+            if hresp.hovered() {
+                ui.painter().rect_filled(hr, 3.0, t.control_hover.gamma_multiply(0.6));
+            }
+            icons::paint(ui.painter(), Rect::from_center_size(hr.center(), vec2(10.0, 10.0)), Icon::ChevronDown, false);
+            let undo = tool.command == "u";
+            let hresp = hresp.on_hover_text(if undo { crate::tl!("Undo several steps") } else { crate::tl!("Redo several steps") });
+            egui::Popup::menu(&hresp).align(egui::RectAlign::BOTTOM_START).show(|ui| {
+                if let Some(k) = history_list(app, ui, undo) {
+                    action = Some(Action::History(undo, k));
+                    ui.close();
+                }
+            });
+            extra = HISTORY_W;
+        }
         placed.push((index, br));
-        pos += len + GAP;
+        pos += len + extra + GAP;
     }
 
     // Dragging a button: show where it lands; dropping it on the bar moves it there.
@@ -938,6 +1012,14 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
         }
         Some(Action::LayerToggle(name, key, on)) => {
             let _ = app.run("layer.set", json!({ "name": name, key: on }));
+        }
+        Some(Action::History(undo, steps)) => {
+            for _ in 0..steps.min(HISTORY_MAX) {
+                if let Err(e) = app.run(if undo { "u" } else { "redo" }, json!({})) {
+                    app.session.echo(e);
+                    break;
+                }
+            }
         }
         Some(Action::SetCurrent(combo, name)) => {
             let r = match combo {

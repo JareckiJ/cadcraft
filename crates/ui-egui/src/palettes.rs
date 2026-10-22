@@ -1137,6 +1137,13 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 });
                 num(ui, "Scale", "scale", real(hh.scale), &mut set, &mut bad, &ids);
                 num(ui, "Angle", "angle", real(hh.angle.to_degrees()), &mut set, &mut bad, &ids);
+                if !hh.solid {
+                    prop_row(ui, "Background color", |ui| {
+                        if let Some(v) = crate::hatchdlg::background_menu(ui, hh.background) {
+                            set = Some(json!({ "handles": ids, "background": v }));
+                        }
+                    });
+                }
             }
             EntityKind::Dimension(dm) => {
                 prop_row(ui, "Dim style", |ui| {

@@ -1870,9 +1870,19 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Crosshair cursor.
     if inside {
         // Hide the OS cursor under the drawn crosshair, unless assistive tech needs it (#39).
-        ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
-        if let Some(hp) = hover_pos {
-            draw_crosshair(app, &painter, rect, hp, selecting);
+        // Panning with the middle button: the Move (four arrows) cursor instead of the crosshair.
+        let panning = app.canvas.pan_last.is_some() && middle_down;
+        if panning {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+        } else {
+            ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
+        }
+        if let Some(hp) = hover_pos
+            && !panning
+        {
+            // Over the white paper of a layout the crosshair is black.
+            let on_paper = sheet.is_some_and(|s| s.bounds().contains(xf.to_world(hp)));
+            draw_crosshair(app, &painter, rect, hp, selecting, on_paper);
         }
         if !app.session.settings.dynmode
             && !app.cmd.buffer.is_empty()
@@ -2055,8 +2065,8 @@ fn pickbox_half(pickbox: f64) -> Option<f32> {
     (half.is_finite() && half >= 1.0).then_some(half)
 }
 
-fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox: bool) {
-    let st = Stroke::new(1.0, Tokens::get().crosshair);
+fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox: bool, on_paper: bool) {
+    let st = Stroke::new(1.0, if on_paper { egui::Color32::BLACK } else { Tokens::get().crosshair });
     let len = (rect.height() * app.session.settings.cursorsize as f32 / 100.0).max(12.0);
     let pb = if pickbox { pickbox_half(app.session.settings.pickbox) } else { None };
     let gap = pb.unwrap_or(0.0);

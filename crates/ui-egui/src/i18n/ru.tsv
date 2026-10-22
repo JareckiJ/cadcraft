@@ -1395,3 +1395,14 @@
 	Text Style	Текстовый стиль
 	Dimension Style	Размерный стиль
 	Style	Стиль
+	Sheet	Лист
+	Drawing	Чертёж
+	Paper	Бумага
+	Ctrl and Shift pick several sheets; drag in the empty space to pick with a rectangle.	Ctrl и Shift выбирают несколько листов; протяните рамку в пустом месте списка, чтобы выбрать прямоугольником.
+	Undo several steps	Отменить несколько шагов
+	Redo several steps	Повторить несколько шагов
+	Nothing to undo	Нечего отменять
+	Nothing to redo	Нечего повторять
+	Change	Изменение
+	Background color	Цвет фона
+	Other color	Другой цвет

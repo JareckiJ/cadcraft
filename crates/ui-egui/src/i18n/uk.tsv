@@ -1700,3 +1700,14 @@
 	Text Style	Текстовий стиль
 	Dimension Style	Розмірний стиль
 	Style	Стиль
+	Sheet	Аркуш
+	Drawing	Креслення
+	Paper	Папір
+	Ctrl and Shift pick several sheets; drag in the empty space to pick with a rectangle.	Ctrl і Shift вибирають кілька аркушів; протягніть рамку в порожньому місці списку, щоб вибрати прямокутником.
+	Undo several steps	Скасувати кілька кроків
+	Redo several steps	Повторити кілька кроків
+	Nothing to undo	Нічого скасовувати
+	Nothing to redo	Нічого повторювати
+	Change	Зміна
+	Background color	Колір фону
+	Other color	Інший колір

@@ -33,6 +33,9 @@ pub struct CmdLine {
     pub option_rows: Vec<(Rect, String)>,
     /// Where the Dynamic Input tooltip stays while the options menu is open.
     pub options_anchor: Option<Pos2>,
+    /// The prompt (message and keywords) the options menu last opened by itself for: it opens
+    /// once per prompt, so closing it (Escape, typing) keeps it closed.
+    options_auto: Option<(String, Vec<String>)>,
 }
 
 /// The most history lines the command line shows above its bar.
@@ -200,6 +203,29 @@ fn options_still_fit(app: &mut CadApp) {
     if app.cmd.options.as_ref().is_some_and(|m| !on || !m.fits(&kws)) {
         app.cmd.options = None;
     }
+    // A prompt that only asks to choose (Yes/No, an option list) shows its options by the
+    // cursor at once: click one, or move with the arrows and press Enter.
+    let Some(prompt) = app.session.current_prompt() else {
+        app.cmd.options_auto = None;
+        return;
+    };
+    let key = (prompt.message.clone(), prompt.keywords.clone());
+    let choose = !prompt.keywords.is_empty() && !prompt.accept.point && !prompt.accept.select;
+    if on
+        && choose
+        && app.cmd.options.is_none()
+        && app.cmd.buffer.is_empty()
+        && app.cmd.history_pos.is_none()
+        && app.cmd.options_auto.as_ref() != Some(&key)
+    {
+        if let Some(mut m) = crate::dyninput::OptionsMenu::open(&prompt.keywords) {
+            if let Some(i) = prompt.default.as_ref().and_then(|d| prompt.keywords.iter().position(|k| k.eq_ignore_ascii_case(d))) {
+                m.index = i;
+            }
+            app.cmd.options = Some(m);
+        }
+        app.cmd.options_auto = Some(key);
+    }
 }
 
 /// Down Arrow at a prompt with keywords (Dynamic Input on, DYNPROMPT on, not browsing the
@@ -249,7 +275,8 @@ pub struct KeyPress {
 
 /// Handle keyboard input destined for the command line (when no text field has focus).
 pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() {
+    // A modal window (Batch Plot) has the keyboard.
+    if ctx.egui_wants_keyboard_input() || app.ui.dialog.as_deref() == Some("publish") {
         return;
     }
     let events = ctx.input(|i| i.events.clone());
@@ -294,7 +321,8 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
             egui::Event::Text(t) => {
                 if t == "\t" {
                     tab(app);
-                } else if t == " " && !text_prompt {
+                } else if t == " " && !text_prompt && !app.cmd.buffer.trim_start().starts_with('=') {
+                    // Space is Enter, except inside a formula (`=1200 + 350`).
                     submit(app);
                 } else {
                     app.cmd.buffer.push_str(&t);

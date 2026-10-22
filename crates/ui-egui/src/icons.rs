@@ -268,35 +268,38 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             }
         }
         Undo | Redo => {
-            // A thick arc with a large arrowhead at its upper end: pointing left for Undo, right
-            // for Redo (the same picture mirrored).
+            // As in Office 2010: a thick blue hook over the top, its arrowhead at the open end
+            // pointing down (Undo: on the left, Redo: mirrored on the right).
             let m = |x: f32| if icon == Undo { x } else { 24.0 - x };
-            let (cx, cy, r) = (13.0_f32, 14.0_f32, 6.5_f32);
-            let a0 = 155.0_f32;
-            let pts: Vec<egui::Pos2> = (0..=24)
+            let (cx, cy, r) = (12.5_f32, 13.5_f32, 6.5_f32);
+            let blue = if dim { a } else { Color32::from_rgb(0x3d, 0x8e, 0xe0) };
+            let pts: Vec<egui::Pos2> = (0..=28)
                 .map(|i| {
-                    let a = (a0 - (a0 + 60.0) * i as f32 / 24.0).to_radians();
-                    pen.at(m(cx + r * a.cos()), cy - r * a.sin())
+                    let ang = (-35.0 + 205.0 * i as f32 / 28.0).to_radians();
+                    pen.at(m(cx + r * ang.cos()), cy - r * ang.sin())
                 })
                 .collect();
-            p.add(egui::Shape::line(pts, Stroke::new(pen.w * 1.8, b)));
-            let a = a0.to_radians();
-            let (sx, sy) = (cx + r * a.cos(), cy - r * a.sin());
-            // Opposite to the arc's way round: down and out at its start.
-            let (dx, dy) = (-a.sin(), -a.cos());
-            let (dx, dy) = (-dx, -dy);
-            let (tx, ty) = (sx + dx * 3.6, sy + dy * 3.6);
+            p.add(egui::Shape::line(pts, Stroke::new(pen.w * 2.4, blue)));
+            // The arrowhead at the arc's open end (170°), pointing down and a little out.
+            let ang = 170.0_f32.to_radians();
+            let (ex, ey) = (cx + r * ang.cos(), cy - r * ang.sin());
+            let (dx, dy) = (-ang.sin(), -ang.cos());
+            let (tx, ty) = (ex + dx * 4.6, ey + dy * 4.6);
             let ddx = if icon == Undo { dx } else { -dx };
-            pen.big_arrow(m(tx), ty, ddx, dy, 6.5, 4.3, b);
+            pen.big_arrow(m(tx), ty, ddx, dy, 7.0, 4.8, blue);
         }
-        Plot | Preview => {
+        Plot => {
             pen.rect(4.0, 9.0, 16.0, 8.0, b);
             pen.rect(7.0, 4.0, 10.0, 5.0, b);
             pen.rect(7.0, 14.0, 10.0, 7.0, b);
-            if icon == Preview {
-                pen.c(17.0, 17.0, 3.0, a);
-                pen.la(19.0, 19.0, 22.0, 22.0);
-            }
+        }
+        Preview => {
+            // A smaller printer on the left and the magnifier clear of it on the right.
+            pen.rect(1.5, 8.0, 12.0, 6.5, b);
+            pen.rect(3.8, 4.0, 7.4, 4.0, b);
+            pen.rect(3.8, 12.0, 7.4, 6.0, b);
+            pen.c(17.5, 13.0, 4.0, a);
+            p.line_segment([pen.at(20.4, 15.9), pen.at(23.0, 18.5)], Stroke::new(pen.w * 1.8, a));
         }
         Publish => {
             pen.rect(3.0, 10.0, 13.0, 7.0, b);

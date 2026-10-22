@@ -45,6 +45,8 @@ pub struct Fill {
     pub associative: bool,
     /// Island detection: 0 normal, 1 outer, 2 ignore.
     pub style: u8,
+    /// Background colour under a pattern (none: the drawing shows through).
+    pub background: Option<Color>,
 }
 
 /// The dialog while open (and while a pick it started runs).
@@ -96,6 +98,7 @@ pub fn create_state(d: &Drawing, uid: u64, gradient: bool) -> HatchDlgState {
         origin_mode: origin_mode.into(),
         associative: h.i64("HPASSOC", 1) != 0,
         style: u8::try_from(h.i64("HPISLANDDETECTION", 0).clamp(0, 2)).unwrap_or(0),
+        background: None,
     };
     HatchDlgState {
         opened: fill.clone(),
@@ -128,6 +131,7 @@ pub fn edit_state(d: &Drawing, uid: u64, handles: Vec<Handle>) -> Option<HatchDl
     f.angle = Some(first.angle.to_degrees()).filter(|a| a.is_finite()).unwrap_or(0.0);
     f.associative = first.associative;
     f.style = first.style.min(2);
+    f.background = first.background;
     f.specified = false;
     f.origin = None;
     if let Some(g) = &first.gradient {
@@ -193,6 +197,9 @@ pub fn ok_call(st: &HatchDlgState) -> Option<(&'static str, Value)> {
         p.insert("associative".into(), json!(f.associative));
         p.insert("separate".into(), json!(st.separate));
         p.insert("style".into(), json!(style_name(f.style)));
+        if let (Some(c), false) = (f.background, f.gradient) {
+            p.insert("background".into(), json!(c.name()));
+        }
         match (f.specified, f.origin) {
             (true, Some(o)) => p.insert("origin".into(), json!(o)),
             (true, None) => p.insert("originMode".into(), json!(f.origin_mode)),
@@ -231,6 +238,9 @@ pub fn ok_call(st: &HatchDlgState) -> Option<(&'static str, Value)> {
     }
     if f.style != o.style {
         p.insert("style".into(), json!(style_name(f.style)));
+    }
+    if f.background != o.background && !f.gradient {
+        p.insert("background".into(), json!(f.background.map_or_else(|| "None".to_string(), |c| c.name())));
     }
     if f.specified {
         match f.origin {
@@ -389,6 +399,66 @@ enum Action {
     Pick(PickMode),
     /// Choose the Custom Patterns folder.
     BrowseFolder,
+}
+
+/// The hatch background colour picker: None, ByLayer/ByBlock, the standard colours and any
+/// colour; the choice as HATCH takes it (a colour name or `"None"`).
+pub fn background_menu(ui: &mut egui::Ui, current: Option<Color>) -> Option<String> {
+    let shown = match current {
+        None => crate::tl!("None").to_string(),
+        Some(c) => crate::i18n::t(&c.name()).to_string(),
+    };
+    let mut out = None;
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+        match current {
+            Some(c) => {
+                let rgb = c.resolve(Color::Index(7), Color::Index(7));
+                ui.painter().rect_filled(r, 2.0, egui::Color32::from_rgb(rgb.0, rgb.1, rgb.2));
+            }
+            None => {
+                ui.painter().rect_stroke(r, 2.0, egui::Stroke::new(1.0, crate::theme::Tokens::get().text_dim), egui::StrokeKind::Inside);
+            }
+        }
+        ui.menu_button(shown, |ui| {
+            if ui.button(crate::tl!("None")).clicked() {
+                out = Some("None".to_string());
+                ui.close();
+            }
+            ui.separator();
+            for (n, c) in [
+                ("ByLayer", Color::ByLayer),
+                ("ByBlock", Color::ByBlock),
+                ("Red", Color::Index(1)),
+                ("Yellow", Color::Index(2)),
+                ("Green", Color::Index(3)),
+                ("Cyan", Color::Index(4)),
+                ("Blue", Color::Index(5)),
+                ("Magenta", Color::Index(6)),
+                ("White", Color::Index(7)),
+                ("Color 8", Color::Index(8)),
+                ("Color 9", Color::Index(9)),
+            ] {
+                if ui.button(crate::i18n::t(n)).clicked() {
+                    out = Some(c.name());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            // Any colour.
+            let mut rgb = match current {
+                Some(Color::True(c)) => [c.0, c.1, c.2],
+                _ => [255, 255, 255],
+            };
+            ui.horizontal(|ui| {
+                ui.label(crate::tl!("Other color"));
+                if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    out = Some(Color::True(cadcraft_color::Rgb(rgb[0], rgb[1], rgb[2])).name());
+                }
+            });
+        });
+    });
+    out
 }
 
 fn shape_label(name: &str) -> &'static str {
@@ -609,6 +679,14 @@ fn options_ui(ui: &mut egui::Ui, st: &mut HatchDlgState, action: &mut Action) {
     ui.checkbox(&mut st.fill.associative, crate::tl!("Associative"));
     if st.edit.is_empty() {
         ui.checkbox(&mut st.separate, crate::tl!("Create separate hatches"));
+    }
+    if !st.fill.gradient {
+        ui.horizontal(|ui| {
+            ui.label(crate::tl!("Background color"));
+            if let Some(v) = background_menu(ui, st.fill.background) {
+                st.fill.background = if v == "None" { None } else { Color::parse(&v) };
+            }
+        });
     }
     ui.label(crate::tl!("Island detection"));
     ui.radio_value(&mut st.fill.style, 0, crate::tl!("Normal"));

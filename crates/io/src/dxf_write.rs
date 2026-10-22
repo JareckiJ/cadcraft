@@ -1219,6 +1219,11 @@ fn hatch_xdata(w: &mut W, h: &Hatch) {
     w.s(1000, "HATCH");
     w.p(1011, h.origin.to3(0.0));
     w.s(1000, h.background.map(Color::name).unwrap_or_default());
+    // As AutoCAD keeps it, so AutoCAD shows the background too.
+    if let Some(c) = h.background {
+        w.s(1001, dxf_ext::HATCH_BACKGROUND_APP);
+        w.i(1071, dxf_ext::acad_color_value(c));
+    }
 }
 
 /// What happens to the anonymous `*D` blocks read from a file (#495): a dimension that still
@@ -2032,7 +2037,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let apps = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    let apps =
+        ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP, dxf_ext::HATCH_BACKGROUND_APP];
     let th = table_head(&mut w, "APPID", apps.len());
     for app in apps {
         record_head(&mut w, "APPID", &th, "AcDbRegAppTableRecord");

@@ -8,6 +8,94 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 22.10.2026 (0.9.0-b13)
+
+### Русский
+
+**Штриховка: цвет фона**
+- У штриховки появилось свойство «Цвет фона»: в палитре «Свойства», в окне «Штриховка и градиент» и в команде HATCHEDIT. Можно выбрать «Нет», «ПоСлою», «ПоБлоку», стандартный цвет или любой другой.
+- Цвет фона, заданный в AutoCAD, читается из файла и записывается обратно, так что AutoCAD его тоже увидит. У сплошной заливки фона нет.
+
+**Иврит на чертеже вместо русского**
+- Найдена причина. Шрифты SHX этого чертежа (romans, txt, simplex и др.) хранят буквы по кодам Unicode. Программа считала их «одноязычными» шрифтами, где иврит лежит на кодах 0xE0–0xFA, и брала оттуда знаки, а там в этих шрифтах русские буквы. Теперь иврит берётся из таких кодов только у настоящих ивритских шрифтов (кодировки 1255 и 862). В остальных шрифтах буквы ищутся по Unicode, а если буквы нет, используется встроенный шрифт CADCraft.
+- Шрифты вроде GIL, в которых латинские буквы нарисованы как ивритские (ввод с английской раскладки), так и показываются — это задумано самим шрифтом.
+
+**Спецсимволы**
+- Знаки ⌀ (%%c), ° (%%d) и ± (%%p) показываются при любом стиле и шрифте. Если в шрифте SHX такого знака нет, он рисуется встроенным шрифтом. Раньше в некоторых ивритских шрифтах вместо ⌀ появлялась «]».
+
+**Листы (Layout) чертежей AutoCAD**
+- Найдена причина сдвига. Видовой экран AutoCAD смотрит не только в свою «центральную точку», но и со смещением на «цель вида», и программа это смещение не учитывала. Теперь учитывает: чертежи вернулись на листы на своё место (проверено на «אריה צוק»).
+
+**Формулы в командной строке**
+- Везде, где программа спрашивает расстояние, длину, радиус или число, можно ввести формулу, начинающуюся с «=»: =1200+350*2, =(2400-50)/3. Работают + − * /, скобки, минус перед числом, десятичная запятая. Результат показывается в истории: «=1200+350*2 = 1900».
+- Пробел внутри формулы — это пробел, а не Enter.
+
+**Выбор вариантов рядом с курсором**
+- Когда команда спрашивает выбор между вариантами (например, ЗЕРКАЛО: «Удалить исходные объекты? [Да/Нет]»), рядом с курсором появляется окошко с вариантами. Вариант можно нажать мышью или выбрать стрелками ↑ ↓ и Enter. Вариант по умолчанию уже выделен. Можно и просто печатать, как раньше.
+
+**Курсор**
+- При панорамировании средней кнопкой мыши курсор становится значком «Перемещение».
+- Над бумагой листа (Layout) перекрестие курсора становится чёрным.
+
+**Пакетная печать**
+- Пока окно открыто, остальная программа неактивна (затемнена).
+- Несколько листов выделяются щелчком с Ctrl, диапазон — с Shift, рамкой мышью (начиная с пустого места под строками), все — Ctrl+A. Кнопки перемещения, удаления и копирования работают для всех выделенных листов сразу.
+- Список разбит на столбцы «№», «Лист», «Чертёж», «Бумага» с разделителями. Названия обрезаются по ширине столбца и не наезжают друг на друга.
+
+**Отменить и повторить**
+- Новые значки в стиле Office 2010: толстая синяя дуга с крупной стрелкой.
+- Рядом с кнопками «Отменить» и «Повторить» есть маленькая кнопка со стрелкой вниз. Она открывает список последних шагов (до 100, с прокруткой). При наведении подсвечиваются все шаги, которые будут отменены, а щелчок отменяет (или повторяет) их все сразу.
+
+**Значок предварительного просмотра**
+- Лупа отодвинута вправо и больше не закрывает принтер.
+
+**Пока не воспроизведено**
+- Текст, печатающийся контуром без заливки, у нас не получился: в PDF текст и размеры выходят залитыми. Пришлите, пожалуйста, снимок или файл, где это видно, и скажите, через что печатали (PDF, принтер) и чем смотрели.
+
+### English
+
+**Hatch: background colour**
+- Hatches have a "Background color" property: in the Properties palette, the Hatch and Gradient dialog, and HATCHEDIT. Choose None, ByLayer, ByBlock, a standard colour, or any other colour.
+- A background colour set in AutoCAD is read from the file and written back, so AutoCAD sees it too. Solid fills have no background.
+
+**Hebrew turning into Russian on the drawing**
+- Found the cause. This drawing's SHX fonts (romans, txt, simplex, …) store letters by their Unicode codes. CADCraft took them for single-language fonts that keep Hebrew at codes 0xE0–0xFA and drew the glyphs found there, which in these fonts are Russian letters. Now Hebrew is looked up at those codes only in real Hebrew fonts (code pages 1255 and 862). Other fonts are looked up by Unicode, and a missing letter is drawn with CADCraft's built-in font.
+- Fonts such as GIL, which draw Latin letters as Hebrew ones (for typing on an English keyboard), keep showing that way, as the font intends.
+
+**Special symbols**
+- ⌀ (%%c), ° (%%d) and ± (%%p) show with every style and font. If an SHX font has no such sign, it is drawn with the built-in font. Some Hebrew fonts used to show "]" instead of ⌀.
+
+**Layouts of AutoCAD drawings**
+- Found the cause of the shift. An AutoCAD viewport looks at its view centre offset by its "view target", and CADCraft ignored that offset. It no longer does: the drawings are back in place on the sheets (checked with "אריה צוק").
+
+**Formulas at the command line**
+- Wherever a distance, length, radius or number is asked for, you can type a formula starting with "=": =1200+350*2, =(2400-50)/3. It takes + − * /, parentheses, a minus before a number and a decimal comma. The history shows the result: "=1200+350*2 = 1900".
+- A space inside a formula is a space, not Enter.
+
+**Choices next to the cursor**
+- When a command asks you to choose between options (for example MIRROR: "Erase source objects? [Yes/No]"), a small box with the options appears next to the cursor. Click one, or move with ↑ ↓ and press Enter. The default option is already highlighted. Typing works as before.
+
+**Cursor**
+- While panning with the middle mouse button, the cursor shows the Move icon.
+- Over the paper of a layout, the crosshair turns black.
+
+**Batch Plot**
+- While the window is open, the rest of the program is inactive (dimmed).
+- Select several sheets with Ctrl+click, a range with Shift+click, a rectangle dragged with the mouse (start in the empty space below the rows), or all with Ctrl+A. Move, remove and duplicate act on all selected sheets.
+- The list has columns "#", "Sheet", "Drawing" and "Paper" with separators. Names are cut to the column width and never overlap.
+
+**Undo and Redo**
+- New Office 2010-style icons: a thick blue arc with a big arrowhead.
+- A small arrow button beside Undo and Redo opens a list of recent steps (up to 100, with a scrollbar). Hovering highlights all steps that will be undone, and a click undoes (or redoes) all of them at once.
+
+**Plot Preview icon**
+- The magnifier moved right and no longer covers the printer.
+
+**Not reproduced yet**
+- Text printing as an outline without fill didn't happen here: in PDF, text and dimensions come out filled. Please send a screenshot or a file where you see it, and say how you printed (PDF or printer) and what you viewed it with.
+
+---
+
 ## 22.10.2026 (0.9.0-b12)
 
 ### Русский

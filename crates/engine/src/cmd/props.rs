@@ -16,7 +16,7 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; textStyle (text, multiline text, multileaders); multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; textStyle (text, multiline text, multileaders); hatches: pattern, scale, angle, background (colour | \"None\"); multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -463,6 +463,17 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     if let Some(x) = num("angle") {
                         h.angle = x.to_radians();
+                    }
+                    // Background colour: a colour fills the area under the pattern; "None" none.
+                    match p.get("background") {
+                        Some(Value::Null) => h.background = None,
+                        Some(v) if v.as_str().is_some_and(|s| s.trim().eq_ignore_ascii_case("none") || s.trim().is_empty()) => h.background = None,
+                        Some(v) => {
+                            if let Some(c) = parse_color(v) {
+                                h.background = Some(c);
+                            }
+                        }
+                        None => {}
                     }
                 }
                 _ => {}

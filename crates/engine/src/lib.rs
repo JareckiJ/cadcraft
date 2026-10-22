@@ -15,6 +15,7 @@ pub mod blockedit;
 pub mod cmd;
 pub mod doc_path;
 mod finite;
+pub mod formula;
 pub mod grip_dims;
 pub mod grips;
 mod guard;
@@ -1508,6 +1509,22 @@ impl Session {
         // Transparent command.
         if tt.starts_with('\'') {
             return self.start(tt);
+        }
+        // A formula (`=1200+350*2`) where a distance or number is asked: its value is the answer.
+        if (prompt.accept.number || prompt.accept.point)
+            && let Some(r) = formula::eval(tt)
+        {
+            return match r {
+                Ok(v) => {
+                    let v = if v.fract() == 0.0 && v.abs() < 1e15 { format!("{v:.0}") } else { format!("{v}") };
+                    self.echo(format!("{tt} = {v}"));
+                    self.typed(&v)
+                }
+                Err(e) => {
+                    self.echo(e);
+                    Ok(())
+                }
+            };
         }
         // A LISP expression typed at a command's prompt: its value is the answer.
         // Not at a free-text prompt: there the text is the answer (CAL takes "(3+4)*2").

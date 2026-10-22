@@ -164,18 +164,71 @@ impl ShxFont {
         self.shapes.contains_key(&code)
     }
 
+    /// How many of `codes` the font draws.
+    fn count(&self, codes: std::ops::RangeInclusive<u32>) -> usize {
+        codes.filter(|c| self.shapes.contains_key(c)).count()
+    }
+
+    /// A one-byte font with Hebrew letters at their Windows-1255 places (0xE0..0xFA) and not a
+    /// Cyrillic Windows-1251 font (which fills 0xC0..0xDF with capitals as well).
+    fn hebrew_1255(&self) -> bool {
+        self.kind != Kind::Unifont && self.count(0xE0..=0xFA) >= 20 && self.count(0xC0..=0xDF) < 16
+    }
+
+    /// A one-byte font with Hebrew letters at their DOS 862 places (0x80..0x9A) and not a
+    /// Cyrillic DOS 866 font (which also has small letters at 0xA0..0xAF).
+    fn hebrew_862(&self) -> bool {
+        self.kind != Kind::Unifont && self.count(0x80..=0x9A) >= 20 && self.count(0xA0..=0xAF) < 8
+    }
+
     /// The shape that draws `c`: its code point, or for a one-byte font a Hebrew letter at
     /// its Windows-1255 or DOS (862) position, and the old AutoCAD positions of °, ± and ⌀.
     pub fn code_for(&self, c: char) -> Option<u32> {
         let u = u32::from(c);
         let mut tries: Vec<u32> = vec![u];
+        // Only a font that holds Hebrew there: a Cyrillic font has its letters at the same
+        // places (Windows-1251 0xC0..0xFF, DOS 866 0x80..0xAF), and Hebrew text must not turn
+        // into Russian.
         if (0x05D0..=0x05EA).contains(&u) {
-            tries.extend([u - 0x05D0 + 0xE0, u - 0x05D0 + 0x80]);
+            if self.hebrew_1255() {
+                tries.push(u - 0x05D0 + 0xE0);
+            }
+            if self.hebrew_862() {
+                tries.push(u - 0x05D0 + 0x80);
+            }
         }
+        // °, ± and ⌀: their Unicode places in a Unicode font; in a one-byte font AutoCAD's own
+        // places (127, 128, 129) unless those hold Hebrew letters (DOS 862), and never a
+        // Windows code page place, which other code pages use for letters (Ш, ר…). A font
+        // without them draws them from the built-in font.
+        let unicode = self.kind == Kind::Unifont;
+        let legacy = !unicode && !self.hebrew_862();
         match c {
-            '°' => tries.extend([0xB0, 0x7F]),
-            '±' => tries.extend([0xB1, 0x80]),
-            '⌀' | '∅' | 'Ø' => tries.extend([0x2205, 0x2300, 0xD8, 0x81]),
+            '°' => {
+                if unicode {
+                    tries.push(0xB0);
+                }
+                if legacy {
+                    tries.push(0x7F);
+                }
+            }
+            '±' => {
+                if unicode {
+                    tries.push(0xB1);
+                }
+                if legacy {
+                    tries.push(0x80);
+                }
+            }
+            '⌀' | '∅' | 'Ø' => {
+                tries.extend([0x2205, 0x2300]);
+                if unicode {
+                    tries.push(0xD8);
+                }
+                if legacy {
+                    tries.push(0x81);
+                }
+            }
             _ => {}
         }
         tries.into_iter().find(|t| self.has(*t))
@@ -701,5 +754,38 @@ mod tests {
         }
         let f = ShxFont::parse("loop", &b).expect("parses");
         assert!(f.glyph(65).is_some());
+    }
+}
+
+#[cfg(test)]
+mod survey {
+    /// `CADCRAFT_SHX_DIR=… cargo test -p cadcraft-fonts survey -- --ignored --nocapture`: how each
+    /// font of a folder is read (a look at real fonts; not run normally).
+    #[test]
+    #[ignore = "needs a folder of fonts"]
+    fn survey_fonts() {
+        let Ok(dir) = std::env::var("CADCRAFT_SHX_DIR") else { return };
+        let mut v: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
+        v.sort();
+        for p in v {
+            let b = std::fs::read(&p).unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().to_string();
+            match super::ShxFont::parse(&name, &b) {
+                Some(f) => println!(
+                    "{name}: {:?} 1255={} 862={} E0..FA={} C0..DF={} 80..9A={} A0..AF={} U+05D0={} U+0430={} E0~430={}",
+                    f.kind,
+                    f.hebrew_1255(),
+                    f.hebrew_862(),
+                    f.count(0xE0..=0xFA),
+                    f.count(0xC0..=0xDF),
+                    f.count(0x80..=0x9A),
+                    f.count(0xA0..=0xAF),
+                    f.has(0x05D0),
+                    f.has(0x0430),
+                    f.glyph(0xE0).map(|g| g.strokes) == f.glyph(0x430).map(|g| g.strokes)
+                ),
+                None => println!("{name}: unreadable"),
+            }
+        }
     }
 }

@@ -22,8 +22,14 @@ struct State {
     sheets: Vec<Sheet>,
     /// The drawing the list was filled from when the window opened.
     filled_for: Option<String>,
-    selected: Option<usize>,
-    dragging: Option<usize>,
+    /// The picked rows (Ctrl and Shift pick several).
+    selected: Vec<usize>,
+    /// Where Shift+click extends from.
+    anchor: Option<usize>,
+    /// The picked rows are being dragged.
+    dragging: bool,
+    /// Where a selection rectangle started (in the list's empty space).
+    band_from: Option<egui::Pos2>,
     /// The drawing whose sheets the Add section shows.
     add_from: Option<String>,
     separate: bool,
@@ -74,19 +80,47 @@ pub fn publish_params(app: &CadApp, sheets: &[Sheet], combine: bool, path: Optio
     Ok(p)
 }
 
+/// Move the sheets at `picked` (any order) as one block to stand before `slot` (0..=len), keeping
+/// their order; the indices they end up at.
+pub fn move_sheets(v: &mut Vec<Sheet>, picked: &[usize], slot: usize) -> Vec<usize> {
+    let mut idx: Vec<usize> = picked.iter().copied().filter(|i| *i < v.len()).collect();
+    idx.sort_unstable();
+    idx.dedup();
+    if idx.is_empty() {
+        return Vec::new();
+    }
+    let before = idx.iter().filter(|i| **i < slot).count();
+    let moved: Vec<Sheet> = idx.iter().filter_map(|i| v.get(*i).cloned()).collect();
+    for i in idx.iter().rev() {
+        v.remove(*i);
+    }
+    let at = slot.saturating_sub(before).min(v.len());
+    for (k, sh) in moved.into_iter().enumerate() {
+        v.insert(at + k, sh);
+    }
+    (at..at + idx.len()).collect()
+}
+
 /// What a click asked for, applied once the list is drawn.
 enum Act {
-    Select(usize),
-    Move(usize, usize),
-    Duplicate(usize),
-    Remove(usize),
+    /// A click on row `i`: with Ctrl it toggles, with Shift it extends from the anchor.
+    Click(usize, egui::Modifiers),
+    /// A rubber-band rectangle picked these rows (added to the selection with Ctrl).
+    Band(Vec<usize>, bool),
+    SelectAll,
+    /// The selected rows to stand before this slot.
+    MoveTo(usize),
+    Up,
+    Down,
+    Duplicate,
+    Remove,
     Add(Sheet),
     AddAll(String),
     Clear,
     Plot,
 }
 
-/// File ▸ Batch Plot: the print manager window.
+/// File ▸ Batch Plot: the print manager window. While it is open the rest of the program waits.
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
     let current = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
@@ -94,12 +128,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     if st.filled_for.as_deref() != Some(current.as_str()) {
         st.sheets = app.session.doc().map(|d| sheets_of(d, &current)).unwrap_or_default();
         st.filled_for = Some(current.clone());
-        st.selected = None;
+        st.selected.clear();
         st.add_from = Some(current.clone());
         st.note = None;
     }
+    st.selected.retain(|i| *i < st.sheets.len());
     let titles: Vec<String> = app.session.docs.iter().map(|d| d.title.clone()).collect();
-    let several = st.sheets.iter().any(|s| s.drawing != current) || titles.len() > 1;
     let paper = |s: &Sheet| -> String {
         let Some(d) = app.session.docs.iter().find(|d| d.title == s.drawing) else { return crate::tl!("closed").to_string() };
         if s.layout == "Model" {
@@ -111,10 +145,17 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let can_plot = app.services.pick_save.is_some();
     let mut act: Option<Act> = None;
     let mut close = false;
+    // Modal: a dimmed backdrop over the whole program takes every click outside the window.
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("cc_batch_plot_backdrop")).order(egui::Order::Middle).fixed_pos(screen.min).interactable(true).show(ctx, |ui| {
+        let (r, _) = ui.allocate_exact_size(screen.size(), Sense::click_and_drag());
+        ui.painter().rect_filled(r, 0.0, egui::Color32::from_black_alpha(110));
+    });
     egui::Window::new(crate::tl!("Batch Plot"))
         .id(egui::Id::new("cc_batch_plot_window"))
+        .order(egui::Order::Foreground)
         .open(open)
-        .default_size(vec2(680.0, 500.0))
+        .default_size(vec2(700.0, 520.0))
         .min_size(vec2(520.0, 380.0))
         .resizable(true)
         .show(ctx, |ui| {
@@ -125,47 +166,100 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 let list_h = (ui.available_height() - 190.0).max(140.0);
                 ui.allocate_ui_with_layout(vec2(list_w, list_h), egui::Layout::top_down(egui::Align::LEFT), |ui| {
                     egui::Frame::NONE.stroke(Stroke::new(1.0, t.border)).inner_margin(2.0).show(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt("cc_batch_list").auto_shrink([false, false]).max_height(list_h - 6.0).show(ui, |ui| {
-                            let w = list_w - 10.0;
+                        let w = list_w - 10.0;
+                        // Columns: number, sheet, drawing, paper, with a separator between each.
+                        let cols = [34.0_f32, (w - 34.0) * 0.36, (w - 34.0) * 0.34, (w - 34.0) * 0.30];
+                        let col_x = |k: usize| cols.iter().take(k).sum::<f32>();
+                        let (hr, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+                        ui.painter().rect_filled(hr, 0.0, t.chrome_dark);
+                        for (k, title) in ["#", crate::tl!("Sheet"), crate::tl!("Drawing"), crate::tl!("Paper")].into_iter().enumerate() {
+                            let cell = Rect::from_min_size(pos2(hr.left() + col_x(k), hr.top()), vec2(cols[k], hr.height()));
+                            ui.painter().with_clip_rect(cell.shrink2(vec2(3.0, 0.0))).text(
+                                pos2(cell.left() + 5.0, cell.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                title,
+                                crate::theme::small(),
+                                t.text_dim,
+                            );
+                            if k > 0 {
+                                ui.painter().vline(cell.left(), hr.y_range(), Stroke::new(1.0, t.border));
+                            }
+                        }
+                        let body_h = list_h - 30.0;
+                        egui::ScrollArea::vertical().id_salt("cc_batch_list").auto_shrink([false, false]).max_height(body_h).show(ui, |ui| {
                             ui.set_width(w);
                             let mut rects: Vec<Rect> = Vec::new();
                             for (i, (layout, drawing, paper)) in rows.iter().enumerate() {
                                 let (r, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click_and_drag());
                                 rects.push(r);
-                                let on = st.selected == Some(i);
+                                let on = st.selected.contains(&i);
                                 if on {
                                     ui.painter().rect_filled(r, 2.0, t.accent.gamma_multiply(0.35));
                                 } else if resp.hovered() {
                                     ui.painter().rect_filled(r, 2.0, t.control_hover.gamma_multiply(0.6));
                                 }
-                                let p = ui.painter().with_clip_rect(r);
                                 let y = r.center().y;
-                                // A grip that shows rows can be dragged.
+                                let cell = |k: usize| Rect::from_min_size(pos2(r.left() + col_x(k), r.top()), vec2(cols[k], r.height()));
+                                // A grip that shows rows can be dragged, and the number.
+                                let c0 = cell(0);
                                 for dy in [-4.0, 0.0, 4.0] {
-                                    p.hline((r.left() + 5.0)..=(r.left() + 13.0), y + dy, Stroke::new(1.0, t.text_faint));
+                                    ui.painter().hline((c0.left() + 3.0)..=(c0.left() + 9.0), y + dy, Stroke::new(1.0, t.text_faint));
                                 }
-                                p.text(pos2(r.left() + 20.0, y), egui::Align2::LEFT_CENTER, format!("{}.", i + 1), crate::theme::body(), t.text_dim);
-                                p.text(pos2(r.left() + 48.0, y), egui::Align2::LEFT_CENTER, crate::i18n::t(layout), crate::theme::body(), t.text);
-                                if several {
-                                    // Hebrew names read right to left, as in the file manager.
-                                    let job = crate::i18n::job(drawing, crate::theme::small(), t.text_dim);
-                                    let g = ui.ctx().fonts_mut(|f| f.layout_job(job));
-                                    p.galley(pos2(r.left() + w * 0.45, y - g.size().y / 2.0), g, t.text_dim);
+                                ui.painter().with_clip_rect(c0).text(
+                                    pos2(c0.left() + 12.0, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    format!("{}", i + 1),
+                                    crate::theme::small(),
+                                    t.text_dim,
+                                );
+                                let c1 = cell(1);
+                                ui.painter().with_clip_rect(c1.shrink2(vec2(3.0, 0.0))).text(
+                                    pos2(c1.left() + 5.0, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    crate::i18n::t(layout),
+                                    crate::theme::body(),
+                                    t.text,
+                                );
+                                // Hebrew names read right to left, as in the file manager.
+                                let c2 = cell(2);
+                                let job = crate::i18n::job(drawing, crate::theme::small(), t.text_dim);
+                                let g = ui.ctx().fonts_mut(|f| f.layout_job(job));
+                                ui.painter().with_clip_rect(c2.shrink2(vec2(3.0, 0.0))).galley(
+                                    pos2(c2.left() + 5.0, y - g.size().y / 2.0),
+                                    g,
+                                    t.text_dim,
+                                );
+                                let c3 = cell(3);
+                                ui.painter().with_clip_rect(c3.shrink2(vec2(3.0, 0.0))).text(
+                                    pos2(c3.left() + 5.0, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    paper,
+                                    crate::theme::small(),
+                                    t.text_dim,
+                                );
+                                for k in 1..4 {
+                                    ui.painter().vline(cell(k).left(), r.y_range(), Stroke::new(1.0, t.border.gamma_multiply(0.6)));
                                 }
-                                p.text(pos2(r.right() - 6.0, y), egui::Align2::RIGHT_CENTER, paper, crate::theme::small(), t.text_dim);
-                                if resp.clicked() || resp.drag_started() {
-                                    act = Some(Act::Select(i));
+                                if resp.clicked() {
+                                    act = Some(Act::Click(i, ui.input(|inp| inp.modifiers)));
                                 }
                                 if resp.drag_started() {
-                                    st.dragging = Some(i);
+                                    // Dragging an unselected row drags it alone.
+                                    if !on {
+                                        act = Some(Act::Click(i, egui::Modifiers::NONE));
+                                    }
+                                    st.dragging = true;
                                 }
                                 resp.context_menu(|ui| {
+                                    if !on {
+                                        act = Some(Act::Click(i, egui::Modifiers::NONE));
+                                    }
                                     if ui.button(crate::tl!("Duplicate")).clicked() {
-                                        act = Some(Act::Duplicate(i));
+                                        act = Some(Act::Duplicate);
                                         ui.close();
                                     }
                                     if ui.button(crate::tl!("Delete")).clicked() {
-                                        act = Some(Act::Remove(i));
+                                        act = Some(Act::Remove);
                                         ui.close();
                                     }
                                 });
@@ -173,8 +267,28 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                             if rows.is_empty() {
                                 ui.label(RichText::new(crate::tl!("No sheets. Add sheets below.")).color(t.text_dim));
                             }
-                            // Dragging a row: a line where it will land.
-                            if let Some(from) = st.dragging {
+                            // The space below the rows: a drag there draws a selection rectangle.
+                            let rest = ui.available_size().max(vec2(w, 30.0));
+                            let (blank, bresp) = ui.allocate_exact_size(vec2(w, rest.y), Sense::click_and_drag());
+                            if bresp.clicked() && !ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+                                act = Some(Act::Band(Vec::new(), false));
+                            }
+                            if bresp.drag_started() {
+                                st.band_from = bresp.interact_pointer_pos();
+                            }
+                            if let (Some(from), Some(to)) = (st.band_from, ui.ctx().pointer_latest_pos()) {
+                                let band = Rect::from_two_pos(from, to);
+                                ui.painter().rect_filled(band, 0.0, t.accent.gamma_multiply(0.15));
+                                ui.painter().rect_stroke(band, 0.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+                                let hit: Vec<usize> = rects.iter().enumerate().filter(|(_, r)| r.intersects(band)).map(|(i, _)| i).collect();
+                                if ui.input(|i| i.pointer.any_released()) {
+                                    act = Some(Act::Band(hit, ui.input(|i| i.modifiers.command)));
+                                    st.band_from = None;
+                                }
+                            }
+                            let _ = blank;
+                            // Dragging rows: a line where they will land.
+                            if st.dragging {
                                 let pointer = ui.ctx().pointer_latest_pos();
                                 let slot = pointer.map(|p| rects.iter().position(|r| p.y < r.center().y).unwrap_or(rects.len()));
                                 if let Some(slot) = slot {
@@ -185,13 +299,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                                 }
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                                 if ui.input(|i| i.pointer.any_released()) {
-                                    if let Some(slot) = slot
-                                        && slot != from
-                                        && slot != from + 1
-                                    {
-                                        act = Some(Act::Move(from, slot));
+                                    if let Some(slot) = slot {
+                                        act = Some(Act::MoveTo(slot));
                                     }
-                                    st.dragging = None;
+                                    st.dragging = false;
                                 }
                             }
                         });
@@ -200,8 +311,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 // The order and list buttons.
                 ui.vertical(|ui| {
                     ui.set_width(180.0);
-                    let sel = st.selected.filter(|i| *i < st.sheets.len());
+                    let any = !st.selected.is_empty();
                     let n = st.sheets.len();
+                    let first = st.selected.iter().min().copied().unwrap_or(0);
+                    let last = st.selected.iter().max().copied().unwrap_or(0);
                     let row = |ui: &mut egui::Ui, icon: Icon, label: &str, enabled: bool| -> bool {
                         ui.add_enabled_ui(enabled, |ui| {
                             ui.horizontal(|ui| {
@@ -222,40 +335,34 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                         })
                         .inner
                     };
-                    if row(ui, Icon::MoveTop, crate::tl!("Move to Top"), sel.is_some_and(|i| i > 0))
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Move(i, 0));
+                    if row(ui, Icon::MoveTop, crate::tl!("Move to Top"), any && first > 0) {
+                        act = Some(Act::MoveTo(0));
                     }
-                    if row(ui, Icon::MoveUp, crate::tl!("Move Higher"), sel.is_some_and(|i| i > 0))
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Move(i, i.saturating_sub(1)));
+                    if row(ui, Icon::MoveUp, crate::tl!("Move Higher"), any && first > 0) {
+                        act = Some(Act::Up);
                     }
-                    if row(ui, Icon::MoveDown, crate::tl!("Move Lower"), sel.is_some_and(|i| i + 1 < n))
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Move(i, i + 2));
+                    if row(ui, Icon::MoveDown, crate::tl!("Move Lower"), any && last + 1 < n) {
+                        act = Some(Act::Down);
                     }
-                    if row(ui, Icon::MoveBottom, crate::tl!("Move to Bottom"), sel.is_some_and(|i| i + 1 < n))
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Move(i, n));
+                    if row(ui, Icon::MoveBottom, crate::tl!("Move to Bottom"), any && last + 1 < n) {
+                        act = Some(Act::MoveTo(n));
                     }
                     ui.add_space(6.0);
-                    if row(ui, Icon::Copy, crate::tl!("Duplicate"), sel.is_some())
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Duplicate(i));
+                    if row(ui, Icon::Copy, crate::tl!("Duplicate"), any) {
+                        act = Some(Act::Duplicate);
                     }
-                    if row(ui, Icon::Erase, crate::tl!("Delete"), sel.is_some())
-                        && let Some(i) = sel
-                    {
-                        act = Some(Act::Remove(i));
+                    if row(ui, Icon::Erase, crate::tl!("Delete"), any) {
+                        act = Some(Act::Remove);
                     }
                     if row(ui, Icon::Close, crate::tl!("Clear List"), n > 0) {
                         act = Some(Act::Clear);
                     }
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(crate::tl!("Ctrl and Shift pick several sheets; drag in the empty space to pick with a rectangle."))
+                            .small()
+                            .color(t.text_dim),
+                    );
                 });
             });
             ui.add_space(6.0);
@@ -313,25 +420,89 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 }
                 ui.label(RichText::new(format!("{} {}", st.sheets.len(), crate::tl!("sheets"))).color(t.text_dim));
             });
+            // Ctrl+A picks every sheet.
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+                act = Some(Act::SelectAll);
+            }
         });
+    let n = st.sheets.len();
     match act {
-        Some(Act::Select(i)) => st.selected = Some(i),
-        Some(Act::Move(from, slot)) => st.selected = move_sheet(&mut st.sheets, from, slot),
-        Some(Act::Duplicate(i)) => {
-            if let Some(s) = st.sheets.get(i).cloned() {
-                st.sheets.insert(i + 1, s);
-                st.selected = Some(i + 1);
+        Some(Act::Click(i, m)) => {
+            if m.shift {
+                let a = st.anchor.unwrap_or(i).min(n.saturating_sub(1));
+                let (lo, hi) = (a.min(i), a.max(i));
+                if !m.command {
+                    st.selected.clear();
+                }
+                for k in lo..=hi {
+                    if !st.selected.contains(&k) {
+                        st.selected.push(k);
+                    }
+                }
+            } else if m.command {
+                if let Some(p) = st.selected.iter().position(|k| *k == i) {
+                    st.selected.remove(p);
+                } else {
+                    st.selected.push(i);
+                }
+                st.anchor = Some(i);
+            } else {
+                st.selected = vec![i];
+                st.anchor = Some(i);
             }
         }
-        Some(Act::Remove(i)) => {
-            if i < st.sheets.len() {
-                st.sheets.remove(i);
-                st.selected = if st.sheets.is_empty() { None } else { Some(i.min(st.sheets.len() - 1)) };
+        Some(Act::Band(hit, add)) => {
+            if !add {
+                st.selected.clear();
             }
+            for k in hit {
+                if !st.selected.contains(&k) {
+                    st.selected.push(k);
+                }
+            }
+            st.anchor = st.selected.first().copied();
+        }
+        Some(Act::SelectAll) => st.selected = (0..n).collect(),
+        Some(Act::MoveTo(slot)) => {
+            let picked = st.selected.clone();
+            st.selected = move_sheets(&mut st.sheets, &picked, slot);
+        }
+        Some(Act::Up) => {
+            let first = st.selected.iter().min().copied().unwrap_or(0);
+            let picked = st.selected.clone();
+            st.selected = move_sheets(&mut st.sheets, &picked, first.saturating_sub(1));
+        }
+        Some(Act::Down) => {
+            let last = st.selected.iter().max().copied().unwrap_or(0);
+            let picked = st.selected.clone();
+            st.selected = move_sheets(&mut st.sheets, &picked, (last + 2).min(n));
+        }
+        Some(Act::Duplicate) => {
+            // Each picked sheet gets its copy right after the block of picked sheets.
+            let mut idx = st.selected.clone();
+            idx.sort_unstable();
+            let copies: Vec<Sheet> = idx.iter().filter_map(|i| st.sheets.get(*i).cloned()).collect();
+            let at = idx.last().map_or(n, |l| l + 1);
+            let k = copies.len();
+            for (j, c) in copies.into_iter().enumerate() {
+                st.sheets.insert(at + j, c);
+            }
+            st.selected = (at..at + k).collect();
+        }
+        Some(Act::Remove) => {
+            let mut idx = st.selected.clone();
+            idx.sort_unstable();
+            idx.dedup();
+            for i in idx.iter().rev() {
+                if *i < st.sheets.len() {
+                    st.sheets.remove(*i);
+                }
+            }
+            st.selected = idx.first().filter(|_| !st.sheets.is_empty()).map(|f| vec![(*f).min(st.sheets.len() - 1)]).unwrap_or_default();
         }
         Some(Act::Add(s)) => {
             st.sheets.push(s);
-            st.selected = Some(st.sheets.len() - 1);
+            st.selected = vec![st.sheets.len() - 1];
         }
         Some(Act::AddAll(title)) => {
             if let Some(d) = app.session.docs.iter().find(|d| d.title == title) {
@@ -340,7 +511,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         }
         Some(Act::Clear) => {
             st.sheets.clear();
-            st.selected = None;
+            st.selected.clear();
         }
         Some(Act::Plot) => {
             let stem = std::path::Path::new(&current)
@@ -362,7 +533,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         }
         None => {}
     }
-    if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) && st.dragging.is_none() {
+    if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !st.dragging {
         *open = false;
     }
     if *open {
@@ -375,7 +546,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Sheet, move_sheet};
+    use super::{Sheet, move_sheet, move_sheets};
 
     fn s(n: &str) -> Sheet {
         Sheet { drawing: "A.dwg".into(), layout: n.into() }
@@ -391,5 +562,17 @@ mod tests {
         assert_eq!(move_sheet(&mut v, 1, 3), Some(2));
         assert_eq!(v.iter().map(|x| x.layout.as_str()).collect::<Vec<_>>(), ["1", "3", "2", "4"]);
         assert_eq!(move_sheet(&mut v, 9, 0), None);
+    }
+
+    #[test]
+    fn several_sheets_move_as_a_block() {
+        let names = |v: &[Sheet]| v.iter().map(|x| x.layout.clone()).collect::<Vec<_>>().join("");
+        let mut v = vec![s("1"), s("2"), s("3"), s("4"), s("5")];
+        assert_eq!(move_sheets(&mut v, &[3, 1], 0), vec![0, 1]);
+        assert_eq!(names(&v), "24135");
+        assert_eq!(move_sheets(&mut v, &[0, 1], 5), vec![3, 4]);
+        assert_eq!(names(&v), "13524");
+        assert_eq!(move_sheets(&mut v, &[2], 1), vec![1]);
+        assert_eq!(names(&v), "15324");
     }
 }
