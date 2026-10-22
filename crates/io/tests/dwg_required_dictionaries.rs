@@ -47,14 +47,21 @@ fn variable_dictionary(doc: &acadrust::CadDocument) -> Option<Vec<(String, Strin
     )
 }
 
+/// Read a DWG back with acadrust's reader, so the assertions inspect the file as another
+/// application would rather than through CADCraft's own importer.
 fn read_dwg(dwg: &[u8]) -> acadrust::CadDocument {
     acadrust::DwgReader::from_stream(Cursor::new(dwg)).read().expect("read the DWG back")
 }
 
+/// The value of the variable called `name`, matched case-insensitively as AutoCAD matches
+/// dictionary keys, or nothing when the dictionary has no such entry.
 fn value<'a>(vars: &'a [(String, String)], name: &str) -> Option<&'a str> {
     vars.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
 }
 
+/// #1813's regression: a DXF written without an `AcDbVariableDictionary` (as ezdxf and CADCraft
+/// write them) must gain AutoCAD's dictionary when exported as an AC1018 DWG, so readers that
+/// require it see the drawing's contents; the added objects must not break CADCraft's own read.
 #[test]
 fn an_ac1018_dwg_gets_the_variable_dictionary_autocad_always_writes() {
     let d = rectangle();
@@ -79,6 +86,8 @@ fn an_ac1018_dwg_gets_the_variable_dictionary_autocad_always_writes() {
     assert_eq!(back.model.len(), 1);
 }
 
+/// The AC1032 (AutoCAD 2018) path is deliberately unchanged: those DWGs read in Vectric Aspire
+/// without the dictionary, so no dictionary is injected and the existing output stays as it was.
 #[test]
 fn an_ac1032_dwg_stays_as_it_was() {
     // 2018 DWGs read fine in Aspire without the dictionary, so the latest format is unchanged.
@@ -89,6 +98,9 @@ fn an_ac1032_dwg_stays_as_it_was() {
     assert_eq!(variable_dictionary(&doc), None, "no dictionary is added to a 2018 DWG");
 }
 
+/// A drawing that already has the dictionary must keep its own entries and values: conversion
+/// only supplies AutoCAD's dictionary when it is absent, rather than merging defaults into one
+/// that a producer such as ezdxf's `add_dict_var` already wrote.
 #[test]
 fn a_variable_dictionary_the_drawing_has_is_left_alone() {
     // A drawing that already has the dictionary keeps its own values and entries (here only
