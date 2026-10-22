@@ -339,19 +339,12 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
                 break;
             }
         }
-        let mut paths: Vec<&std::path::Path> = Vec::new();
-        if !chinese {
-            paths.extend(japanese_font());
+        if !chinese && let Some(face) = installed_japanese_face() {
+            added.push(("system-japanese".into(), std::sync::Arc::new(face_font_data(face))));
         }
-        paths.extend(cjk_font());
-        paths.dedup();
-        added.extend(
-            paths
-                .into_iter()
-                .filter_map(|p| read_capped(p, MAX_UI_FONT_BYTES))
-                .enumerate()
-                .map(|(i, bytes)| (format!("system-cjk-{i}"), std::sync::Arc::new(egui::FontData::from_owned(bytes)))),
-        );
+        if let Some(bytes) = cjk_font().and_then(|p| read_capped(p, MAX_UI_FONT_BYTES)) {
+            added.push(("system-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes))));
+        }
         // العربية: an installed Arabic face after the Latin ones (egui's bundled faces carry no
         // Arabic glyphs), for the Arabic interface.
         if language == "ar"
@@ -371,9 +364,7 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
         && !cjk_covers_hangul()
         && let Some(face) = korean_font()
     {
-        let mut data = egui::FontData::from_owned(face.bytes.as_ref().clone());
-        data.index = face.index;
-        added.push(("korean-ui".into(), std::sync::Arc::new(data)));
+        added.push(("korean-ui".into(), std::sync::Arc::new(face_font_data(face))));
     }
     for (name, data) in added {
         fonts.font_data.insert(name.clone(), data);
@@ -384,6 +375,14 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
         }
     }
     ctx.set_fonts(fonts);
+}
+
+/// egui font data for `face`, with its collection index: without the index egui draws face 0,
+/// which need not be the face the gate checked.
+fn face_font_data(face: &cadcraft_fonts::ttf::Face) -> egui::FontData {
+    let mut data = egui::FontData::from_owned(face.bytes.as_ref().clone());
+    data.index = face.index;
+    data
 }
 
 /// The faces `build.rs` embedded from craft-fonts that the interface loads, in order: every CJK
@@ -599,21 +598,43 @@ fn covers_japanese(face: &cadcraft_fonts::ttf::Face) -> bool {
     japanese_letters().iter().all(|c| face.has_glyph(*c))
 }
 
-/// The face of a font file that egui uses (the first one) when it covers the Japanese interface.
-fn japanese_face(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
-    cadcraft_fonts::ttf::faces(&bytes).into_iter().find(covers_japanese)
+/// The first face of a font file (the one egui installs without an index) when it covers the
+/// Japanese interface.
+fn first_japanese_face(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
+    cadcraft_fonts::ttf::faces(&bytes).into_iter().next().filter(covers_japanese)
 }
 
-/// Whether the installed Japanese face [`japanese_font`] covers the interface. Checked once.
+/// The face of a Japanese font file that [`install_fonts`] loads: the first face covering the
+/// interface if a collection has one, else the first face (as before, for names it can still
+/// draw).
+fn installed_japanese_face_from(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcraft_fonts::ttf::Face> {
+    let faces = cadcraft_fonts::ttf::faces(&bytes);
+    let matched = faces.iter().find(|face| covers_japanese(face)).cloned();
+    matched.or_else(|| faces.into_iter().next())
+}
+
+/// The face of the installed Japanese font [`japanese_font`] that [`install_fonts`] loads. Its
+/// collection index is kept so egui draws the face the gate checked. Checked once; collections
+/// are scanned with the fonts crate's face-count cap and reads are capped.
+fn installed_japanese_face() -> Option<&'static cadcraft_fonts::ttf::Face> {
+    static FOUND: std::sync::OnceLock<Option<cadcraft_fonts::ttf::Face>> = std::sync::OnceLock::new();
+    FOUND
+        .get_or_init(|| {
+            japanese_font()
+                .and_then(|path| read_capped(path, MAX_UI_FONT_BYTES))
+                .and_then(|bytes| installed_japanese_face_from(std::sync::Arc::new(bytes)))
+        })
+        .as_ref()
+}
+
+/// Whether the installed Japanese face [`japanese_font`] covers the interface.
 pub fn japanese_font_covers() -> bool {
-    static COVERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *COVERS.get_or_init(|| {
-        japanese_font().is_some_and(|path| read_capped(path, MAX_UI_FONT_BYTES).and_then(|bytes| japanese_face(std::sync::Arc::new(bytes))).is_some())
-    })
+    installed_japanese_face().is_some_and(covers_japanese)
 }
 
 /// Whether the CJK fonts [`install_fonts`] loads in every language already show Japanese
-/// (Noto Sans CJK's first face is Japanese; PingFang and Microsoft YaHei carry kana too). Only
+/// (Noto Sans CJK's first face is Japanese; PingFang and Microsoft YaHei carry kana too). The
+/// CJK file is installed without a collection index, so only its first face counts. Only
 /// asked about Japanese, so other interfaces never read the font twice. Checked once.
 pub fn cjk_covers_japanese() -> bool {
     static COVERS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -621,7 +642,7 @@ pub fn cjk_covers_japanese() -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
             if cjk_font()
-                .is_some_and(|path| read_capped(path, MAX_UI_FONT_BYTES).and_then(|bytes| japanese_face(std::sync::Arc::new(bytes))).is_some())
+                .is_some_and(|path| read_capped(path, MAX_UI_FONT_BYTES).and_then(|bytes| first_japanese_face(std::sync::Arc::new(bytes))).is_some())
             {
                 return true;
             }
@@ -789,6 +810,129 @@ mod tests {
 
     fn families<'a>(faces: &[&'a CraftFont]) -> Vec<&'a str> {
         faces.iter().map(|f| f.family).collect()
+    }
+
+    /// A Windows Unicode BMP `cmap` table with one format 4 subtable mapping `pairs`
+    /// (sorted code points to nonzero glyph ids).
+    fn cmap_table(pairs: &[(u16, u16)]) -> Vec<u8> {
+        assert!(pairs.windows(2).all(|w| w[0].0 < w[1].0) && pairs.iter().all(|&(_, g)| g != 0));
+        let seg_count = pairs.len() + 1; // the 0xFFFF terminator
+        let mut subtable = Vec::new();
+        subtable.extend_from_slice(&4u16.to_be_bytes());
+        subtable.extend_from_slice(&u16::try_from(16 + 8 * seg_count).unwrap().to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        subtable.extend_from_slice(&u16::try_from(2 * seg_count).unwrap().to_be_bytes());
+        let mut power = 1u16;
+        let mut entry_selector = 0u16;
+        while power * 2 <= u16::try_from(seg_count).unwrap() {
+            power *= 2;
+            entry_selector += 1;
+        }
+        subtable.extend_from_slice(&(2 * power).to_be_bytes());
+        subtable.extend_from_slice(&entry_selector.to_be_bytes());
+        subtable.extend_from_slice(&(u16::try_from(2 * seg_count).unwrap() - 2 * power).to_be_bytes());
+        for (code, _) in pairs {
+            subtable.extend_from_slice(&code.to_be_bytes());
+        }
+        subtable.extend_from_slice(&0xffffu16.to_be_bytes());
+        subtable.extend_from_slice(&0u16.to_be_bytes());
+        for (code, _) in pairs {
+            subtable.extend_from_slice(&code.to_be_bytes());
+        }
+        subtable.extend_from_slice(&0xffffu16.to_be_bytes());
+        for (code, glyph) in pairs {
+            subtable.extend_from_slice(&glyph.wrapping_sub(*code).to_be_bytes());
+        }
+        subtable.extend_from_slice(&1u16.to_be_bytes()); // 0xFFFF wraps to glyph 0.
+        for _ in 0..seg_count {
+            subtable.extend_from_slice(&0u16.to_be_bytes());
+        }
+        let mut table = Vec::new();
+        table.extend_from_slice(&0u16.to_be_bytes());
+        table.extend_from_slice(&1u16.to_be_bytes());
+        table.extend_from_slice(&3u16.to_be_bytes()); // Windows
+        table.extend_from_slice(&1u16.to_be_bytes()); // Unicode BMP
+        table.extend_from_slice(&12u32.to_be_bytes());
+        table.extend_from_slice(&subtable);
+        table
+    }
+
+    /// A TrueType collection with one face per entry; a `None` face has no tables.
+    fn collection(cmaps: &[Option<Vec<u8>>]) -> Vec<u8> {
+        let mut dir_offsets = Vec::with_capacity(cmaps.len());
+        let mut cursor = 12 + 4 * cmaps.len();
+        for cmap in cmaps {
+            dir_offsets.push(cursor);
+            cursor += 12 + if cmap.is_some() { 16 } else { 0 };
+        }
+        let mut tables = Vec::with_capacity(cmaps.len());
+        for cmap in cmaps {
+            if let Some(bytes) = cmap {
+                cursor = (cursor + 3) & !3;
+                tables.push(Some((cursor, bytes.len())));
+                cursor += bytes.len();
+            } else {
+                tables.push(None);
+            }
+        }
+        let mut out = Vec::with_capacity(cursor);
+        out.extend_from_slice(b"ttcf");
+        out.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        out.extend_from_slice(&(cmaps.len() as u32).to_be_bytes());
+        for offset in &dir_offsets {
+            out.extend_from_slice(&(*offset as u32).to_be_bytes());
+        }
+        for (cmap, table) in cmaps.iter().zip(&tables) {
+            out.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+            out.extend_from_slice(&u16::from(cmap.is_some()).to_be_bytes());
+            out.extend_from_slice(&(if cmap.is_some() { 16u16 } else { 0 }).to_be_bytes());
+            out.extend_from_slice(&0u16.to_be_bytes());
+            out.extend_from_slice(&0u16.to_be_bytes());
+            if let (Some(_), Some((offset, length))) = (cmap, table) {
+                out.extend_from_slice(b"cmap");
+                out.extend_from_slice(&0u32.to_be_bytes());
+                out.extend_from_slice(&(*offset as u32).to_be_bytes());
+                out.extend_from_slice(&(*length as u32).to_be_bytes());
+            }
+        }
+        for (cmap, table) in cmaps.iter().zip(&tables) {
+            if let (Some(bytes), Some((offset, _))) = (cmap, table) {
+                out.resize(*offset, 0);
+                out.extend_from_slice(bytes);
+            }
+        }
+        out
+    }
+
+    fn japanese_cmap() -> Vec<u8> {
+        let pairs: Vec<_> = super::japanese_letters()
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (u16::try_from(u32::from(*c)).expect("Japanese catalog is BMP"), u16::try_from(i + 1).unwrap()))
+            .collect();
+        cmap_table(&pairs)
+    }
+
+    /// A collection whose face 0 is Latin-only and face 1 covers the Japanese catalog: the
+    /// Japanese install selects and installs face 1, while the shared CJK path, installed at
+    /// face 0, must not accept the nonzero face.
+    #[test]
+    fn japanese_gate_installs_the_face_it_accepts_from_a_collection() {
+        let bytes = std::sync::Arc::new(collection(&[Some(cmap_table(&[(u16::from(b'A'), 1)])), Some(japanese_cmap())]));
+        let selected = super::installed_japanese_face_from(bytes.clone()).expect("the collection parses");
+        assert_eq!(selected.index, 1, "the install selects the face covering Japanese");
+        assert!(super::covers_japanese(&selected));
+        let installed = super::face_font_data(&selected);
+        assert_eq!(installed.index, selected.index, "egui must draw the face the gate checked");
+        assert!(super::first_japanese_face(bytes.clone()).is_none(), "face 0 alone does not cover Japanese");
+        let first = cadcraft_fonts::ttf::faces(&bytes).into_iter().next().expect("face 0 parses");
+        assert_eq!(first.index, 0);
+        assert!(!super::covers_japanese(&first));
+        // With no covering face the install keeps face 0, and the gate asks that same face.
+        let latin_only = std::sync::Arc::new(collection(&[Some(cmap_table(&[(u16::from(b'A'), 1)])), None]));
+        let fallback = super::installed_japanese_face_from(latin_only).expect("face 0 parses");
+        assert_eq!(fallback.index, 0);
+        assert!(!super::covers_japanese(&fallback), "an unvalidated face is not accepted");
     }
 
     #[test]
