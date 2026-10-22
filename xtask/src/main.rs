@@ -21,8 +21,10 @@ commands:
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   wasm            cargo check --target wasm32-unknown-unknown for the wasm-safe crates
   ci              fmt --check, clippy -D warnings, test, assets, layers, wasm (stops at first failure)
-  corpus [--download]
-                  show where test corpora live; --download fetches PngSuite into corpus/pngsuite
+  corpus [DIR] [--out DIR] [--keep-saved] [--same-format]
+                  open -> save -> reopen every DXF/DWG of a real-file corpus (DIR, default
+                  $CADCRAFT_CORPUS_DIR or ../cadcraft-corpus) and write report.md + report.json
+                  (default DIR/report); runs `cadcraft-cli roundtrip` in release mode
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   parity          recompute the AutoCAD menu-breadth checklist in docs/parity-checklist.md
   ico <out.ico> <in.png>...
@@ -37,7 +39,7 @@ fn main() -> ExitCode {
         Some("layers") => cmd_layers(),
         Some("wasm") => cmd_wasm(),
         Some("ci") => cmd_ci(),
-        Some("corpus") => cmd_corpus(rest.contains(&"--download")),
+        Some("corpus") => cmd_corpus(&rest),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("parity") => parity::run(&root()),
         Some("ico") => ico::run(&rest),
@@ -199,7 +201,32 @@ fn cmd_ci() -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_corpus(_download: bool) -> Result<(), String> {
-    println!("Test corpora live in storytold/cadcraft-corpus (planned); never commit large binaries here.");
-    Ok(())
+/// `corpus [DIR] [options]`: the round-trip report over a real-file corpus (gaps FF1, FF5). The
+/// corpus lives outside this repo (storytold/cadcraft-corpus); its files are never committed here.
+fn cmd_corpus(args: &[&str]) -> Result<(), String> {
+    let mut pass: Vec<String> = Vec::new();
+    let mut dir: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match *a {
+            "--out" | "--tolerance" => {
+                let v = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                pass.extend([a.to_string(), v.to_string()]);
+            }
+            s if s.starts_with("--") => pass.push(s.to_string()),
+            s if dir.is_none() => dir = Some(s.to_string()),
+            _ => return Err("corpus takes one DIR".into()),
+        }
+    }
+    let dir = dir
+        .or_else(|| std::env::var("CADCRAFT_CORPUS_DIR").ok())
+        .unwrap_or_else(|| root().parent().map(|p| p.join("cadcraft-corpus").display().to_string()).unwrap_or_else(|| "../cadcraft-corpus".into()));
+    if !Path::new(&dir).is_dir() {
+        return Err(format!(
+            "no corpus at `{dir}`: clone storytold/cadcraft-corpus next to this repo, set CADCRAFT_CORPUS_DIR or pass DIR              (never commit corpus files to this repo)"
+        ));
+    }
+    let mut c = cargo();
+    c.args(["run", "--release", "-q", "-p", "cadcraft-cli", "--", "roundtrip", &dir]).args(&pass);
+    run(c, &format!("cadcraft-cli roundtrip {dir} {}", pass.join(" ")))
 }
