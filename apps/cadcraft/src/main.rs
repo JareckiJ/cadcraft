@@ -149,6 +149,7 @@ fn services() -> Services {
             let dialog = if dir.is_empty() { dialog } else { dialog.set_directory(dir) };
             dialog.pick_file().map(|p| p.to_string_lossy().to_string())
         })),
+        no_file_system: false,
     }
 }
 

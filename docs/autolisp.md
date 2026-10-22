@@ -7,9 +7,11 @@ CADCraft runs AutoLISP routines (`.lsp` files). What is here and what is not yet
 
 - **APPLOAD** (Tools > Load Application…, alias `AP`) opens a file browser filtered to `.lsp`
   files, starting in the folder the last one came from (kept in the preferences), and runs the
-  chosen file. Cancelling the browser does nothing. Where there is no native file dialog (the
-  web), it asks for the file name on the command line instead. Dropping a `.lsp` file on the
-  window does the same. Only `.lsp` files are loaded; anything else is refused.
+  chosen file. Cancelling the browser does nothing. A picked file loads as a typed name does, so a
+  routine it starts that asks for a point waits for it. A desktop without a file browser asks for
+  the name on the command line; the web has no file system, so it says to drop the `.lsp` file on
+  the window and loads it from its contents. Only `.lsp` files are loaded; anything else is
+  refused.
 - **`(load "name")`** loads a file by path, with `.lsp` added when the name has none. A file
   APPLOAD loaded is found again by its name, also on the web where there is no file system.
 - **`(defun c:NAME …)`** defines a command: type `NAME` at the command line. Built-in commands

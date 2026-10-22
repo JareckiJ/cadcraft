@@ -193,8 +193,12 @@ pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
     /// Pick a `.lsp` file for APPLOAD, starting in the given folder (empty for the default one).
-    /// `None` where there is no native file dialog (the web): APPLOAD asks for the name instead.
+    /// `None` where there is no native file dialog: the desktop without one asks for the name,
+    /// and the web (no file system) says to drop the file (`no_file_system`).
     pub pick_lisp: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// The host has no file system to read a path from (the browser): a dropped file's contents
+    /// are what it loads, and APPLOAD says so instead of asking for a name it cannot read.
+    pub no_file_system: bool,
 }
 
 pub struct CadApp {

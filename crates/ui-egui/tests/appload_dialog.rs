@@ -104,6 +104,35 @@ fn typed_appload_opens_the_picker_and_remembers_the_directory() {
 }
 
 #[test]
+fn a_picked_file_that_asks_for_a_point_waits_for_the_user() {
+    let dir = temp_dir("interactive");
+    // Loading asks for a point: a picked file runs as a typed APPLOAD does, so the routine
+    // waits for the answer instead of being handed nil.
+    let path = write(&dir, "ask.lsp", "(setq picked (getpoint \"\\nPick a point: \")) (princ picked)");
+    let (mut app, asked) = app_with_picker(Some(path));
+
+    app.cmdline("appload");
+    assert_eq!(asked.borrow().len(), 1);
+    assert!(app.session.lisp_running(), "the load waits for the point instead of getting nil");
+    assert_eq!(app.session.prompt_text(), "Pick a point: ");
+    app.cmdline("3,4");
+    assert!(!app.session.lisp_running());
+    assert!(app.session.lisp_var("PICKED").as_point().is_some(), "the picked point reached the routine");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn where_there_is_no_file_system_appload_says_to_drop_the_file() {
+    // The web has no file system, so a name typed at the command line could never be read:
+    // APPLOAD says what works there (dropping the file on the window) instead of asking.
+    let mut app = CadApp::new(Session::new(), Services { no_file_system: true, ..Services::default() });
+    app.cmdline("appload");
+    assert!(!app.session.prompting(), "it never asks for a name it cannot read");
+    assert!(app.session.log.iter().any(|l| l.contains("drop a .lsp file")), "{:?}", app.session.log);
+    assert!(app.status.as_ref().is_some_and(|(s, _)| s.contains("drop a .lsp file")), "{:?}", app.status);
+}
+
+#[test]
 fn a_cancelled_picker_is_a_no_op() {
     let (mut app, asked) = app_with_picker(None);
     let before = app.session.log.len();
@@ -118,7 +147,8 @@ fn a_cancelled_picker_is_a_no_op() {
 fn without_a_picker_appload_asks_for_the_name_on_the_command_line() {
     let dir = temp_dir("prompt");
     let path = write(&dir, "tools.lsp", "(defun c:hi () (princ \"hi\") (princ))");
-    // The web host has no native file dialog: the engine's prompt is the fallback.
+    // A desktop host with no file picker: the engine's prompt is the fallback (the web says to
+    // drop the file instead, since it cannot read a path).
     let mut app = CadApp::new(Session::new(), Services::default());
     app.start("appload");
     assert!(app.session.prompting());

@@ -37,9 +37,10 @@ fn source(p: &Value) -> Result<(String, String)> {
         let bytes = super::file::base64_decode(data).ok_or_else(|| bad("appload", "invalid base64"))?;
         return Ok((str_param(p, "name").unwrap_or("untitled.lsp").to_string(), String::from_utf8_lossy(&bytes).into_owned()));
     }
+    // The path is read as it is given (a JSON caller may name a file or folder with spaces);
+    // only a path of blanks alone is refused.
     let path = str_param(p, "path")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
+        .filter(|p| !p.trim().is_empty())
         .ok_or_else(|| bad("appload", "`path`, or `name` with `data` (base64) or `text`, is required"))?;
     if !is_lisp_path(path) {
         return Err(bad("appload", format!("{path}: not an AutoLISP file (APPLOAD loads .lsp files)")));
