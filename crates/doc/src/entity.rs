@@ -356,6 +356,10 @@ pub struct Attrib {
     /// Its other modes: Verify, Preset and Lock position.
     #[serde(default, skip_serializing_if = "AttribModes::is_default")]
     pub modes: AttribModes,
+    /// The field its value comes from (a block attribute only): the value is evaluated again
+    /// when what the field reads changes, such as a dynamic block parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<crate::field::Field>,
 }
 
 /// An attribute's modes beyond invisible and constant.
@@ -717,6 +721,12 @@ pub struct MLeader {
     /// Block content in place of the text: a block reference placed at the landing.
     #[serde(default)]
     pub block: Option<Insert>,
+    /// The text hangs from the landing point, which lies on the bottom line of its first line of
+    /// text (multileader text attachment "bottom of top line", DXF 174/175 = 6). The landing line
+    /// is then drawn as the shelf under the whole text, as AutoCAD draws a section mark; with any
+    /// other attachment the landing line is only the dogleg.
+    #[serde(default)]
+    pub shelf: bool,
 }
 
 impl MLeader {

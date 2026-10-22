@@ -37,6 +37,7 @@ fn text_mleader() -> MLeader {
         arrow_size: 0.3,
         spline: false,
         block: None,
+        shelf: false,
     }
 }
 
@@ -92,6 +93,7 @@ fn spline_leader_with_block_content_and_attributes() {
     blk.entities.push(Entity::new(
         Handle(0x201),
         EntityKind::AttDef(Attrib {
+            field: None,
             tag: "NUM".into(),
             text: tag_text,
             invisible: false,
@@ -113,6 +115,7 @@ fn spline_leader_with_block_content_and_attributes() {
     let EntityKind::Text(mut placed) = k else { unreachable!() };
     placed.value = "42".into();
     ins.attribs.push(Attrib {
+        field: None,
         tag: "NUM".into(),
         text: placed,
         invisible: false,
@@ -131,6 +134,7 @@ fn spline_leader_with_block_content_and_attributes() {
         arrow_size: 0.18,
         spline: true,
         block: Some(ins),
+        shelf: false,
     };
     d.add(&Space::Model, Common::default(), EntityKind::MLeader(m.clone())).unwrap();
     let (_, back) = roundtrip(&d);

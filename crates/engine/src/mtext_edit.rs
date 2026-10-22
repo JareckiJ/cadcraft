@@ -33,7 +33,7 @@ pub struct CharFmt {
     pub font: Option<String>,
     /// Absolute character height set inline (`\H`); `None`: the text's.
     pub height: Option<f64>,
-    /// Colour set inline (`\C`, `\c`); `None`: the entity's (ByLayer/ByBlock).
+    /// Colour set inline (`\C`, `\c`); `None`: the entity's.
     pub color: Option<MTextColor>,
 }
 
@@ -155,7 +155,12 @@ impl Formatted {
                                 'f' | 'F' => apply_font(&mut cur, &a),
                                 'H' => cur.height = parse_height(&a, cur.height),
                                 'C' => {
-                                    cur.color = a.trim().parse::<u16>().ok().and_then(|v| (v > 0 && v < 256).then_some(MTextColor::Aci(v)));
+                                    cur.color = a.trim().parse::<u16>().ok().and_then(|v| match v {
+                                        0 => Some(MTextColor::ByBlock),
+                                        256 => Some(MTextColor::ByLayer),
+                                        1..=255 => Some(MTextColor::Aci(v)),
+                                        _ => None,
+                                    });
                                 }
                                 'c' => {
                                     if let Ok(v) = a.trim().parse::<u32>() {
@@ -453,6 +458,8 @@ impl Formatted {
         match f.color {
             Some(MTextColor::Aci(v)) => s.push_str(&format!("\\C{v};")),
             Some(MTextColor::Rgb(v)) => s.push_str(&format!("\\c{v};")),
+            Some(MTextColor::ByLayer) => s.push_str("\\C256;"),
+            Some(MTextColor::ByBlock) => s.push_str("\\C0;"),
             None => {}
         }
         s
@@ -503,6 +510,7 @@ mod tests {
             "{\\fArial|b1|i0;bold} and {\\Lunder}",
             "x \\S1/2; y",
             "{\\H2;big}{\\C1;red}{\\c16711680;rgb}",
+            "{\\C256;a}{\\C0;b}",
             "\\pxi-3,l3,t3;1.\tone\\P2.\ttwo",
             "esc \\{ \\} \\\\",
         ] {

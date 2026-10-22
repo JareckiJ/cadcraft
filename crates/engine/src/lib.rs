@@ -13,6 +13,7 @@ pub mod audit;
 pub mod autosave;
 pub mod blockedit;
 pub mod cmd;
+pub mod config_dir;
 pub mod doc_path;
 mod finite;
 pub mod grip_dims;
@@ -373,6 +374,8 @@ pub struct Settings {
     /// DYNPROMPT: Dynamic Input shows the prompt beside the cursor, and Down Arrow opens the
     /// prompt's options there (on by default).
     pub dynprompt: bool,
+    /// LWDISPLAY of the active drawing, as [`Session::drafting_settings`] gives it; the drawing
+    /// keeps it ([`Session::lwdisplay`]).
     pub lwdisplay: bool,
     /// TRANSPARENCYDISPLAY: draw objects with their transparency on screen (on by default).
     pub transparency_display: bool,
@@ -811,7 +814,13 @@ impl Session {
             settings.snapunit = d.header.snap_unit();
             settings.gridunit = d.header.grid_unit();
         }
+        settings.lwdisplay = self.lwdisplay();
         settings
+    }
+    /// LWDISPLAY: lineweights shown. Saved in the drawing, as in AutoCAD: a file drawn with
+    /// lineweights on shows them on.
+    pub fn lwdisplay(&self) -> bool {
+        self.doc().is_ok_and(|d| d.header.i64("LWDISPLAY", 0) != 0)
     }
     /// The space commands act on (model space while working inside a layout viewport).
     pub fn space(&self) -> Space {
@@ -857,7 +866,7 @@ impl Session {
     }
 
     /// Add an entity to the current space with current properties.
-    pub fn add_entity(&mut self, kind: EntityKind) -> Result<Handle> {
+    pub fn add_entity(&mut self, mut kind: EntityKind) -> Result<Handle> {
         let common = self.current_common();
         let space = self.space();
         let true_color = self.doc()?.header.get("CECOLOR_RGB").and_then(|v| v.as_i64());
@@ -866,10 +875,16 @@ impl Session {
             common.color = cadcraft_color::Color::True(cadcraft_color::Rgb::from_u32(rgb as u32));
         }
         // Text, dimensions, multileaders, hatches and block references of annotative styles are
-        // annotative, supporting the current annotation scale.
+        // annotative, made at the current annotation scale: an annotative object is stored the
+        // size it shows at the scale it was made at, as AutoCAD stores it. Paper space shows them
+        // at 1:1 (`Drawing::anno_draw`), so one made there is made at 1:1.
         let d = self.doc()?;
         if d.annotative_by_style(&kind) {
-            common.anno_scales = vec![d.current_anno_scale()];
+            let scale = if space.is_paper() { cadcraft_doc::AnnoScale::unit() } else { d.current_anno_scale() };
+            let mut e = cadcraft_doc::Entity { handle: cadcraft_doc::Handle(0), common, kind };
+            cadcraft_doc::made_annotative_at(&mut e, &scale);
+            common = e.common;
+            kind = e.kind;
         }
         let h = self.doc_mut()?.add(&space, common, kind)?;
         Ok(h)
@@ -1373,6 +1388,17 @@ impl Session {
     /// ([`Interactive::editing_mtext`]).
     pub fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         self.running.as_ref().and_then(|r| r.machine.editing_mtext())
+    }
+
+    /// The single-line text the running command edits in place ([`Interactive::editing_line`]).
+    pub fn editing_line(&self) -> Option<cadcraft_doc::Text> {
+        self.running.as_ref().and_then(|r| r.machine.editing_line())
+    }
+
+    /// The measured value of the dimension the running command edits in place
+    /// ([`Interactive::editing_measurement`]).
+    pub fn editing_measurement(&self) -> Option<String> {
+        self.running.as_ref().and_then(|r| r.machine.editing_measurement())
     }
 
     pub fn current_prompt(&self) -> Option<Prompt> {

@@ -47,6 +47,9 @@ fn same_content(a: &ListKey, b: &ListKey) -> bool {
 #[derive(Default)]
 pub struct CanvasState {
     pub list: Option<DisplayList>,
+    /// Where the last click on the canvas was: two quick clicks are a double-click only near
+    /// each other, as in AutoCAD (a click selecting a block, then one on its grip, is not).
+    last_click: Option<egui::Pos2>,
     key: ListKey,
     /// The area `list` was built for (hatch patterns exist only inside it); a view leaving it
     /// rebuilds the list.
@@ -301,7 +304,7 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         }
         s.finish()
     };
-    let (lwdisplay, transparency_display) = (app.session.settings.lwdisplay, app.session.settings.transparency_display);
+    let (lwdisplay, transparency_display) = (app.session.lwdisplay(), app.session.settings.transparency_display);
     let key: ListKey = (st.uid, st.revision, band(px), lod_band, lwdisplay, transparency_display, std::sync::Arc::as_ptr(&st.doc) as usize, vp_view);
     // A background build that finished: use it unless the drawing has changed since it started
     // (or the list was dropped to force a rebuild).
@@ -396,6 +399,8 @@ fn stencil_clip(app: &CadApp) -> bool {
 /// How long the view inside the active viewport stays still before a zoomed [`VpContent`] is
 /// rebuilt at the exact view (dash lengths and curve detail follow the viewport's scale).
 const VP_SETTLE_MS: f64 = 150.0;
+/// Farthest apart (points) the two clicks of a double-click are.
+const DOUBLE_CLICK_DISTANCE: f32 = 6.0;
 
 /// Model space seen through the active MSPACE viewport, drawn apart from the layout's list. It is
 /// built for an area around the viewport at one view and drawn clipped to the viewport, moved
@@ -457,7 +462,7 @@ struct VpFrame {
 
 /// Build or reuse the active viewport's [`VpContent`] for this frame.
 fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Option<VpFrame> {
-    let (lwdisplay, transparency) = (app.session.settings.lwdisplay, app.session.settings.transparency_display);
+    let (lwdisplay, transparency) = (app.session.lwdisplay(), app.session.settings.transparency_display);
     let stencil = stencil_clip(app);
     let c = &mut app.canvas.vp;
     let Some((st, (h, vp, clip))) = app.session.state().ok().and_then(|st| Some((st, split_viewport(st, stencil)?))) else {
@@ -1369,7 +1374,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     app.canvas.xf = Some(xf);
 
     // ---------- input ----------
-    let (hover_pos, scroll, mods, middle_down, pressed_primary, pressed_secondary, dbl_middle, dbl_primary) = ui.input(|i| {
+    let (hover_pos, scroll, mods, middle_down, pressed_primary, pressed_secondary, dbl_middle, dbl_primary, click_pos) = ui.input(|i| {
         (
             i.pointer.hover_pos(),
             i.smooth_scroll_delta,
@@ -1379,8 +1384,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             i.pointer.secondary_clicked(),
             i.pointer.button_double_clicked(egui::PointerButton::Middle),
             i.pointer.button_double_clicked(egui::PointerButton::Primary),
+            i.pointer.interact_pos(),
         )
     });
+    // egui counts any two quick clicks as a double-click; AutoCAD only two in about one place.
+    let dbl_primary = dbl_primary && app.canvas.last_click.zip(click_pos).is_some_and(|(a, b)| a.distance(b) <= DOUBLE_CLICK_DISTANCE);
+    if pressed_primary {
+        app.canvas.last_click = click_pos;
+    }
     let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
     // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
     // previews that read `Session::ctrl_down` always see the current state. The engine
@@ -1508,28 +1519,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             return;
         }
     }
-    // Double-click text to edit it, as in AutoCAD: TEXTEDIT with that object already picked.
+    // Double-click an object to edit it as AutoCAD's double-click actions do ([`crate::dblclick`]).
     if inside
         && dbl_primary
         && app.session.running.is_none()
         && let Some(hp) = hover_pos
-        && edit_text_at(app, xf.to_world(hp))
+        && crate::dblclick::at(app, xf.to_world(hp))
     {
         return;
-    }
-
-    // Double-click a hatch (no command running) to edit it in the Hatch Edit dialog. The click is
-    // used up: it must not also start a grip edit on the hatch's centre grip below.
-    let mut hatch_dialog = false;
-    if inside
-        && dbl_primary
-        && app.session.running.is_none()
-        && let Some(hp) = hover_pos
-        && let Some(h) = hatch_at(app, xf.to_world(hp), scale)
-    {
-        app.session.set_selection(vec![h]);
-        crate::hatchdlg::open_edit(app);
-        hatch_dialog = true;
     }
 
     // While a command asks for a point, every click places one, however fast the drafting (#815).
@@ -1622,7 +1619,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.pending_window = None;
         app.canvas.drag_window = false;
     }
-    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
+    let pressed_primary = pressed_primary && !picked && !idle_dbl;
     let key: CycleKey = (
         app.session.running.as_ref().map(|r| r.id.clone()),
         app.session.current_prompt().map(|p| p.message),
@@ -1669,6 +1666,22 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             click_grip(app, g, mods.shift);
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
             app.session.echo(e.to_string());
+        }
+    }
+    // Dragging a grip edits it: pressing on it starts the edit, and letting go places the point,
+    // as clicking it and then clicking the point does (a dynamic block's list grip opens its list
+    // on a click only).
+    if resp.drag_started_by(egui::PointerButton::Primary)
+        && !middle_down
+        && app.session.running.is_none()
+        && app.session.pending_window.is_none()
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && rect.contains(origin)
+    {
+        if let Some(g) = crate::dyngrips::at(app, &xf, Some(origin)).filter(|(_, g)| g.shape != cadcraft_engine::doc::dynblock::GripShape::List) {
+            crate::dyngrips::click(app, g);
+        } else if let Some(g) = grip_at(app, &xf, Some(origin)) {
+            click_grip(app, g, mods.shift);
         }
     }
     // Press-and-drag selection window (PICKDRAG = 2; click-click still works): a drag
@@ -1726,7 +1739,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // The cursor picks objects (pick box, rollover highlight): "Select objects" and single-object
     // prompts, or no command with PICKFIRST on; SELECTIONPREVIEW says in which of those it shows.
     let selecting = app.session.previews_selection();
-    if inside && selecting && app.session.pending_window.is_none() {
+    // Not while text is edited in place: the editor covers the object (as AutoCAD hides it).
+    let editing = app.session.editing_mtext().is_some() || app.session.editing_line().is_some();
+    if inside && selecting && !editing && app.session.pending_window.is_none() {
         if hover_pos != app.canvas.hover_at
             && let (Some(w), Ok(st)) = (raw_world, app.session.state())
         {
@@ -1770,8 +1785,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         Some(sh) => {
             // Paper space: grey surround, the sheet with a shadow, the printable area dashed.
             painter.rect_filled(rect, 0.0, Color32::from_rgb(0x50, 0x57, 0x63));
-            let a = xf_paper.to_screen(Vec2::new(0.0, sh.size.y));
-            let b = xf_paper.to_screen(Vec2::new(sh.size.x, 0.0));
+            let sb = sh.bounds();
+            let a = xf_paper.to_screen(Vec2::new(sb.min.x, sb.max.y));
+            let b = xf_paper.to_screen(Vec2::new(sb.max.x, sb.min.y));
             let paper = Rect::from_two_pos(a, b);
             painter.rect_filled(paper.translate(vec2(5.0, 5.0)), 0.0, Color32::from_black_alpha(110));
             painter.rect_filled(paper, 0.0, t.paper);
@@ -1799,13 +1815,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if let Some(f) = ensure_vp_content(app, &xf_paper, ui.ctx()) {
         let gpu = app.canvas.gpu.is_some();
         let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
-        draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
+        draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.lwdisplay());
         masked = gpu && f.outline.is_some();
     }
     if app.canvas.gpu.is_some() {
-        draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
+        draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.lwdisplay());
     } else if let Some(list) = &app.canvas.list {
-        draw_list(&painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
+        draw_list(&painter, &xf_paper, list, bg, app.session.lwdisplay());
     }
     if let Some(vp) = &active_vp {
         // The active viewport: a heavy border, highlights in model units clipped to it.
@@ -2034,23 +2050,6 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 }
 
 /// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
-/// Start TEXTEDIT on the text, mtext or attribute definition at `p` (the objects its shortcut menu
-/// offers Edit Text for); false when there is none.
-fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
-    use cadcraft_engine::doc::EntityKind;
-    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
-        app.session.doc().ok()?.entity(h).map(|e| matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)))
-    });
-    if is_text != Some(true) {
-        return false;
-    }
-    app.start("textedit");
-    if let Err(e) = app.session.input(Input::Point(p)) {
-        app.session.echo(e.to_string());
-    }
-    true
-}
-
 fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile)> {
     let x = |f: f64| full.left() + full.width() * f.clamp(0.0, 1.0) as f32;
     let y = |f: f64| full.bottom() - full.height() * f.clamp(0.0, 1.0) as f32;
@@ -2077,7 +2076,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         p.rect_filled(*r, 0.0, t.canvas);
         draw_grid(app, &p, &xf);
         if let Some(list) = &app.canvas.list {
-            draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
+            draw_list(&p, &xf, list, bg, app.session.lwdisplay());
         }
         viewport_label(&p, *r);
     }
@@ -2206,15 +2205,6 @@ fn tooltip(p: &egui::Painter, at: Pos2, text: &str) {
     let r = Rect::from_min_size(at, galley.size() + vec2(8.0, 4.0));
     p.rect_filled(r, 2.0, Color32::from_rgb(0xf4, 0xf4, 0xf4));
     p.galley(r.min + vec2(4.0, 2.0), galley, Color32::BLACK);
-}
-
-/// The hatch under world point `w` within the pick aperture (PICKBOX × 1.5 pixels at `scale`
-/// pixels per unit), if any.
-fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
-    let st = app.session.state().ok()?;
-    let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
-    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
-    matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
 }
 
 /// Half the side of the pick box: the pick aperture (PICKBOX × 1.5 pixels, as `select::pick` is
@@ -2906,23 +2896,12 @@ mod compare;
 mod rebuild;
 
 #[cfg(test)]
-mod hatch_pick_tests {
+mod hatch_double_click_tests {
     use cadcraft_engine::Session;
     use cadcraft_geom::Vec2;
     use serde_json::json;
 
     use crate::{CadApp, Services};
-
-    #[test]
-    fn hatch_at_finds_a_hatch_under_the_cursor_only() {
-        let mut app = CadApp::new(Session::new(), Services::default());
-        app.session.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
-        let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
-        app.session.execute("line", &json!({ "points": [[20, 0], [30, 0]] })).unwrap();
-        assert_eq!(super::hatch_at(&app, Vec2::new(5.0, 5.0), 10.0).map(|h| h.hex()), Some(hx));
-        assert_eq!(super::hatch_at(&app, Vec2::new(25.0, 0.0), 10.0), None, "a line is not a hatch");
-        assert_eq!(super::hatch_at(&app, Vec2::new(60.0, 60.0), 10.0), None);
-    }
 
     #[test]
     fn double_clicking_a_hatch_opens_the_hatch_edit_dialog() {

@@ -5,7 +5,9 @@
 /// What a DXF file holds that CADCraft doesn't model, kept and written back (#528).
 mod dxf_raw;
 
+mod bridge_form;
 mod dxf_ext;
+mod dxf_field;
 mod dxf_image;
 mod dxf_mleader;
 mod dxf_read;
@@ -64,6 +66,8 @@ pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
         let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
         d.read_notes = notes;
+        // Its dynamic block objects are as the bridge renders them; a DXF save rewrites them.
+        std::sync::Arc::make_mut(&mut d.foreign).bridge_form = true;
         return Ok(d);
     }
     match ext(name).as_str() {

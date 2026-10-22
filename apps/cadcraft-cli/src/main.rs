@@ -215,6 +215,11 @@ fn info(path: &str) -> Result<(), String> {
     open(&mut s, path)?;
     let v = s.execute("drawing.inspect", &json!({ "entities": false })).map_err(|e| e.to_string())?;
     outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    // `skipped` counts DXF records; a DWG reports what its failsafe reader left out in notes
+    // instead, which would otherwise be seen only on the way in.
+    if let Some(m) = read_notes_message(s.doc().map_err(|e| e.to_string())?, path) {
+        eprintln!("{m}");
+    }
     Ok(())
 }
 
@@ -275,6 +280,9 @@ fn convert(args: &[String]) -> Result<(), String> {
     if let Some(m) = skipped_message(s.doc().map_err(|e| e.to_string())?, i) {
         eprintln!("{m}");
     }
+    if let Some(m) = read_notes_message(s.doc().map_err(|e| e.to_string())?, i) {
+        eprintln!("{m}");
+    }
     if cadcraft_io::is_image(o)
         && let Some(m) = undrawn_message(s.doc().map_err(|e| e.to_string())?, i)
     {
@@ -282,6 +290,15 @@ fn convert(args: &[String]) -> Result<(), String> {
     }
     let window = export_window(&s, framing, None)?;
     export_framed(&s, o, window)
+}
+
+/// The warning for what reading `path` left out that isn't a counted record: a DWG's failsafe
+/// reader notes, which is where a DWG reports its losses (`read_notes`).
+fn read_notes_message(d: &cadcraft_engine::doc::Drawing, path: &str) -> Option<String> {
+    if d.read_notes.is_empty() {
+        return None;
+    }
+    Some(format!("{path}: {}", d.read_notes.join("; ")))
 }
 
 /// The warning for the model-space entities of `path` an image can't show, by type (those kept
@@ -667,6 +684,7 @@ fn main() -> ExitCode {
 
 fn cli() -> ExitCode {
     install_io();
+    cadcraft_fonts::ttf::set_user_font_dirs(cadcraft_engine::config_dir::user_font_dirs());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
     let r = match args.first().map(String::as_str) {

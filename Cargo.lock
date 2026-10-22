@@ -550,6 +550,7 @@ name = "cadcraft"
 version = "0.10.0"
 dependencies = [
  "cadcraft-engine",
+ "cadcraft-fonts",
  "cadcraft-io",
  "cadcraft-ui-egui",
  "eframe",
@@ -572,6 +573,7 @@ name = "cadcraft-cli"
 version = "0.10.0"
 dependencies = [
  "cadcraft-engine",
+ "cadcraft-fonts",
  "cadcraft-io",
  "cadcraft-mcp",
  "cadcraft-render",
@@ -713,6 +715,7 @@ dependencies = [
  "cadcraft-engine",
  "cadcraft-fonts",
  "cadcraft-geom",
+ "cadcraft-io",
  "cadcraft-render",
  "craft-ui",
  "egui",

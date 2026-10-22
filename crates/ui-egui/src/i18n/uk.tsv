@@ -1153,6 +1153,7 @@
 	Unsaved Layer State	Незбережений стан шарів
 	Up	Угору
 	Update Data Links	Оновити зв’язки з даними
+	Update Fields	Оновити поля
 	Update	Оновити
 	Use System Setting	Як у системі
 	User	Користувач
@@ -1358,3 +1359,12 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+	Enhanced Attribute Editor	Розширений редактор атрибутів
+	Block:	Блок:
+	Tag:	Ім'я:
+	Tag	Ім'я
+	Prompt	Підказка
+	Reset to Measurement	Повернути вимірене значення
+	Insert Measurement	Вставити вимірене значення
+	The text becomes the measured value alone, which follows the dimension when it is stretched	Текст стає лише виміряним значенням, яке змінюється разом із розміром
+	Puts the measured value in at the caret: it follows the dimension, the text around it stays	Вставляє виміряне значення в позицію курсора: воно змінюється разом із розміром, текст навколо залишається

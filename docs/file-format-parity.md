@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (DWG read keeps dynamic blocks' properties tables and associative data the bridge drops) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -58,6 +58,11 @@ definition uses (leftovers of DGN imports, hundreds of thousands in some drawing
 on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG ≈ 30% read,
 ≈ 15% write.**
 
+What a read leaves out is reported rather than silent: DXF records the reader could not place are
+counted per section (`skipped`), and a DWG — which has no sections of its own, the failsafe
+converter does the dropping — reports its losses in the reader's notes (`readNotes`). Both
+`drawing.inspect` and `cadcraft-cli info` / `convert` report them.
+
 ## DXF, version by version
 
 | DXF version | AutoCAD 2027 | CADCraft read | CADCraft write |
@@ -79,6 +84,7 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 | DIMENSION (all 7 kinds) | yes | yes, with anonymous `*D` blocks | a reopened dimension's `*D` block is regenerated under its name, unreferenced ones dropped (#495); DIMASSOC objects written |
 | LEADER | yes | yes | |
 | MULTILEADER | yes (#459) | yes, native MULTILEADER with MLEADERSTYLE (#459) | several landings per multileader are folded into one; per-object overrides and annotative scale contexts not kept |
+| Annotative objects (`ACDB_ANNOTATIONSCALES` context data) | yes (#1321): each object's supported scales and their SCALE records, so an MTEXT, dimension, multileader, hatch or block reference draws at the viewport's scale the size AutoCAD draws it | no: object annotativity is written as CADCraft data (our own `CADCRAFT ANNOTATION` record), which AutoCAD ignores, so a CADCraft-saved file reloads those objects as not annotative. Annotative *styles* do carry the `AcadAnnotative` xdata AutoCAD reads | |
 | HATCH pattern / solid | yes | yes; associative hatches keep their boundary objects in blocks too, and the boundary carries the hatch reactor (stretched dynamic blocks drag the fill in AutoCAD) | |
 | HATCH gradient | yes | yes (#162, fixes #80) | |
 | SOLID, TRACE, 3DFACE | yes | yes | |
@@ -95,8 +101,9 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 | Objects: LAYOUT, DICTIONARY, XRECORD, TABLESTYLE, DIMASSOC | yes | yes | |
 | Objects: GROUP, MLINESTYLE, MLEADERSTYLE, IMAGEDEF, SCALE | yes | yes (groups #417, scale list #468) | |
 | Objects: VISUALSTYLE, PLOTSETTINGS, materials, field objects and other unmodelled objects | kept raw (#528) | written back as read | not editable |
+| Fields of block attributes (FIELD, `ACAD_FIELD`, FIELDLIST) | read into a model (#1321): the field tree, the objects it reads (its own reference as itself, so a copy reads the copy), its cached value | written from 2004 as AutoCAD writes them, the field list brought up to date | evaluated again when the reference changes (UPDATEFIELD, REGEN): dynamic parameter values, block curve lengths, `AcExpr`, `_text`, number and case formats — checked field by field against AutoCAD on rebar drawings with dynamic blocks; other evaluators keep their value; a typed value replaces the field; fields of TEXT/MTEXT/ATTDEF are kept raw |
 | Foreign xdata, extension dictionaries, reactors, unmodelled objects, colour books | kept raw (#528); an entity's xdata is part of the entity, so COPY, MIRROR, ARRAY and paste keep it on the copies (EXPLODE pieces don't) | written back, handles remapped, references to deleted objects dropped | through DWG: xdata on table records and blocks, entity colour books and reactors, custom-class objects lost (acadrust) |
-| Objects: dynamic block data (ACAD_EVALUATION_GRAPH, BLOCK…PARAMETER, BLOCK…ACTION, grips) | read into a model (`dynblock`, `blocks.dynamic`): parameters, visibility states, value sets, stretch and lookup actions; references: their dynamic block, values and custom properties (`blocks.reference`, Properties ▸ Custom, read-only); kept raw (#528) | written back as read; a changed visibility state is written as AutoCAD writes it (a new anonymous block with its `AcDbBlockRepBTag`, the objects' `AcDbBlockRepETag`, the reference's representation data) | visibility states (and lookups that set only them) can be changed (`blocks.reference.set`, Properties ▸ Custom); distances, positions and the actions they drive not yet; DWG open and save keep it too (checked with an AutoCAD dynamic block) |
+| Objects: dynamic block data (ACAD_EVALUATION_GRAPH, BLOCK…PARAMETER, BLOCK…ACTION, grips) | read into a model (`dynblock`, `blocks.dynamic`): parameters, visibility states, value sets, stretch and lookup actions; references: their dynamic block, values and custom properties (`blocks.reference`, Properties ▸ Custom, read-only); kept raw (#528) | written back as read; a changed visibility state is written as AutoCAD writes it (a new anonymous block with its `AcDbBlockRepBTag`, the objects' `AcDbBlockRepETag`, the reference's representation data) | visibility states (and lookups that set only them) can be changed (`blocks.reference.set`, Properties ▸ Custom); distances, positions and the actions they drive not yet; DWG open and save keep it too (checked with an AutoCAD dynamic block). A DXF save writes the objects the DWG bridge reads in the form AutoCAD reads (#1321: null values, constraint value sets, lookup markers, connection order, associative variables' dependencies), so a drawing opened from a DWG and saved as DXF opens in AutoCAD; a DWG read also keeps what the bridge drops or misreads of dynamic blocks — block properties tables (decoded from their records), the associative geometry dependencies it skips (`AcDbAssocSimplePersSubentId`), constraint groups' node counts and edge subentity names — so the attribute fields of constraint-driven dynamic blocks read from DWG and saved as DXF evaluate in AutoCAD as in the original; a DWG save still loses properties tables (the bridge can't write them) |
 | Handles and owners | entity handles kept; others regenerated | consistent | stable across CADCraft re-saves (#495); other programs' table and object handles renumbered once |
 
 **DXF ≈ 50% read, ≈ 30% write** (estimated; weights: common 2D entities 50%, annotation objects
@@ -138,6 +145,9 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | DWG read keeps dynamic blocks' properties tables, the associative geometry dependencies the bridge skipped and constraint groups' node counts (#1321): no records left out of drawings with constraint-driven dynamic blocks, their fields evaluate in AutoCAD after a DXF save |
+| 2026-10-19 | minor | Block attribute fields read, saved and evaluated (#1321); dynamic block objects from the DWG bridge written in AutoCAD's form in DXF, so such drawings open in AutoCAD again |
+| 2026-10-19 | minor | Annotative objects: AutoCAD's `ACDB_ANNOTATIONSCALES` context data read (object → extension dictionary → context data → SCALE), so MTEXT, dimensions, multileaders, hatches and block references draw at a layout viewport's scale the size AutoCAD draws them; writing that data is still open (#1321) |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |
@@ -152,3 +162,4 @@ our output in AutoCAD black-box.
 | 2026-10-11 | minor | DXF (ASCII and binary) and DWG saved at 2000–2018, 2018 by default (#421) |
 | 2026-10-10 | minor | WIPEOUT and gradients written since #147/#162; other save losses remain (#201, #204, #208, #209, #213, #223) |
 | 2026-10-10 | major | First file-format parity doc: DWG and DXF version by version, per-object read/write, other formats |
+| 2026-10-21 | minor | Dynamic block objects keep the form they were read in: only a drawing read from a DWG has them rewritten in AutoCAD's form on a DXF save (`bridge_form`), a DXF drawing's are written as read |

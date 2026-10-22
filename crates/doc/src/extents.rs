@@ -318,6 +318,7 @@ mod tests {
     fn right_justified_attdef_is_left_of_alignment_point() {
         let text = text(HAlign::Right, VAlign::Baseline);
         let a = crate::Attrib {
+            field: None,
             tag: "HELLO".into(),
             text,
             invisible: false,
@@ -354,6 +355,7 @@ mod tests {
             arrow_size: 1.0,
             spline: false,
             block: None,
+            shelf: false,
         };
         let b = bounds(EntityKind::MLeader(ml.clone()));
         // The glyph spans x 25.45..28.78, y -2.5..2.5.

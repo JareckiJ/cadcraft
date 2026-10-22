@@ -942,6 +942,7 @@
 	Unsaved Layer State	Несохраненное состояние слоев
 	Up	Вверх
 	Update	Обновить
+	Update Fields	Обновить поля
 	Use System Setting	Как в системе
 	User	Пользователь
 	User Parameters	Пользовательские параметры
@@ -1009,3 +1010,13 @@
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
 	Analyze Shapes	Анализ фигур
+	Enhanced Attribute Editor	Редактор атрибутов
+	Block:	Блок:
+	Tag:	Тег:
+	Tag	Тег
+	Prompt	Подсказка
+	Apply	Применить
+	Reset to Measurement	Вернуть измеренное значение
+	Insert Measurement	Вставить измеренное значение
+	The text becomes the measured value alone, which follows the dimension when it is stretched	Текст становится только измеренным значением, которое меняется вместе с размером при растягивании
+	Puts the measured value in at the caret: it follows the dimension, the text around it stays	Вставляет измеренное значение в позицию курсора: оно меняется вместе с размером, текст вокруг остаётся
