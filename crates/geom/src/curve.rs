@@ -281,26 +281,16 @@ impl Ellipse {
         let mb = ma * self.ratio;
         norm_angle((y / mb.max(EPS)).atan2(x / ma))
     }
+    /// The point of the ellipse (arc) nearest `p`: exact (the roots of the perpendicular
+    /// condition on the rational form), the centre for a non-finite ellipse.
     pub fn closest(&self, p: Vec2) -> Vec2 {
-        let mut pts = Vec::new();
-        self.tessellate(self.major.len() * 1e-3, &mut pts);
-        nearest_on_polyline(&pts, p).unwrap_or(self.center)
+        crate::Curve::ellipse(self).closest(p).map(|c| c.point).unwrap_or(self.center)
     }
-}
 
-/// The nearest point to `p` on a polyline (through tessellated points).
-pub(crate) fn nearest_on_polyline(pts: &[Vec2], p: Vec2) -> Option<Vec2> {
-    let mut best: Option<(f64, Vec2)> = None;
-    for w in pts.windows(2) {
-        if let [a, b] = w {
-            let c = Line::new(*a, *b).closest(p);
-            let d = c.dist(p);
-            if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, c));
-            }
-        }
+    /// The parameter of the point of the ellipse (arc) nearest `p`.
+    pub fn closest_param(&self, p: Vec2) -> Option<f64> {
+        crate::Curve::ellipse(self).closest(p).map(|c| c.t)
     }
-    best.map(|(_, c)| c).or_else(|| pts.first().copied())
 }
 
 /// A primitive segment: a line or an arc (polyline pieces, boundary loops, offsets).

@@ -3,9 +3,7 @@
 //! ellipses and splines).
 
 use cadcraft_doc::{Common, Entity, EntityKind, Handle, LwPolyline, MAX_BLOCK_DEPTH, Space};
-use cadcraft_geom::{
-    Arc, Ellipse, Line, Mat3, PolyVertex, Polyline, Segment, Spline, TAU, Vec2, ccw_sweep, intersect_ext, line_circle, line_line_infinite, norm_angle,
-};
+use cadcraft_geom::{Arc, Curve, Ellipse, Mat3, PolyVertex, Polyline, Spline, TAU, Vec2, ccw_sweep, line_circle, line_line_infinite, norm_angle};
 use serde_json::{Value, json};
 
 use super::curves::{self, Chain, MAX_GEN, TanObj};
@@ -1880,66 +1878,20 @@ fn ellipse_kind(e: &Ellipse) -> EntityKind {
     EntityKind::Ellipse(cadcraft_doc::Ellipse { center: v3(e.center), major: v3(e.major), ratio: e.ratio, start: e.start, end: e.end })
 }
 
-/// Intersections of a sampled curve `eval(t)` (parameters `ts`) with the cutting segments,
-/// as curve parameters refined by bisection on the exact curve.
-fn hits_on(eval: &dyn Fn(f64) -> Vec2, ts: &[f64], cut: &[Segment]) -> Vec<f64> {
-    let mut out = Vec::new();
-    for w in ts.windows(2) {
-        let (Some(t0), Some(t1)) = (w.first().copied(), w.get(1).copied()) else { continue };
-        let (a, b) = (eval(t0), eval(t1));
-        let sg = Segment::Line(Line::new(a, b));
-        for c in cut {
-            for x in intersect_ext(&sg, c, false) {
-                let f = Line::new(a, b).param_of(x).clamp(0.0, 1.0);
-                out.push(refine_hit(eval, c, t0, t1, t0 + (t1 - t0) * f));
-            }
-        }
-    }
-    out
-}
-
-/// Signed side of `p` relative to a cutting segment (line side, or inside/outside an arc's circle).
-fn side_of(c: &Segment, p: Vec2) -> f64 {
-    match c {
-        Segment::Line(l) => l.side(p) / l.len().max(1e-300),
-        Segment::Arc { arc, .. } => p.dist(arc.center) - arc.radius,
-    }
-}
-
-fn refine_hit(eval: &dyn Fn(f64) -> Vec2, c: &Segment, t0: f64, t1: f64, guess: f64) -> f64 {
-    let (mut a, mut b) = (t0, t1);
-    let (mut fa, fb) = (side_of(c, eval(a)), side_of(c, eval(b)));
-    if !(fa.is_finite() && fb.is_finite()) || fa * fb > 0.0 {
-        return guess;
-    }
-    for _ in 0..60 {
-        let m = (a + b) / 2.0;
-        let fm = side_of(c, eval(m));
-        if fa * fm <= 0.0 {
-            b = m;
-        } else {
-            a = m;
-            fa = fm;
-        }
-    }
-    (a + b) / 2.0
-}
-
-fn ellipse_samples(ge: &Ellipse) -> Vec<f64> {
-    let n = 720usize;
-    let sw = ge.sweep();
-    (0..=n).map(|i| ge.start + sw * i as f64 / n as f64).collect()
+/// Parameters on `curve` (its first parameter: ellipse angle or spline parameter) where it
+/// meets the cutting edges, exactly.
+fn cut_params(curve: &Curve, cut: &[Curve]) -> Vec<f64> {
+    cut.iter().flat_map(|c| curve.intersect(c)).map(|h| h.t1).filter(|t| t.is_finite()).collect()
 }
 
 /// Trim objects that modify.rs does not handle itself (ellipses and splines).
-pub(crate) fn trim_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Result<Vec<EntityKind>> {
+pub(crate) fn trim_other(k: &EntityKind, cut: &[Curve], pick: Vec2) -> Result<Vec<EntityKind>> {
     let none = || other("Object does not intersect a cutting edge.");
     match k {
         EntityKind::Ellipse(e) => {
             let ge = ellipse_of(e);
             let full = Ellipse { start: 0.0, end: TAU, ..ge };
-            let eval = |t: f64| full.at_param(t);
-            let params: Vec<f64> = hits_on(&eval, &ellipse_samples(&ge), cut).into_iter().map(norm_angle).collect();
+            let params: Vec<f64> = cut_params(&Curve::ellipse(&ge), cut).into_iter().map(norm_angle).collect();
             if ge.is_full() {
                 let mut ps = params;
                 ps.sort_by(f64::total_cmp);
@@ -1981,11 +1933,10 @@ pub(crate) fn trim_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Result<
                 return Err(other("Invalid spline."));
             }
             let (lo_d, hi_d) = sp.domain();
-            let n = 512;
-            let params: Vec<f64> = (0..=n).map(|i| lo_d + (hi_d - lo_d) * i as f64 / n as f64).collect();
-            let eval = |t: f64| sp.eval(t);
-            let mut ts: Vec<f64> =
-                hits_on(&eval, &params, cut).into_iter().filter(|t| *t > lo_d + 1e-9 * (hi_d - lo_d) && *t < hi_d - 1e-9 * (hi_d - lo_d)).collect();
+            let mut ts: Vec<f64> = cut_params(&Curve::spline(sp), cut)
+                .into_iter()
+                .filter(|t| *t > lo_d + 1e-9 * (hi_d - lo_d) && *t < hi_d - 1e-9 * (hi_d - lo_d))
+                .collect();
             ts.sort_by(f64::total_cmp);
             ts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
             let tp = curves::spline_param_of(sp, pick);
@@ -2015,7 +1966,7 @@ pub(crate) fn trim_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Result<
 }
 
 /// Extend objects that modify.rs does not handle itself (elliptical arcs and open splines).
-pub(crate) fn extend_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Result<EntityKind> {
+pub(crate) fn extend_other(k: &EntityKind, cut: &[Curve], pick: Vec2) -> Result<EntityKind> {
     match k {
         EntityKind::Ellipse(e) => {
             let ge = ellipse_of(e);
@@ -2024,8 +1975,7 @@ pub(crate) fn extend_other(k: &EntityKind, cut: &[Segment], pick: Vec2) -> Resul
             }
             let full = Ellipse { start: 0.0, end: TAU, ..ge };
             let from_end = pick.dist(ge.at_param(ge.end)) < pick.dist(ge.at_param(ge.start));
-            let eval = |t: f64| full.at_param(t);
-            let hits: Vec<f64> = hits_on(&eval, &ellipse_samples(&full), cut)
+            let hits: Vec<f64> = cut_params(&Curve::ellipse(&full), cut)
                 .into_iter()
                 .map(norm_angle)
                 .filter(|t| !cadcraft_geom::angle_in_sweep(*t, ge.start, ge.end))

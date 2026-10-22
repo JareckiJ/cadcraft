@@ -1,5 +1,6 @@
 //! OFFSET of a full ellipse goes to the side of the picked point (issue #501): an outside point
-//! gave an inward copy and an inside point an outward one.
+//! gave an inward copy and an inside point an outward one. The copy is a spline (an ellipse's
+//! offset is not an ellipse), as in AutoCAD.
 
 use cadcraft_engine::Session;
 use cadcraft_engine::doc::EntityKind;
@@ -11,12 +12,13 @@ fn last_handle(s: &Session) -> String {
     e.handle.hex()
 }
 
-/// The largest (x, y) over the vertices of the last polyline.
+/// The largest (x, y) over points along the last spline.
 fn last_poly_max(s: &Session) -> (f64, f64) {
     let d = s.doc().unwrap();
     let Some(e) = d.model.iter().last() else { panic!("empty drawing") };
-    let EntityKind::LwPolyline(p) = &e.kind else { panic!("not a polyline: {:?}", e.kind) };
-    p.vertices.iter().fold((f64::MIN, f64::MIN), |(x, y), v| (x.max(v.p.x), y.max(v.p.y)))
+    let EntityKind::Spline(sp) = &e.kind else { panic!("not a spline: {:?}", e.kind) };
+    let (lo, hi) = sp.domain();
+    (0..=4000).map(|i| sp.eval(lo + (hi - lo) * i as f64 / 4000.0)).fold((f64::MIN, f64::MIN), |(x, y), p| (x.max(p.x), y.max(p.y)))
 }
 
 #[test]
@@ -30,6 +32,6 @@ fn full_ellipse_offset_follows_side_point() {
         s.execute("offset", &json!({ "handle": h, "distance": 2, "side": side })).unwrap();
         let (mx, my) = last_poly_max(&s);
         let got = if major[0] > 0.0 { mx } else { my };
-        assert!((got - expected).abs() < 0.05, "major {major:?}, side {side:?}: far end at {got}, expected {expected}");
+        assert!((got - expected).abs() < 1e-6, "major {major:?}, side {side:?}: far end at {got}, expected {expected}");
     }
 }

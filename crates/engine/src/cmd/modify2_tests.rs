@@ -761,11 +761,13 @@ fn offset_elliptical_arc_follows_picked_side() {
         let mut s = Session::new();
         let e = h(&s.execute("ellipse", &json!({"center": [0, 0], "major": [10, 0], "ratio": 0.5, "start": 0, "end": 90})).unwrap());
         s.execute("offset", &json!({"handle": e, "distance": 1, "side": side})).unwrap();
-        let p = poly(&last(&s));
-        p.vertices.iter().map(|v| v.p.x).fold(f64::MIN, f64::max)
+        // The offset of an elliptical arc is a spline (not an ellipse), as in AutoCAD.
+        let EntityKind::Spline(sp) = last(&s) else { panic!("not a spline: {:?}", last(&s)) };
+        let (lo, hi) = sp.domain();
+        (0..=2000).map(|i| sp.eval(lo + (hi - lo) * i as f64 / 2000.0).x).fold(f64::MIN, f64::max)
     };
     let centre = max_x(json!([0, 0]));
-    assert!((centre - 9.0).abs() < 0.05, "centre side went outward: max x = {centre}");
+    assert!((centre - 9.0).abs() < 1e-6, "centre side went outward: max x = {centre}");
     let outer = max_x(json!([20, 20]));
-    assert!((outer - 11.0).abs() < 0.05, "outer side went inward: max x = {outer}");
+    assert!((outer - 11.0).abs() < 1e-6, "outer side went inward: max x = {outer}");
 }

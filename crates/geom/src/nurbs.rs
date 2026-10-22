@@ -21,7 +21,7 @@ const MAX_SPLIT_INSERTS: usize = 64;
 const MAX_DECOMPOSED: usize = 10_000;
 
 /// A homogeneous control point: (w·P, w).
-type H = (Vec2, f64);
+pub(crate) type H = (Vec2, f64);
 
 fn hlerp(a: H, b: H, t: f64) -> H {
     (a.0 * (1.0 - t) + b.0 * t, a.1 * (1.0 - t) + b.1 * t)
@@ -303,7 +303,7 @@ impl Spline {
 
     /// Bézier decomposition: the homogeneous control points of each polynomial piece
     /// (degree + 1 each) and the parameter breaks between them (pieces + 1 values).
-    fn bezier_pieces(&self) -> Option<(Vec<Vec<H>>, Vec<f64>)> {
+    pub(crate) fn bezier_pieces(&self) -> Option<(Vec<Vec<H>>, Vec<f64>)> {
         let mut s = self.clamped()?;
         let p = s.degree;
         if p > MAX_EDIT_DEGREE {

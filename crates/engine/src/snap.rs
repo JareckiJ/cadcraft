@@ -8,7 +8,7 @@ mod viewport;
 pub use viewport::ViewportPoint;
 
 use cadcraft_doc::{Drawing, EntityKind, Insert, MAX_BLOCK_DEPTH, Prim, Space};
-use cadcraft_geom::{Bounds2, Circle, EPS, Ellipse, Mat3, PI, Segment, Vec2, intersect_ext};
+use cadcraft_geom::{Bounds2, Circle, Curve, EPS, Ellipse, Mat3, PI, Segment, Vec2, intersect_ext};
 use serde::Serialize;
 
 /// OSMODE bits.
@@ -260,7 +260,7 @@ fn osnap_in_with_prims(
     // meet (lines extended, arcs as full circles: in 2D, the "apparent" crossing of objects
     // that don't reach each other).
     if osmode & (mode::INT | mode::APP) != 0 {
-        let mut segs: Vec<Vec<Segment>> = near_prims.iter().take(200).map(prim_segments).collect();
+        let mut segs: Vec<Vec<Segment>> = near_prims.iter().take(200).map(|p| if is_curved(p) { Vec::new() } else { prim_segments(p) }).collect();
         let probe = finite_intersection_probe(cursor, aperture);
         for (i, segments) in segs.iter_mut().enumerate() {
             let preserves_app = osmode & mode::APP != 0 && near_prims.get(i).is_some_and(extendable);
@@ -269,9 +269,25 @@ fn osnap_in_with_prims(
             }
         }
         let real = if osmode & mode::INT != 0 { mode::INT } else { mode::APP };
+        // Ellipses and splines meet other objects exactly (not as polygons), searched only
+        // where their pieces reach the probe.
+        let exact = exact_curves(&near_prims, &segs);
         for i in 0..segs.len() {
             for j in i + 1..segs.len() {
-                // Extending a tessellated ellipse or spline chord means nothing.
+                if let (Some(ca), Some(cb)) = (exact.get(i), exact.get(j))
+                    && [i, j].iter().any(|k| near_prims.get(*k).is_some_and(is_curved))
+                {
+                    for a in ca {
+                        for b in cb {
+                            for h in a.intersect_in(b, probe.as_ref()) {
+                                if h.point.dist(cursor) <= aperture {
+                                    cands.push((real, h.point));
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let extend = osmode & mode::APP != 0 && [i, j].iter().all(|k| near_prims.get(*k).is_some_and(extendable));
                 for a in segs.get(i).into_iter().flatten() {
                     for b in segs.get(j).into_iter().flatten() {
@@ -294,6 +310,28 @@ fn osnap_in_with_prims(
     }
     let hit = finish(cands, &near_prims, cursor, aperture, osmode, base, deferred, clip);
     Some((hit, near_prims))
+}
+
+/// An ellipse or spline: intersected exactly, not through `prim_segments`.
+fn is_curved(p: &Prim) -> bool {
+    matches!(p, Prim::Ellipse(_) | Prim::Spline(_))
+}
+
+/// The exact curves of each primitive for intersections with ellipses and splines: the curve
+/// itself, or the primitive's (probe-filtered) segments. Empty when no ellipse or spline is near.
+fn exact_curves(prims: &[Prim], segs: &[Vec<Segment>]) -> Vec<Vec<Curve>> {
+    if !prims.iter().take(segs.len()).any(is_curved) {
+        return Vec::new();
+    }
+    prims
+        .iter()
+        .zip(segs)
+        .map(|(p, ss)| match p {
+            Prim::Ellipse(e) => vec![Curve::ellipse(e)],
+            Prim::Spline(s) => vec![Curve::spline(s)],
+            _ => ss.iter().map(|s| Curve::segment(fix_circle(s))).collect(),
+        })
+        .collect()
 }
 
 fn finite_intersection_probe(cursor: Vec2, aperture: f64) -> Option<Bounds2> {
@@ -469,8 +507,19 @@ fn finish(
             }
         };
         for p in near_prims {
-            for s in prim_segments(p) {
-                consider(fix_circle(&s).closest(cursor));
+            match p {
+                // Exact on ellipses and splines, not on their tessellation.
+                Prim::Ellipse(e) => consider(e.closest(cursor)),
+                Prim::Spline(s) => {
+                    if let Some(c) = s.closest(cursor) {
+                        consider(c);
+                    }
+                }
+                _ => {
+                    for s in prim_segments(p) {
+                        consider(fix_circle(&s).closest(cursor));
+                    }
+                }
             }
             if let Prim::Circle(c) = p {
                 consider(c.closest(cursor));

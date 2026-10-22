@@ -525,10 +525,7 @@ pub fn kind_distance(k: &EntityKind, p: Vec2) -> f64 {
             Prim::Seg(s) => s.closest(p).dist(p),
             Prim::Circle(c) => c.closest(p).dist(p),
             Prim::Ellipse(e) => e.closest(p).dist(p),
-            Prim::Spline(sp) => {
-                let pts = sp.tessellate(1e-3);
-                pts.windows(2).filter_map(|w| Some(Line::new(*w.first()?, *w.get(1)?).closest(p).dist(p))).fold(f64::INFINITY, f64::min)
-            }
+            Prim::Spline(sp) => sp.closest(p).map_or(f64::INFINITY, |c| c.dist(p)),
             Prim::Point(q) => q.dist(p),
             Prim::Infinite { base, dir, .. } => Line::new(*base, *base + *dir).project(p).dist(p),
             Prim::Fill(f) => {
@@ -551,30 +548,10 @@ pub fn sub_spline(sp: &Spline, a: f64, b: f64) -> Option<Spline> {
     sp.sub_between(a, b)
 }
 
-/// Parameter of the point on the spline nearest `p`.
+/// Parameter of the point on the spline nearest `p` (exact: `Spline::closest_param`; the start
+/// of the domain for an invalid spline).
 pub fn spline_param_of(sp: &Spline, p: Vec2) -> f64 {
-    let (lo, hi) = sp.domain();
-    let n = 400;
-    let mut best = (f64::INFINITY, lo);
-    for i in 0..=n {
-        let t = lo + (hi - lo) * i as f64 / n as f64;
-        let d = sp.eval(t).dist(p);
-        if d < best.0 {
-            best = (d, t);
-        }
-    }
-    let step = (hi - lo) / n as f64;
-    let (mut a, mut b) = ((best.1 - step).max(lo), (best.1 + step).min(hi));
-    for _ in 0..60 {
-        let m1 = a + (b - a) / 3.0;
-        let m2 = b - (b - a) / 3.0;
-        if sp.eval(m1).dist(p) < sp.eval(m2).dist(p) {
-            b = m2;
-        } else {
-            a = m1;
-        }
-    }
-    (a + b) / 2.0
+    sp.closest_param(p).unwrap_or(sp.domain().0)
 }
 
 /// Reverse a spline's direction (control, weights, fit points and knots).

@@ -3,7 +3,8 @@
 
 use cadcraft_doc::{Entity, EntityKind, Handle, Prim};
 use cadcraft_geom::{
-    Arc, Circle, Line, Mat3, PolyVertex, Polyline, Segment, TAU, Vec2, angle_in_sweep, ccw_sweep, intersect_ext, line_line_infinite, norm_angle,
+    Arc, Circle, Curve, Line, Mat3, PolyVertex, Polyline, Segment, TAU, Vec2, angle_in_sweep, ccw_sweep, intersect_ext, line_line_infinite,
+    norm_angle,
 };
 use serde_json::{Value, json};
 
@@ -584,7 +585,7 @@ pub(crate) fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<Entit
             (r > 1e-12).then(|| arc(&Arc::new(a.center.xy(), r, a.start, a.end)))
         }
         EntityKind::Ellipse(e) => {
-            // Approximate with a polyline offset of the tessellation.
+            // An ellipse's offset is not an ellipse: a spline within tolerance, as in AutoCAD.
             let ge = cadcraft_geom::Ellipse { center: e.center.xy(), major: e.major.xy(), ratio: e.ratio, start: e.start, end: e.end };
             // Inside = on the centre side of the full ellipse, even for an open arc.
             let inside = {
@@ -595,11 +596,7 @@ pub(crate) fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<Entit
                 let (x, y) = (d.dot(u) * b, d.dot(u.perp()) * a);
                 x * x + y * y < (a * b) * (a * b)
             };
-            // offset_points shifts along the left normal, which points into a counter-clockwise ellipse.
-            let mut pts = Vec::new();
-            ge.tessellate(e.major.xy().len() * 1e-3, &mut pts);
-            let off = offset_points(&pts, if inside { dist } else { -dist }, ge.is_full());
-            Some(lwpoly(off.into_iter().map(PolyVertex::new).collect(), ge.is_full()))
+            ge.offset_spline(if inside { -dist } else { dist }, 0.0).map(EntityKind::Spline)
         }
         EntityKind::LwPolyline(p) => {
             let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
@@ -619,14 +616,11 @@ pub(crate) fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<Entit
             })
         }
         EntityKind::Spline(sp) => {
-            let pts = sp.tessellate(1e-3);
-            let n = pts.len();
-            let mid = pts.get(n / 2).copied()?;
-            let next = pts.get((n / 2 + 1).min(n.saturating_sub(1))).copied()?;
-            let left = (next - mid).cross(side - mid) > 0.0;
-            let off = offset_points(&pts, if left { dist } else { -dist }, sp.closed);
+            // The side from the exact nearest point; the offset is fitted within tolerance.
+            let t = sp.closest_param(side)?;
+            let left = sp.unit_tangent(t).cross(side - sp.eval(t)) > 0.0;
             // A closed spline stays closed (periodic), smooth across its start point.
-            Some(EntityKind::Spline(cadcraft_geom::Spline::from_fit(&decimate(&off, 40), sp.closed)))
+            sp.offset(if left { dist } else { -dist }, 0.0).map(EntityKind::Spline)
         }
         EntityKind::XLine(r) | EntityKind::Ray(r) => {
             let ln = Line::new(r.base.xy(), r.base.xy() + r.dir.xy());
@@ -637,48 +631,6 @@ pub(crate) fn offset_kind(k: &EntityKind, dist: f64, side: Vec2) -> Option<Entit
         }
         _ => None,
     }
-}
-
-fn decimate(pts: &[Vec2], max: usize) -> Vec<Vec2> {
-    if pts.len() <= max {
-        return pts.to_vec();
-    }
-    let step = pts.len() as f64 / max as f64;
-    let mut v: Vec<Vec2> = (0..max).filter_map(|i| pts.get((i as f64 * step) as usize).copied()).collect();
-    if let Some(l) = pts.last() {
-        v.push(*l);
-    }
-    v
-}
-
-fn offset_points(pts: &[Vec2], d: f64, closed: bool) -> Vec<Vec2> {
-    let n = pts.len();
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let p = pts.get(i).copied().unwrap_or_default();
-        let prev = if i > 0 {
-            pts.get(i - 1)
-        } else if closed {
-            pts.get(n.saturating_sub(2))
-        } else {
-            None
-        };
-        let next = if i + 1 < n {
-            pts.get(i + 1)
-        } else if closed {
-            pts.get(1)
-        } else {
-            None
-        };
-        let t = match (prev, next) {
-            (Some(a), Some(b)) => (*b - *a).normalized(),
-            (None, Some(b)) => (*b - p).normalized(),
-            (Some(a), None) => (p - *a).normalized(),
-            _ => Vec2::X,
-        };
-        out.push(p + t.perp() * d);
-    }
-    out
 }
 
 /// Offset a polyline: offset each segment, then join neighbours at their intersections.
@@ -787,8 +739,9 @@ pub(crate) struct Edges<'a> {
     pub implied: bool,
 }
 
-/// All primitives of the cutting edges (excluding `exclude`).
-fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segment>> {
+/// All primitives of the cutting edges (excluding `exclude`): lines and arcs, ellipses and
+/// splines as exact curves.
+fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Curve>> {
     let d = s.doc()?;
     let space = s.space();
     let store = d.space(&space).ok_or(EngineError::NoDocument)?;
@@ -805,11 +758,11 @@ fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segme
         if edges.implied
             && let Some(segs) = implied_edge(&e.kind)
         {
-            out.extend(segs);
+            out.extend(segs.into_iter().map(Curve::segment));
             continue;
         }
         for p in e.kind.prims() {
-            out.extend(prim_to_segments(&p));
+            out.extend(prim_to_curves(&p));
         }
     }
     Ok(out)
@@ -844,22 +797,28 @@ fn implied_edge(k: &EntityKind) -> Option<Vec<Segment>> {
     }
 }
 
-fn prim_to_segments(p: &Prim) -> Vec<Segment> {
-    match p {
+fn prim_to_curves(p: &Prim) -> Vec<Curve> {
+    let segs = match p {
         Prim::Seg(s) => vec![*s],
         Prim::Circle(c) => vec![Segment::Arc { arc: Arc { center: c.center, radius: c.radius, start: 0.0, end: TAU - 1e-12 }, ccw: true }],
         Prim::Infinite { base, dir, .. } => vec![Segment::Line(Line::new(*base - *dir * 1e8, *base + *dir * 1e8))],
-        Prim::Ellipse(e) => {
-            let mut pts = Vec::new();
-            e.tessellate(e.major.len() * 1e-4, &mut pts);
-            pts.windows(2).filter_map(|w| Some(Segment::Line(Line::new(*w.first()?, *w.get(1)?)))).collect()
-        }
-        Prim::Spline(sp) => sp.tessellate(1e-4).windows(2).filter_map(|w| Some(Segment::Line(Line::new(*w.first()?, *w.get(1)?)))).collect(),
+        Prim::Ellipse(e) => return vec![Curve::ellipse(e)],
+        Prim::Spline(sp) => return vec![Curve::spline(sp)],
         Prim::Fill(f) => {
             let n = f.len();
             (0..n).filter_map(|i| Some(Segment::Line(Line::new(*f.get(i)?, *f.get((i + 1) % n)?)))).collect()
         }
         Prim::Point(_) => Vec::new(),
+    };
+    segs.into_iter().map(Curve::segment).collect()
+}
+
+/// Where segment `seg` meets cutting edge `c`: the closed forms against lines and arcs (as
+/// before), exact against ellipses and splines.
+pub(crate) fn cut_hits(seg: &Segment, c: &Curve) -> Vec<Vec2> {
+    match c.as_segment() {
+        Some(s) => intersect_ext(seg, s, false),
+        None => Curve::segment(*seg).intersect(c).into_iter().map(|h| h.point).collect(),
     }
 }
 
@@ -873,12 +832,8 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
     let pieces: Vec<EntityKind> = match &e.kind {
         EntityKind::Line(l) => {
             let ln = Line::new(l.a.xy(), l.b.xy());
-            let mut ts: Vec<f64> = cut
-                .iter()
-                .flat_map(|c| intersect_ext(&Segment::Line(ln), c, false))
-                .map(|x| ln.param_of(x))
-                .filter(|t| *t > 1e-9 && *t < 1.0 - 1e-9)
-                .collect();
+            let mut ts: Vec<f64> =
+                cut.iter().flat_map(|c| cut_hits(&Segment::Line(ln), c)).map(|x| ln.param_of(x)).filter(|t| *t > 1e-9 && *t < 1.0 - 1e-9).collect();
             ts.sort_by(f64::total_cmp);
             let tp = ln.param_of(pick).clamp(0.0, 1.0);
             let lo = ts.iter().copied().filter(|t| *t < tp).fold(0.0, f64::max);
@@ -900,8 +855,7 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
             let seg = Segment::Arc { arc: ga, ccw: true };
             let sweep = ga.sweep();
             let param = |p: Vec2| norm_angle(ga.center.angle_to(p) - ga.start);
-            let mut ts: Vec<f64> =
-                cut.iter().flat_map(|c| intersect_ext(&seg, c, false)).map(param).filter(|t| *t > 1e-9 && *t < sweep - 1e-9).collect();
+            let mut ts: Vec<f64> = cut.iter().flat_map(|c| cut_hits(&seg, c)).map(param).filter(|t| *t > 1e-9 && *t < sweep - 1e-9).collect();
             ts.sort_by(f64::total_cmp);
             let tp = param(pick).min(sweep);
             let lo = ts.iter().copied().filter(|t| *t < tp).fold(0.0, f64::max);
@@ -920,7 +874,7 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
         }
         EntityKind::Circle(c) => {
             let full = Segment::Arc { arc: Arc { center: c.center.xy(), radius: c.radius, start: 0.0, end: TAU - 1e-12 }, ccw: true };
-            let mut angs: Vec<f64> = cut.iter().flat_map(|x| intersect_ext(&full, x, false)).map(|p| c.center.xy().angle_to(p)).collect();
+            let mut angs: Vec<f64> = cut.iter().flat_map(|x| cut_hits(&full, x)).map(|p| c.center.xy().angle_to(p)).collect();
             angs.sort_by(f64::total_cmp);
             angs.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
             if angs.len() < 2 {
@@ -989,7 +943,7 @@ fn sub_polyline(segs: &[Segment], a: f64, b: f64) -> Vec<PolyVertex> {
     out
 }
 
-fn trim_polyline(p: &cadcraft_doc::LwPolyline, cut: &[Segment], pick: Vec2) -> Result<Vec<EntityKind>> {
+fn trim_polyline(p: &cadcraft_doc::LwPolyline, cut: &[Curve], pick: Vec2) -> Result<Vec<EntityKind>> {
     let pl = Polyline { vertices: p.vertices.clone(), closed: p.closed };
     let segs = pl.segments();
     let total: f64 = segs.iter().map(Segment::len).sum();
@@ -999,7 +953,7 @@ fn trim_polyline(p: &cadcraft_doc::LwPolyline, cut: &[Segment], pick: Vec2) -> R
     let mut best = f64::INFINITY;
     for s in &segs {
         let len = s.len();
-        for x in cut.iter().flat_map(|c| intersect_ext(s, c, false)) {
+        for x in cut.iter().flat_map(|c| cut_hits(s, c)) {
             ts.push(acc + param_on(s, x) * len);
         }
         let c = s.closest(pick);
@@ -1069,11 +1023,8 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
             let (fixed, end) = if from_b { (a, b) } else { (b, a) };
             let dir = (end - fixed).normalized();
             let ray = Segment::Line(Line::new(end, end + dir * 1e8));
-            let best = cut
-                .iter()
-                .flat_map(|c| intersect_ext(&ray, c, false))
-                .filter(|x| (*x - end).dot(dir) > 1e-9)
-                .min_by(|x, y| x.dist(end).total_cmp(&y.dist(end)));
+            let best =
+                cut.iter().flat_map(|c| cut_hits(&ray, c)).filter(|x| (*x - end).dot(dir) > 1e-9).min_by(|x, y| x.dist(end).total_cmp(&y.dist(end)));
             let np = best.ok_or_else(|| EngineError::Other("Object does not intersect an edge.".into()))?;
             if from_b { line(a, np) } else { line(np, b) }
         }
@@ -1082,7 +1033,7 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
             let from_end = pick.dist(ga.end_point()) < pick.dist(ga.start_point());
             let full = Segment::Arc { arc: Arc { start: 0.0, end: TAU - 1e-12, ..ga }, ccw: true };
             let hits: Vec<f64> =
-                cut.iter().flat_map(|c| intersect_ext(&full, c, false)).map(|x| ga.center.angle_to(x)).filter(|t| !ga.contains_angle(*t)).collect();
+                cut.iter().flat_map(|c| cut_hits(&full, c)).map(|x| ga.center.angle_to(x)).filter(|t| !ga.contains_angle(*t)).collect();
             let pick_ang = if from_end {
                 hits.iter().copied().min_by(|x, y| ccw_sweep(ga.end, *x).total_cmp(&ccw_sweep(ga.end, *y)))
             } else {
@@ -1102,7 +1053,7 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
             let ray = Segment::Line(Line::new(end, end + dir * 1e8));
             let np = cut
                 .iter()
-                .flat_map(|c| intersect_ext(&ray, c, false))
+                .flat_map(|c| cut_hits(&ray, c))
                 .filter(|x| (*x - end).dot(dir) > 1e-9)
                 .min_by(|x, y| x.dist(end).total_cmp(&y.dist(end)))
                 .ok_or_else(|| EngineError::Other("Object does not intersect an edge.".into()))?;
