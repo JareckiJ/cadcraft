@@ -194,6 +194,94 @@ impl DisplayList {
     }
 }
 
+/// 3D Orbit orientation for model space: azimuth (`yaw`) around world Z, elevation tilt (`pitch`)
+/// from the Top 2D plan view (`0.0`), and the 3D `pivot` point in world coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Orbit3d {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub pivot: cadcraft_geom::Vec3,
+}
+
+impl Orbit3d {
+    /// True when looking straight down `-Z` with zero twist (the standard 2D Top plan view).
+    pub fn is_top(&self) -> bool {
+        self.yaw.abs() <= 1e-9 && self.pitch.abs() <= 1e-9
+    }
+
+    /// Orthographically project a 3D world point `p` onto the 2D view plane around `self.pivot`.
+    pub fn project(&self, p: cadcraft_geom::Vec3) -> Vec2 {
+        if self.is_top() {
+            return p.xy();
+        }
+        let d = p - self.pivot;
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        let x1 = d.x * cy - d.y * sy;
+        let y1 = d.x * sy + d.y * cy;
+        let y2 = y1 * cp + d.z * sp;
+        Vec2::new(self.pivot.x + x1, self.pivot.y + y2)
+    }
+
+    /// Project a 3D direction vector onto the 2D view plane.
+    pub fn project_vec(&self, v: cadcraft_geom::Vec3) -> Vec2 {
+        if self.is_top() {
+            return v.xy();
+        }
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        let x1 = v.x * cy - v.y * sy;
+        let y1 = v.x * sy + v.y * cy;
+        let y2 = y1 * cp + v.z * sp;
+        Vec2::new(x1, y2)
+    }
+
+    /// Stable hash key for display-list caching (`0` in 2D Top view).
+    pub fn hash_key(&self) -> u64 {
+        if self.is_top() {
+            return 0;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (
+            self.yaw.to_bits(),
+            self.pitch.to_bits(),
+            self.pivot.x.to_bits(),
+            self.pivot.y.to_bits(),
+            self.pivot.z.to_bits(),
+        )
+            .hash(&mut h);
+        h.finish()
+    }
+
+    /// Short label for the ViewCube face (`"TOP"`, `"FRONT"`, `"RIGHT"`, `"ISO"`, `"3D"`).
+    pub fn label(&self) -> &'static str {
+        if self.is_top() {
+            return "TOP";
+        }
+        let deg_y = self.yaw.to_degrees().rem_euclid(360.0);
+        let deg_p = self.pitch.to_degrees();
+        if (deg_p - 90.0).abs() < 2.0 {
+            if !(2.0..=358.0).contains(&deg_y) {
+                return "FRONT";
+            }
+            if (deg_y - 90.0).abs() < 2.0 {
+                return "LEFT";
+            }
+            if (deg_y - 180.0).abs() < 2.0 {
+                return "BACK";
+            }
+            if (deg_y - 270.0).abs() < 2.0 {
+                return "RIGHT";
+            }
+        }
+        if (deg_p - 54.7356).abs() < 3.0 {
+            return "ISO";
+        }
+        "3D"
+    }
+}
+
 /// Build options.
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -226,6 +314,8 @@ pub struct Options {
     /// rebuild the view no longer needs). A cancelled build returns a partial list, which the
     /// caller must discard; see [`Options::cancelled`].
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// 3D Orbit camera orientation (defaults to 2D Top plan view).
+    pub orbit: Orbit3d,
 }
 
 impl Options {
@@ -249,6 +339,7 @@ impl Default for Options {
             skip_viewport: None,
             transparency: false,
             cancel: None,
+            orbit: Orbit3d::default(),
         }
     }
 }
@@ -286,6 +377,8 @@ struct Ctx<'a> {
     block_pstyle: Option<usize>,
     /// Transparency (percent) of the block reference being expanded, for `ByBlock`.
     block_transparency: u8,
+    /// Accumulated Z elevation for 3D orbit projection.
+    z_offset: f64,
 }
 
 impl Ctx<'_> {
@@ -354,10 +447,41 @@ impl Builder<'_> {
         let (color, _) = self.styled(color, 0.0);
         self.push_polyline(ctx, color, 0.0, pts);
     }
+    fn project_pt(&self, ctx: &Ctx, p: Vec2, extra_z: f64) -> Vec2 {
+        let q = ctx.xf.apply(p);
+        if self.opts.orbit.is_top() {
+            q
+        } else {
+            self.opts.orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, ctx.z_offset + extra_z))
+        }
+    }
+    fn polyline_3d(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[cadcraft_geom::Vec3]) {
+        if pts.len() < 2 {
+            return;
+        }
+        self.note_pen(color);
+        let (color, lw) = self.styled(color, lw);
+        let start = self.list.verts.len() as u32;
+        for p in pts {
+            let q = self.project_pt(ctx, p.xy(), p.z);
+            self.list.bounds.add(q);
+            self.list.verts.push(q);
+        }
+        self.list.prims.push(DPrim {
+            handle: ctx.top,
+            color: color.rgb,
+            aci7: color.aci7,
+            lw,
+            transparency: self.transparency,
+            kind: Kind::Polyline,
+            start,
+            len: pts.len() as u32,
+        });
+    }
     fn push_polyline(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[Vec2]) {
         let start = self.list.verts.len() as u32;
         for p in pts {
-            let q = ctx.xf.apply(*p);
+            let q = self.project_pt(ctx, *p, 0.0);
             self.list.bounds.add(q);
             self.list.verts.push(q);
         }
@@ -383,7 +507,12 @@ impl Builder<'_> {
         let (color, _) = self.styled(color, 0.0);
         let start = self.list.tris.len() as u32;
         for p in tris {
-            let q = xf.apply(*p);
+            let q0 = xf.apply(*p);
+            let q = if self.opts.orbit.is_top() {
+                q0
+            } else {
+                self.opts.orbit.project(cadcraft_geom::Vec3::new(q0.x, q0.y, ctx.z_offset))
+            };
             self.list.bounds.add(q);
             self.list.tris.push(q);
         }
@@ -443,7 +572,7 @@ impl Builder<'_> {
     }
     fn point(&mut self, ctx: &Ctx, color: Ink, p: Vec2) {
         let (color, _) = self.styled(color, 0.0);
-        let q = ctx.xf.apply(p);
+        let q = self.project_pt(ctx, p, 0.0);
         self.list.bounds.add(q);
         let start = self.list.verts.len() as u32;
         self.list.verts.push(q);
@@ -461,8 +590,14 @@ impl Builder<'_> {
     fn infinite(&mut self, ctx: &Ctx, color: Ink, base: Vec2, dir: Vec2, ray: bool) {
         let (color, _) = self.styled(color, 0.0);
         let start = self.list.verts.len() as u32;
-        self.list.verts.push(ctx.xf.apply(base));
-        self.list.verts.push(ctx.xf.apply_vec(dir).normalized());
+        self.list.verts.push(self.project_pt(ctx, base, 0.0));
+        let d2 = ctx.xf.apply_vec(dir);
+        let d_proj = if self.opts.orbit.is_top() {
+            d2.normalized()
+        } else {
+            self.opts.orbit.project_vec(cadcraft_geom::Vec3::new(d2.x, d2.y, 0.0)).normalized()
+        };
+        self.list.verts.push(d_proj);
         self.list.prims.push(DPrim {
             handle: ctx.top,
             color: color.rgb,
@@ -510,6 +645,7 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
         lt_factor: 1.0,
         block_pstyle: None,
         block_transparency: 0,
+        z_offset: 0.0,
     }
 }
 
@@ -1069,6 +1205,25 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     if b.opts.transparency {
         b.transparency = transparency(e.common.transparency, layer_transparency, ctx.block_transparency);
     }
+    let ent_z = if b.opts.orbit.is_top() {
+        0.0
+    } else {
+        match &e.kind {
+            EntityKind::LwPolyline(p) => p.elevation,
+            EntityKind::Hatch(h) => h.elevation,
+            EntityKind::Circle(c) => c.center.z,
+            EntityKind::Arc(a) => a.center.z,
+            EntityKind::Ellipse(el) => el.center.z,
+            EntityKind::Text(t) => t.insert.z,
+            EntityKind::MText(t) => t.insert.z,
+            EntityKind::Point(p) => p.p.z,
+            EntityKind::Dimension(d) => d.defpt.z,
+            EntityKind::Line(l) if (l.a.z - l.b.z).abs() <= 1e-12 => l.a.z,
+            _ => 0.0,
+        }
+    };
+    let ctx_z = Ctx { z_offset: ctx.z_offset + ent_z, ..ctx.clone() };
+    let ctx = &ctx_z;
     // A plot style's linetype replaces the object's.
     let lt = match b.styles.and_then(|s| s.linetype(rgb, b.named)) {
         Some(over) => over,
@@ -1280,6 +1435,22 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             for l in &fig.lines {
                 b.polyline(ctx, rgb, lw, l);
             }
+        }
+        EntityKind::Line(l) if !b.opts.orbit.is_top() && (l.a.z - l.b.z).abs() > 1e-12 => {
+            b.polyline_3d(ctx, rgb, lw, &[l.a, l.b]);
+        }
+        EntityKind::Polyline3d(p) if !b.opts.orbit.is_top() => {
+            let mut pts = p.points.clone();
+            if p.closed
+                && let Some(first) = p.points.first().copied()
+            {
+                pts.push(first);
+            }
+            b.polyline_3d(ctx, rgb, lw, &pts);
+        }
+        EntityKind::Face3d(f) if !b.opts.orbit.is_top() => {
+            let c = &f.corners;
+            b.polyline_3d(ctx, rgb, lw, &[c[0], c[1], c[2], c[3], c[0]]);
         }
         kind => {
             for prim in kind.prims() {
@@ -1532,6 +1703,11 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
         block_pstyle: ctx.block_pstyle,
         // The reference's own, set by the caller (`Builder::transparency` while it draws).
         block_transparency: ctx.block_transparency,
+        z_offset: ctx.z_offset
+            + match &e.kind {
+                EntityKind::Insert(ins) => ins.insert.z,
+                _ => 0.0,
+            },
     }
 }
 

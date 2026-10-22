@@ -97,7 +97,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, l: &Layout) {
     let face_col = if part == Some(Part::Face) { Color32::from_rgb(0xb8, 0xbc, 0xc2) } else { Color32::from_rgb(0x9a, 0x9e, 0xa4) };
     p.rect_filled(l.face, 2.0, face_col);
     p.rect_stroke(l.face, 2.0, Stroke::new(1.0, Color32::from_rgb(0x6c, 0x70, 0x76)), egui::StrokeKind::Inside);
-    p.text(c, egui::Align2::CENTER_CENTER, crate::tl!("TOP"), egui::FontId::proportional(13.0), Color32::from_rgb(0x50, 0x54, 0x5a));
+    let current_orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
+    let face_label = if current_orbit.is_top() { crate::tl!("TOP") } else { current_orbit.label() };
+    p.text(c, egui::Align2::CENTER_CENTER, face_label, egui::FontId::proportional(13.0), Color32::from_rgb(0x50, 0x54, 0x5a));
     paint_home(&p, l.home, part == Some(Part::Home));
 
     let resp = match part {
@@ -107,27 +109,61 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, l: &Layout) {
     let pressed_on = resp.interact_pointer_pos().and_then(|o| l.part_at(o));
     if resp.clicked() {
         match pressed_on {
-            Some(Part::Face | Part::Home) => {
+            Some(Part::Face) => {
+                if !current_orbit.is_top() {
+                    let _ = app.run("view.top", json!({}));
+                }
+                let _ = app.run("zoom.extents", json!({}));
+            }
+            Some(Part::Home) => {
                 let _ = app.run("zoom.extents", json!({}));
             }
             Some(Part::Ring) => app.session.echo(NO_TWIST),
             None => {}
         }
     }
+    if resp.dragged() && pressed_on == Some(Part::Face) {
+        let d = resp.drag_delta();
+        let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
+    }
     if resp.drag_started() && pressed_on == Some(Part::Ring) {
         app.session.echo(NO_TWIST);
     }
     let mut action = None;
+    let mut start_orbit = false;
     resp.context_menu(|ui| {
-        if ui.button("Home").clicked() {
+        if ui.button("Home (Zoom Extents)").clicked() {
             action = Some(("zoom.extents", json!({})));
             ui.close();
         }
+        if ui.button("3D Orbit (3DO)").clicked() {
+            start_orbit = true;
+            ui.close();
+        }
+        ui.separator();
+        for (lbl, cmd) in [
+            ("Top (2D Plan)", "view.top"),
+            ("Front", "view.front"),
+            ("Right", "view.right"),
+            ("Left", "view.left"),
+            ("Back", "view.back"),
+            ("SE Isometric", "view.seiso"),
+            ("SW Isometric", "view.swiso"),
+        ] {
+            if ui.button(lbl).clicked() {
+                action = Some((cmd, json!({})));
+                ui.close();
+            }
+        }
+        ui.separator();
         if ui.button("Hide ViewCube").clicked() {
             action = Some(("ui.toggle.viewcube", json!({"on": false})));
             ui.close();
         }
     });
+    if start_orbit {
+        app.start("3dorbit");
+    }
     if let Some((id, params)) = action {
         let _ = app.run(id, params);
     }
@@ -179,17 +215,42 @@ pub fn ucs_icon(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     ucs_menu(app, egui::Popup::menu(&resp).open_memory(open).at_pointer_fixed());
 }
 
-/// The coordinate-system menu: the WCS (the only coordinate system so far) and the icon switch.
+/// The coordinate-system menu: the WCS, 3D View presets, 3D Orbit and the icon switch.
 fn ucs_menu(app: &mut CadApp, popup: egui::Popup<'_>) {
     let mut hide = false;
+    let mut preset: Option<&'static str> = None;
+    let mut start_orbit = false;
     popup.show(|ui| {
         ui.radio(true, "World (WCS)").on_hover_text("CADCraft draws in the World Coordinate System; user coordinate systems aren't available yet.");
+        ui.separator();
+        if ui.button("3D Orbit (3DO)").clicked() {
+            start_orbit = true;
+            ui.close();
+        }
+        for (lbl, cmd) in [
+            ("Top (2D Plan)", "view.top"),
+            ("Front", "view.front"),
+            ("Right", "view.right"),
+            ("SE Isometric", "view.seiso"),
+            ("SW Isometric", "view.swiso"),
+        ] {
+            if ui.button(lbl).clicked() {
+                preset = Some(cmd);
+                ui.close();
+            }
+        }
         ui.separator();
         if ui.button("Hide UCS Icon").clicked() {
             hide = true;
             ui.close();
         }
     });
+    if start_orbit {
+        app.start("3dorbit");
+    }
+    if let Some(cmd) = preset {
+        let _ = app.run(cmd, json!({}));
+    }
     if hide {
         let _ = app.run("ui.toggle.ucsicon", json!({"on": false}));
     }

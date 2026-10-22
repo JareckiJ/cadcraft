@@ -765,9 +765,13 @@ mod tests {
     #[test]
     fn attach_share_and_orbit_say_they_are_not_available_yet() {
         let mut s = session();
-        for c in ["attach", "share", "3dorbit", "orbit"] {
+        for c in ["attach", "share"] {
             let e = s.execute(&resolve_alias(c), &Value::Null).unwrap_err().to_string();
             assert!(e.contains("not available yet"), "{c}: {e}");
+        }
+        for c in ["3dorbit", "orbit"] {
+            let r = s.execute(&resolve_alias(c), &Value::Null).unwrap();
+            assert_eq!(r["label"], "TOP");
         }
     }
 }

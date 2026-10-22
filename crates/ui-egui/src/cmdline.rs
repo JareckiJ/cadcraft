@@ -247,6 +247,42 @@ pub struct KeyPress {
     pub plain: bool,
 }
 
+/// Whether pressing Space on the command line should insert a literal space instead of submitting
+/// the buffer: true while a LISP expression has unclosed parentheses/strings (`(+ 1 2`), or when
+/// typing a bare LISP prefix expression at `Command:` (`+ 1 2`).
+pub fn lisp_accepts_space(buffer: &str, prompting: bool) -> bool {
+    let b = buffer.trim_start();
+    let rest = b.strip_prefix('!').unwrap_or(b);
+    if rest.starts_with('(') {
+        let (mut depth, mut in_str, mut escaped) = (0i32, false, false);
+        for c in rest.chars() {
+            if in_str {
+                match (escaped, c) {
+                    (true, _) => escaped = false,
+                    (false, '\\') => escaped = true,
+                    (false, '"') => in_str = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match c {
+                '"' => in_str = true,
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+        }
+        return depth > 0 || in_str;
+    }
+    if !prompting {
+        let first = b.split_whitespace().next().unwrap_or("");
+        if cadcraft_engine::is_bare_lisp_operator(first) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Handle keyboard input destined for the command line (when no text field has focus).
 pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     if ctx.egui_wants_keyboard_input() {
@@ -259,9 +295,10 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     let text_prompt = app.session.current_prompt().is_some_and(|p| p.accept.text && !p.accept.point && !p.accept.number);
     options_still_fit(app);
     for ev in events {
+        let keep_space = text_prompt || lisp_accepts_space(&app.cmd.buffer, app.session.prompting());
         // The options menu takes the arrows, Enter and Escape; typing closes it.
         if app.cmd.options.is_some() {
-            let space = matches!(&ev, egui::Event::Text(t) if t == " ") && !text_prompt;
+            let space = matches!(&ev, egui::Event::Text(t) if t == " ") && !keep_space;
             match &ev {
                 _ if space => {
                     if let Some(k) = app.cmd.options.as_ref().and_then(|m| m.current()).map(str::to_owned) {
@@ -294,7 +331,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
             egui::Event::Text(t) => {
                 if t == "\t" {
                     tab(app);
-                } else if t == " " && !text_prompt {
+                } else if t == " " && !keep_space {
                     submit(app);
                 } else {
                     app.cmd.buffer.push_str(&t);

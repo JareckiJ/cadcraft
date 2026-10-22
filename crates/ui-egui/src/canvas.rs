@@ -290,10 +290,16 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
     // contents stay in the list, which then follows its view: realtime navigation changes it
     // without a new revision.
     let split = split_viewport(st, stencil_clip(app)).map(|(h, ..)| h);
+    let active_orbit = if matches!(st.space, cadcraft_doc::Space::Paper(_)) && st.mspace.is_none() {
+        cadcraft_render::Orbit3d::default()
+    } else {
+        st.orbit
+    };
     let vp_view = {
         use std::hash::{Hash, Hasher};
         let mut s = std::collections::hash_map::DefaultHasher::new();
         split.hash(&mut s);
+        active_orbit.hash_key().hash(&mut s);
         if split.is_none()
             && let Some((h, vp)) = st.active_viewport()
         {
@@ -346,10 +352,11 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         lineweights: lwdisplay,
         view_height: st.paper_view().height,
         plot_style_table: None,
-        view: build_window(views),
+        view: if active_orbit.is_top() { build_window(views) } else { None },
         transparency: app.session.settings.transparency_display,
         skip_viewport: split,
         cancel: None,
+        orbit: active_orbit,
     };
     if view_only {
         let t = Tokens::get();
@@ -511,6 +518,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             skip_viewport: None,
             transparency,
             cancel: None,
+            orbit: cadcraft_render::Orbit3d::default(),
         };
         c.list = cadcraft_render::viewport_content(&st.doc, &st.space, h, area, &opts);
         c.key = Some(key);
@@ -1438,7 +1446,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     {
         if let Some(last) = app.canvas.pan_last {
             let d = hp - last;
-            if let Ok(st) = app.session.state_mut() {
+            if mods.shift {
+                let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
+            } else if let Ok(st) = app.session.state_mut() {
                 let v = st.view();
                 st.set_view_quiet(cadcraft_engine::View {
                     center: v.center - Vec2::new(f64::from(d.x) / scale, -f64::from(d.y) / scale),
@@ -1456,6 +1466,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // ZOOM Realtime: dragging up zooms in, down zooms out.
     if resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
+    }
+    // 3DORBIT: dragging with the primary button rotates the 3D view.
+    if resp.dragged_by(egui::PointerButton::Primary) && app.session.orbit_active() {
+        let d = resp.drag_delta();
+        let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
     }
     // A click in another tile makes it current (or answers -VPORTS Join's prompts).
     if pressed_primary
@@ -1678,6 +1693,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.drag_window = false;
     }
     if app.session.settings.pickdrag
+        && !app.session.orbit_active()
         && resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
         && app.canvas.cycle.is_none()
@@ -1991,14 +2007,18 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
+    let current_orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
     if app.ui.show_ucs_icon {
-        draw_ucs_icon(&painter, rect);
+        draw_ucs_icon(&painter, rect, current_orbit);
         crate::viewcube::ucs_icon(app, ui, rect);
+    }
+    if app.session.orbit_active() {
+        draw_orbit_arcball(&painter, rect, current_orbit);
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(&painter, rect);
+    viewport_label(&painter, rect, current_orbit);
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
@@ -2079,7 +2099,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r);
+        viewport_label(&p, *r, cadcraft_render::Orbit3d::default());
     }
     let p = ui.painter();
     for (r, tile) in tiles {
@@ -2532,22 +2552,72 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
-fn draw_ucs_icon(p: &egui::Painter, rect: Rect) {
+fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
-    let st = Stroke::new(1.0, t.canvas_ink);
-    p.line_segment([o, o + vec2(60.0, 0.0)], st);
-    p.line_segment([o, o + vec2(0.0, -60.0)], st);
-    p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
     let f = egui::FontId::proportional(13.0);
-    p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
-    p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+    if orbit.is_top() {
+        let st = Stroke::new(1.0, t.canvas_ink);
+        p.line_segment([o, o + vec2(60.0, 0.0)], st);
+        p.line_segment([o, o + vec2(0.0, -60.0)], st);
+        p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+        p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
+        p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+        return;
+    }
+    // 3D UCS Triad: X (Red), Y (Green), Z (Blue).
+    let len = 56.0_f64;
+    let to_scr = |v: cadcraft_geom::Vec3| -> Pos2 {
+        let pr = orbit.project_vec(v);
+        pos2(o.x + pr.x as f32, o.y - pr.y as f32)
+    };
+    let px = to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0));
+    let py = to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0));
+    let pz = to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len));
+    let col_x = Color32::from_rgb(0xe8, 0x45, 0x45);
+    let col_y = Color32::from_rgb(0x3a, 0xc9, 0x58);
+    let col_z = Color32::from_rgb(0x42, 0x87, 0xf5);
+    p.line_segment([o, px], Stroke::new(2.0, col_x));
+    p.line_segment([o, py], Stroke::new(2.0, col_y));
+    p.line_segment([o, pz], Stroke::new(2.0, col_z));
+    p.text(px + (px - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "X", f.clone(), col_x);
+    p.text(py + (py - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "Y", f.clone(), col_y);
+    p.text(pz + (pz - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "Z", f, col_z);
 }
 
-fn viewport_label(p: &egui::Painter, rect: Rect) {
+fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
+    let c = rect.center();
+    let r = (rect.width().min(rect.height()) * 0.34).clamp(90.0, 260.0);
+    let green = Color32::from_rgb(0x35, 0xc4, 0x55);
+    p.circle_stroke(c, r, Stroke::new(1.8, green));
+    for d in [vec2(0.0, -r), vec2(0.0, r), vec2(-r, 0.0), vec2(r, 0.0)] {
+        p.circle_stroke(c + d, 6.5, Stroke::new(1.4, green));
+    }
+    // Pivot crosshair + 3D mini triad at center.
+    let len = 28.0_f64;
+    let to_scr = |v: cadcraft_geom::Vec3| -> Pos2 {
+        let pr = orbit.project_vec(v);
+        pos2(c.x + pr.x as f32, c.y - pr.y as f32)
+    };
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0))], Stroke::new(1.8, Color32::from_rgb(0xe8, 0x45, 0x45)));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0))], Stroke::new(1.8, Color32::from_rgb(0x3a, 0xc9, 0x58)));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len))], Stroke::new(1.8, Color32::from_rgb(0x42, 0x87, 0xf5)));
+}
+
+fn viewport_label(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let at = pos2(rect.left() + 10.0, rect.top() + 8.0);
-    p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    if orbit.is_top() {
+        p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    } else {
+        let txt = format!(
+            "+  |  {} ({:.0}°, {:.0}°)  |  3D Orbit Wireframe",
+            orbit.label(),
+            orbit.yaw.to_degrees().rem_euclid(360.0),
+            orbit.pitch.to_degrees()
+        );
+        p.text(at, egui::Align2::LEFT_TOP, txt, crate::theme::small(), t.canvas_ink);
+    }
 }
 
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {

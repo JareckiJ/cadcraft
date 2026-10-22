@@ -15,6 +15,17 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{path: .lsp file} | {name, data: base64 | text} → {value?, error?}")
             .noundo()
             .interactive(|_| Ok(Box::new(ApploadM))),
+        CommandSpec::new("netload", "Load LISP / Application (NETLOAD)...", run_appload)
+            .menu(&["Tools", "Load Application (NETLOAD)..."])
+            .params("{path: .lsp file} | {name, data: base64 | text} → {value?, error?}")
+            .noundo()
+            .interactive(|_| Ok(Box::new(ApploadM))),
+        CommandSpec::new("vbaide", "AutoLISP / VBA IDE...", run_vbaide)
+            .menu(&["Tools", "AutoLISP / VBA IDE..."])
+            .alias(&["vlide", "vlisp"])
+            .params("{path?: .lsp file, code?: LISP source} → {value?, output?, error?}")
+            .noundo()
+            .interactive(|_| Ok(Box::new(ApploadM))),
         CommandSpec::new("lisp", "Evaluate LISP", run_lisp)
             .params(
                 "{code: LISP source, inputs?: [answers to get… calls: numbers, strings, [x,y] points]} → {value (printed as prin1), output: lines printed, error?}",
@@ -52,6 +63,16 @@ fn run_appload(s: &mut Session, p: &Value) -> Result<Value> {
     let from = s.log.len();
     let r = s.lisp_load(&name, &text, true)?;
     Ok(report(s, from, r))
+}
+
+fn run_vbaide(s: &mut Session, p: &Value) -> Result<Value> {
+    if str_param(p, "code").is_some() {
+        return run_lisp(s, p);
+    }
+    if str_param(p, "path").is_some() || str_param(p, "text").is_some() || str_param(p, "data").is_some() {
+        return run_appload(s, p);
+    }
+    Ok(json!({ "status": "open" }))
 }
 
 /// A JSON input as a LISP value: numbers, strings, `[x, y(, z)]` points, null for Enter.
