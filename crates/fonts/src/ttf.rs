@@ -962,4 +962,24 @@ mod geometry_budget_tests {
         assert_eq!(shaped.text[0].outline, 0);
         assert!(shaped.glyphs[shaped.text[0].outline].is_empty());
     }
+
+    #[test]
+    fn unmapped_empty_glyph_does_not_make_the_shape_nonempty() {
+        let glyph = GlyphOutline { cap: 1.0, ..Default::default() };
+        let contours = place_glyph_budgeted(&glyph, 0.0, 1.0, 1.0, 0.0, &mut 0).unwrap();
+        let mut shaped = Shaped::default();
+        shaped.push_glyph(contours, text_glyph(&glyph, 'x', 0.0, 1.0, 1.0, 0.0));
+        assert!(shaped.is_empty());
+        assert!(shaped.text.is_empty());
+    }
+
+    #[test]
+    fn an_unmapped_glyph_with_contours_still_draws() {
+        let mut shaped = Shaped::default();
+        let contours = vec![vec![Vec2::ZERO, Vec2::new(1.0, 1.0)]];
+        shaped.push_glyph(contours.clone(), None);
+        assert!(!shaped.is_empty());
+        assert_eq!(shaped.glyphs, vec![contours]);
+        assert!(shaped.text.is_empty());
+    }
 }
