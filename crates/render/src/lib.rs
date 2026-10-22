@@ -34,6 +34,7 @@ pub use dim::{ArrowGeom, Arrowhead, DimGeometry, DimText, LineRole, arrowhead, d
 pub use fill::triangulate_evenodd;
 pub use hatch::{fill_loops as hatch_fill_loops, pattern_swatch};
 pub use paper::{PAPER_SIZES, PaperSize, Sheet, paper_size, sheet};
+pub use text::triangulate_placed as triangulate_glyph;
 pub use tolerance::{gdt_points, tolerance_in};
 
 /// Handle carried by model-space geometry drawn inside a paper-space viewport (it belongs to no
@@ -409,7 +410,7 @@ impl Builder<'_> {
                     self.tris_at(ctx, color, &mesh.triangles, xf);
                     mesh.triangles.len()
                 } else {
-                    let tris = fill::triangulate_evenodd(g);
+                    let tris = crate::text::triangulate_placed(g);
                     self.tris(ctx, color, &tris);
                     tris.len()
                 };

@@ -383,7 +383,8 @@ impl TextFont {
 }
 
 /// Shaped text in local or world coordinates: open strokes (stroke-font glyphs, underlines,
-/// fraction bars) and closed glyph outlines grouped per glyph (fill each group even-odd).
+/// fraction bars) and closed glyph outlines grouped per glyph (fill each group by the non-zero rule, as
+/// TrueType does).
 /// Outline glyphs also come as [`TextGlyph`]s, for output that keeps text as text (PDF).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shaped {

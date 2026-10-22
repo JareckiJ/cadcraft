@@ -1475,6 +1475,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.canvas.snap = None;
             app.canvas.track = None;
         }
+        if let Some((p, _)) = grip_snap(app, &xf, hover_pos) {
+            eff = p;
+        }
         app.canvas.cursor = Some(eff);
         app.session.cursor = eff;
         app.session.cursor_deferred = app.canvas.snap.and_then(|h| h.deferred);
@@ -1880,6 +1883,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if let Some(hp) = hover_pos
             && !panning
         {
+            // GRIPSNAP: with no command running the crosshair sits on the grip under it.
+            let hp = grip_snap(app, &xf, hover_pos).map_or(hp, |(_, at)| at);
             // Over the white paper of a layout the crosshair is black.
             let on_paper = sheet.is_some_and(|s| s.bounds().contains(xf.to_world(hp)));
             draw_crosshair(app, &painter, rect, hp, selecting, on_paper);
@@ -2116,6 +2121,28 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2) {
         && let Some(c) = app.canvas.cursor
     {
         let message = if show_prompt { crate::i18n::t(&prompt.message) } else { "" };
+        if f.dims
+            && e.format == crate::dyninput::Format::Cartesian
+            && let Some(xf) = app.canvas.xf
+        {
+            rectangle_dims(p, &xf, &f, &e, c, app.cmd.second_locked(), length_units(&app.session));
+            let r = if show_prompt {
+                let t = Tokens::get();
+                let g = p.layout_no_wrap(message.to_owned(), crate::theme::small(), t.text_dim);
+                let hint = if options { OPTIONS_HINT_W } else { 0.0 };
+                let r = tooltip_frame(p, at, vec2(g.size().x + 12.0 + hint, g.size().y + 8.0));
+                let gy = r.center().y - g.size().y / 2.0;
+                p.galley(pos2(r.left() + 6.0, gy), g, t.text_dim);
+                if options {
+                    options_hint(p, r);
+                }
+                r
+            } else {
+                Rect::from_min_size(at, vec2(0.0, 0.0))
+            };
+            options_menu(app, p, r, hover);
+            return;
+        }
         let r = dynamic_input_boxes(p, at, message, &f, &e, c, app.cmd.second_locked(), options, length_units(&app.session));
         options_menu(app, p, r, hover);
         return;
@@ -2211,7 +2238,9 @@ fn options_menu(app: &mut CadApp, p: &egui::Painter, r: Rect, hover: Pos2) {
     let row_h = rows.iter().map(|g| g.size().y).fold(12.0, f32::max) + 6.0;
     let w = rows.iter().map(|g| g.size().x).fold(60.0, f32::max) + 28.0;
     let h = row_h * rows.len() as f32 + 4.0;
-    let m = Rect::from_min_size(pos2(r.left(), r.bottom() + 2.0), vec2(w, h));
+    // Below the crosshair's horizontal arm (the tooltip sits above the cursor, its bottom 14
+    // points above it), so the menu never covers the cursor.
+    let m = Rect::from_min_size(pos2(r.left(), r.bottom() + 28.0), vec2(w, h));
     p.rect_filled(m, 3.0, t.cmd_bg);
     p.rect_stroke(m, 3.0, Stroke::new(1.0, t.cmd_border), egui::StrokeKind::Inside);
     let row_at = |i: usize| Rect::from_min_size(pos2(m.left() + 2.0, m.top() + 2.0 + row_h * i as f32), vec2(w - 4.0, row_h));
@@ -2344,6 +2373,79 @@ fn dynamic_input_boxes(
     r
 }
 
+/// RECTANG's width and height boxes, each beside its side of the rubber-band rectangle (outside
+/// it), like dimensions: the width under or over the horizontal side through the first corner,
+/// the height beside the vertical side through the cursor. The active box (the one typing goes
+/// to; Tab moves on) has the accent outline, a locked one a lock.
+fn rectangle_dims(
+    p: &egui::Painter,
+    xf: &crate::canvas::Xf,
+    f: &crate::dyninput::Frame,
+    e: &crate::dyninput::Entry<'_>,
+    cursor: Vec2,
+    second_locked: bool,
+    (lu, lp): (i64, i64),
+) {
+    let t = Tokens::get();
+    let font = crate::theme::small();
+    let o = f.origin();
+    let held = crate::dyninput::constrain(e, f, cursor, second_locked);
+    let (w, h) = f.live(crate::dyninput::Format::Cartesian, held);
+    let dist = |v: f64| cadcraft_engine::units::format_distance(v, lu, lp);
+    let a = xf.to_screen(o);
+    let b = xf.to_screen(held);
+    let (left, right) = (a.x.min(b.x), a.x.max(b.x));
+    let (top, bottom) = (a.y.min(b.y), a.y.max(b.y));
+    // Outside the rectangle: below a side at its bottom, above one at its top; right of a side at
+    // its right, left of one at its left.
+    let width_y = if (a.y - bottom).abs() < 0.5 { a.y + 16.0 } else { a.y - 16.0 };
+    let height_x = if (b.x - right).abs() < 0.5 { b.x + 10.0 } else { b.x - 10.0 };
+    let cells = [
+        (
+            pos2((left + right) / 2.0, width_y),
+            if e.first.is_empty() { dist(w) } else { e.first.to_owned() },
+            !e.first.is_empty(),
+            e.first_locked().is_some(),
+            !e.split,
+            0.5,
+        ),
+        (
+            pos2(height_x, (top + bottom) / 2.0),
+            if e.second.is_empty() { dist(h) } else { e.second.to_owned() },
+            !e.second.is_empty(),
+            second_locked,
+            e.split && !second_locked,
+            if height_x > b.x { 0.0 } else { 1.0 },
+        ),
+    ];
+    // Dimension-like guides along the two sides.
+    let guide = Stroke::new(1.0, t.text_faint);
+    p.line_segment([pos2(left, width_y - 6.0), pos2(right, width_y - 6.0)], guide);
+    let gx = if height_x > b.x { height_x - 4.0 } else { height_x + 4.0 };
+    p.line_segment([pos2(gx, top), pos2(gx, bottom)], guide);
+    let lock_w = 10.0;
+    for (at, text, typed, locked, active, anchor_x) in cells {
+        let value = p.layout_no_wrap(text, font.clone(), if typed { t.text } else { t.text_faint });
+        let bw = (value.size().x + 10.0 + if locked { lock_w } else { 0.0 }).max(48.0);
+        let bh = value.size().y + 6.0;
+        let min = pos2(at.x - bw * anchor_x, at.y - bh / 2.0);
+        let r = Rect::from_min_size(min, vec2(bw, bh));
+        p.rect_filled(r, 2.0, t.chrome_dark);
+        let stroke = if active { Stroke::new(1.5, t.accent) } else { Stroke::new(1.0, t.border) };
+        p.rect_stroke(r, 2.0, stroke, egui::StrokeKind::Inside);
+        let vw = value.size().x;
+        let vh = value.size().y;
+        p.galley(pos2(r.left() + 5.0, r.center().y - vh / 2.0), value, t.text);
+        if active {
+            let cx = r.left() + 6.0 + vw;
+            p.line_segment([pos2(cx, r.top() + 3.0), pos2(cx, r.bottom() - 3.0)], Stroke::new(1.0, t.text));
+        }
+        if locked {
+            draw_lock(p, pos2(r.right() - lock_w / 2.0 - 3.0, r.center().y), t.accent);
+        }
+    }
+}
+
 /// A small padlock, drawn in code: body plus shackle.
 fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     p.rect_filled(Rect::from_center_size(c + vec2(0.0, 1.5), vec2(7.0, 5.0)), 1.0, color);
@@ -2443,6 +2545,8 @@ fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
 
 /// Seconds the cursor rests on a grip before its menu opens.
 const GRIP_HOVER_DELAY: f64 = 0.4;
+/// The same with the crosshair locked onto grips (GRIPSNAP).
+const GRIP_HOVER_DELAY_SNAPPED: f64 = 0.2;
 
 /// The grip menu that opens when the cursor rests on a grip with options (a dimension's text
 /// grip, a polyline vertex…); it closes when the cursor leaves the grip and the menu.
@@ -2490,13 +2594,15 @@ fn hover_grip_menu(app: &mut CadApp, ui: &egui::Ui, xf: &Xf, hover: Option<Pos2>
     }
     match (over, app.canvas.grip_hover) {
         (Some(g), Some((h, since))) if h == g => {
-            if now - since >= GRIP_HOVER_DELAY {
+            // A crosshair locked onto the grip (GRIPSNAP) holds still: the menu can come sooner.
+            let delay = if app.session.settings.gripsnap { GRIP_HOVER_DELAY_SNAPPED } else { GRIP_HOVER_DELAY };
+            if now - since >= delay {
                 let point = app.session.grips_of(g.0).ok().and_then(|p| p.get(g.1).copied());
                 if let Some(p) = point {
                     app.canvas.grip_popup = Some((g, xf.to_screen(p) + vec2(10.0, 10.0)));
                 }
             } else {
-                ctx.request_repaint_after(std::time::Duration::from_secs_f64(GRIP_HOVER_DELAY - (now - since) + 0.01));
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(delay - (now - since) + 0.01));
             }
         }
         (Some(g), _) => {
@@ -2518,6 +2624,17 @@ fn apply_grip_choice(app: &mut CadApp, g: (Handle, usize), choice: Option<cadcra
         app.canvas.hot_grips.clear();
         app.session.echo(e.to_string());
     }
+}
+
+/// GRIPSNAP: the grip the crosshair locks onto (no command running, a grip of the selection
+/// under the cursor): its world point and where it is on screen.
+fn grip_snap(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Vec2, Pos2)> {
+    if !app.session.settings.gripsnap || app.session.prompting() {
+        return None;
+    }
+    let g = grip_at(app, xf, hover)?;
+    let p = app.session.grips_of(g.0).ok()?.get(g.1).copied()?;
+    Some((p, xf.to_screen(p)))
 }
 
 /// The grip of a selected object under the cursor, if any: (object, grip index).

@@ -8,6 +8,66 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 22.10.2026 (0.9.0-b14)
+
+### Русский
+
+**Текст без заливки при печати**
+- Вероятная причина найдена. Шрифты TrueType заливаются по правилу «ненулевой обмотки»: если контуры буквы перекрываются, место перекрытия всё равно закрашивается. CADCraft заливал буквы по другому правилу («чёт-нечет»), и у букв из перекрывающихся контуров середина оставалась пустой — была видна только обводка. Так устроены многие шрифты, в том числе TrueType-версии штриховых шрифтов, которые AutoCAD ставит в Windows (romanc__.ttf, txt_____.ttf и т. п.). Теперь буквы заливаются так же, как их рисует Windows: на экране, в предварительном просмотре и при печати.
+- Пожалуйста, проверьте лист «4» ещё раз. Если где-то текст всё ещё полый, пришлите снимок.
+
+**Редактор текста показывает шрифт чертежа**
+- В окне редактирования текста (TEXT, MTEXT, мультивыноски) буквы рисуются тем же шрифтом, что и на чертеже: SHX, TrueType или встроенным, с коэффициентом ширины и наклоном стиля. Курсор и выделение совпадают с буквами.
+- Текст в окне стал немного крупнее.
+
+**Прямоугольник: ширина и высота**
+- После первого угла ПРЯМОУГОЛЬНИК (RECTANG) показывает два поля прямо у сторон: ширину под (или над) горизонтальной стороной и высоту рядом с вертикальной. Введите ширину, нажмите Tab, введите высоту, нажмите Enter.
+- Прямоугольник строится в ту сторону от первого угла, где находится курсор.
+
+**Окошко с вариантами**
+- Окошко с вариантами (например, «Да/Нет» в ЗЕРКАЛО) теперь открывается ниже перекрестия и не закрывает курсор.
+
+**Режимы рисования (DSETTINGS)**
+- Окно стало ниже, его содержимое прокручивается, полоса прокрутки видна всегда.
+
+**Тип и вес линий на панели «Слои»**
+- Рядом со списком типов линий появился список весов линий (ПоСлою, ПоБлоку, По умолчанию, 0.00–2.11 мм). Выбранный вес становится текущим для новых объектов.
+- В обоих списках слева от названия нарисован образец: штрихи типа линии или линия нужной толщины, отделённые от названия разделителем.
+
+**Привязка курсора к ручкам**
+- Раньше её не было. Теперь, когда никакая команда не выполняется, перекрестие «прилипает» к ручке выбранного объекта, на которую наведена мышь. Меню ручки появляется вдвое быстрее.
+- Включается и выключается в «Режимах рисования» (DSETTINGS), флажок «Привязывать перекрестие к ручкам», или переменной GRIPSNAP (1/0). По умолчанию включена.
+
+### English
+
+**Text printing without fill**
+- Likely cause found. TrueType fonts are filled by the non-zero winding rule: where a letter's contours overlap, the overlap is still ink. CADCraft filled letters by the even-odd rule instead, so letters made of overlapping contours came out hollow, showing only their outline. Many fonts are built that way, including the TrueType versions of stroke fonts that AutoCAD installs in Windows (romanc__.ttf, txt_____.ttf and so on). Letters are now filled the way Windows draws them: on screen, in Plot Preview and in plots.
+- Please check sheet "4" again, and send a screenshot if any text is still hollow.
+
+**The text editor shows the drawing's font**
+- The text editing box (TEXT, MTEXT, multileaders) draws letters in the drawing's own font: SHX, TrueType or the built-in one, with the style's width factor and oblique angle. The caret and selection line up with the letters.
+- Text in the box is a little larger.
+
+**Rectangle: width and height**
+- After the first corner, RECTANG shows two boxes right at the sides: the width under (or over) the horizontal side and the height beside the vertical side. Type the width, press Tab, type the height, press Enter.
+- The rectangle goes from the first corner toward the side where the cursor is.
+
+**Options box**
+- The options box (for example Yes/No in MIRROR) now opens below the crosshair and no longer covers the cursor.
+
+**Drafting Settings (DSETTINGS)**
+- The window is shorter, its contents scroll, and the scrollbar is always visible.
+
+**Linetype and lineweight on the Layers bar**
+- A lineweight list (ByLayer, ByBlock, Default, 0.00–2.11 mm) is now beside the linetype list. The weight you pick becomes current for new objects.
+- Both lists show a sample left of each name, behind a separator: the linetype's dashes or a line of that weight.
+
+**Cursor snapping to grips**
+- This didn't exist before. With no command running, the crosshair now locks onto the grip of a selected object under the mouse. The grip menu appears twice as fast.
+- Turn it on or off in Drafting Settings (DSETTINGS) with "Snap the crosshair to grips", or with the GRIPSNAP variable (1/0). It is on by default.
+
+---
+
 ## 22.10.2026 (0.9.0-b13)
 
 ### Русский

@@ -25,6 +25,7 @@ pub mod custom_patterns;
 pub mod dialogs;
 pub mod dimstyles;
 pub mod docking;
+pub mod editor_glyphs;
 pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
@@ -86,6 +87,10 @@ pub struct UiState {
     pub toolsets_bar: toolbar::BarState,
     /// The Layers bar (layer tools and the current layer): shown, dock, buttons.
     pub layers_bar: toolbar::BarState,
+    /// The current-lineweight drop-down was added to a Layers bar saved before it existed
+    /// (missing from saved settings: not yet).
+    #[serde(default)]
+    pub lweight_combo_added: bool,
     pub show_file_tabs: bool,
     pub show_status_bar: bool,
     pub show_command_line: bool,
@@ -184,6 +189,7 @@ impl Default for UiState {
             toolbar_items: toolbar::default_items(),
             toolsets_bar: toolbar::Bar::ToolSets.default_state(),
             layers_bar: toolbar::Bar::Layers.default_state(),
+            lweight_combo_added: true,
             show_file_tabs: true,
             show_status_bar: true,
             show_command_line: true,

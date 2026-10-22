@@ -1406,3 +1406,6 @@
 	Change	Изменение
 	Background color	Цвет фона
 	Other color	Другой цвет
+	Current Lineweight	Текущий вес линий
+	Snap the crosshair to grips	Привязывать перекрестие к ручкам
+	With no command running, the crosshair locks onto a grip of the selected objects under it.	Когда команда не выполняется, перекрестие притягивается к ручке выбранного объекта под курсором.

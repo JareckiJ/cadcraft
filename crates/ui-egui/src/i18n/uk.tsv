@@ -1711,3 +1711,6 @@
 	Change	Зміна
 	Background color	Колір фону
 	Other color	Інший колір
+	Current Lineweight	Поточна товщина ліній
+	Snap the crosshair to grips	Прив’язувати перехрестя до ручок
+	With no command running, the crosshair locks onto a grip of the selected objects under it.	Коли команда не виконується, перехрестя притягується до ручки вибраного об’єкта під курсором.

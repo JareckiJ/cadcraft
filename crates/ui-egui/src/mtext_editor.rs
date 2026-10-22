@@ -21,7 +21,7 @@ use crate::CadApp;
 use crate::theme::Tokens;
 
 /// Smallest and largest size of the text in the box, in points: the box stays readable at any zoom.
-const MIN_PX: f32 = 13.0;
+const MIN_PX: f32 = 18.0;
 const MAX_PX: f32 = 36.0;
 /// Families the font list offers besides the one set in the text.
 const FAMILIES: [&str; 6] = ["Arial", "Times New Roman", "Courier New", "Verdana", "Georgia", "Calibri"];
@@ -47,6 +47,8 @@ struct State {
     key: String,
     /// Give the text box the keyboard in the next frame.
     focus: bool,
+    /// The text style's font: the text box shows the text in it.
+    font: crate::editor_glyphs::EditorFont,
 }
 
 fn state_id() -> egui::Id {
@@ -89,14 +91,28 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             }
             _ => Formatted::from_contents(&mt.contents),
         };
-        if let Some(f) = app.session.doc().ok().and_then(|d| d.text_style(&mt.style).map(|s| s.font.clone())) {
+        let style = app.session.doc().ok().and_then(|d| d.text_style(&mt.style).cloned());
+        if let Some(f) = style.as_ref().map(|s| s.font.clone()) {
             // A family name, not a font file (`txt.shx`, `arial.ttf`).
             if !f.is_empty() && !f.contains('.') {
                 fmt.base_font = f;
             }
         }
+        let font = style
+            .map(|s| crate::editor_glyphs::EditorFont { font: s.font, big_font: s.big_font, width_factor: s.width_factor, oblique: s.oblique })
+            .unwrap_or_else(|| crate::editor_glyphs::EditorFont { width_factor: 1.0, ..Default::default() });
         let end = fmt.len();
-        State { fmt, typing: CharFmt::default(), typing_at: end, top: 70.0, sel: (end, end), caret: Some(end), key: editor.key.clone(), focus: true }
+        State {
+            fmt,
+            typing: CharFmt::default(),
+            typing_at: end,
+            top: 70.0,
+            sel: (end, end),
+            caret: Some(end),
+            key: editor.key.clone(),
+            focus: true,
+            font,
+        }
     });
     let line = kind == EditorKind::Line;
     let cell = matches!(kind, EditorKind::TableCell { .. });
@@ -689,45 +705,45 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
     }
     let fmt = st.fmt.clone();
     let default_color = t.text;
+    let base = st.font.clone();
+    // The font each character is drawn in: an inline family (`\f`) or the style's.
+    let font_of = move |f: &CharFmt| match &f.font {
+        Some(fam) if !fam.trim().is_empty() && !fam.eq_ignore_ascii_case(&fmt_base(&base)) => {
+            crate::editor_glyphs::EditorFont { font: fam.clone(), big_font: String::new(), ..base.clone() }
+        }
+        _ => base.clone(),
+    };
+    let size_of = move |f: &CharFmt| f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
+    let fmt_l = fmt.clone();
+    let font_l = font_of.clone();
     let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| -> Arc<egui::Galley> {
         let mut job = LayoutJob::default();
         job.wrap.max_width = wrap;
-        let s = text.as_str();
-        let mut run = String::new();
-        let mut cur: Option<CharFmt> = None;
-        let flush = |job: &mut LayoutJob, run: &mut String, f: &CharFmt| {
-            if run.is_empty() {
-                return;
-            }
-            let size = f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
+        // One section per character, its advance set to the drawing font's (the difference is
+        // its leading space, so the caret after it lands where the drawing's would), the egui
+        // glyph itself invisible: the drawing font is painted over it (see `paint_glyphs`).
+        for (i, c) in text.as_str().chars().enumerate() {
+            let f = fmt_l.fmt_at(i);
+            let size = size_of(&f);
             let color = f.color.map_or(default_color, color32);
+            let font_id = FontId::proportional(size);
+            let spacing = if c == '\n' {
+                0.0
+            } else {
+                let real = crate::editor_glyphs::advance(&font_l(&f), f.italic, c, size);
+                let shown = ui.fonts_mut(|fs| fs.glyph_width(&font_id, c));
+                real - shown
+            };
             job.append(
-                run,
-                0.0,
+                &c.to_string(),
+                spacing,
                 TextFormat {
-                    font_id: FontId::proportional(size),
-                    color,
-                    italics: f.italic,
+                    font_id,
+                    color: Color32::TRANSPARENT,
                     underline: if f.underline { Stroke::new(1.0, color) } else { Stroke::NONE },
-                    // The editor has one weight of each font: bold is shown wider.
-                    extra_letter_spacing: if f.bold { size * 0.06 } else { 0.0 },
                     ..TextFormat::default()
                 },
             );
-            run.clear();
-        };
-        for (i, c) in s.chars().enumerate() {
-            let f = fmt.fmt_at(i);
-            if cur.as_ref() != Some(&f) {
-                if let Some(p) = &cur {
-                    flush(&mut job, &mut run, p);
-                }
-                cur = Some(f);
-            }
-            run.push(c);
-        }
-        if let Some(p) = &cur {
-            flush(&mut job, &mut run, p);
         }
         ui.fonts_mut(|f| f.layout_job(job))
     };
@@ -744,6 +760,7 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
         out.response.request_focus();
     }
     st.focus = false;
+    paint_glyphs(ui, &out, &fmt, &font_of, &size_of, default_color);
     if out.response.changed() {
         let typing = st.typing.clone();
         st.fmt.set_text(&buf, &typing);
@@ -759,6 +776,42 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
                 st.typing = st.fmt.fmt_at(a.saturating_sub(1));
                 st.typing_at = a;
             }
+        }
+    }
+}
+
+/// The style font's family as an inline font switch would name it (`txt.shx` → `txt`).
+fn fmt_base(f: &crate::editor_glyphs::EditorFont) -> String {
+    let n = f.font.trim();
+    n.rsplit(['\\', '/']).next().unwrap_or(n).split('.').next().unwrap_or("").to_string()
+}
+
+/// Draw the text box's characters in the drawing's fonts, where the box laid them out.
+fn paint_glyphs(
+    ui: &egui::Ui,
+    out: &egui::text_edit::TextEditOutput,
+    fmt: &Formatted,
+    font_of: &impl Fn(&CharFmt) -> crate::editor_glyphs::EditorFont,
+    size_of: &impl Fn(&CharFmt) -> f32,
+    default_color: Color32,
+) {
+    let painter = ui.painter().with_clip_rect(out.text_clip_rect);
+    let mut i = 0usize;
+    for row in &out.galley.rows {
+        for g in &row.row.glyphs {
+            let f = fmt.fmt_at(i);
+            // The glyph ends at its laid-out right edge (its leading space made up the width).
+            let font = font_of(&f);
+            let size = size_of(&f);
+            let real = crate::editor_glyphs::advance(&font, f.italic, g.chr, size);
+            let at = out.galley_pos + row.pos.to_vec2() + g.pos.to_vec2() + egui::vec2(g.advance_width - real, 0.0);
+            let color = f.color.map_or(default_color, color32);
+            crate::editor_glyphs::paint(&painter, &font, f.italic, f.bold, g.chr, at, size, color);
+            i += 1;
+        }
+        // The line break that ends a paragraph is a character of the text, not a glyph.
+        if row.ends_with_newline {
+            i += 1;
         }
     }
 }

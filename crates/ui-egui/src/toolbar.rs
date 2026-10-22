@@ -160,6 +160,7 @@ impl Bar {
                 TEXTSTYLE_COMBO,
                 DIMSTYLE_COMBO,
                 LINETYPE_COMBO,
+                LWEIGHT_COMBO,
             ],
         };
         ids.iter().map(|s| s.to_string()).collect()
@@ -204,6 +205,9 @@ pub const LAYER_COMBO: &str = "layer.combo";
 pub const TEXTSTYLE_COMBO: &str = "textstyle.combo";
 pub const DIMSTYLE_COMBO: &str = "dimstyle.combo";
 pub const LINETYPE_COMBO: &str = "linetype.combo";
+pub const LWEIGHT_COMBO: &str = "lweight.combo";
+/// Width of a drop-down row's preview (a linetype's dashes, a lineweight's line).
+const PREVIEW_W: f32 = 64.0;
 /// Width of the current-layer drop-down in a row.
 const COMBO_W: f32 = 220.0;
 /// Width of the style and linetype drop-downs in a row.
@@ -264,7 +268,7 @@ fn history_list(app: &CadApp, ui: &mut egui::Ui, undo: bool) -> Option<usize> {
 
 /// Whether `command` is one of the bars' drop-downs (not a command).
 pub fn is_combo(command: &str) -> bool {
-    [LAYER_COMBO, TEXTSTYLE_COMBO, DIMSTYLE_COMBO, LINETYPE_COMBO].contains(&command)
+    [LAYER_COMBO, TEXTSTYLE_COMBO, DIMSTYLE_COMBO, LINETYPE_COMBO, LWEIGHT_COMBO].contains(&command)
 }
 
 /// A drop-down's width in a row.
@@ -288,6 +292,7 @@ const LAYER_TOOLS: &[(Icon, &str, &str)] = &[
     (Icon::Text, TEXTSTYLE_COMBO, "Current Text Style"),
     (Icon::DimLinear, DIMSTYLE_COMBO, "Current Dimension Style"),
     (Icon::Line, LINETYPE_COMBO, "Current Linetype"),
+    (Icon::Lineweight, LWEIGHT_COMBO, "Current Lineweight"),
 ];
 
 /// The default bar: file, undo, output, exchange, navigation, palettes, inquiry and help groups.
@@ -567,6 +572,15 @@ pub fn top(app: &mut CadApp, ui: &mut egui::Ui, row: Rect) {
 
 /// The other bars docked at the top: one row each, below the menu bar.
 pub fn top_panels(app: &mut CadApp, ui: &mut egui::Ui) {
+    // A Layers bar saved before the lineweight drop-down existed gets it after the linetype one.
+    if !app.ui.lweight_combo_added {
+        app.ui.lweight_combo_added = true;
+        let items = &mut app.ui.layers_bar.items;
+        if !items.iter().any(|i| i == LWEIGHT_COMBO) {
+            let at = items.iter().position(|i| i == LINETYPE_COMBO).map_or(items.len(), |i| i + 1);
+            items.insert(at, LWEIGHT_COMBO.to_string());
+        }
+    }
     let t = Tokens::get();
     for bar in [Bar::ToolSets, Bar::Layers] {
         let st = state(&app.ui, bar);
@@ -627,19 +641,139 @@ fn combo_names(app: &CadApp, combo: &str) -> Option<(String, Vec<String>)> {
             }
             (d.header.str("CELTYPE", "ByLayer").to_string(), names)
         }
+        LWEIGHT_COMBO => {
+            let mut names: Vec<String> = ["ByLayer", "ByBlock", "Default"].iter().map(|s| s.to_string()).collect();
+            names.extend(cadcraft_engine::doc::Lineweight::STANDARD.iter().map(|v| lweight_name(i64::from(*v))));
+            (lweight_name(d.header.i64("CELWEIGHT", -1)), names)
+        }
         _ => return None,
     })
 }
 
+/// A CELWEIGHT value as the lineweight drop-down names it (`0.25 mm`, ByLayer...).
+fn lweight_name(v: i64) -> String {
+    match v {
+        -1 => "ByLayer".into(),
+        -2 => "ByBlock".into(),
+        -3 => "Default".into(),
+        v => format!("{:.2} mm", v.clamp(0, 211) as f64 / 100.0),
+    }
+}
+
+/// What a drop-down row previews beside its name.
+enum Preview {
+    /// Linetype dash patterns (drawing units: dashes positive, gaps negative, dots 0) by
+    /// lower-case name; ByLayer shows the current layer's.
+    Linetypes(std::collections::HashMap<String, Vec<f64>>, Vec<f64>),
+    /// Lineweights (mm): ByLayer shows the current layer's, Default LWDEFAULT.
+    Lineweights { layer: f64, default: f64 },
+}
+
+/// The preview for the drop-down `combo`, if it has one.
+fn combo_preview(app: &CadApp, combo: &str) -> Option<Preview> {
+    let d = app.session.doc().ok()?;
+    let clayer = d.header.str("CLAYER", "0").to_string();
+    let layer = d.layers.iter().find(|l| l.name.eq_ignore_ascii_case(&clayer));
+    match combo {
+        LINETYPE_COMBO => {
+            let pattern = |name: &str| {
+                d.linetypes.iter().find(|l| l.name.eq_ignore_ascii_case(name)).map(|l| l.pattern.iter().map(|e| e.length).collect::<Vec<f64>>())
+            };
+            let map = d.linetypes.iter().map(|l| (l.name.to_lowercase(), l.pattern.iter().map(|e| e.length).collect())).collect();
+            let by_layer = layer.and_then(|l| pattern(&l.linetype)).unwrap_or_default();
+            Some(Preview::Linetypes(map, by_layer))
+        }
+        LWEIGHT_COMBO => {
+            let default = d.header.i64("LWDEFAULT", 25).clamp(0, 211) as f64 / 100.0;
+            let layer = layer.map_or(default, |l| match l.lineweight.to_dxf() {
+                v if v >= 0 => f64::from(v) / 100.0,
+                _ => default,
+            });
+            Some(Preview::Lineweights { layer, default })
+        }
+        _ => None,
+    }
+}
+
+/// Paint `name`'s preview in `r`.
+fn paint_preview(p: &egui::Painter, r: Rect, preview: &Preview, name: &str, color: egui::Color32) {
+    let y = r.center().y;
+    match preview {
+        Preview::Lineweights { layer, default } => {
+            let mm = match name {
+                "ByLayer" => *layer,
+                "ByBlock" | "Default" => *default,
+                n => n.trim_end_matches(" mm").trim().parse().unwrap_or(*default),
+            };
+            // Thicker than on screen (3.78 px per mm) so neighbouring weights tell apart.
+            let w = ((mm * 6.0) as f32).clamp(1.0, 12.0);
+            p.line_segment([pos2(r.left() + 2.0, y), pos2(r.right() - 2.0, y)], Stroke::new(w, color));
+        }
+        Preview::Linetypes(map, by_layer) => {
+            let pattern: &[f64] = match name {
+                "ByLayer" => by_layer,
+                "ByBlock" => &[],
+                n => map.get(&n.to_lowercase()).map_or(&[], Vec::as_slice),
+            };
+            let total: f64 = pattern.iter().map(|v| v.abs()).sum();
+            let (x0, x1) = (r.left() + 2.0, r.right() - 2.0);
+            let st = Stroke::new(1.2, color);
+            if pattern.is_empty() || !(total.is_finite() && total > 1e-9) {
+                p.line_segment([pos2(x0, y), pos2(x1, y)], st);
+                return;
+            }
+            // About two and a half repeats of the pattern across the preview.
+            let k = f64::from(x1 - x0) / (2.5 * total);
+            let mut x = f64::from(x0);
+            let mut steps = 0;
+            'draw: while x < f64::from(x1) {
+                for v in pattern {
+                    steps += 1;
+                    if steps > 400 || x >= f64::from(x1) {
+                        break 'draw;
+                    }
+                    let len = v.abs() * k;
+                    if *v > 0.0 {
+                        let end = (x + len).min(f64::from(x1));
+                        p.line_segment([pos2(x as f32, y), pos2(end as f32, y)], st);
+                    } else if *v == 0.0 {
+                        p.circle_filled(pos2(x as f32, y), 1.0, color);
+                    }
+                    x += len.max(if *v == 0.0 { 0.0 } else { 0.5 });
+                }
+            }
+        }
+    }
+}
+
 /// A drop-down's list of names: picking one makes it current. It scrolls when long.
-fn name_list(ui: &mut egui::Ui, salt: &str, current: &str, names: &[String]) -> Option<String> {
+fn name_list(ui: &mut egui::Ui, salt: &str, current: &str, names: &[String], preview: Option<&Preview>) -> Option<String> {
     let mut picked = None;
+    let t = Tokens::get();
     // A scroll bar that is always there once the list is longer than the drop-down.
     ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
     egui::ScrollArea::vertical().id_salt(("cc_combo_list", salt)).max_height(COMBO_LIST_H).auto_shrink([false, true]).show(ui, |ui| {
         for n in names {
-            let shown = if ["ByLayer", "ByBlock"].contains(&n.as_str()) { crate::i18n::t(n).to_string() } else { n.clone() };
-            if ui.selectable_label(n.eq_ignore_ascii_case(current), shown).clicked() {
+            let shown = if ["ByLayer", "ByBlock", "Default"].contains(&n.as_str()) { crate::i18n::t(n).to_string() } else { n.clone() };
+            let on = n.eq_ignore_ascii_case(current);
+            let Some(pv) = preview else {
+                if ui.selectable_label(on, shown).clicked() {
+                    picked = Some(n.clone());
+                }
+                continue;
+            };
+            // Preview | separator | name.
+            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::click());
+            let p = ui.painter();
+            if on || resp.hovered() {
+                p.rect_filled(r, 2.0, if on { t.accent.gamma_multiply(0.45) } else { t.control_hover });
+            }
+            let pr = Rect::from_min_size(pos2(r.left() + 4.0, r.top()), vec2(PREVIEW_W, r.height()));
+            paint_preview(p, pr, pv, n, t.text);
+            let sep = pr.right() + 5.0;
+            p.vline(sep, (r.top() + 3.0)..=(r.bottom() - 3.0), Stroke::new(1.0, t.border));
+            p.text(pos2(sep + 6.0, r.center().y), egui::Align2::LEFT_CENTER, shown, crate::theme::body(), t.text);
+            if resp.clicked() {
                 picked = Some(n.clone());
             }
         }
@@ -847,12 +981,13 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
         } else if combo {
             if let Some((cur, list)) = &names {
                 let command = tool.command;
+                let preview = combo_preview(app, command);
                 egui::Popup::from_toggle_button_response(&resp)
                     .align(align)
                     .width(STYLE_COMBO_W.max(200.0))
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .show(|ui| {
-                        if let Some(n) = name_list(ui, command, cur, list) {
+                        if let Some(n) = name_list(ui, command, cur, list, preview.as_ref()) {
                             action = Some(Action::SetCurrent(command, n));
                             ui.close();
                         }
@@ -961,7 +1096,8 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
                 if is_combo(tool.command) {
                     if let Some((cur, list)) = combo_names(app, tool.command) {
                         ui.label(RichText::new(crate::i18n::t(tool.label)).weak());
-                        if let Some(n) = name_list(ui, tool.command, &cur, &list) {
+                        let preview = combo_preview(app, tool.command);
+                        if let Some(n) = name_list(ui, tool.command, &cur, &list, preview.as_ref()) {
                             action = Some(Action::SetCurrent(tool.command, n));
                             ui.close();
                         }
@@ -1025,6 +1161,13 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
             let r = match combo {
                 TEXTSTYLE_COMBO => app.run("style.current", json!({ "name": name })),
                 DIMSTYLE_COMBO => app.run("dimstyle.current", json!({ "name": name })),
+                LWEIGHT_COMBO => {
+                    let v = match name.trim_end_matches(" mm").trim().parse::<f64>() {
+                        Ok(mm) => json!(mm),
+                        Err(_) => json!(name),
+                    };
+                    app.run("lweight", json!({ "lineweight": v }))
+                }
                 _ => app.run("linetype", json!({ "current": name })),
             };
             if let Err(e) = r {
