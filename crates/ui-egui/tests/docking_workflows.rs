@@ -336,6 +336,46 @@ fn canvas_reset_during_splitter_drag_discards_old_resize_and_ends_gesture() {
 }
 
 #[test]
+fn every_panel_header_has_a_close_button_that_closes_like_the_context_menu() {
+    let mut h = harness(None, 1280.0, 1.0);
+    assert!(h.query_by_label("Close Tool Sets").is_some(), "docked tab headers show a close button");
+    assert!(h.query_by_label("Close Drawing").is_none(), "the drawing view is not a closable panel");
+    // External References opens as a tabbed pane; its button sits beside the title, not over it.
+    h.state_mut().run("ui.dock", json!({"operation":"open","panel":"externalReferences"})).unwrap();
+    h.run_steps(4);
+    assert!(h.state().ui.docking.layout.contains(&Panel::ExternalRefs));
+    let close = h.get_by_label("Close External References").rect();
+    let title = h.get_by_role_and_label(egui::accesskit::Role::Tab, "External References").rect();
+    assert!(!close.intersects(title), "the close button does not cover the panel title");
+    h.get_by_label("Close External References").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::ExternalRefs));
+
+    // Accordion headers (the default Layers/Properties stack) get one too.
+    assert!(h.state().ui.docking.layout.contains(&Panel::Layers));
+    h.get_by_label("Close Layers").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Layers));
+
+    // The context menu still closes the same panel after it is reopened.
+    h.state_mut().run("ui.dock", json!({"operation":"open","panel":"layers"})).unwrap();
+    h.run_steps(4);
+    assert!(h.state().ui.docking.layout.contains(&Panel::Layers));
+    h.get_by_role_and_label(egui::accesskit::Role::Tab, "Layers").click_button(PointerButton::Secondary);
+    h.run_steps(3);
+    h.get_by_label("Close panel").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Layers));
+
+    // Floating panels get the same button in their group header.
+    h.state_mut().run("ui.dock", json!({"operation":"float","panel":"properties","rect":[400,250,300,350]})).unwrap();
+    h.run_steps(4);
+    h.get_by_label("Close Properties").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Properties));
+}
+
+#[test]
 fn collapsed_tool_sets_leave_a_visible_control_that_expands_them() {
     let mut h = harness(None, 1280.0, 1.0);
     h.get_by_label("Collapse Tool Sets").click();

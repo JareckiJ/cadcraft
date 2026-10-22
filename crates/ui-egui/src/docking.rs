@@ -1,10 +1,16 @@
 //! Application panel identities and persistence around the shared docking renderer.
 //! Document contents remain owned by their existing view implementations.
 
-use craft_ui::docking::{Action, DockArea, DockStyle, Layout, Location, Node, PanelLimits, Permissions, Placement, Zone};
+use craft_ui::docking::{Action, DockArea, DockContent, DockStyle, Layout, Location, Node, PanelLimits, Permissions, Placement, Zone};
 use craft_ui::layout::{SplitAxis, SplitSize};
+use egui::{Rect, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use crate::icons::{self, Icon};
+
+/// Size of the visible close button on every panel header.
+const CLOSE_BUTTON: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -315,6 +321,83 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
     Ok(json!({"docking": app.ui.docking}))
 }
 
+/// A visible close button for a panel header. It runs the same action as the tab context
+/// menu's "Close panel"; the accessible name includes the panel so the headers stay distinct.
+fn close_button(ui: &mut egui::Ui, panel: Panel, rect: Rect) -> bool {
+    let t = crate::theme::Tokens::get();
+    let response = ui.interact(rect, egui::Id::new("cadcraft-docking").with(("close", panel.id())), egui::Sense::click());
+    let label = format!("Close {}", crate::i18n::t(panel.label()));
+    icons::describe_control(ui, &response, &label, None, false);
+    if response.hovered() {
+        ui.painter().rect_filled(rect.expand(2.0), 2.0, t.control_hover.gamma_multiply(0.6));
+    }
+    icons::paint(ui.painter(), rect, Icon::Close, false);
+    response.on_hover_text(crate::tl!("Close panel")).clicked()
+}
+
+/// Panel bodies plus the shared header's close affordance, rendered by the docking surface.
+struct PanelContent<'a> {
+    app: &'a mut crate::CadApp,
+    close: Option<Panel>,
+}
+
+impl DockContent<Panel> for PanelContent<'_> {
+    fn body(&mut self, ui: &mut egui::Ui, panel: &Panel) {
+        let t = crate::theme::Tokens::get();
+        match panel {
+            Panel::Canvas => {
+                ui.painter().rect_filled(ui.max_rect(), 0.0, t.canvas);
+                crate::canvas::show(self.app, ui);
+            }
+            Panel::ToolSets => crate::palettes::toolsets(self.app, ui),
+            Panel::QuickCalc => crate::palettes::quickcalc::show(self.app, ui),
+            Panel::Layers => {
+                egui::ScrollArea::vertical()
+                    .id_salt("dock-layers")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| crate::palettes::layers_section(self.app, ui));
+            }
+            Panel::Properties => {
+                egui::ScrollArea::vertical().id_salt("dock-properties").auto_shrink([false, false]).show(ui, |ui| {
+                    crate::shortcut_menus::palette(self.app, ui, crate::palettes::properties_section, crate::shortcut_menus::properties_entries)
+                });
+            }
+            Panel::ExternalRefs => {
+                egui::ScrollArea::both().id_salt("dock-xrefs").auto_shrink([false, false]).show(ui, |ui| crate::xrefs::section(self.app, ui));
+            }
+        }
+    }
+
+    fn group_header_width(&self, _panels: &[Panel], active: &Panel, _floating: bool) -> f32 {
+        if permissions(active).closable { CLOSE_BUTTON + 8.0 } else { 0.0 }
+    }
+
+    fn group_header(&mut self, ui: &mut egui::Ui, _panels: &[Panel], active: &Panel, _floating: bool) {
+        let header = ui.max_rect();
+        let rect = Rect::from_center_size(pos2(header.right() - CLOSE_BUTTON * 0.5 - 4.0, header.center().y), vec2(CLOSE_BUTTON, CLOSE_BUTTON));
+        if close_button(ui, *active, rect) {
+            self.close = Some(*active);
+        }
+    }
+}
+
+/// Panels whose title bar is an accordion entry rather than a tab group header.
+fn stack_panels(layout: &Layout<Panel>) -> Vec<Panel> {
+    let mut panels = Vec::new();
+    let mut nodes: Vec<&Node<Panel>> = layout.root.iter().collect();
+    while let Some(node) = nodes.pop() {
+        match node {
+            Node::Split { first, second, .. } => {
+                nodes.push(first);
+                nodes.push(second);
+            }
+            Node::Stack { entries } => panels.extend(entries.iter().map(|entry| entry.panel)),
+            Node::Tabs { .. } => {}
+        }
+    }
+    panels
+}
+
 pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     let mut workspace = app.ui.docking.clone();
@@ -336,36 +419,41 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     style.border = egui::Stroke::new(1.0, t.border);
     style.accent = t.accent;
     style.font = crate::theme::body();
-    let output = DockArea::new(egui::Id::new("cadcraft-docking")).show_with_limits(
-        ui,
-        &workspace.layout,
-        &style,
-        |panel| crate::i18n::t(panel.label()).into(),
-        permissions,
-        panel_limits,
-        |ui, panel| match panel {
-            Panel::Canvas => {
-                ui.painter().rect_filled(ui.max_rect(), 0.0, t.canvas);
-                crate::canvas::show(app, ui);
-            }
-            Panel::ToolSets => crate::palettes::toolsets(app, ui),
-            Panel::QuickCalc => crate::palettes::quickcalc::show(app, ui),
-            Panel::Layers => {
-                egui::ScrollArea::vertical()
-                    .id_salt("dock-layers")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| crate::palettes::layers_section(app, ui));
-            }
-            Panel::Properties => {
-                egui::ScrollArea::vertical().id_salt("dock-properties").auto_shrink([false, false]).show(ui, |ui| {
-                    crate::shortcut_menus::palette(app, ui, crate::palettes::properties_section, crate::shortcut_menus::properties_entries)
-                });
-            }
-            Panel::ExternalRefs => {
-                egui::ScrollArea::both().id_salt("dock-xrefs").auto_shrink([false, false]).show(ui, |ui| crate::xrefs::section(app, ui));
-            }
-        },
-    );
+    let (mut output, header_close) = {
+        let mut content = PanelContent { app, close: None };
+        let output = DockArea::new(egui::Id::new("cadcraft-docking")).show_customized(
+            ui,
+            &workspace.layout,
+            &style,
+            |panel| crate::i18n::t(panel.label()).into(),
+            permissions,
+            panel_limits,
+            &mut content,
+        );
+        (output, content.close)
+    };
+    // Accordion title bars are rendered by the shared surface without a header callback, so
+    // place the same close button over their title bar, left of the stock collapse control.
+    let mut close = header_close;
+    for panel in stack_panels(&workspace.layout) {
+        if !permissions(&panel).closable {
+            continue;
+        }
+        let Some(title) = ui.ctx().read_response(egui::Id::new("cadcraft-docking").with(("tab", panel))) else { continue };
+        if !title.rect.is_positive() {
+            continue;
+        }
+        let rect = Rect::from_center_size(
+            pos2(title.rect.right() - 18.0 - CLOSE_BUTTON * 0.5 - 4.0, title.rect.center().y),
+            vec2(CLOSE_BUTTON, CLOSE_BUTTON),
+        );
+        if close_button(ui, panel, rect) {
+            close = Some(panel);
+        }
+    }
+    if let Some(panel) = close {
+        output.actions.push(Action::Close { panel });
+    }
     // Existing panel close buttons and commands still own their visibility switches.
     let rendered = workspace;
     let mut workspace = app.ui.docking.clone();
