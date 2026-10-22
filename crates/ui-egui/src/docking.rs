@@ -342,6 +342,8 @@ struct PanelContent<'a> {
 }
 
 impl DockContent<Panel> for PanelContent<'_> {
+    /// Render `panel`'s existing view; Layers, Properties and External References scroll
+    /// independently, and the drawing canvas paints its own background before the view.
     fn body(&mut self, ui: &mut egui::Ui, panel: &Panel) {
         let t = crate::theme::Tokens::get();
         match panel {
@@ -368,10 +370,14 @@ impl DockContent<Panel> for PanelContent<'_> {
         }
     }
 
+    /// Reserve header space for the close button only when `active` may be closed, so the
+    /// drawing view's title gets no empty gap.
     fn group_header_width(&self, _panels: &[Panel], active: &Panel, _floating: bool) -> f32 {
         if permissions(active).closable { CLOSE_BUTTON + 8.0 } else { 0.0 }
     }
 
+    /// Draw the close button at the right edge of a tab-group header and remember the panel
+    /// to close once the docking surface has returned, so layout changes stay outside rendering.
     fn group_header(&mut self, ui: &mut egui::Ui, _panels: &[Panel], active: &Panel, _floating: bool) {
         let header = ui.max_rect();
         let rect = Rect::from_center_size(pos2(header.right() - CLOSE_BUTTON * 0.5 - 4.0, header.center().y), vec2(CLOSE_BUTTON, CLOSE_BUTTON));
@@ -398,6 +404,10 @@ fn stack_panels(layout: &Layout<Panel>) -> Vec<Panel> {
     panels
 }
 
+/// Draw the docked workspace: restore or fall back from the persisted layout, render every
+/// panel body plus the header close buttons, and apply the resulting actions through
+/// [`command`]. Bodies may dispatch commands, so the canonical workspace is published before
+/// rendering while the layout snapshot stays immutable.
 pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     let mut workspace = app.ui.docking.clone();
