@@ -204,6 +204,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | OSOPTIONS bit 4 filters individual segments in imported dimension block polylines, including nested transforms, while preserving main dimension-line endpoints and Node, Midpoint and Nearest snaps. |
 | 2026-10-14 | minor | OSOPTIONS (default 7): hatch filtering and dimension extension-line endpoint filtering in running snaps, overrides and cycling; legacy OSNAPHATCH synchronized, profiles migrated, Drafting Settings checkboxes added. Bit 2 is retained but inactive without dynamic UCS; parity estimates unchanged. |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |

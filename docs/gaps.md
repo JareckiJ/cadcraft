@@ -150,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | OSOPTIONS bit 4 filters individual segments in imported dimension block polylines, including nested transforms, while preserving main dimension-line endpoints and Node, Midpoint and Nearest snaps. |
 | 2026-10-14 | minor | OSOPTIONS (default 7): hatch filtering and dimension extension-line endpoint filtering in running snaps, overrides and cycling; legacy OSNAPHATCH synchronized, profiles migrated, Drafting Settings checkboxes added. Bit 2 is retained but inactive without dynamic UCS; parity estimates unchanged. |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |

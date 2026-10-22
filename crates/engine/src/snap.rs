@@ -407,10 +407,10 @@ fn gather_in(
             }
         }
         let mut sink = Sink { osmode, aperture, probe, cands: &mut cands, near: &mut near_prims };
-        sink.object(&e.kind, None);
+        sink.object(&e.kind, None, None);
         // A block reference snaps to the objects inside it, placed by its transform.
         if let EntityKind::Insert(ins) = &e.kind {
-            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, frozen, &mut |k, m| sink.object(k, Some(m)));
+            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, frozen, &mut |k, m| sink.object(k, Some(m), None));
         }
         if let EntityKind::Dimension(dm) = &e.kind {
             sink.dimension(d, dm, &mut budget, frozen);
@@ -515,8 +515,9 @@ struct Sink<'a> {
 
 impl Sink<'_> {
     /// The snap points of one object; `xf` places an object from inside a block reference
-    /// (whose primitives far from the cursor are skipped).
-    fn object(&mut self, kind: &EntityKind, xf: Option<&Mat3>) {
+    /// (whose primitives far from the cursor are skipped). For a dimension block, optional
+    /// `extension_geometry` filters endpoints per transformed segment, including in polylines.
+    fn object(&mut self, kind: &EntityKind, xf: Option<&Mat3>, extension_geometry: Option<&cadcraft_render::DimGeometry>) {
         let osmode = self.osmode;
         // OSNAPHATCH = 0: hatches are left out.
         if osmode & mode::HATCH == 0 && matches!(kind, EntityKind::Hatch(_)) {
@@ -542,7 +543,7 @@ impl Sink<'_> {
             let cands = &mut *self.cands;
             match &p {
                 Prim::Seg(s) => {
-                    if osmode & mode::END != 0 {
+                    if osmode & mode::END != 0 && !extension_geometry.is_some_and(|g| dimension_extension(s, g)) {
                         cands.push((mode::END, s.start()));
                         cands.push((mode::END, s.end()));
                     }
@@ -662,12 +663,7 @@ impl Sink<'_> {
                     row_spacing: 0.0,
                 };
                 block_leaves(d, &ins, &Mat3::IDENTITY, 0, budget, frozen, &mut |k, m| {
-                    let modes = self.osmode;
-                    if geometry.as_ref().is_some_and(|g| dimension_extension(k, m, g)) {
-                        self.osmode &= !mode::END;
-                    }
-                    self.object(k, Some(m));
-                    self.osmode = modes;
+                    self.object(k, Some(m), geometry.as_ref());
                 });
             }
             None => {
@@ -697,11 +693,11 @@ impl Sink<'_> {
     }
 }
 
-/// Whether a block line lies along one of the dimension's extension lines. Reject non-finite
-/// geometry and use unit directions to avoid squaring large input-derived lengths.
-fn dimension_extension(kind: &EntityKind, xf: &Mat3, g: &cadcraft_render::DimGeometry) -> bool {
-    let EntityKind::Line(l) = kind else { return false };
-    let (p, q) = (xf.apply(l.a.xy()), xf.apply(l.b.xy()));
+/// Whether a transformed block segment lies along one of the dimension's extension lines.
+/// Reject non-finite geometry and use unit directions to avoid squaring large input-derived lengths.
+fn dimension_extension(segment: &Segment, g: &cadcraft_render::DimGeometry) -> bool {
+    let Segment::Line(l) = segment else { return false };
+    let (p, q) = (l.a, l.b);
     if !(p.is_finite() && q.is_finite()) {
         return false;
     }

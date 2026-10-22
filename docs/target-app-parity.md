@@ -1,6 +1,6 @@
 # Target-app parity: CADCraft vs AutoCAD 2027
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (OSOPTIONS added; estimates unchanged) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (OSOPTIONS added; estimates unchanged) · **Target:** Autodesk AutoCAD 2027
 
 The authoritative assessment of how close CADCraft is to AutoCAD, and how much Opus 5.5 work
 remains. [ROADMAP.md](../ROADMAP.md) summarises it, [gaps.md](gaps.md) lists every shortfall,
@@ -223,6 +223,7 @@ DWG/DXF corpus (files from people who own them); black-box checks in AutoCAD of 
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | OSOPTIONS bit 4 filters individual segments in imported dimension block polylines, including nested transforms, while preserving main dimension-line endpoints and Node, Midpoint and Nearest snaps. |
 | 2026-10-14 | minor | OSOPTIONS (default 7): hatch filtering and dimension extension-line endpoint filtering in running snaps, overrides and cycling; legacy OSNAPHATCH synchronized, profiles migrated, Drafting Settings checkboxes added. Bit 2 is retained but inactive without dynamic UCS; parity estimates unchanged. |
 | 2026-10-12 | minor | Hatch row evidence: Hatch and Gradient / Hatch Edit dialogs; percentages and hours not re-measured |
 | 2026-10-12 | minor | Blocks row evidence: Block Editor for static blocks (BEDIT, BSAVE, BSAVEAS, BCLOSE); percentages and hours not re-measured |

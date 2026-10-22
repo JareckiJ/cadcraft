@@ -1,10 +1,10 @@
 //! OSOPTIONS applies to running snaps, overrides and cycling, and survives profile restores.
 
-use cadcraft_doc::{Block, Common, Entity, EntityKind, Handle, Line, Space};
+use cadcraft_doc::{Block, Common, Entity, EntityKind, Handle, Insert, Line, LwPolyline, Space};
 use cadcraft_engine::snap::tracking::CursorQuery;
 use cadcraft_engine::snap::{self, mode};
 use cadcraft_engine::{Session, cmd::options};
-use cadcraft_geom::{Vec2, Vec3};
+use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
 fn set(s: &mut Session, name: &str, value: Value) {
@@ -151,6 +151,74 @@ fn imported_dimension_blocks_filter_extension_lines_but_keep_dimension_lines() {
         set(&mut s, "OSOPTIONS", json!(7));
     }
     assert_eq!(pick(&mut s, Vec2::new(10.0, 3.0), mode::END).unwrap().point, Vec2::new(10.0, 3.0));
+}
+
+#[test]
+fn imported_dimension_polylines_filter_each_transformed_segment() {
+    for nested in [false, true] {
+        let (mut s, h, points) = fixture();
+        let d = s.doc_mut().unwrap();
+        // One polyline contains both extension lines, their overshoots, and the main line.
+        let vertices = [(0.0, 0.4), (0.0, 3.6), (0.0, 3.0), (10.0, 3.0), (10.0, 3.6), (10.0, 0.4)]
+            .into_iter()
+            .map(|(x, y)| PolyVertex::new(if nested { Vec2::new(y, 10.0 - x) } else { Vec2::new(x, y) }))
+            .collect();
+        let entity = Entity {
+            handle: d.new_handle(),
+            common: Common::default(),
+            kind: EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: 0.0, elevation: 0.0, plinegen: false }),
+        };
+        let mut block = Block::new("DIMGEOM");
+        if nested {
+            let mut inner = Block::new("DIM_POLYLINE");
+            inner.entities.push(entity);
+            d.blocks.insert(inner.name.clone(), std::sync::Arc::new(inner));
+            block.entities.push(Entity {
+                handle: d.new_handle(),
+                common: Common::default(),
+                kind: EntityKind::Insert(Insert {
+                    block: "DIM_POLYLINE".into(),
+                    insert: Vec3::new(10.0, 0.0, 0.0),
+                    scale: Vec3::new(1.0, 1.0, 1.0),
+                    rotation: std::f64::consts::FRAC_PI_2,
+                    attribs: Vec::new(),
+                    cols: 1,
+                    rows: 1,
+                    col_spacing: 0.0,
+                    row_spacing: 0.0,
+                }),
+            });
+        } else {
+            block.entities.push(entity);
+        }
+        d.blocks.insert(block.name.clone(), std::sync::Arc::new(block));
+        d.model.modify(h, |e| {
+            if let EntityKind::Dimension(dm) = &mut e.kind {
+                dm.block = Some("DIMGEOM".into());
+            }
+        });
+        for bits in [3, 7] {
+            set(&mut s, "OSOPTIONS", json!(bits));
+            for &p in &points {
+                let hit = pick(&mut s, p, mode::END);
+                let modes = s.settings.object_snap_modes(mode::END);
+                let cycling = cadcraft_engine::pointmod::snap_candidates(s.doc().unwrap(), &Space::Model, p, 0.05, modes, None, false);
+                if bits == 7 {
+                    assert!(hit.is_none(), "filtered endpoint {p:?}, nested={nested}: {hit:?}");
+                    assert!(cycling.is_empty(), "filtered endpoint offered by cycling at {p:?}, nested={nested}");
+                } else {
+                    assert!(hit.unwrap().point.near(p, 1e-9));
+                    assert!(cycling.iter().any(|hit| hit.point.near(p, 1e-9)));
+                }
+            }
+            for p in [Vec2::new(0.0, 3.0), Vec2::new(10.0, 3.0)] {
+                assert!(pick(&mut s, p, mode::END).unwrap().point.near(p, 1e-9), "main-line endpoint, nested={nested}");
+            }
+            assert_eq!(pick(&mut s, Vec2::ZERO, mode::NOD).unwrap().point, Vec2::ZERO);
+            assert!(pick(&mut s, Vec2::new(0.0, 2.0), mode::MID).unwrap().point.near(Vec2::new(0.0, 2.0), 1e-9));
+            assert!(pick(&mut s, Vec2::new(0.0, 1.0), mode::NEA).is_some());
+        }
+    }
 }
 
 #[test]
