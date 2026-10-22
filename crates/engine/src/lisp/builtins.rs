@@ -662,7 +662,7 @@ fn wcmatch(a: &[Value]) -> R {
     // must not explore exponentially many placements unchecked (CWE-400). Charge every glob step
     // against a shared budget and fail the call if it is exhausted.
     let mut budget: u64 = WCMATCH_BUDGET;
-    for p in split_patterns(&pat) {
+    for p in split_patterns(&pat, &mut budget).map_err(|()| LispError::new("wcmatch: pattern too complex"))? {
         match match_pattern(&text, &p, &mut budget) {
             Ok(true) => return Ok(Value::bool(true)),
             Ok(false) => {}
@@ -677,16 +677,25 @@ fn wcmatch(a: &[Value]) -> R {
 /// cover), but finite so truly exponential `*`-heavy patterns are rejected rather than hanging.
 const WCMATCH_BUDGET: u64 = 200_000_000;
 
-fn split_patterns(pat: &str) -> Vec<Vec<char>> {
+fn charge_match(budget: &mut u64) -> Result<(), ()> {
+    *budget = budget.checked_sub(1).ok_or(())?;
+    Ok(())
+}
+
+fn split_patterns(pat: &str, budget: &mut u64) -> Result<Vec<Vec<char>>, ()> {
     let mut out = vec![Vec::new()];
     let mut chars = pat.chars().peekable();
     let mut in_set = false;
     while let Some(c) = chars.next() {
+        charge_match(budget)?;
         match c {
             '`' => {
                 if let Some(cur) = out.last_mut() {
                     cur.push('`');
-                    cur.extend(chars.next());
+                    if let Some(escaped) = chars.next() {
+                        charge_match(budget)?;
+                        cur.push(escaped);
+                    }
                 }
             }
             '[' => {
@@ -709,7 +718,7 @@ fn split_patterns(pat: &str) -> Vec<Vec<char>> {
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn match_pattern(text: &[char], pat: &[char], budget: &mut u64) -> Result<bool, ()> {
@@ -724,6 +733,37 @@ fn match_pattern(text: &[char], pat: &[char], budget: &mut u64) -> Result<bool, 
 /// Iterative-enough glob with `*` backtracking; `depth` bounds the recursion on `*`. Every step is
 /// charged against `budget`; `Err(())` means the shared budget ran out (treated as too complex).
 fn glob(text: &[char], pat: &[char], depth: usize, budget: &mut u64) -> Result<bool, ()> {
+    glob_cached(text, pat, depth, budget, &mut std::collections::HashSet::new())
+}
+
+fn glob_cached(
+    text: &[char],
+    pat: &[char],
+    depth: usize,
+    budget: &mut u64,
+    failed: &mut std::collections::HashSet<(usize, usize, usize)>,
+) -> Result<bool, ()> {
+    charge_match(budget)?;
+    let key = (text.len(), pat.len(), depth);
+    if failed.contains(&key) {
+        return Ok(false);
+    }
+    let matched = glob_inner(text, pat, depth, budget, failed)?;
+    // Avoid revisiting the same failed suffix exponentially. Bound the memo table independently
+    // of the step limit so a very large pattern cannot turn the optimization into an allocation bomb.
+    if !matched && failed.len() < 100_000 {
+        failed.insert(key);
+    }
+    Ok(matched)
+}
+
+fn glob_inner(
+    text: &[char],
+    pat: &[char],
+    depth: usize,
+    budget: &mut u64,
+    failed: &mut std::collections::HashSet<(usize, usize, usize)>,
+) -> Result<bool, ()> {
     if *budget == 0 {
         return Err(());
     }
@@ -733,11 +773,12 @@ fn glob(text: &[char], pat: &[char], depth: usize, budget: &mut u64) -> Result<b
     }
     let (mut t, mut p) = (0usize, 0usize);
     while p < pat.len() {
+        charge_match(budget)?;
         match pat[p] {
             '*' => {
                 let rest = &pat[p + 1..];
                 for i in t..=text.len() {
-                    if glob(&text[i..], rest, depth + 1, budget)? {
+                    if glob_cached(&text[i..], rest, depth + 1, budget, failed)? {
                         return Ok(true);
                     }
                 }
@@ -752,7 +793,17 @@ fn glob(text: &[char], pat: &[char], depth: usize, budget: &mut u64) -> Result<b
                 p += 2;
             }
             '[' => {
-                let Some(close) = pat[p..].iter().position(|c| *c == ']').map(|i| p + i) else { return Ok(false) };
+                let mut close = p;
+                while let Some(c) = pat.get(close) {
+                    charge_match(budget)?;
+                    if *c == ']' {
+                        break;
+                    }
+                    close += 1;
+                }
+                if close == pat.len() {
+                    return Ok(false);
+                }
                 let Some(&c) = text.get(t) else { return Ok(false) };
                 let set = &pat[p + 1..close];
                 let (neg, set) = match set.split_first() {
@@ -762,6 +813,7 @@ fn glob(text: &[char], pat: &[char], depth: usize, budget: &mut u64) -> Result<b
                 let mut hit = false;
                 let mut i = 0;
                 while i < set.len() {
+                    charge_match(budget)?;
                     if set.get(i + 1) == Some(&'-') && i + 2 < set.len() {
                         if set[i] <= c && c <= set[i + 2] {
                             hit = true;
@@ -1508,5 +1560,23 @@ pub fn real(r: f64) -> String {
 pub fn wild_match(text: &str, pattern: &str) -> bool {
     let t: Vec<char> = text.chars().collect();
     let mut budget: u64 = WCMATCH_BUDGET;
-    split_patterns(pattern).iter().any(|p| match_pattern(&t, p, &mut budget) == Ok(true))
+    split_patterns(pattern, &mut budget).is_ok_and(|patterns| patterns.iter().any(|p| match_pattern(&t, p, &mut budget) == Ok(true)))
+}
+
+#[cfg(test)]
+mod wildcard_budget_tests {
+    use super::*;
+
+    #[test]
+    fn all_native_scans_consume_fuel() {
+        assert!(split_patterns("abcdefgh", &mut 4).is_err());
+        assert!(split_patterns("`a`b`c", &mut 4).is_err());
+        let text: Vec<_> = "abcdefgh".chars().collect();
+        assert!(glob(&text, &text, 0, &mut 4).is_err());
+        let pattern: Vec<_> = "[abcdefgh]".chars().collect();
+        assert!(glob(&['!'], &pattern, 0, &mut 6).is_err());
+        // Enough for finding the closing bracket, but not scanning the entire set again.
+        assert!(glob(&['!'], &pattern, 0, &mut 14).is_err());
+        assert_eq!(glob(&['a'], &pattern, 0, &mut 100), Ok(true));
+    }
 }

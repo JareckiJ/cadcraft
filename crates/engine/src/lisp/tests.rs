@@ -193,6 +193,7 @@ fn synchronous_callback_loop_is_an_error_not_a_hang() {
     // A comparator with an infinite loop used to run with u64::MAX fuel and hang the thread; it
     // now terminates at the synchronous-callback step cap (CWE-400, finding row 2).
     let mut s = session();
+    s.lisp.limits.callback_steps = 1_000;
     assert!(eval(&mut s, "(vl-sort '(1 2) (function (lambda (a b) (while t))))").is_err());
     // A well-behaved comparator still works afterwards.
     assert_eq!(ok(&mut s, "(vl-sort '(3 1 2) '<)"), "(1 2 3)");

@@ -165,10 +165,6 @@ pub const MAX_STACK: usize = 100_000;
 const MAX_SYNC_DEPTH: usize = 32;
 /// Steps per slice while driving a synchronous callback ([`Ctx::call_sync`]).
 const SYNC_SLICE: u64 = 400_000;
-/// Hard cap on the total steps one synchronous callback may take before it is aborted, so a
-/// comparator or predicate containing an infinite loop cannot occupy the thread forever (CWE-400).
-const SYNC_CALL_CAP: u64 = 500_000_000;
-
 enum State {
     Eval(Value),
     Ret(Value),
@@ -650,6 +646,7 @@ impl Ctx<'_> {
             super::value::charge_result(&v)?;
             return Ok(v);
         }
+        let cap = self.s.lisp.limits.callback_steps;
         let mut m = Machine::calling(f.clone(), args);
         let mut sub = Ctx { s: &mut *self.s, env: &mut *self.env, depth: self.depth + 1 };
         // Drive the callback in bounded slices instead of granting it `u64::MAX` fuel. A `Yield`
@@ -663,8 +660,8 @@ impl Ctx<'_> {
                 Outcome::Error(e) => return Err(e),
                 Outcome::Wait(Need::Yield) => {
                     spent = spent.saturating_add(SYNC_SLICE);
-                    if spent > SYNC_CALL_CAP {
-                        return Err(LispError::new(format!("callback stopped after {SYNC_CALL_CAP} steps")));
+                    if spent > cap {
+                        return Err(LispError::new(format!("callback stopped after {cap} steps")));
                     }
                 }
                 Outcome::Wait(_) => return Err(LispError::new("this function can't ask for input here")),
