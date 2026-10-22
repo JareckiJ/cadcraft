@@ -622,6 +622,103 @@ fn rectang_options_command_line() {
     }
 }
 
+#[test]
+fn rectang_center_mode_json() {
+    let mut s = Session::new();
+    // The first point is the centre; the second is a corner mirrored about it.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "p2": [14, 16]})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Dimensions are the rectangle's full size, still centred on the first point.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "dimensions": [8, 12]})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // A second point only picks the quadrant.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "dimensions": [8, 12], "p2": [0, 0]})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // The area is the full area, centred too.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "area": 96, "length": 8})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Rotation is about the centre.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "dimensions": [8, 12], "rotation": 90})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 4.0, 6.0) && near(b.max, 16.0, 14.0), "{b:?}");
+    // The default corner mode is unchanged.
+    s.execute("rectang", &json!({"p1": [10, 10], "p2": [14, 16]})).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 10.0, 10.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Centre mode still needs a size.
+    assert!(s.execute("rectang", &json!({"center": true, "p1": [10, 10]})).is_err());
+}
+
+#[test]
+fn rectang_center_mode_honours_options() {
+    let mut s = Session::new();
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "p2": [14, 16], "fillet": 1, "width": 0.25, "thickness": 2})).unwrap();
+    match &s.doc().unwrap().model.last().unwrap().kind {
+        EntityKind::LwPolyline(p) => assert!(p.vertices.len() == 8 && p.const_width == 0.25),
+        k => panic!("{k:?}"),
+    }
+    assert_eq!(s.doc().unwrap().model.last().unwrap().common.thickness, 2.0);
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Chamfer, still centred.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "p2": [14, 16], "chamfer": [1, 1]})).unwrap();
+    assert_eq!(rect_pts(&s).len(), 8);
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // A fillet too large for the rectangle falls back to sharp corners, still centred.
+    s.execute("rectang", &json!({"center": true, "p1": [10, 10], "p2": [14, 16], "fillet": 5})).unwrap();
+    assert_eq!(rect_pts(&s).len(), 4);
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+}
+
+#[test]
+fn rectang_center_mode_command_line() {
+    let mut s = Session::new();
+    s.cmdline("rectang ce 10,10 14,16").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Options before the centre point, and the centre picked after them.
+    s.cmdline("rectang center f 1 w 0.1 10,10 14,16").unwrap();
+    match &s.doc().unwrap().model.last().unwrap().kind {
+        EntityKind::LwPolyline(p) => assert!(p.vertices.len() == 8 && p.const_width == 0.1),
+        k => panic!("{k:?}"),
+    }
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Dimensions after the centre: the pick only chooses the quadrant.
+    s.cmdline("rectang ce 10,10 d 8 12 14,16").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // Area too: the rectangle of that area is centred on the first point.
+    s.cmdline("rectang ce 10,10 a 96 l 8").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 6.0, 4.0) && near(b.max, 14.0, 16.0), "{b:?}");
+    // The rubber band is centred while the second point is picked.
+    s.start("rectang").unwrap();
+    s.cmdline("ce").unwrap();
+    assert!(s.prompt_text().contains("Specify center point for rectangle"), "{}", s.prompt_text());
+    s.cmdline("10,10").unwrap();
+    let pv = s.preview(Vec2::new(14.0, 16.0));
+    let pb = match pv.first().map(|e| &e.kind) {
+        Some(EntityKind::LwPolyline(p)) => cadcraft_geom::Bounds2::from_points(p.vertices.iter().map(|v| v.p).collect::<Vec<_>>()),
+        k => panic!("{k:?}"),
+    };
+    assert!(near(pb.min, 6.0, 4.0) && near(pb.max, 14.0, 16.0), "{pb:?}");
+    s.cancel();
+    // The default corner mode is unchanged.
+    s.cmdline("rectang 10,10 14,16").unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 10.0, 10.0) && near(b.max, 14.0, 16.0), "{b:?}");
+}
+
 // ---------------- 3DPOLY / MLINE / HELIX / SPLINE CV ----------------
 
 #[test]
