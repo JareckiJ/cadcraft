@@ -114,26 +114,48 @@ impl CadApp {
                 // The Block Editor's unsaved changes go into the block first (BSAVE), then the
                 // drawing is saved with them.
                 let r = if self.session.state().is_ok_and(|st| st.block_unsaved()) { self.run("bsave", json!({})) } else { Ok(Value::Null) };
+                let waiting = self.pending_pick.is_some();
                 let r = r.and_then(|_| self.run("qsave", Value::Null));
-                let saved = r.is_ok() && self.doc_index(uid).and_then(|i| self.session.docs.get(i)).is_some_and(|d| !d.is_dirty());
-                match (saved, self.doc_index(uid)) {
-                    (true, Some(i)) => {
-                        self.close_front(i);
-                        self.advance_close();
-                    }
-                    _ => {
-                        // Not saved (picker cancelled, save failed or unavailable): keep the
-                        // drawing and its edits, and stop closing.
-                        self.closing = None;
-                        let title = self.doc_index(uid).and_then(|i| self.session.docs.get(i)).map(|d| d.title.clone()).unwrap_or_default();
-                        let msg = match r {
-                            Err(e) => format!("{title} was not saved ({e}); it stays open."),
-                            Ok(_) => format!("{title} was not saved; it stays open."),
-                        };
-                        self.session.echo(msg.clone());
-                        self.set_status(msg);
-                    }
+                // The Save dialog opened without waiting (macOS): closing goes on once it has
+                // saved; cancelling it leaves the prompt up.
+                if !waiting && let Some((rx, then)) = self.pending_pick.take() {
+                    self.pending_pick = Some((
+                        rx,
+                        Box::new(move |app: &mut CadApp, path| {
+                            let r = then(app, path);
+                            // Unless the prompt was answered otherwise meanwhile.
+                            if app.closing.as_ref().and_then(|c| c.asking) == Some(uid) {
+                                app.close_after_save(uid, r.clone());
+                            }
+                            r
+                        }),
+                    ));
+                    return;
                 }
+                self.close_after_save(uid, r);
+            }
+        }
+    }
+
+    /// Go on closing after the drawing `uid` was asked to save with result `r`.
+    fn close_after_save(&mut self, uid: u64, r: Result<Value, String>) {
+        let saved = r.is_ok() && self.doc_index(uid).and_then(|i| self.session.docs.get(i)).is_some_and(|d| !d.is_dirty());
+        match (saved, self.doc_index(uid)) {
+            (true, Some(i)) => {
+                self.close_front(i);
+                self.advance_close();
+            }
+            _ => {
+                // Not saved (picker cancelled, save failed or unavailable): keep the
+                // drawing and its edits, and stop closing.
+                self.closing = None;
+                let title = self.doc_index(uid).and_then(|i| self.session.docs.get(i)).map(|d| d.title.clone()).unwrap_or_default();
+                let msg = match r {
+                    Err(e) => format!("{title} was not saved ({e}); it stays open."),
+                    Ok(_) => format!("{title} was not saved; it stays open."),
+                };
+                self.session.echo(msg.clone());
+                self.set_status(msg);
             }
         }
     }

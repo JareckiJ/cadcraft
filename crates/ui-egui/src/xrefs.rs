@@ -6,8 +6,8 @@
 use egui::RichText;
 use serde_json::{Value, json};
 
-use crate::CadApp;
 use crate::docking::Panel;
+use crate::{CadApp, Pick};
 
 /// XREF typed or chosen from a menu opens this palette; XATTACH there asks for the file first
 /// (with the host's file picker, where there is one). JSON calls (with parameters) run the
@@ -19,13 +19,13 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
     match cadcraft_engine::cmd::resolve_alias(id).as_str() {
         "xref" => Some(open_palette(app)),
         "xattach" => {
-            let picked = app.services.pick_open.as_ref().and_then(|f| f())?;
-            let path = relative_to_host(app, &picked);
-            if let Err(e) = app.session.start("xattach") {
-                return Some(Err(e.to_string()));
-            }
-            app.cmdline(&path);
-            Some(Ok(Value::Null))
+            app.services.pick_open.as_ref()?;
+            app.pick_then(Pick::Open, |app, picked| {
+                let path = relative_to_host(app, &picked);
+                app.session.start("xattach").map_err(|e| e.to_string())?;
+                app.cmdline(&path);
+                Ok(Value::Null)
+            })
         }
         _ => None,
     }

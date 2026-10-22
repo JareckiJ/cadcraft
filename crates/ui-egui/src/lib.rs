@@ -189,7 +189,27 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Where set, the file dialogs are shown with this instead of calling `pick_open` /
+    /// `pick_save` (which must still be set, to say which dialogs there are), and the answer is
+    /// acted on in a later frame ([`CadApp::pick_then`]). macOS needs it: a panel run modally
+    /// inside the window's event handler gets the window events of its own resizing sent back
+    /// into that handler, and winit aborts the app (#1527).
+    pub start_pick: Option<StartPick>,
 }
+
+/// The file dialog to show: Open, or Save with the suggested file name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pick {
+    Open,
+    Save(String),
+}
+
+/// Shows a file dialog without waiting for it and calls the callback (from any thread) with the
+/// chosen path, or `None` when the dialog is cancelled ([`Services::start_pick`]).
+pub type StartPick = Box<dyn Fn(Pick, Box<dyn FnOnce(Option<String>) + Send>)>;
+
+/// What to do with the path a file dialog chose ([`CadApp::pick_then`]).
+type PickDone = Box<dyn FnOnce(&mut CadApp, String) -> Result<Value, String>>;
 
 pub struct CadApp {
     pub system_languages: Vec<String>,
@@ -248,6 +268,8 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// A file dialog shown with [`Services::start_pick`]: its answer, and what to do with it.
+    pending_pick: Option<(Receiver<Option<String>>, PickDone)>,
 }
 
 impl CadApp {
@@ -288,6 +310,65 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            pending_pick: None,
+        }
+    }
+
+    /// Ask for a file with the host's dialog (`pick`) and run `then` with the chosen path.
+    /// `None` when the host has no dialog of that kind. Cancelling gives `Ok(Null)`. With a
+    /// synchronous picker the result is `then`'s; with [`Services::start_pick`] the dialog opens
+    /// and this returns `Ok(Null)` at once: `then` runs in a later frame ([`Self::logic`]), and
+    /// its error, if any, shows in the status bar. While one dialog is open, no other is shown.
+    pub fn pick_then(
+        &mut self,
+        pick: Pick,
+        then: impl FnOnce(&mut CadApp, String) -> Result<Value, String> + 'static,
+    ) -> Option<Result<Value, String>> {
+        let available = match pick {
+            Pick::Open => self.services.pick_open.is_some(),
+            Pick::Save(_) => self.services.pick_save.is_some(),
+        };
+        if !available {
+            return None;
+        }
+        if self.pending_pick.is_some() {
+            return Some(Ok(Value::Null));
+        }
+        if let Some(start) = &self.services.start_pick {
+            let (tx, rx) = std::sync::mpsc::channel();
+            start(
+                pick,
+                Box::new(move |answer| {
+                    let _ = tx.send(answer);
+                }),
+            );
+            self.pending_pick = Some((rx, Box::new(then)));
+            return Some(Ok(Value::Null));
+        }
+        let path = match &pick {
+            Pick::Open => self.services.pick_open.as_ref().and_then(|f| f()),
+            Pick::Save(name) => self.services.pick_save.as_ref().and_then(|f| f(name)),
+        };
+        Some(match path {
+            Some(path) => then(self, path),
+            None => Ok(Value::Null),
+        })
+    }
+
+    /// Act on the answer of a dialog started with [`Services::start_pick`], once it arrives.
+    fn finish_pick(&mut self, ctx: &egui::Context) {
+        let Some((rx, _)) = &self.pending_pick else { return };
+        match rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) | Ok(None) => self.pending_pick = None,
+            Ok(Some(path)) => {
+                if let Some((_, then)) = self.pending_pick.take()
+                    && let Err(e) = then(self, path)
+                {
+                    self.set_status(e);
+                }
+                ctx.request_repaint();
+            }
         }
     }
 
@@ -576,6 +657,7 @@ impl CadApp {
             self.shown_interface_scale = Some(scale);
         }
         self.drain_control(ctx);
+        self.finish_pick(ctx);
         self.finish_opening();
         self.opening.show(ctx);
         if !self.synthetic.is_empty() {

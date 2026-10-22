@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::CadApp;
+use crate::{CadApp, Pick};
 
 /// The top-level menus, in order.
 pub const MENUS: &[&str] = &["File", "Edit", "View", "Insert", "Format", "Tools", "Draw", "Dimension", "Modify", "Window", "Help"];
@@ -145,52 +145,48 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(json!({"interfaceLanguage": preference.code(), "shown": shown}))
         }
-        "ui.open" | "open" if no_path => {
-            let picked = app.services.pick_open.as_ref().and_then(|f| f());
-            if let Some(p) = picked {
+        "ui.open" | "open" if no_path => app
+            .pick_then(Pick::Open, |app, p| {
                 app.open_path(&p);
-            }
-            Ok(Value::Null)
-        }
+                Ok(Value::Null)
+            })
+            .unwrap_or(Ok(Value::Null)),
         // Pick a template (.dwt or .dxf) and start a new drawing from it.
-        "ui.newtemplate" => {
-            if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
-                return Some(app.session.execute("new", &json!({ "template": p })).map_err(|e| e.to_string()));
-            }
-            Ok(Value::Null)
-        }
+        "ui.newtemplate" => app
+            .pick_then(Pick::Open, |app, p| app.session.execute("new", &json!({ "template": p })).map_err(|e| e.to_string()))
+            .unwrap_or(Ok(Value::Null)),
         // RECOVER from the menu or typed: pick the file. Without a picker the engine asks for the
         // file name on the command line.
-        "recover" if no_path && app.services.pick_open.is_some() => {
-            if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
+        "recover" if no_path && app.services.pick_open.is_some() => app
+            .pick_then(Pick::Open, |app, p| {
                 let r = app.run("recover", json!({ "path": p }));
                 app.opened(r);
-            }
-            Ok(Value::Null)
-        }
+                Ok(Value::Null)
+            })
+            .unwrap_or(Ok(Value::Null)),
         "ui.saveas" | "saveas" if no_path => {
             let title = app.session.state().map(|s| s.title.clone()).ok();
             let name = app.ui.save_format.suggested_name(title.as_deref());
-            if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name)) {
-                return Some(app.session.execute("saveas", &saveas_params(&app.ui, &app.session, &p)).map_err(|e| e.to_string()));
-            }
-            Ok(Value::Null)
+            app.pick_then(Pick::Save(name), |app, p| {
+                app.session.execute("saveas", &saveas_params(&app.ui, &app.session, &p)).map_err(|e| e.to_string())
+            })
+            .unwrap_or(Ok(Value::Null))
         }
         "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
         // params, never get here and never open a dialog.
         "exportpdf" if params.is_null() && app.session.state().is_ok() => {
-            let pick = app.services.pick_save.as_ref()?;
             let title = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
             let stem = std::path::Path::new(&title).file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.is_empty());
-            let Some(path) = pick(&format!("{}.pdf", stem.unwrap_or_else(|| "Drawing".into()))) else { return Some(Ok(Value::Null)) };
-            let r = app.session.execute("exportpdf", &json!({ "path": path })).map_err(|e| e.to_string());
-            app.session.echo(match &r {
-                Ok(_) => format!("Plotted to {path}"),
-                Err(e) => e.clone(),
+            return app.pick_then(Pick::Save(format!("{}.pdf", stem.unwrap_or_else(|| "Drawing".into()))), |app, path| {
+                let r = app.session.execute("exportpdf", &json!({ "path": path })).map_err(|e| e.to_string());
+                app.session.echo(match &r {
+                    Ok(_) => format!("Plotted to {path}"),
+                    Err(e) => e.clone(),
+                });
+                r
             });
-            r
         }
         "ui.sample" => {
             let d = cadcraft_engine::sample::default_sample();
@@ -718,6 +714,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            start_pick: None,
         };
         (CadApp::new(Session::new(), services), asked)
     }

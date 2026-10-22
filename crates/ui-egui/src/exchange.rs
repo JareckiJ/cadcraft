@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use egui::TextureHandle;
 use serde_json::{Value, json};
 
-use crate::CadApp;
+use crate::{CadApp, Pick};
 
 /// Bumped each time PREVIEW is started, so the window renders the drawing as it is now.
 static PREVIEW_GEN: AtomicU32 = AtomicU32::new(0);
@@ -23,27 +23,15 @@ pub fn route(app: &mut CadApp, id: &str) -> Result<Value, String> {
             app.ui.dialog = Some("preview".into());
             Ok(Value::Null)
         }
-        "import" | "imp" => {
-            let Some(pick) = app.services.pick_open.as_ref() else { return no_picker(app, "IMPORT", r#"import {"path": "parts.dxf"}"#) };
-            match pick() {
-                Some(path) => app.run("import", json!({ "path": path })),
-                None => Ok(Value::Null),
-            }
-        }
-        "publish" => {
-            let Some(pick) = app.services.pick_save.as_ref() else { return no_picker(app, "PUBLISH", "publish {}") };
-            match pick(&format!("{stem}.pdf")) {
-                Some(path) => app.run("publish", json!({ "path": path })),
-                None => Ok(Value::Null),
-            }
-        }
-        _ => {
-            let Some(pick) = app.services.pick_save.as_ref() else { return no_picker(app, "EXPORT", r#"export {"format": "svg"}"#) };
-            match pick(&format!("{stem}.svg")) {
-                Some(path) => app.run("export", json!({ "path": path })),
-                None => Ok(Value::Null),
-            }
-        }
+        "import" | "imp" => app
+            .pick_then(Pick::Open, |app, path| app.run("import", json!({ "path": path })))
+            .unwrap_or_else(|| no_picker(app, "IMPORT", r#"import {"path": "parts.dxf"}"#)),
+        "publish" => app
+            .pick_then(Pick::Save(format!("{stem}.pdf")), |app, path| app.run("publish", json!({ "path": path })))
+            .unwrap_or_else(|| no_picker(app, "PUBLISH", "publish {}")),
+        _ => app
+            .pick_then(Pick::Save(format!("{stem}.svg")), |app, path| app.run("export", json!({ "path": path })))
+            .unwrap_or_else(|| no_picker(app, "EXPORT", r#"export {"format": "svg"}"#)),
     }
 }
 
@@ -161,7 +149,7 @@ mod tests {
     use cadcraft_engine::Session;
     use serde_json::json;
 
-    use crate::{CadApp, Services};
+    use crate::{CadApp, Pick, Services};
 
     /// An app whose file dialogs record what they were asked and cancel.
     fn app() -> (CadApp, Rc<RefCell<Vec<String>>>) {
@@ -176,6 +164,7 @@ mod tests {
                 b.borrow_mut().push(name.to_string());
                 None
             })),
+            start_pick: None,
         };
         (CadApp::new(Session::new(), services), asked)
     }
@@ -205,5 +194,43 @@ mod tests {
 
         let e = app.run("share", json!({})).unwrap_err();
         assert!(e.contains("not available yet"), "{e}");
+    }
+
+    /// Where the host shows its dialogs without waiting (macOS, #1527), the command acts on the
+    /// path in a later frame, and no second dialog opens while one is up.
+    #[test]
+    fn a_deferred_dialog_acts_when_its_answer_arrives() {
+        type Done = Box<dyn FnOnce(Option<String>) + Send>;
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        let answer: Rc<RefCell<Option<Done>>> = Rc::default();
+        let (log, slot) = (asked.clone(), answer.clone());
+        let services = Services {
+            pick_open: Some(Box::new(|| None)),
+            pick_save: Some(Box::new(|_: &str| None)),
+            start_pick: Some(Box::new(move |pick, done| {
+                log.borrow_mut().push(pick);
+                *slot.borrow_mut() = Some(done);
+            })),
+        };
+        let mut app = CadApp::new(Session::new(), services);
+        let ctx = egui::Context::default();
+
+        // Cancelled: nothing happens, and the next command may ask again.
+        app.start("export");
+        assert_eq!(*asked.borrow(), [Pick::Save("Drawing1.svg".into())]);
+        answer.borrow_mut().take().unwrap()(None);
+        app.finish_pick(&ctx);
+        assert!(app.pending_pick.is_none());
+
+        app.start("imp");
+        app.start("publish");
+        assert_eq!(asked.borrow().len(), 2, "no second dialog while one is open");
+        app.finish_pick(&ctx);
+        assert!(app.pending_pick.is_some() && app.status.is_none(), "nothing runs before the answer");
+        let missing = std::env::temp_dir().join(format!("cadcraft-missing-{}.dxf", std::process::id()));
+        answer.borrow_mut().take().unwrap()(Some(missing.to_string_lossy().to_string()));
+        app.finish_pick(&ctx);
+        assert!(app.pending_pick.is_none());
+        assert!(app.status.is_some(), "IMPORT ran with the picked file and reported its error");
     }
 }
