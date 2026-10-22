@@ -112,6 +112,9 @@ struct Ctx {
     paper_views: HashMap<Handle, usize>,
     /// Dimension → anonymous `*D` block name.
     dim_blocks: HashMap<Handle, String>,
+    /// Dimensions whose block is written as read (unchanged since read): their text position
+    /// and measurement are written as read too, not recomputed.
+    dims_as_read: std::collections::HashSet<Handle>,
     /// Upper-case text style name → STYLE record handle.
     styles: HashMap<String, String>,
     /// Upper-case arrow name (as stored in styles/overrides) → BLOCK_RECORD handle.
@@ -630,6 +633,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             thickness(w, e);
             w.p(10, l.a);
             w.p(11, l.b);
+            extrusion(w, mirrored(e));
         }
         EntityKind::Point(p) => {
             w.s(0, "POINT");
@@ -644,27 +648,42 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             w.s(0, "CIRCLE");
             common(w, e, owner, paper, "AcDbCircle");
             thickness(w, e);
-            w.p(10, c.center);
+            let n = mirrored(e);
+            w.p(10, n.map_or(c.center, |n| to_ocs(n, c.center)));
             w.f(40, c.radius);
+            extrusion(w, n);
         }
         EntityKind::Arc(a) => {
             w.s(0, "ARC");
             common(w, e, owner, paper, "AcDbCircle");
             thickness(w, e);
-            w.p(10, a.center);
+            let n = mirrored(e);
+            w.p(10, n.map_or(a.center, |n| to_ocs(n, a.center)));
             w.f(40, a.radius);
+            extrusion(w, n);
             w.s(100, "AcDbArc");
-            w.f(50, a.start.to_degrees());
-            w.f(51, a.end.to_degrees());
+            // In the mirrored OCS the angles run the other way (the reader's inverse).
+            let pi = std::f64::consts::PI;
+            let (start, end) =
+                if n.is_some() { (cadcraft_geom::norm_angle(pi - a.end), cadcraft_geom::norm_angle(pi - a.start)) } else { (a.start, a.end) };
+            w.f(50, start.to_degrees());
+            w.f(51, end.to_degrees());
         }
         EntityKind::Ellipse(el) => {
             w.s(0, "ELLIPSE");
             common(w, e, owner, paper, "AcDbEllipse");
             w.p(10, el.center);
             w.p(11, el.major);
+            let n = mirrored(e);
+            extrusion(w, n);
             w.f(40, el.ratio);
-            w.f(41, el.start);
-            w.f(42, el.end);
+            // The minor axis is extrusion × major: mirrored, a parameter t lands where -t does
+            // in the plan view (the reader's inverse; a full ellipse is the same either way).
+            let full = (cadcraft_geom::ccw_sweep(el.start, el.end) - std::f64::consts::TAU).abs() <= 1e-9;
+            let (start, end) =
+                if n.is_some() && !full { (cadcraft_geom::norm_angle(-el.end), cadcraft_geom::norm_angle(-el.start)) } else { (el.start, el.end) };
+            w.f(41, start);
+            w.f(42, end);
         }
         EntityKind::LwPolyline(p) => {
             w.s(0, "LWPOLYLINE");
@@ -678,16 +697,20 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 w.f(38, p.elevation);
             }
             thickness(w, e);
+            // Mirrored, the vertices are in the OCS of (0,0,-1): x and the bulges turn round.
+            let n = mirrored(e);
+            let m = if n.is_some() { -1.0 } else { 1.0 };
             for v in &p.vertices {
-                w.p2(10, v.p);
+                w.p2(10, Vec2::new(m * v.p.x, v.p.y));
                 if v.start_width != 0.0 || v.end_width != 0.0 {
                     w.f(40, v.start_width);
                     w.f(41, v.end_width);
                 }
                 if v.bulge != 0.0 {
-                    w.f(42, v.bulge);
+                    w.f(42, m * v.bulge);
                 }
             }
+            extrusion(w, n);
         }
         EntityKind::MLine(m) => {
             w.s(0, "MLINE");
@@ -854,17 +877,23 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 w.i(66, 1);
             }
             w.s(2, &i.block);
-            w.p(10, i.insert);
-            w.f(41, i.scale.x);
+            // Read mirrored (extrusion (0,0,-1)), the reference goes back to that OCS: the
+            // reader's inverse (insertion point in the OCS, x scale, rotation and column spacing
+            // turned round).
+            let n = mirrored(e);
+            let m = if n.is_some() { -1.0 } else { 1.0 };
+            w.p(10, n.map_or(i.insert, |n| to_ocs(n, i.insert)));
+            w.f(41, m * i.scale.x);
             w.f(42, i.scale.y);
             w.f(43, i.scale.z);
-            w.f(50, i.rotation.to_degrees());
+            w.f(50, (m * i.rotation).to_degrees());
             if i.cols > 1 || i.rows > 1 {
                 w.i(70, i64::from(i.cols));
                 w.i(71, i64::from(i.rows));
-                w.f(44, i.col_spacing);
+                w.f(44, m * i.col_spacing);
                 w.f(45, i.row_spacing);
             }
+            extrusion(w, n);
             if !i.attribs.is_empty() {
                 for a in &i.attribs {
                     let ah = w.h();
@@ -900,7 +929,13 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             w.p(10, dm.defpt);
             let style = d.dim_style(&dm.style).cloned().unwrap_or_default();
             let g = cadcraft_render::dimension_geometry(dm, &style, d.header.f64("DIMSCALE", 1.0));
-            w.p(11, if dm.user_text_pos { dm.text_mid } else { g.text_pos.to3(0.0) });
+            // Unchanged since read, the text stays where the file had it (CADCraft's own layout
+            // of the text differs a little from other programs').
+            let as_read = cx.dims_as_read.contains(&e.handle);
+            let mid = if dm.user_text_pos || as_read { dm.text_mid } else { g.text_pos.to3(0.0) };
+            // The text midpoint is the one OCS point of a DIMENSION.
+            let n = mirrored(e);
+            w.p(11, n.map_or(mid, |n| to_ocs(n, mid)));
             let ty: i64 = match dm.kind {
                 DimKind::Linear { .. } => 0,
                 DimKind::Aligned => 1,
@@ -914,7 +949,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             };
             w.i(70, ty | 32 | if dm.user_text_pos { 128 } else { 0 });
             // The actual measurement (read-only in DXF): AutoLISP's entget shows it.
-            w.f(42, g.measurement);
+            w.f(42, if as_read && dm.measurement.is_finite() { dm.measurement } else { g.measurement });
             if !dm.text.is_empty() {
                 w.s(1, &dm.text);
             }
@@ -922,6 +957,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             if dm.text_rotation != 0.0 {
                 w.f(53, dm.text_rotation.to_degrees());
             }
+            extrusion(w, n);
             match dm.kind {
                 DimKind::Linear { rotation } => {
                     w.s(100, "AcDbAlignedDimension");
@@ -1058,6 +1094,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             for v in &l.vertices {
                 w.p(10, *v);
             }
+            extrusion(w, mirrored(e));
         }
         EntityKind::Image(i) => {
             // Every image has its IMAGEDEF (planned in `write`); the fallback never happens.
@@ -1070,11 +1107,14 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             let solid = matches!(e.kind, EntityKind::Solid(_));
             w.s(0, if solid { "SOLID" } else { "TRACE" });
             common(w, e, owner, paper, "AcDbTrace");
-            w.p(10, s.corners[0]);
-            w.p(11, s.corners[1]);
-            w.p(12, s.corners[2]);
-            w.p(13, s.corners[3]);
+            let n = mirrored(e);
+            let at = |p: Vec3| n.map_or(p, |n| to_ocs(n, p));
+            w.p(10, at(s.corners[0]));
+            w.p(11, at(s.corners[1]));
+            w.p(12, at(s.corners[2]));
+            w.p(13, at(s.corners[3]));
             thickness(w, e);
+            extrusion(w, n);
         }
         EntityKind::Face3d(f) => {
             w.s(0, "3DFACE");
@@ -1297,6 +1337,31 @@ fn gradient(w: &mut W, g: &Gradient) {
     w.i(1070, i64::from(g.centered));
     w.s(1000, g.color1.name());
     w.s(1000, g.color2.name());
+}
+
+/// The extrusion of an entity read mirrored, (0,0,-1) give or take noise (gap FF1): the reader
+/// drew it in the plan view, and the writer puts it back in that OCS with this extrusion (group
+/// 210), as it was read. Other extrusions are not written (the geometry is in world coordinates).
+fn mirrored(e: &Entity) -> Option<Vec3> {
+    let n = e.common.extrusion;
+    (n.is_finite() && n.z < 0.0 && n.x.hypot(n.y) <= 1e-3 * n.z.abs()).then_some(n)
+}
+
+/// A world point in the OCS of extrusion `n` (the inverse of the reader's OCS → WCS).
+fn to_ocs(n: Vec3, p: Vec3) -> Vec3 {
+    let m = cadcraft_geom::Mat4::ocs(n).m;
+    Vec3::new(
+        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z,
+        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z,
+        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z,
+    )
+}
+
+/// Group 210, the extrusion of a mirrored entity (see [`mirrored`]).
+fn extrusion(w: &mut W, n: Option<Vec3>) {
+    if let Some(n) = n {
+        w.p(210, n);
+    }
 }
 
 /// Group 39 (thickness) of the entities whose DXF Reference record has one; only when set.
@@ -1787,6 +1852,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
                     // (edits drop the link, and the screen draws that block): the block is written
                     // as read, so other programs show it as they drew it.
                     Some(b) if !b.entities.is_empty() => {
+                        cx.dims_as_read.insert(e.handle);
                         ents = b.entities.iter().map(|x| x.as_ref().clone()).collect();
                         reused_handles.extend(ents.iter().map(|x| x.handle).filter(|h| h.0 != 0));
                         b.name.clone()
@@ -1812,6 +1878,18 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
                 cx.dim_blocks.insert(e.handle, name.clone());
                 dim_defs.push((name, brh, ents));
             }
+        }
+    }
+    // Dimensions inside blocks keep the blocks they were read with (written as ordinary blocks).
+    for e in d.blocks.values().flat_map(|b| b.entities.iter()) {
+        if let EntityKind::Dimension(dm) = &e.kind
+            && dm
+                .block
+                .as_deref()
+                .and_then(|n| d.block(n))
+                .is_some_and(|b| !b.entities.is_empty() && !dim_plan.skip.contains(&b.name.to_ascii_uppercase()))
+        {
+            cx.dims_as_read.insert(e.handle);
         }
     }
     // Every entity, including block contents (for arrows, tables and overrides).
