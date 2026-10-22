@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-16 · **Change:** minor (Command Aliases dialog for ALIASEDIT: U12 and E5 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (exact ellipse and spline intersections, closest points, PER/TAN and offsets: top-10 row 3 narrowed) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -15,7 +15,7 @@ do them first.
 |---|---|---|---|---|
 | 1 | **[alpha blocker]** **Saving DWG drops what we don't model** (DXF now writes back unknown entities and objects, foreign xdata, extension dictionaries, reactors, layer states and colour books, #528, and native MULTILEADERs, #459 (not yet tested through DWG); through DWG, acadrust drops custom-class entities and objects, xdata on table records and blocks, entity colour books and reactors) | Opening a colleague's DWG and saving it still deletes some content: the one thing a CAD user can't forgive | 6–10 | [file formats](file-format-parity.md) |
 | 2 | **[alpha blocker]** **No real-file test corpus and no check in AutoCAD** | All 36 file tests are synthetic; nobody has verified a CADCraft DWG/DXF opens cleanly in AutoCAD | 10–15 + human | [file formats](file-format-parity.md#tests) |
-| 3 | **Ellipse and spline geometry is tessellated** (intersections, offsets, closest points; polyline offset ignores bulges) | Coordinates are subtly wrong; offsets of ellipses come out as polylines | 30–50 | [geometry](geometry-parity.md) |
+| 3 | ~~**Ellipse and spline geometry is tessellated**~~ intersections, closest points, PER/TAN and OFFSET are exact for ellipses and splines (2026-10-22); left: polyline offset ignores bulges, BREAK and tracking along ellipses, MID snap by length, HATCH/AREA still tessellate | Coordinates were subtly wrong; offsets of ellipses came out as polylines | 10–20 | [geometry](geometry-parity.md) |
 | 4 | **[alpha blocker]** **No dynamic blocks or REFEDIT; xrefs can't be edited in place or clipped** (xrefs, #525, groups, #417, and the Block Editor for static blocks landed) | Most production drawings use them | 55–90 | [features](#features) |
 | 5 | **No autosave in the web build** (the desktop app has SAVETIME autosave, Drawing Recovery, AUDIT and RECOVER since #406) | Browser users lose unsaved work when the tab or the browser goes down | 3–5 | [features](#features) |
 | 6 | **No CI runs the Rust tests on pull requests** (`cargo fmt` on main is fixed) | open PRs land without a gate; regressions go unseen | 2–3 | [stability](#stability) |
@@ -150,6 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Exact ellipse and spline intersections, closest points, perpendicular feet, tangent points and offsets in `crates/geom` (`Curve`, `Spline::offset`, `Ellipse::offset_spline`); INT/APP/NEA/PER/TAN snaps, TRIM, EXTEND and OFFSET use them; OFFSET of an ellipse gives a spline, as AutoCAD: top-10 row 3 narrowed |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
 | 2026-10-16 | minor | MLEDIT Merged Tee (MT): the first multiline's outer elements stop at the second one's near side, which opens, and its inner elements run on to the second one's inner element: F21 narrowed, hours unchanged |

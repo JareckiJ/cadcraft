@@ -1,6 +1,6 @@
 # Geometry parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** trivial (JOIN Close on a single arc or elliptical arc) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (exact ellipse and spline intersections, closest points, PER/TAN and offsets) · **Target:** Autodesk AutoCAD 2027
 
 CAD users trust numbers: a trimmed endpoint, an offset, an intersection or an area is either right
 to the last displayed digit or the tool is unusable for production drawings. This document
@@ -9,8 +9,10 @@ audits CADCraft's geometry kernel (`crates/geom`, the curve code in `crates/engi
 in [ui-parity.md](ui-parity.md); dimension and hatch behaviour in [gaps.md](gaps.md).
 
 **Headline (estimated): geometry ≈ 40% (weighted below: 41%), of which the constraint solver ≈ 50%.** Everything built
-from lines, arcs and circles is exact. Ellipses and splines are handled by tessellating them, so
-intersections, offsets, trims and snaps on them are approximations; polyline offsets don't
+from lines, arcs and circles is exact. Intersections, closest points, perpendicular feet and
+tangent points of ellipses and splines are exact to about 1e-9 relative (rational Bézier pieces,
+`geom/src/exact.rs`), and their offsets are fitted splines within 1e-8 relative; areas and hatch
+boundaries still tessellate them; polyline offsets don't
 recompute arc bulges or clean up loops; tolerances are absolute, so very large or very small
 drawings behave differently from mid-sized ones. 3D geometry doesn't exist. Remaining:
 **≈ 90–140 Opus 5.5 hours** for 2D precision and the solver, plus the 3D kernel (M11, see
@@ -59,9 +61,9 @@ constraints 10%.
 | Pair | AutoCAD | CADCraft |
 |---|---|---|
 | line–line, line–circle/arc, circle–circle | exact | closed form, exact; tangency decided by a fixed `|disc| ≤ 1e-12·a`, so near-tangent cases depend on scale |
-| line/arc–ellipse | exact (quartic) | **tessellated**: 1e-4 world units in TRIM, 1e-3 in snaps; TRIM refines with 720 samples + 60-step bisection, near-exact against line/arc cutters (`modify2.rs:1946-1995`) |
-| line/arc–spline | exact to tolerance (subdivision + Newton) | tessellated as above |
-| ellipse–ellipse, ellipse–spline, spline–spline | exact to tolerance | **polygon approximations** only |
+| line/arc–ellipse | exact (quartic) | exact: the ellipse's rational quadratic pieces substituted into the line's or circle's implicit equation, roots isolated in Bernstein form and polished by Newton steps (`geom/src/exact.rs`, `bezier.rs`); used by INT/APP snaps, TRIM and EXTEND |
+| line/arc–spline | exact to tolerance (subdivision + Newton) | exact to about 1e-9 relative, the same way on the spline's rational Bézier pieces |
+| ellipse–ellipse, ellipse–spline, spline–spline | exact to tolerance | exact to about 1e-9 relative: a curve against an ellipse through the ellipse's implicit conic; spline–spline by box subdivision with derivative cones and Newton's method on the two-curve system |
 | Self-intersections (curves, offset loops) | yes | **no routine** |
 | Apparent intersection (projected) | yes | treated as plain intersection |
 
@@ -71,8 +73,8 @@ constraints 10%.
 |---|---|---|
 | Line, ray, xline | exact | exact |
 | Circle, arc | exact | exact (radius change) |
-| Ellipse | spline approximation within tolerance | **a polyline** from tessellation at 1e-3 × major axis |
-| Spline | spline approximation within tolerance | tessellate at 1e-3, offset vertices along normals, keep about 40 points, refit: **lossy** |
+| Ellipse | spline approximation within tolerance | a C1 cubic spline within 1e-8 relative of the exact offset (`geom/src/offset.rs`), as AutoCAD gives a spline |
+| Spline | spline approximation within tolerance | a C1 cubic spline within 1e-8 relative; corners kept, the outside gap bridged by a round arc |
 | Polyline with arcs | exact, with self-intersection trimming, OFFSETGAPTYPE (extend, fillet, chamfer) | segments offset and joined at neighbours' intersections; **arc bulges not recomputed** after endpoints move (comment at L413), **no loop cleanup**, collapsed segments not removed; OFFSETGAPTYPE only echoed |
 | Options: Through, Erase, Layer, Multiple | yes | see [gaps.md](gaps.md) |
 
@@ -97,8 +99,8 @@ Where line and arc are supported the results are exact.
 | Quantity | AutoCAD | CADCraft |
 |---|---|---|
 | Closest point: line, arc, circle, polyline | exact | exact |
-| Closest point: ellipse, spline | exact to tolerance | **sampled** (`curve.rs:264`, `curves.rs:637`) |
-| Tangent points, common tangents | every curve | circles and arcs only (`curve.rs:170-183`) |
+| Closest point: ellipse, spline | exact to tolerance | exact (roots of `(C − p)·C' = 0` on the rational pieces; `Curve::closest`, `Ellipse::closest`, `Spline::closest`) |
+| Tangent points, common tangents | every curve | tangent points from a point: exact on every curve (`Curve::tangents`); common tangents: circles and arcs only (`curve.rs:170-183`) |
 | AREA: circle, ellipse | exact | exact area (ellipse perimeter by Ramanujan, not exact); an open elliptical arc has no area, like an arc |
 | AREA: polyline with arcs | exact (bulge segments) | **tessellated at 1e-4** (`curve.rs:491`) |
 | MASSPROP (regions: area, perimeter, centroid, moments) | exact on regions and solids | shoelace over a tessellated circle, polyline or first hatch loop (`utility.rs:310-352`); no regions |
@@ -140,10 +142,10 @@ coordinates to 1e-9 relative.
 
 ## What to do first (ranked)
 
-1. Exact ellipse and spline intersection and closest point (subdivision + Newton with a
-   relative tolerance); use them in snaps, TRIM, EXTEND, BREAK. 15–25 h.
-2. Polyline offset with bulge recomputation, self-intersection cleanup and OFFSETGAPTYPE;
-   spline/ellipse offset as fitted splines within a tolerance. 15–25 h.
+1. ~~Exact ellipse and spline intersection and closest point; use them in snaps, TRIM,
+   EXTEND.~~ Done (2026-10-22). Left: BREAK, tracking along ellipses, MID by exact length. 2–4 h.
+2. Polyline offset with bulge recomputation, self-intersection cleanup and OFFSETGAPTYPE
+   (spline/ellipse offset as fitted splines done, 2026-10-22). 10–15 h.
 3. A tolerance context relative to the drawing's extents, and a known-answer test suite at
    origin and at 1e6–1e7 coordinates. 8–12 h.
 4. Exact areas and MASSPROP for bulge polylines, regions (2D) and hatch loops. 6–10 h.
@@ -157,6 +159,7 @@ Total ≈ 90–140 h; items 1–6 parallelise across two or three agents.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Exact intersections, closest points, perpendicular feet and tangent points for ellipses and splines (rational Bézier pieces, Bernstein roots, subdivision + Newton); OFFSET of an ellipse or spline is a fitted spline within 1e-8 relative; INT/APP/NEA/PER/TAN snaps, TRIM and EXTEND use them. Section percentages not re-weighted |
 | 2026-10-14 | trivial | JOIN Close: a single arc becomes its circle, a single elliptical arc its full ellipse (#1175) |
 | 2026-10-12 | trivial | TRIM on a closed polyline keeps only the complementary run when the pick lies past the last cut (#726) |
 | 2026-10-12 | minor | Property-based and hostile-input tests for geometry numerics landed (`crates/geom/src/property_tests.rs`): intersections, closest points, three-point arcs, bounds, vector identities; hostile f64s never panic; known answers at 1e6–1e7 |

@@ -7,12 +7,15 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bezier;
 mod bounds;
 mod curve;
+mod exact;
 mod fillet;
 mod intersect;
 mod mat;
 mod nurbs;
+mod offset;
 pub mod region;
 mod spline;
 mod spline_fit;
@@ -22,9 +25,11 @@ pub use bounds::Bounds2;
 pub use curve::{
     Arc, Circle, Ellipse, Line, PolyVertex, Polyline, Segment, arc_to_bulge, bulge_to_arc, point_in_polygon, polygon_centroid, shoelace,
 };
+pub use exact::{Curve, CurveHit, CurveKind, CurvePoint, REL_TOL};
 pub use fillet::{CornerFit, TanCurve, tangent_circles};
 pub use intersect::{circle_circle, intersect_ext, intersect_segments, line_circle, line_line, line_line_infinite};
 pub use mat::{Mat3, Mat4};
+pub use offset::OFFSET_REL_TOL;
 pub use spline::Spline;
 pub use spline_fit::{FitOptions, KnotParam};
 pub use vec::{Vec2, Vec3};
@@ -76,6 +81,8 @@ pub fn arc_segments(radius: f64, sweep: f64, tol: f64) -> usize {
     (n as usize).clamp(1, 4096)
 }
 
+#[cfg(test)]
+mod exact_tests;
 #[cfg(test)]
 mod property_tests;
 #[cfg(test)]

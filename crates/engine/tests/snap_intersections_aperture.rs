@@ -66,21 +66,22 @@ fn tessellated_line_parameter_tolerance_is_preserved() {
     assert!(h.point.near(Vec2::new(x, 0.0), 1e-10), "{h:?}");
 }
 
+/// A crossing near the vertex of a huge ellipse is found exactly near the cursor. (Ellipses were
+/// tessellated once, and this case pinned the chord parameter slack; they are exact now.)
 #[test]
 fn large_tessellated_chord_parameter_slack_is_not_pruned() {
     let mut d = Drawing::new_imperial();
     let radius = 1e12;
-    let step = std::f64::consts::TAU / cadcraft_geom::arc_segments(radius, std::f64::consts::TAU, radius * 1e-3) as f64;
-    let next = Vec2::new(-radius + radius * step.cos(), radius * 0.5 * step.sin());
-    let t = 1.0 / next.x;
-    assert!(t.abs() < 1e-9);
-    let cursor = Vec2::new(1.0, t * next.y);
     add_ellipse(&mut d, Vec2::new(-radius, 0.0), Vec2::new(radius, 0.0), 0.5);
-    add_line(&mut d, Vec2::new(1.0, cursor.y - 100.0), Vec2::new(1.0, cursor.y + 100.0));
+    // The horizontal line y = 1e6 crosses the right end of the ellipse at x = −a(1 − √(1 − (y/b)²)).
+    let y = 1e6;
+    let b = radius * 0.5;
+    let x = -radius * ((y / b).powi(2) / (1.0 + (1.0 - (y / b).powi(2)).sqrt()));
+    add_line(&mut d, Vec2::new(-100.0, y), Vec2::new(100.0, y));
 
-    let h = hit(&d, cursor, 0.5, mode::INT).expect("finite intersection within a long tessellated chord's parameter tolerance");
+    let h = hit(&d, Vec2::new(x + 0.1, y), 0.5, mode::INT).expect("crossing near the vertex of a huge ellipse");
     assert_eq!(h.mode, mode::INT);
-    assert!(h.point.near(cursor, 1e-6), "{h:?}");
+    assert!(h.point.near(Vec2::new(x, y), 1e-6), "{h:?} vs ({x}, {y})");
 }
 
 #[test]

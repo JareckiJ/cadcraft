@@ -1,31 +1,27 @@
 //! Snap points on ellipses, elliptical arcs and splines: the midpoint by length, and the
-//! perpendicular feet and tangent points from a base point. Splines (and perpendiculars on
-//! ellipses) are solved numerically: the parameter range is sampled, each sign change of the
-//! condition is narrowed by bisection, and every loop has a fixed bound.
+//! perpendicular feet and tangent points from a base point. Feet and tangent points are exact
+//! (`cadcraft_geom::Curve`: roots of the conditions on the rational Bézier pieces); the
+//! midpoint samples the length, and every loop has a fixed bound.
 
-use cadcraft_geom::{Circle, Ellipse, Spline, Vec2, angle_in_sweep};
+use cadcraft_geom::{Curve, Ellipse, Spline, Vec2};
 
-/// Parameter samples along a curve (sign changes and length).
+/// Parameter samples along a curve (length).
 const SAMPLES: usize = 512;
-/// Bisection steps per root (the bracket shrinks to 2⁻⁶⁰ of a sample step).
-const BISECT: usize = 60;
 /// The most solutions one curve offers.
 const MAX_ROOTS: usize = 16;
 
-/// A curve given by a parameter range, its points and its derivative.
+/// A curve given by a parameter range and its points.
 struct Param<'a> {
     lo: f64,
     hi: f64,
     at: &'a dyn Fn(f64) -> Vec2,
-    d: &'a dyn Fn(f64) -> Vec2,
 }
 
 impl Param<'_> {
     fn ellipse(e: &Ellipse, f: impl FnOnce(&Param) -> Vec<Vec2>) -> Vec<Vec2> {
-        let (u, v) = (e.major, e.minor());
         let lo = e.start;
         let hi = e.start + e.sweep();
-        f(&Param { lo, hi, at: &|t| e.at_param(t), d: &|t| v * t.cos() - u * t.sin() })
+        f(&Param { lo, hi, at: &|t| e.at_param(t) })
     }
 
     fn spline(s: &Spline, f: impl FnOnce(&Param) -> Vec<Vec2>) -> Vec<Vec2> {
@@ -33,12 +29,7 @@ impl Param<'_> {
         if !(s.is_valid() && lo.is_finite() && hi.is_finite() && hi > lo) {
             return Vec::new();
         }
-        let h = (hi - lo) * 1e-7;
-        let d = |t: f64| {
-            let (a, b) = ((t - h).max(lo), (t + h).min(hi));
-            if b > a { (s.eval(b) - s.eval(a)) / (b - a) } else { Vec2::ZERO }
-        };
-        f(&Param { lo, hi, at: &|t| s.eval(t), d: &d })
+        f(&Param { lo, hi, at: &|t| s.eval(t) })
     }
 
     fn param(&self, i: usize) -> f64 {
@@ -64,63 +55,6 @@ impl Param<'_> {
         }
         None
     }
-
-    /// The points where `cond(point − base, derivative)` is zero: sign changes of the samples,
-    /// narrowed by bisection; kept when the normalised condition is (nearly) zero there, so a
-    /// sign flip at a kink or a pole is not taken for a solution.
-    fn solve(&self, base: Vec2, cond: fn(Vec2, Vec2) -> f64) -> Vec<Vec2> {
-        let g = |t: f64| cond((self.at)(t) - base, (self.d)(t));
-        let samples: Vec<(Vec2, Vec2)> = (0..=SAMPLES).map(|i| ((self.at)(self.param(i)) - base, (self.d)(self.param(i)))).collect();
-        let vals: Vec<f64> = samples.iter().map(|(r, d)| cond(*r, *d)).collect();
-        // A curve on which every point qualifies (a circle seen from its centre) has no
-        // particular solution.
-        let scale = samples.iter().map(|(r, d)| r.len() * d.len()).fold(0.0, f64::max);
-        if !(scale.is_finite() && scale > 0.0) || vals.iter().all(|v| v.abs() <= scale * 1e-12) {
-            return Vec::new();
-        }
-        let mut out: Vec<Vec2> = Vec::new();
-        for i in 0..SAMPLES {
-            let (Some(&ga), Some(&gb)) = (vals.get(i), vals.get(i + 1)) else { break };
-            if !(ga.is_finite() && gb.is_finite()) || (ga > 0.0) == (gb > 0.0) && ga != 0.0 {
-                continue;
-            }
-            let (mut a, mut b, mut fa) = (self.param(i), self.param(i + 1), ga);
-            for _ in 0..BISECT {
-                let m = 0.5 * (a + b);
-                let fm = g(m);
-                if fm == 0.0 {
-                    (a, b) = (m, m);
-                    break;
-                }
-                if (fm > 0.0) == (fa > 0.0) {
-                    (a, fa) = (m, fm);
-                } else {
-                    b = m;
-                }
-            }
-            let t = 0.5 * (a + b);
-            let (p, dv) = ((self.at)(t), (self.d)(t));
-            let (r, dl) = ((p - base).len(), dv.len());
-            if !(p.is_finite() && r > 1e-12 && dl > 0.0) || cond(p - base, dv).abs() > 1e-6 * r * dl {
-                continue;
-            }
-            if !out.iter().any(|q| q.near(p, 1e-9 * (1.0 + r))) {
-                out.push(p);
-                if out.len() >= MAX_ROOTS {
-                    break;
-                }
-            }
-        }
-        out
-    }
-}
-
-fn perpendicular(r: Vec2, d: Vec2) -> f64 {
-    r.dot(d)
-}
-
-fn tangent(r: Vec2, d: Vec2) -> f64 {
-    r.cross(d)
 }
 
 /// The midpoint (by length) of an elliptical arc; none for a full ellipse.
@@ -133,26 +67,13 @@ pub(super) fn ellipse_mid(e: &Ellipse) -> Option<Vec2> {
 
 /// The feet of the perpendiculars from `base` to an ellipse or elliptical arc.
 pub(super) fn ellipse_perpendiculars(e: &Ellipse, base: Vec2) -> Vec<Vec2> {
-    Param::ellipse(e, |c| c.solve(base, perpendicular))
+    Curve::ellipse(e).perpendiculars(base).into_iter().map(|c| c.point).take(MAX_ROOTS).collect()
 }
 
 /// The points where lines from `base` touch an ellipse or elliptical arc: exact, by mapping the
 /// ellipse onto the unit circle (an affine map keeps tangency).
 pub(super) fn ellipse_tangents(e: &Ellipse, base: Vec2) -> Vec<Vec2> {
-    let (u, v) = (e.major, e.minor());
-    let (a, b) = (u.len(), v.len());
-    if !(a > 0.0 && b > 0.0 && a.is_finite() && b.is_finite()) {
-        return Vec::new();
-    }
-    let r = base - e.center;
-    let local = Vec2::new(r.dot(u) / (a * a), r.dot(v) / (b * b));
-    Circle::new(Vec2::ZERO, 1.0)
-        .tangent_points(local)
-        .into_iter()
-        .map(|q| q.angle())
-        .filter(|t| t.is_finite() && angle_in_sweep(*t, e.start, e.end))
-        .map(|t| e.at_param(t))
-        .collect()
+    Curve::ellipse(e).tangents(base).into_iter().map(|c| c.point).take(MAX_ROOTS).collect()
 }
 
 /// The midpoint (by length) of an open spline.
@@ -165,12 +86,12 @@ pub(super) fn spline_mid(s: &Spline) -> Option<Vec2> {
 
 /// The feet of the perpendiculars from `base` to a spline.
 pub(super) fn spline_perpendiculars(s: &Spline, base: Vec2) -> Vec<Vec2> {
-    Param::spline(s, |c| c.solve(base, perpendicular))
+    Curve::spline(s).perpendiculars(base).into_iter().map(|c| c.point).take(MAX_ROOTS).collect()
 }
 
 /// The points where lines from `base` touch a spline.
 pub(super) fn spline_tangents(s: &Spline, base: Vec2) -> Vec<Vec2> {
-    Param::spline(s, |c| c.solve(base, tangent))
+    Curve::spline(s).tangents(base).into_iter().map(|c| c.point).take(MAX_ROOTS).collect()
 }
 
 #[cfg(test)]

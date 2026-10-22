@@ -5,7 +5,7 @@
 
 use cadcraft_doc::{Entity, EntityKind, Handle};
 use cadcraft_geom::{
-    Arc, Circle, CornerFit, Ellipse, Line, Polyline, Segment, Spline, TAU, TanCurve, Vec2, angle_in_sweep, ccw_sweep, intersect_ext, norm_angle,
+    Arc, Circle, CornerFit, Curve, Ellipse, Line, Polyline, Segment, Spline, TAU, TanCurve, Vec2, angle_in_sweep, ccw_sweep, norm_angle,
     tangent_circles,
 };
 
@@ -13,7 +13,7 @@ use super::{LenMode, curves, ellipse_kind, ellipse_of, other, set_kind};
 use crate::{Result, Session};
 
 /// EXTEND a spline's end nearest `pick` along its end tangent to the nearest boundary edge.
-pub(super) fn extend_spline(sp: &Spline, cut: &[Segment], pick: Vec2) -> Result<EntityKind> {
+pub(super) fn extend_spline(sp: &Spline, cut: &[Curve], pick: Vec2) -> Result<EntityKind> {
     if sp.closed {
         return Err(other("Cannot extend a closed spline."));
     }
@@ -27,7 +27,12 @@ pub(super) fn extend_spline(sp: &Spline, cut: &[Segment], pick: Vec2) -> Result<
         return Err(other("The spline has no direction at that end."));
     }
     let ray = Segment::Line(Line::new(end, end + dir * 1e8));
-    let d = cut.iter().flat_map(|c| intersect_ext(&ray, c, false)).map(|x| (x - end).dot(dir)).filter(|d| *d > 1e-9).fold(f64::INFINITY, f64::min);
+    let d = cut
+        .iter()
+        .flat_map(|c| super::super::modify::cut_hits(&ray, c))
+        .map(|x| (x - end).dot(dir))
+        .filter(|d| *d > 1e-9)
+        .fold(f64::INFINITY, f64::min);
     if !d.is_finite() {
         return Err(other("Object does not intersect an edge."));
     }
