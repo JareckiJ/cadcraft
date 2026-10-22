@@ -144,8 +144,11 @@ impl Inbox {
 
     /// Open what arrived since the last frame (or report why it couldn't be read), answering the
     /// page embedding CADCraft for the drawings it sent: opened, or why not (#1666).
-    pub fn drain(&self, app: &mut CadApp) -> Vec<crate::OpenReply> {
-        let mut replies = Vec::new();
+    ///
+    /// A failure is answered at once; a success waits in [`crate::PendingOpens`] for the UI pass
+    /// that shows its drawing, which several uploads may not all reach.
+    pub fn drain(&self, app: &mut CadApp) -> crate::Drain {
+        let mut drained = crate::Drain::default();
         for upload in self.files.take() {
             let outcome = match upload.contents {
                 Ok(bytes) => app.open_bytes(&upload.name, &bytes),
@@ -154,11 +157,19 @@ impl Inbox {
                     Err(e)
                 }
             };
-            if upload.reply_to_host {
-                replies.push(crate::OpenReply::new(&upload.name, outcome.as_ref().err().map(String::as_str)));
+            if !upload.reply_to_host {
+                continue;
+            }
+            match outcome {
+                // OPEN makes the new drawing active: that is the one the next UI pass shows.
+                Ok(()) => match app.session.state() {
+                    Ok(st) => drained.opened.push((upload.name, st.uid)),
+                    Err(_) => drained.replies.push(crate::OpenReply::new(&upload.name, Some("Open: the drawing could not be shown"))),
+                },
+                Err(e) => drained.replies.push(crate::OpenReply::new(&upload.name, Some(&e))),
             }
         }
-        replies
+        drained
     }
 }
 

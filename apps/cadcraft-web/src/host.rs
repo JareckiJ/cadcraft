@@ -91,6 +91,12 @@ impl Bridge {
                 .filter(|n| !n.trim().is_empty())
                 .map(|n| n.chars().take(MAX_NAME_CHARS).collect())
                 .unwrap_or_else(|| "Drawing.dxf".to_string());
+            // This channel opens drawings: a LISP file is not one, so it is refused rather than
+            // loaded and answered `cadcraft:opened` (#1666).
+            if let Some(e) = crate::host_open_error(&name) {
+                inbox.refuse(&name, e);
+                return;
+            }
             // Refuse an oversized drawing before copying it into the app's memory.
             let Some(array) = byte_array(&data) else { return };
             if let Some(e) = CadApp::open_size_error(&name, u64::from(array.length())) {

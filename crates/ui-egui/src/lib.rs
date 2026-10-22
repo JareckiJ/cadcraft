@@ -423,7 +423,9 @@ impl CadApp {
         // A LISP file (dropped on the window): loaded as APPLOAD loads it.
         if is_lisp_file(path) {
             match cadcraft_engine::lisp::builtins::read_text_file(path) {
-                Some(text) => self.load_lisp(path, &text),
+                Some(text) => {
+                    let _ = self.load_lisp(path, &text);
+                }
                 None => self.open_failed(format!("APPLOAD: can't read {path}")),
             }
             return;
@@ -455,10 +457,17 @@ impl CadApp {
     }
 
     /// Load a LISP file: its routine runs and may wait for the user (APPLOAD typed or from the
-    /// menu runs this way too).
-    fn load_lisp(&mut self, name: &str, text: &str) {
-        if let Err(e) = self.session.lisp_load(name, text, false) {
-            self.session.echo(e.to_string());
+    /// menu runs this way too). A load that fails is echoed and returned, for a caller that has
+    /// to report it (#1666); a routine that yields keeps running and is not a failure.
+    fn load_lisp(&mut self, name: &str, text: &str) -> Result<(), String> {
+        match self.session.lisp_load(name, text, false) {
+            Ok(Some(Err(e))) => Err(e),
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let e = e.to_string();
+                self.session.echo(e.clone());
+                Err(e)
+            }
         }
     }
 
@@ -489,8 +498,11 @@ impl CadApp {
             return Err(e);
         }
         if is_lisp_file(name) {
-            self.load_lisp(name, &String::from_utf8_lossy(bytes));
-            return Ok(());
+            let r = self.load_lisp(name, &String::from_utf8_lossy(bytes));
+            if let Err(e) = &r {
+                self.set_status(e.clone());
+            }
+            return r;
         }
         let data = cadcraft_engine::cmd::file::base64_encode(bytes);
         let r = self.run("open", json!({ "data": data, "name": name }));
@@ -764,8 +776,8 @@ pub fn now_ms() -> f64 {
     }
 }
 
-/// A LISP source file, by its name.
-fn is_lisp_file(name: &str) -> bool {
+/// A LISP source file, by its name: loaded as APPLOAD loads it, never opened as a drawing.
+pub fn is_lisp_file(name: &str) -> bool {
     std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("lsp"))
 }
 
