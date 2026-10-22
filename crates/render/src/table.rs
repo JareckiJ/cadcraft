@@ -53,10 +53,15 @@ pub struct TableGeom {
 
 /// Which cells are covered by a merge (and so not drawn on their own).
 pub fn table_covered(t: &Table) -> Vec<Vec<bool>> {
+    coverage(t).unwrap_or_else(|partial| partial)
+}
+
+// No partial coverage may reach owner assignment: it would revisit unbounded merge rectangles.
+fn coverage(t: &Table) -> Result<Vec<Vec<bool>>, Vec<Vec<bool>>> {
     let rows = t.row_heights.len().min(10_000);
     let cols = t.col_widths.len().min(10_000);
     if rows.saturating_mul(cols) > MAX_LAYOUT_CELLS {
-        return vec![Vec::new(); rows];
+        return Err(vec![Vec::new(); rows]);
     }
     let mut cov = vec![vec![false; cols]; rows];
     // Coverage marking visits each merge's whole rectangle. Overlapping merges re-mark cells that
@@ -70,7 +75,7 @@ pub fn table_covered(t: &Table) -> Vec<Vec<bool>> {
                     for cc in c..(c + cs.max(1) as usize).min(cols) {
                         budget = budget.saturating_sub(1);
                         if budget == 0 {
-                            return cov;
+                            return Err(cov);
                         }
                         if (rr, cc) != (r, c)
                             && let Some(x) = cov.get_mut(rr).and_then(|v| v.get_mut(cc))
@@ -82,7 +87,7 @@ pub fn table_covered(t: &Table) -> Vec<Vec<bool>> {
             }
         }
     }
-    cov
+    Ok(cov)
 }
 
 /// The table style a table uses (Standard defaults when missing).
@@ -142,12 +147,13 @@ pub fn table_geometry(d: &Drawing, t: &Table) -> TableGeom {
 /// One part of a broken table as a table of its own: its rows (with their cell styles) at
 /// `origin`; merges are cut at the part's edge.
 fn part_table(t: &Table, rows: &[usize], origin: Vec2) -> Table {
-    let cols = t.col_widths.len();
-    let mut cells: Vec<Vec<cadcraft_doc::TableCell>> = rows.iter().map(|r| t.cells.get(*r).cloned().unwrap_or_default()).collect();
+    let cols = t.col_widths.len().min(10_000);
+    let mut cells: Vec<Vec<cadcraft_doc::TableCell>> =
+        rows.iter().take(10_000).map(|r| t.cells.get(*r).map(|row| row.iter().take(cols).cloned().collect()).unwrap_or_default()).collect();
     // Only expand sparse rows to the full column count when detailed layout is actually permitted.
     // Otherwise `layout` renders an outline, so materialising millions of empty cells here would be
     // wasted work an attacker can trigger with a compact dimension array (CWE-789).
-    if rows.len().saturating_mul(cols) <= MAX_LAYOUT_CELLS {
+    if rows.len().min(10_000).saturating_mul(cols) <= MAX_LAYOUT_CELLS {
         for (i, row) in cells.iter_mut().enumerate() {
             row.resize_with(cols, Default::default);
             for cell in row.iter_mut() {
@@ -193,7 +199,8 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
     if rows == 0 || cols == 0 {
         return g;
     }
-    if rows.saturating_mul(cols) > MAX_LAYOUT_CELLS {
+    let cov = coverage(t);
+    if rows.saturating_mul(cols) > MAX_LAYOUT_CELLS || cov.is_err() {
         let (w, h) = (x_at(cols), y_at(rows));
         let corners = [p(0.0, 0.0), p(w, 0.0), p(w, h), p(0.0, h), p(0.0, 0.0)];
         for s in corners.windows(2) {
@@ -222,7 +229,7 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
         i
     };
     // Anchors and the anchor owning each grid cell.
-    let cov = table_covered(t);
+    let cov = cov.unwrap_or_default();
     let mut anchors: Vec<Anchor> = Vec::new();
     let mut owner = vec![usize::MAX; rows * cols];
     for r in 0..rows {
@@ -380,5 +387,39 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
         for piece in &layout.pieces {
             b.shaped(ctx, style_ink(tx.color, rgb), lw, &piece.shaped);
         }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use cadcraft_doc::TableCell;
+
+    #[test]
+    fn overlapping_merges_use_outline_fallback() {
+        let t = Table {
+            row_heights: vec![1.0; 40],
+            col_widths: vec![1.0; 40],
+            cells: vec![vec![TableCell { merged: Some((40, 40)), ..Default::default() }; 40]; 40],
+            ..Default::default()
+        };
+        assert!(coverage(&t).is_err());
+        let g = layout(&Drawing::default(), &t);
+        assert_eq!(g.lines.len(), 4);
+        assert!(g.fills.is_empty() && g.texts.is_empty());
+    }
+
+    #[test]
+    fn part_clips_merges_using_displayed_column_count() {
+        let t = Table {
+            row_heights: vec![1.0; 102],
+            col_widths: vec![1.0; 10_001],
+            cells: vec![vec![TableCell { merged: Some((100, 1)), ..Default::default() }]],
+            ..Default::default()
+        };
+        let mut rows: Vec<_> = (0..99).collect();
+        rows.push(101);
+        let part = part_table(&t, &rows, Vec2::ZERO);
+        assert_eq!(part.cells[0][0].merged, Some((99, 1)));
     }
 }

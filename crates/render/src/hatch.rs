@@ -93,6 +93,9 @@ fn dedup_polygons(loops: &mut Vec<Vec<Vec2>>) {
         }
         let mut dup = false;
         for u in &unique {
+            if u.len() != l.len() {
+                continue;
+            }
             // Each `same_polygon` call costs about 2·len² comparisons; stop if that would overrun.
             let cost = 2u64.saturating_mul((u.len() as u64).saturating_mul(l.len() as u64));
             match budget.checked_sub(cost) {
@@ -597,5 +600,20 @@ mod tests {
         let tris = fill::triangulate_evenodd(&loops);
         let area: f64 = tris.chunks(3).map(|t| ((t[1] - t[0]).cross(t[2] - t[0]) / 2.0).abs()).sum();
         assert!((area - 100.0).abs() < 1e-6, "triangulated area must be 100.0, not zero");
+    }
+}
+
+#[cfg(test)]
+mod dedup_budget_tests {
+    use super::*;
+    #[test]
+    fn unequal_loops_do_not_spend_the_comparison_budget() {
+        // The old estimate exhausted the budget on this unequal pair before seeing the triangle.
+        let a = vec![Vec2::ZERO; 5_000];
+        let b = vec![Vec2::ZERO; 5_001];
+        let tri = vec![Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0)];
+        let mut loops = vec![a, b, tri.clone(), tri];
+        dedup_polygons(&mut loops);
+        assert_eq!(loops.len(), 3);
     }
 }
