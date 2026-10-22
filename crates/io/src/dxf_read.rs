@@ -1425,7 +1425,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
         match kind.as_str() {
             "LAYER" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() {
+                if name.is_empty() || d.layers.len() >= MAX_OBJECTS {
                     continue;
                 }
                 let aci = t.i(62).unwrap_or(7);
@@ -1462,7 +1462,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "LTYPE" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() || d.linetype(&name).is_some() {
+                if name.is_empty() || d.linetype(&name).is_some() || d.linetypes.len() >= MAX_OBJECTS {
                     continue;
                 }
                 let pattern = ltype_pattern(&tg, &ltype_styles);
@@ -1470,7 +1470,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "STYLE" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() {
+                if name.is_empty() || d.text_styles.len() >= MAX_OBJECTS {
                     continue;
                 }
                 // 70 bit 4: vertical; 71 bits 2/4: backwards / upside down.
@@ -1552,7 +1552,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "DIMSTYLE" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() {
+                if name.is_empty() || d.dim_styles.len() >= MAX_OBJECTS {
                     continue;
                 }
                 // Every variable with a DIMSTYLE group code; values the style can't take are
@@ -2248,6 +2248,7 @@ fn page_setup(t: &T) -> PageSetup {
         _ => "layout",
     }
     .into();
+    p.plot_window = [t.fd(48, 0.0), t.fd(49, 0.0), t.fd(140, 0.0), t.fd(141, 0.0)].map(|v| if v.is_finite() { v } else { 0.0 });
     p.plot_style_table = t.s(7).unwrap_or_default();
     p
 }

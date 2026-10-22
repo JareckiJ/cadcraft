@@ -233,6 +233,22 @@ mod tests {
         assert_eq!(version(b"AC1018xxxx").as_deref(), Some("AC1018"));
     }
 
+    /// A DXF with ROMANS as `$TEXTSTYLE` gives a DWG whose current text style is ROMANS, not
+    /// Standard: the DXF names the style, and the handle read with it was Standard's (#1650).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn current_text_style_reaches_the_dwg() {
+        let header = "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1032\n  9\n$TEXTSTYLE\n  7\nROMANS\n  0\nENDSEC\n";
+        let style = "  0\nSTYLE\n  5\n1F0\n100\nAcDbSymbolTableRecord\n100\nAcDbTextStyleTableRecord\n  2\nROMANS\n 70\n0\n";
+        let style = format!("{style} 40\n0\n 41\n1\n 50\n0\n 71\n0\n 42\n2.5\n  3\nromans.shx\n  4\n\n");
+        let dxf = format!("{header}  0\nSECTION\n  2\nTABLES\n  0\nTABLE\n  2\nSTYLE\n 70\n1\n{style}  0\nENDTAB\n  0\nENDSEC\n  0\nEOF\n");
+        let dwg = dxf_to_dwg(dxf.as_bytes()).unwrap();
+        let doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(&dwg)).read().unwrap();
+        let romans = doc.text_styles.iter().find(|ts| ts.name == "ROMANS").map(|ts| ts.handle);
+        assert!(romans.is_some(), "ROMANS is missing from the DWG");
+        assert_eq!(Some(doc.header.current_text_style_handle), romans);
+    }
+
     #[test]
     fn garbage_is_an_error_not_a_crash() {
         assert!(dwg_to_dxf(b"AC1032 this is not a dwg file at all").is_err());

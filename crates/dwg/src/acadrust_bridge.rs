@@ -438,6 +438,16 @@ fn current_dimstyle(doc: &mut acadrust::CadDocument) {
     }
 }
 
+/// The current text style (`$TEXTSTYLE`) by its name, the same way as [`current_dimstyle`]:
+/// the handle read with the DXF needn't be the style's in the document, in which case the DWG
+/// writer fell back to Standard and AutoCAD opened the drawing with Standard current (#1650).
+fn current_text_style(doc: &mut acadrust::CadDocument) {
+    let name = doc.header.current_text_style_name.clone();
+    if let Some(h) = doc.text_styles.iter().find(|ts| ts.name.eq_ignore_ascii_case(&name)).map(|ts| ts.handle) {
+        doc.header.current_text_style_handle = h;
+    }
+}
+
 fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<Vec<u8>, String> {
     let data = dxf.to_vec();
     let mut doc = std::panic::catch_unwind(move || acadrust::DxfReader::from_reader(Cursor::new(data)).and_then(|r| r.read()))
@@ -456,6 +466,7 @@ fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<Vec<u8>,
     dimension_flags(&mut doc, true);
     drop_unwritable(&mut doc);
     current_dimstyle(&mut doc);
+    current_text_style(&mut doc);
     std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec(&doc)))
         .map_err(|_| "the DWG writer failed on this drawing".to_string())?
         .map_err(|e| format!("DWG write: {e}"))
