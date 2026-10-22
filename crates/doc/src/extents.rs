@@ -50,8 +50,10 @@ fn blank(s: &str) -> bool {
 
 /// Approximate box of an MTEXT, from its attachment point, width and line count.
 fn mtext_box(t: &crate::MText) -> Bounds2 {
-    let lines = t.contents.split("\\P").count().max(1);
-    let longest = t.contents.split("\\P").map(|l| l.chars().count()).max().unwrap_or(1);
+    // Measure the text the MTEXT shows: inline codes (`{\fArial|b0;...}`, `\H0.8x;`) draw nothing.
+    let plain = cadcraft_geom::plain_mtext(&t.contents);
+    let lines = plain.split('\n').count().max(1);
+    let longest = plain.split('\n').map(|l| l.chars().count()).max().unwrap_or(1);
     let mut w = if t.width > 0.0 { t.width } else { t.height * 0.8 * longest as f64 };
     let mut h = t.height * 1.66 * lines as f64;
     if let Some(c) = t.columns.as_ref().filter(|_| t.width > 0.0) {
@@ -97,7 +99,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
     match &e.kind {
         EntityKind::Table(t) if t.is_broken() => t.bounds(),
         EntityKind::Text(t) if blank(&t.value) => Bounds2::EMPTY,
-        EntityKind::MText(t) if blank(&t.contents) => Bounds2::EMPTY,
+        EntityKind::MText(t) if blank(&cadcraft_geom::plain_mtext(&t.contents)) => Bounds2::EMPTY,
         EntityKind::Text(t) => text_box(t, t.value.chars().count()),
         EntityKind::AttDef(a) => text_box(&a.text, a.tag.chars().count()),
         EntityKind::MText(t) => mtext_box(t),
@@ -295,6 +297,35 @@ mod tests {
 
     fn bounds(kind: EntityKind) -> Bounds2 {
         entity_bounds(&Drawing::default(), &Entity::new(crate::Handle(1), kind), 0)
+    }
+
+    fn mtext(contents: &str) -> crate::MText {
+        crate::MText {
+            insert: Vec3::new(0.0, 10.0, 0.0),
+            height: 2.5,
+            width: 0.0,
+            attach: 1,
+            rotation: 0.0,
+            style: "Standard".into(),
+            contents: contents.into(),
+            line_spacing: 1.0,
+            line_spacing_exact: false,
+            columns: None,
+        }
+    }
+
+    #[test]
+    fn mtext_without_width_is_measured_by_its_shown_text() {
+        let plain = bounds(EntityKind::MText(mtext("AB")));
+        let coded = bounds(EntityKind::MText(mtext("{\\fArial|b0|i0|c0|p34;\\H0.8x;\\W0.9;AB}")));
+        assert_eq!(coded, plain);
+        let two_lines = bounds(EntityKind::MText(mtext("{\\fArial|b0;A}\\P{\\C1;B}")));
+        assert_eq!(two_lines.max.x, bounds(EntityKind::MText(mtext("A\\PB"))).max.x);
+    }
+
+    #[test]
+    fn mtext_of_only_formatting_codes_takes_no_room() {
+        assert!(bounds(EntityKind::MText(mtext("{\\fArial|b0|i0|c0|p34;}"))).is_empty());
     }
 
     #[test]
