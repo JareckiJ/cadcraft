@@ -124,6 +124,9 @@ pub struct CanvasState {
     /// A Shift+left-drag Zoom Window in progress: its two world corners (start, current). The
     /// gesture is transparent and never disturbs a running command.
     zoom_window: Option<(Vec2, Vec2)>,
+    /// Shift was held when the primary button went down: the release still belongs to the zoom
+    /// gesture even if Shift is let go first.
+    shift_press: bool,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -1385,6 +1388,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         )
     });
     let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
+    // Shift+left owns its release: remember the modifier from the press, not from the release.
+    if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        app.canvas.shift_press = inside && mods.shift && !mods.ctrl && !mods.alt;
+    }
     // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
     // previews that read `Session::ctrl_down` always see the current state. The engine
     // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
@@ -1461,7 +1468,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Shift+click does nothing while a command runs — so the gesture can never cancel it — and
     // otherwise keeps its usual idle meaning (deselect).
     let shift_zoom = inside && mods.shift && !mods.ctrl && !mods.alt;
-    let shift_click = shift_zoom && app.session.running.is_some();
+    let shift_click = app.canvas.shift_press && app.session.running.is_some();
     // ZOOM Realtime: dragging up zooms in, down zooms out.
     if !shift_zoom && resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
@@ -1581,7 +1588,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 .filter_map(|e| match e {
                     // A Shift release is the zoom gesture, never a point.
                     egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers, .. }
-                        if !modifiers.shift && !zoom_drag_stopped => Some(*pos),
+                        if !modifiers.shift && !shift_click && !zoom_drag_stopped => Some(*pos),
                     _ => None,
                 })
                 .collect()

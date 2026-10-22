@@ -193,3 +193,45 @@ fn shift_drag_released_after_shift_places_no_point() {
     assert_eq!(after["running"], "line");
     assert_eq!(after["prompt"], started["prompt"], "the release that ends a Shift zoom drag must not place a point");
 }
+
+/// Shift held on the press is enough: even if Shift is let go before the button, the release is
+/// consumed by the zoom gesture and never reaches the running command as a point.
+#[test]
+fn shift_click_released_after_shift_places_no_point() {
+    let (ctx, mut app) = new_app();
+    call(&mut app, &ctx, "cmdline.input", json!({"text": "LINE"}));
+    for i in 0..4 {
+        step(&mut app, &ctx, vec![], 1.0 + f64::from(i) * 0.05);
+    }
+    let started = call(&mut app, &ctx, "cmdline.state", json!({}));
+    assert_eq!(started["running"], "line");
+    let center = app.canvas.rect.unwrap().center();
+
+    let s = shift();
+    let none = Modifiers::default();
+    let mut t = 2.0;
+    t += 0.05;
+    step(
+        &mut app,
+        &ctx,
+        vec![
+            Event::ModifiersChanged(s),
+            Event::PointerMoved(center),
+            Event::PointerButton { pos: center, button: PointerButton::Primary, pressed: true, modifiers: s },
+        ],
+        t,
+    );
+    t += 0.05;
+    step(&mut app, &ctx, vec![Event::ModifiersChanged(none)], t);
+    t += 0.05;
+    step(
+        &mut app,
+        &ctx,
+        vec![Event::PointerButton { pos: center, button: PointerButton::Primary, pressed: false, modifiers: none }],
+        t,
+    );
+
+    let after = call(&mut app, &ctx, "cmdline.state", json!({}));
+    assert_eq!(after["running"], "line");
+    assert_eq!(after["prompt"], started["prompt"], "Shift held on the press must consume the release");
+}
