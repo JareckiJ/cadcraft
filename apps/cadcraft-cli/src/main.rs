@@ -331,10 +331,37 @@ const LAST_HANDLE: &str = "{last}";
 /// How deep [`result_handles`] walks a command result (results are the engine's own JSON).
 const RESULT_DEPTH: usize = 16;
 
-/// The object handles a command result mentions, in the order it lists them. Only strings that
-/// name an entity of the active drawing count, so counts, names (even a hex-looking layer name)
-/// and other values are skipped.
-fn result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
+/// Result keys whose values are object references: the engine's result convention for handles.
+/// A handle can be a string (`handle`, `viewport`, `insert`…) or a list of them (`handles`,
+/// `viewports`, `members`…). Every other field may hold a user-defined name, a message or a
+/// count, and is never read as a handle — a group named `100` is a name, not object `100`.
+fn handle_field(key: &str) -> bool {
+    matches!(
+        key,
+        "handle"
+            | "handles"
+            | "viewport"
+            | "viewports"
+            | "boundary"
+            | "clip"
+            | "insert"
+            | "members"
+            | "source"
+            | "objects"
+            | "entities"
+            | "selection"
+            | "parts"
+            | "refs"
+            | "matches"
+            | "line"
+            | "arc"
+            | "blocks"
+    )
+}
+
+/// Collect the handles of `v`, a value under a handle field: a handle string, an array of them,
+/// or objects that carry handle fields of their own (`entities`, `parts`).
+fn collect_result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
     if depth > RESULT_DEPTH {
         return;
     }
@@ -346,8 +373,48 @@ fn result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
                 out.push(h);
             }
         }
-        Value::Array(a) => a.iter().for_each(|x| result_handles(s, x, depth + 1, out)),
-        Value::Object(m) => m.values().for_each(|x| result_handles(s, x, depth + 1, out)),
+        Value::Array(a) => a.iter().for_each(|x| collect_result_handles(s, x, depth + 1, out)),
+        Value::Object(m) => {
+            for (k, x) in m {
+                if handle_field(k) {
+                    collect_result_handles(s, x, depth + 1, out);
+                } else {
+                    find_result_handles(s, x, depth + 1, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Find handle fields nested in containers that are not handles themselves (`groups` in
+/// `groups.list`, whose members are handles): strings here are names, never references.
+fn find_result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
+    if depth > RESULT_DEPTH {
+        return;
+    }
+    match v {
+        Value::Array(a) => a.iter().for_each(|x| find_result_handles(s, x, depth + 1, out)),
+        Value::Object(m) => {
+            for (k, x) in m {
+                if handle_field(k) {
+                    collect_result_handles(s, x, depth + 1, out);
+                } else {
+                    find_result_handles(s, x, depth + 1, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The object handles a command result mentions, in the order it lists them. A handle-only result
+/// (a handle string or an array of them) counts as it is; otherwise only handle fields do.
+fn result_handles(s: &Session, v: &Value, depth: usize, out: &mut Vec<Handle>) {
+    match v {
+        Value::String(_) => collect_result_handles(s, v, depth, out),
+        Value::Array(a) if a.iter().all(Value::is_string) => collect_result_handles(s, v, depth, out),
+        Value::Array(_) | Value::Object(_) => find_result_handles(s, v, depth, out),
         _ => {}
     }
 }
@@ -357,6 +424,13 @@ fn returned_handle(s: &Session, r: &Value) -> Option<Handle> {
     let mut hs = Vec::new();
     result_handles(s, r, 0, &mut hs);
     hs.last().copied()
+}
+
+/// The active drawing's identity ([`cadcraft_engine::DocState::uid`]): a handle is only meaningful
+/// in the drawing it came from, and `new`, `open`, `document.switch` and `close` can make another
+/// drawing current.
+fn active_drawing(s: &Session) -> Option<u64> {
+    s.docs.get(s.active).map(|st| st.uid)
 }
 
 /// Every `{last}` in `p`, at any depth, replaced by `h`. With no handle to fill in it is an
@@ -412,13 +486,26 @@ fn run(args: &[String]) -> Result<(), String> {
     let before = model_views(&s);
     let mut last_handle: Option<Handle> = None;
     for (kind, body) in steps {
+        // A handle belongs to the drawing that returned it: if this step makes another drawing
+        // current (`new`, `open`, `document.switch`, `close`, or a script running one of them),
+        // the remembered handle is stale. A handle the step itself returns is taken afterwards,
+        // so it is a handle of the drawing it made current.
+        let drawing = active_drawing(&s);
         match kind.as_str() {
-            "script" => s.script(&body).map_err(|e| e.to_string())?,
+            "script" => {
+                s.script(&body).map_err(|e| e.to_string())?;
+                if active_drawing(&s) != drawing {
+                    last_handle = None;
+                }
+            }
             _ => {
                 let (id, json) = body.split_once(' ').unwrap_or((&body, "{}"));
                 let params: Value = serde_json::from_str(json).map_err(|e| format!("--cmd {id}: {e}"))?;
                 let params = fill_last(&params, last_handle).map_err(|e| format!("--cmd {id}: {e}"))?;
                 let r = s.execute(id, &params).map_err(|e| e.to_string())?;
+                if active_drawing(&s) != drawing {
+                    last_handle = None;
+                }
                 if let Some(h) = returned_handle(&s, &r) {
                     last_handle = Some(h);
                 }
