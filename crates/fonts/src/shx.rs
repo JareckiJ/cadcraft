@@ -703,13 +703,14 @@ mod tests {
         assert!(crate::ttf::available("tiny_test.shx"));
     }
 
-    #[test]
-    fn hebrew_letters_find_their_one_byte_positions() {
+    /// A shapes font with a dot glyph at each of `codes`.
+    fn font_with(codes: impl IntoIterator<Item = u16>) -> ShxFont {
+        let mut shapes: Vec<(u16, Vec<u8>)> = vec![(0, b"H\0\x04\x01\x00\x00".to_vec())];
+        shapes.extend(codes.into_iter().map(|c| (c, b"\0\x14\x00".to_vec())));
         let mut b = b"AutoCAD-86 shapes 1.0\r\n\x1a".to_vec();
-        let shapes: Vec<(u16, Vec<u8>)> = vec![(0, b"H\0\x04\x01\x00\x00".to_vec()), (0xE0, b"\0\x14\x00".to_vec())];
         b.extend(0u16.to_le_bytes());
-        b.extend(0xE0u16.to_le_bytes());
-        b.extend(2u16.to_le_bytes());
+        b.extend(shapes.last().map_or(0, |s| s.0).to_le_bytes());
+        b.extend(u16::try_from(shapes.len()).unwrap_or(0).to_le_bytes());
         for (n, d) in &shapes {
             b.extend(n.to_le_bytes());
             b.extend(u16::try_from(d.len()).unwrap_or(0).to_le_bytes());
@@ -717,9 +718,21 @@ mod tests {
         for (_, d) in &shapes {
             b.extend(d);
         }
-        let f = ShxFont::parse("h", &b).expect("parses");
+        ShxFont::parse("h", &b).expect("parses")
+    }
+
+    #[test]
+    fn hebrew_letters_find_their_one_byte_positions() {
+        // Code page 1255: the 27 letters at 0xE0..0xFA.
+        let f = font_with((0xE0..=0xFA).filter(|c| *c != 0xE1));
         assert_eq!(f.code_for('א'), Some(0xE0));
         assert_eq!(f.code_for('ב'), None);
+        // Code page 862: the letters at 0x80..0x9A.
+        let f = font_with(0x80..=0x9A);
+        assert_eq!(f.code_for('א'), Some(0x80));
+        // A Cyrillic-style font (0xC0..0xFF all drawn) is not taken for Hebrew.
+        let f = font_with(0xC0..=0xFF);
+        assert_eq!(f.code_for('א'), None);
     }
 
     #[test]
