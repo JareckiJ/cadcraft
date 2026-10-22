@@ -500,32 +500,28 @@ pub fn arabic_font() -> Option<&'static std::path::Path> {
     None
 }
 
-/// An installed Japanese font, for Japanese names in a non-Chinese interface. Checked once.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-fn japanese_font() -> Option<&'static std::path::Path> {
+/// Japanese font files to try, in order, for Japanese names in a non-Chinese interface: Hiragino
+/// on macOS, Yu Gothic/Meiryo/MS Gothic on Windows, IPA Gothic on Linux/FreeBSD.
+fn japanese_fonts() -> &'static [&'static str] {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        static FOUND: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
-        FOUND
-            .get_or_init(|| {
-                let candidates: &[&str] = if cfg!(target_os = "macos") {
-                    &["/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"]
-                } else if cfg!(windows) {
-                    &["C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc", "C:\\Windows\\Fonts\\msgothic.ttc"]
-                } else {
-                    &[
-                        "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
-                        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-                        "/usr/share/fonts/ipa-pgothic/ipagp.ttf",
-                        "/usr/share/fonts/vl-gothic/VL-PGothic-Regular.ttf",
-                    ]
-                };
-                candidates.iter().map(std::path::PathBuf::from).find(|p| p.is_file())
-            })
-            .as_deref()
+        if cfg!(target_os = "macos") {
+            &["/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"]
+        } else if cfg!(windows) {
+            &["C:\\Windows\\Fonts\\YuGothR.ttc", "C:\\Windows\\Fonts\\meiryo.ttc", "C:\\Windows\\Fonts\\msgothic.ttc"]
+        } else {
+            &[
+                "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+                "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+                "/usr/share/fonts/ipa-pgothic/ipagp.ttf",
+                "/usr/share/fonts/vl-gothic/VL-PGothic-Regular.ttf",
+            ]
+        }
     }
     #[cfg(target_arch = "wasm32")]
-    None
+    {
+        &[]
+    }
 }
 
 /// The Hangul letters the Korean interface shows: its catalog and its own name.
@@ -578,6 +574,12 @@ pub fn cjk_covers_hangul() -> bool {
     })
 }
 
+/// Whether `c` is a character in a Japanese script (kana, kanji, Japanese punctuation or
+/// full-width forms). The catalog's few Latin symbols (`⌘`, `ƒ`) are not the Japanese font's job.
+pub(crate) fn is_japanese_ui_char(c: char) -> bool {
+    matches!(c, '\u{3000}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}')
+}
+
 /// The Japanese letters the Japanese interface shows: its catalog and its own name.
 fn japanese_letters() -> &'static std::collections::BTreeSet<char> {
     static LETTERS: std::sync::OnceLock<std::collections::BTreeSet<char>> = std::sync::OnceLock::new();
@@ -587,7 +589,7 @@ fn japanese_letters() -> &'static std::collections::BTreeSet<char> {
             .filter_map(|line| line.split('\t').nth(2))
             .flat_map(str::chars)
             .chain("日本語".chars())
-            .filter(|c| !c.is_ascii())
+            .filter(|c| is_japanese_ui_char(*c))
             .collect()
     })
 }
@@ -613,21 +615,31 @@ fn installed_japanese_face_from(bytes: std::sync::Arc<Vec<u8>>) -> Option<cadcra
     matched.or_else(|| faces.into_iter().next())
 }
 
-/// The face of the installed Japanese font [`japanese_font`] that [`install_fonts`] loads. Its
-/// collection index is kept so egui draws the face the gate checked. Checked once; collections
-/// are scanned with the fonts crate's face-count cap and reads are capped.
+/// The face of the first installed Japanese font [`japanese_fonts`] that covers the interface,
+/// else the first face that parses. Its collection index is kept so egui draws the face the gate
+/// checked. Checked once; collections are scanned with the fonts crate's face-count cap and reads
+/// are capped.
 fn installed_japanese_face() -> Option<&'static cadcraft_fonts::ttf::Face> {
     static FOUND: std::sync::OnceLock<Option<cadcraft_fonts::ttf::Face>> = std::sync::OnceLock::new();
     FOUND
         .get_or_init(|| {
-            japanese_font()
-                .and_then(|path| read_capped(path, MAX_UI_FONT_BYTES))
-                .and_then(|bytes| installed_japanese_face_from(std::sync::Arc::new(bytes)))
+            let mut fallback = None;
+            for path in japanese_fonts() {
+                let Some(bytes) = read_capped(std::path::Path::new(path), MAX_UI_FONT_BYTES) else { continue };
+                let Some(face) = installed_japanese_face_from(std::sync::Arc::new(bytes)) else { continue };
+                if covers_japanese(&face) {
+                    return Some(face);
+                }
+                if fallback.is_none() {
+                    fallback = Some(face);
+                }
+            }
+            fallback
         })
         .as_ref()
 }
 
-/// Whether the installed Japanese face [`japanese_font`] covers the interface.
+/// Whether the installed Japanese font covers the interface.
 pub fn japanese_font_covers() -> bool {
     installed_japanese_face().is_some_and(covers_japanese)
 }

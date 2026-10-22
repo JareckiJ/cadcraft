@@ -103,9 +103,9 @@ and Nanum Gothic or Noto CJK on Linux/FreeBSD. Collection faces are checked indi
 file reads/face scans are bounded. No system fonts or new font assets are redistributed.
 
 Japanese needs a font that covers **every kana, kanji and Japanese punctuation mark in its
-catalog** and the picker label. A Japanese interface first looks for the installed Japanese face
-it already uses for drawing names (`japanese_font`: Hiragino on macOS, Yu Gothic/Meiryo/MS Gothic
-on Windows, IPA Gothic on Linux/FreeBSD), then the CJK face loaded in every language; when either
+catalog** and the picker label. A Japanese interface first tries the installed Japanese faces it
+already uses for drawing names (`japanese_fonts`: Hiragino on macOS, Yu Gothic/Meiryo/MS Gothic on
+Windows, IPA Gothic on Linux/FreeBSD), then the CJK face loaded in every language; when either
 covers the catalog the interface switches, otherwise it stays English, the saved `ja` preference
 is kept, and the language command says a font is needed. An English interface uses the readable
 label **Japanese** wherever kana can't be shown. Web builds cannot read installed fonts: without a

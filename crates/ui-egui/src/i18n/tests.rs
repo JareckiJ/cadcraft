@@ -972,7 +972,7 @@ fn japanese_ui_fonts_cover_catalog_and_language_picker_in_both_families() {
         .filter_map(|line| line.split('\t').nth(2))
         .flat_map(str::chars)
         .chain("日本語".chars())
-        .filter(|c| matches!(*c, '\u{3000}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}'))
+        .filter(|c| crate::theme::is_japanese_ui_char(*c))
         .collect();
     assert!(letters.len() > 50, "the Japanese catalog should use plenty of kana and kanji: {}", letters.len());
     let ctx = egui::Context::default();
