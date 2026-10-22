@@ -1,5 +1,5 @@
 //! Saving over a drawing keeps the previous file as `<name>.bak` (ISAVEBAK, #540), and the
-//! save itself replaces the file atomically (craft-atomic): no staging files are left behind.
+//! save itself replaces the file atomically: no temporary files are left behind.
 
 use cadcraft_engine::Session;
 use cadcraft_engine::cmd::file::{IoHooks, backup_path, looks_like_drawing, set_io};

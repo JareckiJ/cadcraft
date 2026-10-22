@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::{Accept, Input, Prompt, Result, Session, Step};
 
+/// The rules the Command Aliases dialog checks before it sends an alias to ALIASEDIT.
+pub use pgp::{MAX_ALIASES, alias_name, command_id};
 pub(crate) use pgp::{specs as alias_specs, user_alias};
 pub use template::{qnew_template, set_qnew_template};
 
@@ -399,10 +401,10 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
 /// Put saved bytes where the user gets them: natively the file at `path`; on the web, which has
 /// no file system, a browser download named after `path` via [`deliver`].
 ///
-/// Natively the file is replaced atomically and durably (`craft-atomic`: a staging file beside
-/// it, flushed to disk, renamed over it, the folder flushed), so a crash or power loss leaves
-/// either the old file or the new one, never a truncated one. Saving over a drawing first keeps
-/// the previous file as `<name>.bak` (ISAVEBAK, #540).
+/// Natively the file is replaced atomically ([`crate::atomic_write`]: a fresh temporary file
+/// beside it, renamed over it), so a crash leaves either the old file or the new one, never a
+/// truncated one. Saving over a drawing first keeps the previous file as `<name>.bak` (ISAVEBAK,
+/// #540).
 fn store(path: &str, bytes: &[u8]) -> Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -410,8 +412,9 @@ fn store(path: &str, bytes: &[u8]) -> Result<()> {
             backup(std::path::Path::new(path))
                 .map_err(|e| bad("save", format!("{path}: the backup copy could not be written ({e}); nothing was saved")))?;
         }
-        craft_atomic::atomic_write(std::path::Path::new(path), bytes).map_err(|e| bad("save", format!("{path}: {e}")))?;
-        Ok(())
+        // Exclusively create a fresh temporary file and rename it over `path`, so a planted
+        // `<path>.cadcraft-tmp` symlink cannot redirect the write onto another file (CWE-59).
+        crate::atomic_write::write_atomic(std::path::Path::new(path), bytes).map_err(|e| bad("save", format!("{path}: {e}")))
     }
     #[cfg(target_arch = "wasm32")]
     {
