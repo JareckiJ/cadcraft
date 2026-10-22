@@ -62,6 +62,8 @@ fn fit_scale(b: &Bounds2, sheet: &Sheet, o: &PdfOptions) -> f64 {
     pdf::plot_scale(b, sheet, o.fit != Some(false), o.scale)
 }
 
+/// Plot `space` to PNG through the raster renderer of the display list, with the requested
+/// resolution; image size is capped so a hostile sheet cannot allocate unboundedly.
 fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let o = PdfOptions::from_json(opts);
     let (sheet, page) = sheet(d, space, &o)?;
@@ -106,6 +108,9 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     raster::render_png(&list, &view, &ro).ok_or_else(|| IoError::Format("render failed".into()))
 }
 
+/// Plot `space` to SVG: a layout shows its sheet, model space goes through the plot style table,
+/// lineweights and the scale that fits the paper; `text` selects `<text>` elements or the glyph
+/// outlines the list holds.
 fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let o = PdfOptions::from_json(opts);
     let text = crate::svg::TextMode::from_json(opts);

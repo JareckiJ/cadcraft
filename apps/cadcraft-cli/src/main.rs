@@ -171,6 +171,8 @@ fn export_window(s: &Session, framing: Framing, before: Option<&[(u64, Option<Vi
     }
 }
 
+/// Install the CLI's file-format hooks in the engine (read, write, plot, save-as and export), so
+/// the engine stays I/O-agnostic; DXF entities are also exposed to AutoLISP as groups.
 fn install_io() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
