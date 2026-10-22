@@ -60,7 +60,7 @@ Detail and evidence: [ui-parity.md](ui-parity.md).
 | U10 | ~~SETVAR variable coverage expansion~~ **(done)**: SETVAR table covers drawing header variables, entity defaults (CECOLOR, CELTYPE, CELWEIGHT, CELTSCALE, LTSCALE, PSLTSCALE, PDMODE, PDSIZE, AUNITS, AUPREC, ANGDIR), and comprehensive dimension variables (DIMSCALE, DIMTXT, DIMASZ, DIMGAP, DIMEXE, DIMEXO, DIMDLI, DIMDLE, DIMLFAC, DIMTAD, DIMTIH, DIMTOH, DIMTOFL, DIMTIX, DIMSOXD, DIMSE1/2, DIMSD1/2, DIMDEC, DIMALT, etc.) with validation, units-aware defaults, and bare command line variable invocation | Low-medium | 0 |
 | U11 | ~~View navigation / MVIEW Restore / VIEW Orthographic~~ **(done)**: MVIEW Restore puts saved viewport configurations into layouts (#626); VIEW command Orthographic option (Top, Bottom, Front, Back, Left, Right) with 3D preset view direction vectors and extents zoom landed; UCS and background settings, Zoom Realtime and Dynamic, ZOOMFACTOR, named views (VIEW) and tiled model viewports with saved configurations (VPORTS) landed | None: closed | 0 |
 | U12 | Workspaces, navigation bar, CUI customisation, alias editor, ViewCube drag (#7) | Low-medium | 15–25 |
-| U13 | `.dxf` from Finder fails to open on macOS (#158) (window controls fixed, #161) | Medium | 1–2 |
+| U13 | ~~`.dxf` from Finder fails to open on macOS~~ **(done)**: macOS Finder process serial number argument (`-psn_...`) ignored in command-line argument parsing (#158); window controls fixed (#161) | None: closed | 0 |
 
 ## File formats
 

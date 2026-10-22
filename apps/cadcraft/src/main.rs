@@ -226,26 +226,38 @@ fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
     current
 }
 
+fn parse_args<I: IntoIterator<Item = String>>(iter: I) -> (Option<u16>, bool, Vec<String>) {
+    let mut control_port = None;
+    let mut sample = false;
+    let mut files = Vec::new();
+    let mut args = iter.into_iter();
+    while let Some(a) = args.next() {
+        if a.starts_with("-psn_") {
+            // macOS Finder launches application bundles with a process serial number parameter (e.g. -psn_0_123456).
+            continue;
+        }
+        match a.as_str() {
+            "--control" => control_port = control_flag(control_port, args.next()),
+            "--sample" => sample = true,
+            _ => files.push(a),
+        }
+    }
+    (control_port, sample, files)
+}
+
 fn main() -> eframe::Result {
     // First, so every start-up record is captured; see `logging`.
     let logger = logging::install();
     // lossy, so a value that is not Unicode is reported like any other bad port instead of ignored
-    let mut control_port =
+    let env_control_port =
         control_port_from("CADCRAFT_CONTROL_PORT", std::env::var_os("CADCRAFT_CONTROL_PORT").map(|p| p.to_string_lossy().into_owned()));
-    let mut files = Vec::new();
-    let mut sample = false;
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--control" => control_port = control_flag(control_port, args.next()),
-            "--sample" => sample = true,
-            "--version" | "-V" => {
-                println!("{}", version_string());
-                return Ok(());
-            }
-            _ => files.push(a),
-        }
+    let args_list: Vec<String> = std::env::args().skip(1).collect();
+    if args_list.iter().any(|a| a == "--version" || a == "-V") {
+        println!("{}", version_string());
+        return Ok(());
     }
+    let (cli_port, sample, files) = parse_args(args_list);
+    let control_port = cli_port.or(env_control_port);
     // The log file lives under the settings directory; opened after the arguments, so `--version`
     // leaves no file behind. Records logged until now are written to it first.
     if let Some(logger) = logger {
@@ -380,9 +392,18 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_dir_from, control_flag, control_port_from, filters_for_save, follow_desktop};
+    use super::{config_dir_from, control_flag, control_port_from, filters_for_save, follow_desktop, parse_args};
     use std::ffi::OsString;
     use std::path::PathBuf;
+
+    #[test]
+    fn parse_args_ignores_macos_psn_parameter() {
+        let args = vec!["-psn_0_294982".to_string(), "floorplan.dxf".to_string()];
+        let (port, sample, files) = parse_args(args);
+        assert_eq!(port, None);
+        assert!(!sample);
+        assert_eq!(files, vec!["floorplan.dxf"]);
+    }
 
     fn env<'a>(vars: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |k| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(v))
