@@ -14,18 +14,18 @@ struct Counts {
 /// never make the stats command run unbounded work.
 const MAX_ENTRIES: usize = 2_000_000;
 
-fn walk(dir: &Path, c: &mut Counts) {
+fn walk(dir: &Path, c: &mut Counts) -> Result<(), String> {
     let mut budget = MAX_ENTRIES;
-    walk_inner(dir, c, &mut budget);
+    walk_inner(dir, c, &mut budget)
 }
 
-fn walk_inner(dir: &Path, c: &mut Counts, budget: &mut usize) {
+fn walk_inner(dir: &Path, c: &mut Counts, budget: &mut usize) -> Result<(), String> {
     let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
+        return Ok(());
     };
     for e in rd.flatten() {
         if *budget == 0 {
-            return;
+            return Err(format!("stats traversal budget exhausted at {}", dir.display()));
         }
         *budget -= 1;
         // Use the entry's own type and never follow symlinks: a directory symlink would otherwise
@@ -41,7 +41,7 @@ fn walk_inner(dir: &Path, c: &mut Counts, budget: &mut usize) {
         if ft.is_dir() {
             // Nested fuzz workspaces and build output are not part of the crate.
             if name != "target" && name != "fuzz" && !name.starts_with('.') {
-                walk_inner(&p, c, budget);
+                walk_inner(&p, c, budget)?;
             }
         } else if ft.is_file()
             && name.ends_with(".rs")
@@ -54,6 +54,7 @@ fn walk_inner(dir: &Path, c: &mut Counts, budget: &mut usize) {
             c.proptests += pt;
         }
     }
+    Ok(())
 }
 
 /// `#[test]` attributes and `proptest!` blocks (each block may hold many
@@ -92,7 +93,7 @@ pub fn run(_root: &Path, exact: bool) -> Result<(), String> {
             continue;
         };
         let mut c = Counts::default();
-        walk(&dir, &mut c);
+        walk(&dir, &mut c)?;
         let ex = if exact { exact_tests(&name) } else { None };
         rows.push((name, c, ex));
     }
@@ -149,8 +150,20 @@ mod tests {
         // A directory symlink pointing back at `real` would be re-scanned if followed.
         symlink(&real, base.join("alias")).unwrap();
         let mut c = Counts::default();
-        walk(&base, &mut c);
+        walk(&base, &mut c).unwrap();
         assert_eq!(c.files, 1, "the aliased directory was followed and counted twice");
         std::fs::remove_dir_all(&base).ok();
+    }
+    #[test]
+    fn walk_reports_budget_exhaustion() {
+        let base = std::env::temp_dir().join(format!("cadcraft-stats-budget-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("a.rs"), "fn a() {}\n").unwrap();
+        let error = super::walk_inner(&base, &mut Counts::default(), &mut 0).unwrap_err();
+        assert!(error.contains("budget exhausted"));
+        let mut c = Counts::default();
+        super::walk_inner(&base, &mut c, &mut 1).unwrap();
+        assert_eq!(c.files, 1);
+        std::fs::remove_dir_all(base).unwrap();
     }
 }
