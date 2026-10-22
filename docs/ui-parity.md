@@ -190,11 +190,13 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
   shortcuts. AutoCAD for Mac's defaults are similar in number; F4 (3D osnap) and F6 (dynamic UCS)
   are missing.
 - Delete erases the selection on macOS (#64); Escape cancels.
-- Right-click on the canvas is Enter while a command runs; holding it (250 ms, AutoCAD's
-  time-sensitive right-click) opens the command menu: Enter, Cancel, Recent Input, the prompt's
-  options, Snap Overrides, Pan/Zoom. Otherwise it opens a shortcut menu (Repeat, Recent Commands,
+- Right-click on the canvas with no command opens a shortcut menu (Repeat, Recent Commands,
   Clipboard ▸, Isolate ▸, the selection's editing commands, Draw Order ▸, Group, the selected
-  object type's edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom; #325, #512).
+  object type's edit commands, Select Similar, Deselect All, Undo/Redo, Pan/Zoom, Properties;
+  #325, #512). While a command runs, a prompt with options opens the command menu at the cursor —
+  Enter, Cancel, Recent Input, the prompt's options, Snap Overrides, Pan/Zoom — and a prompt
+  without options is Enter, as in AutoCAD (`timeSensitiveRightClick` off, its default); with that
+  option on a quick click is Enter and holding it 250 ms opens the menu (#1366).
   The command line, drawing tabs, layout tabs, Layers palette rows and the Properties palette
   have menus too (#512). Still missing: in-place layout tab rename, Move or Copy, Select All
   Layouts.
@@ -203,6 +205,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Right-click at a command prompt with options opens the command shortcut menu at the cursor (AutoCAD's default command mode); a prompt without options stays Enter, and time-sensitive right-click moves to an option (#1366) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |
 | 2026-10-14 | minor | Hatch Edit dialog adds boundaries from picked points or closed objects and removes selected loops |
