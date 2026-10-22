@@ -19,47 +19,58 @@ const TOKEN_BYTES: usize = 32;
 /// On Unix the runtime dir (`XDG_RUNTIME_DIR`, already `0700` and per-user) is preferred, else the
 /// user's home; on Windows the local app-data directory. The file itself is created with
 /// owner-only permissions regardless.
-pub fn token_path(port: u16) -> PathBuf {
-    let dir = private_dir();
-    dir.join(format!("cadcraft-control-{port}.token"))
+pub fn token_path(port: u16) -> io::Result<PathBuf> {
+    Ok(private_dir()?.join(format!("cadcraft-control-{port}.token")))
 }
 
 #[cfg(unix)]
-fn private_dir() -> PathBuf {
+fn private_dir() -> io::Result<PathBuf> {
     if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
-        return PathBuf::from(d);
+        return Ok(PathBuf::from(d));
     }
     if let Some(h) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
-        return PathBuf::from(h).join(".cache");
+        return Ok(PathBuf::from(h).join(".cache"));
     }
-    std::env::temp_dir()
+    Ok(std::env::temp_dir())
 }
 
 #[cfg(windows)]
-fn private_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
-        return PathBuf::from(d);
-    }
-    std::env::temp_dir()
+fn private_dir() -> io::Result<PathBuf> {
+    windows_private_dir(std::env::var_os("LOCALAPPDATA"))
+}
+
+#[cfg(any(windows, test))]
+fn windows_private_dir(local: Option<std::ffi::OsString>) -> io::Result<PathBuf> {
+    local
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is required for a private control token"))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn private_dir() -> PathBuf {
-    std::env::temp_dir()
+fn private_dir() -> io::Result<PathBuf> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "no private control token directory on this platform"))
 }
 
 /// Generate a fresh token and write it to [`token_path`] with owner-only permissions, returning
 /// the token. The file is replaced if it already exists.
 pub fn issue(port: u16) -> io::Result<String> {
     let token = random_hex()?;
-    let path = token_path(port);
-    write_private(&path, token.as_bytes())?;
+    let path = token_path(port)?;
+    issue_at(&path, token.as_bytes())?;
     Ok(token)
+}
+
+fn issue_at(path: &std::path::Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_private(path, bytes)
 }
 
 /// Read the token for `port`, trimming trailing whitespace. Used by clients (the MCP bridge).
 pub fn read(port: u16) -> io::Result<String> {
-    let raw = std::fs::read_to_string(token_path(port))?;
+    let raw = std::fs::read_to_string(token_path(port)?)?;
     let token = raw.trim().to_string();
     if token.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "empty control token"));
@@ -69,7 +80,9 @@ pub fn read(port: u16) -> io::Result<String> {
 
 /// Remove the token file (best effort), called when the server stops.
 pub fn revoke(port: u16) {
-    let _ = std::fs::remove_file(token_path(port));
+    if let Ok(path) = token_path(port) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Constant-time comparison of two tokens, so a wrong token cannot be guessed byte by byte.
@@ -145,8 +158,23 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let port = 40000 + (std::process::id() % 10000) as u16;
         issue(port).unwrap();
-        let mode = std::fs::metadata(token_path(port)).unwrap().permissions().mode();
+        let mode = std::fs::metadata(token_path(port).unwrap()).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "token file is readable by group/other: {:o}", mode);
         revoke(port);
+    }
+    #[test]
+    fn windows_requires_local_app_data() {
+        assert!(windows_private_dir(None).is_err());
+        assert!(windows_private_dir(Some("".into())).is_err());
+        assert_eq!(windows_private_dir(Some("private-app-data".into())).unwrap(), PathBuf::from("private-app-data"));
+    }
+
+    #[test]
+    fn issuance_creates_missing_parent() {
+        let dir = std::env::temp_dir().join(format!("cadcraft-token-parent-{}", std::process::id()));
+        let path = dir.join("missing/cache/session.token");
+        issue_at(&path, b"secret").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"secret");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

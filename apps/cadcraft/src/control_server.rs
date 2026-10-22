@@ -62,7 +62,9 @@ pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
                     return sync_channel::<ControlRequest>(0).1;
                 }
             };
-            log::info!("control server listening on 127.0.0.1:{port} (token in {})", cadcraft_mcp::control_token::token_path(port).display());
+            if let Ok(path) = cadcraft_mcp::control_token::token_path(port) {
+                log::info!("control server listening on 127.0.0.1:{port} (token in {})", path.display());
+            }
             serve_listener(l, Limits::default(), ctx, token)
         }
         Err(e) => {

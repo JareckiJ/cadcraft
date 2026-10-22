@@ -112,7 +112,9 @@ impl Remote {
         let sent = writer.write_all(line.as_bytes()).and_then(|()| writer.write_all(b"\n")).and_then(|()| writer.flush());
         if let Err(e) = sent {
             self.conn = None;
-            return Err((e, false));
+            // write_all can fail after partial delivery. The server may have received the full
+            // JSON before the newline write failed, so a mutation must not be retried blindly.
+            return Err((e, true));
         }
         let mut reply = String::new();
         match reader.read_line(&mut reply) {
@@ -188,17 +190,30 @@ impl Backend for Remote {
         if let (Some(obj), Some(token)) = (req.as_object_mut(), token) {
             obj.insert("token".into(), Value::String(token));
         }
-        let line = req.to_string();
-        let reply = match self.roundtrip(&line) {
+        let reply = match self.roundtrip(&req.to_string()) {
             Ok(r) => r,
-            // Resend only when the request cannot have been applied. After a sent mutation with no reply the outcome is unknown, and
-            // resending could apply it twice (for example two circles from one call), so report that instead.
-            Err((_, sent)) if !sent || is_read_only(method) => self.roundtrip(&line).map_err(|(e, _)| format!("CADCraft at {}: {e}", self.addr))?,
-            Err((e, _)) => {
-                return Err(format!(
-                    "CADCraft at {}: {e}; the reply was lost, so `{method}` may or may not have been applied. Inspect the drawing first",
-                    self.addr
-                ));
+            Err((e, sent)) => {
+                self.token = None;
+                self.conn = None;
+                // A mutation whose reply was lost must never be sent twice.
+                if sent && !is_read_only(method) {
+                    return Err(format!(
+                        "CADCraft at {}: {e}; the reply was lost, so `{method}` may or may not have been applied. Inspect the drawing first",
+                        self.addr
+                    ));
+                }
+                // A restarted server may have rotated its token before dropping the old socket.
+                if let Some(obj) = req.as_object_mut() {
+                    obj.remove("token");
+                    if let Some(token) = self.token() {
+                        obj.insert("token".into(), Value::String(token.to_owned()));
+                    }
+                }
+                self.roundtrip(&req.to_string()).map_err(|(e, _)| {
+                    self.token = None;
+                    self.conn = None;
+                    format!("CADCraft at {}: {e}", self.addr)
+                })?
             }
         };
         let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply: {e}"))?;
@@ -206,6 +221,10 @@ impl Backend for Remote {
             Ok(v.get("result").cloned().unwrap_or(Value::Null))
         } else {
             let e = v.get("error").and_then(Value::as_str).unwrap_or("error");
+            if e.starts_with("unauthorized") {
+                self.token = None;
+                self.conn = None;
+            }
             // A timeout says whether the request can still have run (#345).
             Err(match v.get("state").and_then(Value::as_str) {
                 Some("not-run") => format!("{e}: CADCraft did not start `{method}` and won't; it is safe to send again"),
@@ -401,9 +420,12 @@ mod tests {
             requests
         });
         let mut remote = Remote::connect(&addr).unwrap();
+        remote.token = Some("stale-token".into());
         let err = remote.call("engine.execute", json!({"command": "circle", "params": {}})).unwrap_err();
         assert!(err.contains("may or may not have been applied"), "{err}");
         assert_eq!(server.join().unwrap(), 1);
+        assert!(remote.token.is_none());
+        assert!(remote.conn.is_none());
     }
 
     /// The app's timeout reply says whether the request can still run; the error passes that on (#345).
@@ -424,5 +446,50 @@ mod tests {
             assert!(err.starts_with("timeout") && err.contains(want), "{err}");
             server.join().unwrap();
         }
+    }
+    #[test]
+    fn safe_retry_rereads_a_rotated_token_after_a_lost_reply() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let old = crate::control_token::issue(addr.port()).unwrap();
+        let server = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            let mut reader = BufReader::new(conn);
+            reader.read_line(&mut line).unwrap();
+            let first: Value = serde_json::from_str(&line).unwrap();
+            assert!(first["token"].as_str() == Some(old.as_str()));
+            let fresh = crate::control_token::issue(addr.port()).unwrap();
+            drop(reader);
+            let (mut conn, _) = listener.accept().unwrap();
+            line.clear();
+            BufReader::new(conn.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let retry: Value = serde_json::from_str(&line).unwrap();
+            assert!(retry["token"].as_str() == Some(fresh.as_str()));
+            writeln!(conn, "{}", json!({"ok": true, "result": "pong"})).unwrap();
+            crate::control_token::revoke(addr.port());
+        });
+        let mut remote = Remote::connect(&addr.to_string()).unwrap();
+        assert_eq!(remote.call("ping", json!({})).unwrap(), json!("pong"));
+        server.join().unwrap();
+    }
+    #[test]
+    fn failed_mutation_write_is_not_resent() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let mut remote = Remote::connect(&addr).unwrap();
+        remote.conn.as_ref().unwrap().1.shutdown(std::net::Shutdown::Write).unwrap();
+        let server = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            assert_eq!(BufReader::new(conn).read_line(&mut line).unwrap(), 0);
+            listener.set_nonblocking(true).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            listener.accept().is_ok()
+        });
+        let error = remote.call("engine.execute", json!({"command": "circle", "params": {}})).unwrap_err();
+        assert!(error.contains("may or may not have been applied"));
+        assert!(!server.join().unwrap(), "a failed mutation write was retried");
+        assert!(remote.token.is_none());
     }
 }
