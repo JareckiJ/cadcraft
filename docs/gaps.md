@@ -150,7 +150,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-22 | minor | CALIBRATE (Modify ▸ Calibrate Scale): pick two points, type the true length between them, then scale everything, the current selection or an underlay; JSON form `{p1, p2, length, apply?, handles?}`, SCALE ▸ Reference's factor and transform reused (#1181) |
+| 2026-10-22 | minor | CALIBRATE (Modify ▸ Calibrate Scale): pick two points, type the true length between them, then scale everything or the current selection (an underlay request reports that underlay scaling is currently unavailable); JSON form `{p1, p2, length, apply?, handles?}`, SCALE ▸ Reference's factor and transform reused (#1181) |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
 | 2026-10-16 | minor | MLEDIT Merged Tee (MT): the first multiline's outer elements stop at the second one's near side, which opens, and its inner elements run on to the second one's inner element: F21 narrowed, hours unchanged |
