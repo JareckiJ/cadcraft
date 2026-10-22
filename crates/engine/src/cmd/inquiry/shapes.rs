@@ -30,6 +30,9 @@ enum Facts {
     Skip(&'static str),
 }
 
+/// SHAPES: geometry facts for every closed shape that matches the filters in the current space,
+/// paged by `offset`/`limit`, with the self-check of what was found, analysed, skipped and
+/// flagged.
 pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).filter(|v| !v.is_null());
     let text = |k: &str| -> Result<Option<String>> {
@@ -130,6 +133,7 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// One analysed shape as the JSON object the command reports (null if `f` is not a shape).
 fn shape_json(e: &Entity, f: &Facts) -> Value {
     let Facts::Shape { perimeter, area, signed, centroid, cross, dups, .. } = f else { return Value::Null };
     json!({
@@ -145,6 +149,9 @@ fn shape_json(e: &Entity, f: &Facts) -> Value {
     })
 }
 
+/// The facts SHAPES reports for one entity, or the reason it is not a closed shape: circles,
+/// full ellipses, closed or self-closing polylines and splines are measured, arcs and everything
+/// else are skipped.
 fn facts(s: &Session, e: &Entity, tol: f64) -> Result<Facts> {
     Ok(match &e.kind {
         EntityKind::Circle(c) => {

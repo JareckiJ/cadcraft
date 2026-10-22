@@ -8,12 +8,14 @@ use serde_json::{Value, json};
 
 const EPS: f64 = 1e-9;
 
+/// Add a polyline through `(x, y, bulge)` vertices to model space.
 fn pline(s: &mut Session, pts: &[(f64, f64, f64)], closed: bool) {
     let vertices = pts.iter().map(|&(x, y, b)| PolyVertex::with_bulge(Vec2::new(x, y), b)).collect();
     let k = EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width: 0.0, elevation: 0.0, plinegen: false });
     s.doc_mut().unwrap().add(&Space::Model, Common::default(), k).unwrap();
 }
 
+/// Add a unit 3D face at height `z`; a face is not a closed 2D shape, so SHAPES must skip it.
 fn face(s: &mut Session, z: f64) {
     let corners = [[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z], [0.0, 1.0, z]].map(|c| Vec3::new(c[0], c[1], c[2]));
     s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Face3d(Face3d { corners, hidden_edges: 0 })).unwrap();
@@ -25,6 +27,7 @@ fn hide_last(s: &mut Session) {
     s.doc_mut().unwrap().modify_entity(h, |e| e.common.visible = false).unwrap();
 }
 
+/// Add a closed 10 × 10 square polyline at the origin.
 fn square(s: &mut Session) {
     pline(s, &[(0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 10.0, 0.0), (0.0, 10.0, 0.0)], true);
 }
@@ -86,6 +89,8 @@ fn bow_tie_reports_its_crossing() {
     near(&x[1], 5.0);
 }
 
+/// Two coincident consecutive vertices are reported with their index and distance, while the
+/// shape is still measured (the duplicate does not change its area).
 #[test]
 fn repeated_vertex_is_listed() {
     let mut s = Session::new();
@@ -96,6 +101,8 @@ fn repeated_vertex_is_listed() {
     near(&sh["area"], 100.0);
 }
 
+/// An open polyline whose last vertex repeats its first is treated as closed: one shape, its area
+/// measured, and the coincident closing vertex not reported as a duplicate.
 #[test]
 fn open_polyline_with_matching_ends_is_closed() {
     let mut s = Session::new();
@@ -106,6 +113,8 @@ fn open_polyline_with_matching_ends_is_closed() {
     assert_eq!(r["shapes"][0]["duplicateVertices"], json!([]));
 }
 
+/// A circle is measured exactly, and objects that are not closed shapes (a line, a text, an open
+/// polyline) are counted under `skipped` with their reasons instead of polluting the result.
 #[test]
 fn circle_and_skipped_entities() {
     let mut s = Session::new();
@@ -128,6 +137,8 @@ fn circle_and_skipped_entities() {
     assert_eq!(sk.values().filter(|v| v["reason"] == "not a closed shape").count(), 2);
 }
 
+/// Paging reports only the requested window of shapes, and a malformed option is an error rather
+/// than silently falling back to a default.
 #[test]
 fn paging_and_bad_options() {
     let mut s = Session::new();
@@ -173,6 +184,10 @@ fn self_check_counts_found_analyzed_and_skipped() {
     assert_eq!(sc["found"].as_u64().unwrap(), analyzed + skipped);
 }
 
+/// #1440: a cap that stopped the analysis is reported with its value — the page `limit` when it
+/// truncates, and `crossingSegments` when a shape has more edges than the self-intersection check
+/// covers (which then reports no self-intersection) — while an unreached cap stays out of the
+/// report.
 #[test]
 fn self_check_reports_the_caps_it_hits() {
     let mut s = Session::new();
@@ -195,6 +210,9 @@ fn self_check_reports_the_caps_it_hits() {
     assert_eq!(r["shapes"].as_array().unwrap().last().unwrap()["selfIntersection"], Value::Null);
 }
 
+/// #1440: geometry that cannot be right is flagged with the bound it broke — a perimeter past 10×
+/// the shape's bounding-box diagonal, and an area larger than the drawing extents (invisible
+/// objects lie outside the extents, which is how the test makes an out-of-extents shape).
 #[test]
 fn self_check_flags_implausible_geometry() {
     let mut s = Session::new();

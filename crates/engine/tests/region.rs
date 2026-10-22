@@ -29,12 +29,16 @@ fn rect_region(s: &mut Session, a: [f64; 2], b: [f64; 2]) -> Handle {
     r
 }
 
+/// Add a circle and turn it into a region, returning the handle of the region's source circle.
 fn circle_region(s: &mut Session, c: [f64; 2], r: f64) -> Handle {
     let hd = h(&s.execute("circle", &json!({"center": c, "radius": r})).unwrap());
     s.execute("region", &json!({"handles": [hd.hex()]})).unwrap();
     hd
 }
 
+/// REGION turns closed rectangles and circles into regions and refuses an open line; AREA and
+/// MASSPROP then report the expected area, perimeter, centroid and moments (a rectangle's and a
+/// circle's integrals are known exactly).
 #[test]
 fn region_from_closed_objects_measures() {
     let mut s = Session::new();
@@ -84,6 +88,8 @@ fn massprop_self_check_reports_skipped_objects() {
     assert_eq!(sc["implausible"], json!([]));
 }
 
+/// SUBTRACT cuts a hole where a region lies inside another, and UNION adds an island when a region
+/// sits inside that hole; the loops, area and containment follow, and the removed region is gone.
 #[test]
 fn booleans_on_separate_and_nested_regions() {
     // Subtract a circle inside a rectangle: a hole.

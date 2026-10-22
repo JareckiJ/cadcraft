@@ -15,6 +15,7 @@ use super::super::*;
 use super::SelfCheck;
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
+/// The region commands: UNION, SUBTRACT and INTERSECT combine regions, MASSPROP measures them.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("union", "Union", run_union)
@@ -212,13 +213,16 @@ impl Interactive for SubtractM {
     fn name(&self) -> &'static str {
         "SUBTRACT"
     }
+    /// Tell the user what to select first: the regions to subtract from.
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         s.echo("Select regions to subtract from ..");
         Ok(Step::Continue)
     }
+    /// Prompt for the current selection phase (regions to subtract from, then regions to remove).
     fn prompt(&self, _s: &Session) -> Prompt {
         self.sel.prompt()
     }
+    /// The first selection is the regions to subtract from; the second is subtracted from them.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match self.sel.feed(s, &i)? {
             SelOutcome::More => Ok(Step::Continue),
@@ -244,6 +248,9 @@ impl Interactive for SubtractM {
     }
 }
 
+/// MASSPROP: area, perimeter, bounding box, centroid, moments of inertia and principal directions
+/// for each selected region, plus a self-check of what was measured, skipped and found
+/// implausible.
 fn run_massprop(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     let rs = regions(s, &hs)?;

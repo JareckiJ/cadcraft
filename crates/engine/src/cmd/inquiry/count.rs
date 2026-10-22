@@ -24,10 +24,12 @@ pub(super) const PARAMS: &str = "{block?, object?: handle (count objects like th
      {blocks: {name: n}, nested: {name: n}, spaces: {space: {name: n}}, total} | {block, count, nested, handles}, plus `message` and \
      `selfCheck` (found/analyzed/skipped counts with reasons, and the caps hit: work, handles, blockDepth)";
 
+/// COUNT's interactive command-line prompt machine.
 pub(super) fn machine() -> Box<dyn Interactive> {
     Box::new(CountM)
 }
 
+/// COUNTTABLE's interactive command-line prompt machine (it asks for the insertion point).
 pub(super) fn table_machine() -> Box<dyn Interactive> {
     Box::new(CountTableM)
 }
@@ -116,6 +118,7 @@ struct Expander<'a> {
 }
 
 impl<'a> Expander<'a> {
+    /// An expander that has not traversed any block yet.
     fn new(d: &'a Drawing) -> Self {
         Expander { d, memo: HashMap::new(), work: 0, truncated: false, depth_capped: false }
     }
@@ -377,6 +380,9 @@ fn count_like(d: &Drawing, scope: &Scope, nested: bool, h: Handle) -> Result<Val
     Ok(json!({ "object": ty, "count": n, "handles": hex(&hs), "selfCheck": check.to_json(), "message": message }))
 }
 
+/// The body of COUNT and COUNTLIST: list the blocks in scope, count one block, or count the
+/// objects shaped like a picked one. `default_all` makes an omitted `space` mean every space
+/// (COUNTLIST) instead of the current one (COUNT).
 fn run(s: &mut Session, cmd: &str, p: &Value, default_all: bool) -> Result<Value> {
     let scope = Scope::parse(s, cmd, p, default_all)?;
     let nested = bool_or(p, "nested", true);
@@ -417,6 +423,8 @@ fn table_style(s: &Session) -> cadcraft_doc::TableStyle {
     d.table_styles.iter().find(|t| t.name.eq_ignore_ascii_case(&cur)).or(d.table_styles.first()).cloned().unwrap_or_default()
 }
 
+/// COUNTTABLE: insert a table of the block counts in scope at `at`, and report what the tally
+/// covered (and refused: no block references in scope is an error, not an empty table).
 pub(super) fn run_counttable(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "counttable";
     let at = point_req(CMD, p, "at")?;
@@ -437,6 +445,7 @@ pub(super) fn run_counttable(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// Echo a result's `message` at the command line, one line at a time.
 fn echo_lines(s: &mut Session, r: &Value) {
     if let Some(m) = r.get("message").and_then(Value::as_str) {
         for l in m.lines() {

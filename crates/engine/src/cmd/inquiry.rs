@@ -13,6 +13,8 @@ use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 mod regions;
 mod shapes;
 
+/// The inquiry commands: distances, points, listing, area, time and status, the drawing and
+/// entity queries an agent reads, SHAPES, COUNT and the region commands.
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = vec![
         CommandSpec::new("dist", "Distance", run_dist)
@@ -66,10 +68,14 @@ pub fn specs() -> Vec<CommandSpec> {
     v
 }
 
+/// Format a distance with the drawing's `LUNITS` and `LUPREC` (decimal units, four places by
+/// default).
 fn fmt_d(s: &Session, v: f64) -> String {
     let h = s.doc().map(|d| (d.header.i64("LUNITS", 2), d.header.i64("LUPREC", 4))).unwrap_or((2, 4));
     format_distance(v, h.0, h.1)
 }
+/// Format an angle with the drawing's `AUNITS` and `AUPREC` (decimal degrees, whole degrees by
+/// default).
 fn fmt_a(s: &Session, v: f64) -> String {
     let h = s.doc().map(|d| (d.header.i64("AUNITS", 0), d.header.i64("AUPREC", 0))).unwrap_or((0, 0));
     format_angle(v, h.0, h.1)
@@ -79,6 +85,7 @@ fn fmt_a(s: &Session, v: f64) -> String {
 /// rename or a changed meaning bumps it.
 pub(super) const SELF_CHECK_SCHEMA: u64 = 1;
 
+/// How many objects of one type an analysis skipped, and every distinct reason it gave.
 #[derive(Default)]
 struct SkipTally {
     count: u64,
@@ -98,6 +105,7 @@ pub(super) struct SelfCheck {
 }
 
 impl SelfCheck {
+    /// An empty self-check: nothing found, analysed or skipped yet.
     pub(super) fn new() -> Self {
         Self::default()
     }
@@ -151,6 +159,8 @@ impl SelfCheck {
         )
     }
 
+    /// The self-check as the JSON object every analysis returns: schema, counts, skip map, caps
+    /// and implausible values.
     pub(super) fn to_json(&self) -> Value {
         json!({
             "schema": SELF_CHECK_SCHEMA,
