@@ -290,7 +290,7 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
     // contents stay in the list, which then follows its view: realtime navigation changes it
     // without a new revision.
     let split = split_viewport(st, stencil_clip(app)).map(|(h, ..)| h);
-    let active_orbit = if matches!(st.space, cadcraft_doc::Space::Paper(_)) && st.mspace.is_none() {
+    let active_orbit = if matches!(st.space, cadcraft_doc::Space::Paper(_)) && (st.mspace.is_none() || split.is_some()) {
         cadcraft_render::Orbit3d::default()
     } else {
         st.orbit
@@ -514,11 +514,11 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             lineweights: lwdisplay,
             view_height: st.paper_view().height,
             plot_style_table: None,
-            view: Some(area),
+            view: if st.orbit.is_top() { Some(area) } else { None },
             skip_viewport: None,
             transparency,
             cancel: None,
-            orbit: cadcraft_render::Orbit3d::default(),
+            orbit: st.orbit,
         };
         c.list = cadcraft_render::viewport_content(&st.doc, &st.space, h, area, &opts);
         c.key = Some(key);
@@ -2007,7 +2007,17 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
-    let current_orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
+    let current_orbit = app
+        .session
+        .state()
+        .map(|s| {
+            if matches!(s.space, cadcraft_doc::Space::Paper(_)) && s.mspace.is_none() {
+                cadcraft_render::Orbit3d::default()
+            } else {
+                s.orbit
+            }
+        })
+        .unwrap_or_default();
     if app.ui.show_ucs_icon {
         draw_ucs_icon(&painter, rect, current_orbit);
         crate::viewcube::ucs_icon(app, ui, rect);
@@ -2552,6 +2562,7 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
+/// Draw the UCS coordinate icon in the bottom-left corner of the viewport (2D XY or 3D RGB triad).
 fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
@@ -2585,6 +2596,7 @@ fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d)
     p.text(pz + (pz - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "Z", f, col_z);
 }
 
+/// Draw the green 3D Orbit arcball overlay and pivot triad while `3DORBIT` is active.
 fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let c = rect.center();
     let r = (rect.width().min(rect.height()) * 0.34).clamp(90.0, 260.0);
@@ -2604,6 +2616,7 @@ fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orb
     p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len))], Stroke::new(1.8, Color32::from_rgb(0x42, 0x87, 0xf5)));
 }
 
+/// Draw the top-left viewport controls label showing current view orientation and visual style.
 fn viewport_label(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let at = pos2(rect.left() + 10.0, rect.top() + 8.0);
@@ -2620,6 +2633,7 @@ fn viewport_label(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d
     }
 }
 
+/// Draw the ViewCube and WCS pill in the top-right corner of the canvas.
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
     let l = crate::viewcube::Layout::new(rect);
     let (c, ring) = (l.center, l.ring);

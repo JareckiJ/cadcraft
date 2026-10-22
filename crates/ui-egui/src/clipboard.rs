@@ -59,7 +59,8 @@ pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static 
                 if is_dxf {
                     ctx.data_mut(|d| d.insert_temp(text_id(), h));
                 }
-                let t = text.trim();
+                let clean = text.replace("\r\n", " ").replace(['\r', '\n'], " ");
+                let t = clean.trim();
                 let paste_to_cmd = !is_own
                     && !is_dxf
                     && !t.is_empty()
@@ -70,7 +71,6 @@ pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static 
                         || t.starts_with('!')
                         || cadcraft_engine::is_bare_lisp_prefix(t));
                 if paste_to_cmd {
-                    let clean = t.replace("\r\n", " ").replace(['\r', '\n'], " ");
                     app.cmd.buffer.push_str(&clean);
                     app.cmd.note_typing();
                 } else {

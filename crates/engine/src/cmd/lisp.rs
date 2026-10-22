@@ -7,6 +7,7 @@ use super::{bad, str_param};
 use crate::lisp::value::{Value as Lv, to_text};
 use crate::{Accept, CommandSpec, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
+/// Command specifications for AutoLISP loading (`appload`, `netload`), the IDE (`vbaide`), and evaluation (`lisp`).
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("appload", "Load Application...", run_appload)
@@ -58,6 +59,7 @@ fn report(s: &Session, from_log: usize, r: Option<std::result::Result<Lv, String
     }
 }
 
+/// Load and evaluate an AutoLISP routine from `{path}`, `{text}`, or base64 `{data}`.
 fn run_appload(s: &mut Session, p: &Value) -> Result<Value> {
     let (name, text) = source(p)?;
     let from = s.log.len();
@@ -65,6 +67,8 @@ fn run_appload(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(report(s, from, r))
 }
 
+/// Dispatch `VBAIDE` (`VLIDE`, `VLISP`): evaluates `code` when given, loads a file/text when given,
+/// or reports `"open"` so the UI opens the AutoLISP IDE window.
 fn run_vbaide(s: &mut Session, p: &Value) -> Result<Value> {
     if str_param(p, "code").is_some() {
         return run_lisp(s, p);
@@ -83,6 +87,7 @@ fn input_value(v: &Value) -> Lv {
     }
 }
 
+/// Evaluate a LISP expression from `{code, inputs?}` and return its printed result and output lines.
 fn run_lisp(s: &mut Session, p: &Value) -> Result<Value> {
     let code = str_param(p, "code").ok_or_else(|| bad("lisp", "`code` is required"))?;
     let inputs = p.get("inputs").and_then(Value::as_array).map(|a| a.iter().map(input_value).collect()).unwrap_or_default();
@@ -127,5 +132,32 @@ impl Interactive for ApploadM {
             }
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+    use crate::cmd::resolve_alias;
+
+    #[test]
+    fn netload_and_vbaide_dispatch_and_aliases_resolve() {
+        let mut s = Session::new();
+        assert_eq!(resolve_alias("vlide"), "vbaide");
+        assert_eq!(resolve_alias("vlisp"), "vbaide");
+
+        let open = s.execute("vbaide", &json!({})).unwrap();
+        assert_eq!(open["status"], "open");
+
+        let eval = s.execute("vbaide", &json!({ "code": "(+ 1 2)" })).unwrap();
+        assert_eq!(eval["value"], "3");
+
+        let loaded = s.execute("vbaide", &json!({ "name": "test.lsp", "text": "(defun sq (x) (* x x)) (sq 4)" })).unwrap();
+        assert_eq!(loaded["value"], "16");
+
+        let nl = s.execute("netload", &json!({ "name": "nl.lsp", "text": "(+ 10 20)" })).unwrap();
+        assert_eq!(nl["value"], "30");
     }
 }

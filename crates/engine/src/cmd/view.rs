@@ -629,9 +629,9 @@ impl Session {
         if !(dx.is_finite() && dy.is_finite()) {
             return Ok(());
         }
-        let pivot = default_orbit_pivot(self);
+        let pivot = self.state()?.orbit.is_top().then(|| default_orbit_pivot(self));
         let st = self.state_mut()?;
-        if st.orbit.is_top() {
+        if let Some(pivot) = pivot {
             st.orbit.pivot = pivot;
         }
         st.orbit.yaw = (st.orbit.yaw - dx * 0.008) % std::f64::consts::TAU;
@@ -641,6 +641,8 @@ impl Session {
     }
 }
 
+/// Default 3D rotation pivot for the active drawing space: uses the current view centre when inside
+/// the drawing extents (or the extents centre otherwise) and the mid-Z of the space's entities.
 fn default_orbit_pivot(s: &Session) -> cadcraft_geom::Vec3 {
     let Ok(st) = s.state() else {
         return cadcraft_geom::Vec3::ZERO;
@@ -690,14 +692,17 @@ fn default_orbit_pivot(s: &Session) -> cadcraft_geom::Vec3 {
     cadcraft_geom::Vec3::new(xy.x, xy.y, z)
 }
 
+/// Execute `3DORBIT` (`ORBIT`, `3DO`): resets to Top view, applies a named 3D preset, or sets
+/// explicit `yaw` and `pitch` angles in degrees.
 fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
-    let pivot = default_orbit_pivot(s);
-    let st = s.state_mut()?;
     if p.get("reset").and_then(Value::as_bool) == Some(true) {
+        let st = s.state_mut()?;
         st.orbit = cadcraft_render::Orbit3d::default();
         s.touch();
         return Ok(json!({ "yaw": 0.0, "pitch": 0.0, "label": "TOP" }));
     }
+    let pivot = default_orbit_pivot(s);
+    let st = s.state_mut()?;
     let iso_pitch = (2.0_f64.sqrt()).atan(); // ~54.7356°
     if let Some(preset) = str_param(p, "preset") {
         let (yaw_deg, pitch_rad) = match preset.to_ascii_lowercase().as_str() {
@@ -707,10 +712,10 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
             "back" => (180.0, std::f64::consts::FRAC_PI_2),
             "left" => (90.0, std::f64::consts::FRAC_PI_2),
             "right" => (-90.0, std::f64::consts::FRAC_PI_2),
-            "swiso" | "iso" => (-45.0, iso_pitch),
-            "seiso" => (45.0, iso_pitch),
-            "neiso" => (135.0, iso_pitch),
-            "nwiso" => (-135.0, iso_pitch),
+            "swiso" | "iso" => (45.0, iso_pitch),
+            "seiso" => (-45.0, iso_pitch),
+            "neiso" => (-135.0, iso_pitch),
+            "nwiso" => (135.0, iso_pitch),
             other => return Err(bad("3dorbit", format!("unknown 3D view preset `{other}`"))),
         };
         st.orbit = if yaw_deg == 0.0 && pitch_rad == 0.0 {

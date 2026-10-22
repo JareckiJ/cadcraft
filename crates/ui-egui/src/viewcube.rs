@@ -34,6 +34,7 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// Compute the ViewCube layout rectangles anchored to the top-right of `canvas`.
     pub fn new(canvas: Rect) -> Self {
         let center = pos2(canvas.right() - 92.0, canvas.top() + 82.0);
         let ring = 58.0;
@@ -60,6 +61,7 @@ impl Layout {
     }
 }
 
+/// Interactive region of the ViewCube widget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     Face,
@@ -68,6 +70,7 @@ pub enum Part {
 }
 
 impl Part {
+    /// Tooltip text shown when hovering over this part of the ViewCube.
     fn tip(self) -> &'static str {
         match self {
             Part::Face => "Top: plan view of the drawing (zoom extents)",

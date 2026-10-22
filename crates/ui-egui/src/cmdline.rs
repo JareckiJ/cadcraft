@@ -393,6 +393,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     }
 }
 
+/// Submit the current command-line buffer to the CAD session.
 pub fn submit(app: &mut CadApp) {
     // Grip dimensional input: the typed lengths and angles place the grip.
     if crate::grip_dyn::submit(app) {

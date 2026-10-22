@@ -865,7 +865,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         if matches!(me.kind, EntityKind::Viewport(_)) {
             return false;
         }
-        if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
+        if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) || !b.opts.orbit.is_top() {
             return true;
         }
         let eb = cadcraft_doc::entity_bounds(d, me, 0);
