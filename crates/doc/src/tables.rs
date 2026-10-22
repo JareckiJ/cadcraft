@@ -767,6 +767,11 @@ pub struct PageSetup {
     /// The layout's paper units are millimetres (plot paper units 1 in DXF) whatever the
     /// drawing's MEASUREMENT says; otherwise paper units follow MEASUREMENT (#1058).
     pub paper_mm: bool,
+    /// The plot paper units a file declared (DXF group 72: 0 inches, 1 millimetres, 2 pixels),
+    /// written back as they were while [`PageSetup::paper_mm`] is off: CADCraft sizes such a page
+    /// from MEASUREMENT, but the program that made the file shows its page setup in these units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plot_paper_units: Option<u8>,
 }
 
 impl Default for PageSetup {
@@ -787,6 +792,7 @@ impl Default for PageSetup {
             show_plot_styles: false,
             plot_transparency: false,
             paper_mm: false,
+            plot_paper_units: None,
         }
     }
 }
