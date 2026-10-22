@@ -114,7 +114,10 @@ impl CadApp {
                 // The Block Editor's unsaved changes go into the block first (BSAVE), then the
                 // drawing is saved with them.
                 let r = if self.session.state().is_ok_and(|st| st.block_unsaved()) { self.run("bsave", json!({})) } else { Ok(Value::Null) };
-                let r = r.and_then(|_| self.run("qsave", Value::Null));
+                // A drawing without a file: pick it and save at once (the Save As window would
+                // answer only after this prompt has moved on).
+                let untitled = self.session.state().is_ok_and(|st| st.path.is_none());
+                let r = r.and_then(|_| if untitled { crate::saving::pick_and_save(self) } else { self.run("qsave", Value::Null) });
                 let saved = r.is_ok() && self.doc_index(uid).and_then(|i| self.session.docs.get(i)).is_some_and(|d| !d.is_dirty());
                 match (saved, self.doc_index(uid)) {
                     (true, Some(i)) => {

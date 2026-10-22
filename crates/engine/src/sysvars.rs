@@ -19,6 +19,7 @@ const SESSION_VARS: &[&str] = &[
     "SNAPTYPE",
     "AUTOSNAP",
     "QNEWTEMPLATE",
+    "FILEDIA",
     "GRIDMODE",
     "SNAPMODE",
     "SNAPSTYL",
@@ -152,6 +153,8 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "BLOCKEDITOR" => json!(i32::from(s.state().is_ok_and(|d| d.block_edit.is_some()))),
         // The template NEW/QNEW start from (a profile setting, like FONTALT; "" = none).
         "QNEWTEMPLATE" => json!(crate::cmd::file::qnew_template()),
+        // File dialogs (1) or command-line prompts (0) for file commands (a profile setting too).
+        "FILEDIA" => json!(i32::from(crate::cmd::file::filedia())),
         "CTAB" => json!(s.state().map(|d| d.space.tab_name().to_string()).unwrap_or_default()),
         // UNDO state of the drawing: Control/Auto/group bits and the number of marks.
         "UNDOCTL" => json!(s.state().ok()?.undo_ctl.bits()),
@@ -253,6 +256,7 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             st.otrack = bits & 16 != 0;
         }
         "QNEWTEMPLATE" => crate::cmd::file::set_qnew_template(v.as_str().ok_or_else(bad)?),
+        "FILEDIA" => crate::cmd::file::set_filedia(as_i(v).filter(|i| (0..=1).contains(i)).ok_or_else(bad)? == 1),
         "POLARANG" => st.polarang = as_f64(v).filter(|a| *a > 0.0).ok_or_else(bad)?.to_radians(),
         "GRIDMODE" => st.gridmode = as_bool(v).ok_or_else(bad)?,
         "SNAPMODE" => st.snapmode = as_bool(v).ok_or_else(bad)?,

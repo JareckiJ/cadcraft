@@ -3,6 +3,7 @@
 //! no file system, saved files reach the user through the host's [`crate::cmd::file::set_deliver`].
 
 mod pgp;
+mod saveas;
 mod template;
 
 use std::sync::OnceLock;
@@ -17,6 +18,7 @@ use crate::{Accept, Input, Prompt, Result, Session, Step};
 /// The rules the Command Aliases dialog checks before it sends an alias to ALIASEDIT.
 pub use pgp::{MAX_ALIASES, alias_name, command_id};
 pub(crate) use pgp::{specs as alias_specs, user_alias};
+pub use saveas::{FileFormat, filedia, set_filedia, set_untitled_save_default, untitled_save_default};
 pub use template::{qnew_template, set_qnew_template};
 
 /// Plot a space to PDF bytes with JSON options (`{paper?, landscape?, fit?, lineweights?, …}`).
@@ -170,7 +172,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["File", "Save As..."])
             .key("Cmd+Shift+S")
             .params("{path, version?: 2000|2004|2007|2010|2013|2018, binary?: bool}")
-            .noundo(),
+            .noundo()
+            .interactive(|s| Ok(Box::new(saveas::SaveAsM::new(s)))),
         CommandSpec::new("document.switch", "Switch Drawing", run_switch).params("{index}").enabled(always).noundo(),
         CommandSpec::new("document.bytes", "Drawing as bytes", run_bytes)
             .params("{format?: dxf, version?: 2000…2018, binary?: bool} → {data: base64}")
@@ -468,7 +471,7 @@ fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The version a drawing is saved in at `path` when none is asked for: its `$ACADVER` (2018 by
 /// default), and for DWG at least 2004 (the io layer's rule: R2000 DWG has no true colours).
-fn drawing_version(s: &Session, path: &str) -> Version {
+pub fn drawing_version(s: &Session, path: &str) -> Version {
     let v =
         s.doc().ok().and_then(|d| d.header.get("ACADVER").and_then(cadcraft_doc::HVal::as_str).and_then(Version::for_acadver)).unwrap_or_default();
     if is_dxf(path) { v } else { v.max(Version::R2004) }

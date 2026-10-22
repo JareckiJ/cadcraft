@@ -25,12 +25,21 @@ fn default_save_version_applies_to_new_drawings_and_persists() {
     assert!(app.run("ui.saveversion", json!({ "version": "2005" })).is_err());
     assert_eq!(app.run("ui.saveversion", json!({ "version": 2010 })).ok(), Some(json!({ "saveVersion": "2010" })));
 
-    // The Save dialog saves an untitled drawing in the default version …
+    // The Save dialog's version starts on the default version for an untitled drawing …
     app.run("ui.saveas", Value::Null).unwrap();
+    assert_eq!(app.save_dlg.as_ref().map(|d| d.version.year()), Some("2010"));
+    cadcraft_ui_egui::saving::confirm(&mut app).unwrap();
     assert_eq!(std::fs::read(picked()).unwrap(), b"2010|false");
-    // … and a drawing that has a file in its own.
+    // … and on the drawing's own for a drawing that has a file (2010 now, not the default).
+    app.run("ui.saveversion", json!({ "version": 2018 })).unwrap();
     app.run("ui.saveas", Value::Null).unwrap();
+    assert_eq!(app.save_dlg.as_ref().map(|d| d.version.year()), Some("2010"));
+    cadcraft_ui_egui::saving::confirm(&mut app).unwrap();
+    assert_eq!(std::fs::read(picked()).unwrap(), b"2010|false");
+    // A save without a version (QSAVE) writes the drawing's own through the plain writer.
+    app.run("qsave", Value::Null).unwrap();
     assert_eq!(std::fs::read(picked()).unwrap(), b"plain");
+    app.run("ui.saveversion", json!({ "version": 2010 })).unwrap();
     let _ = std::fs::remove_file(picked());
 
     // Menu items, preferences (bad values ignored) and resetting the palettes.
