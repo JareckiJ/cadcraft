@@ -12,6 +12,8 @@ mod regions;
 mod shapes;
 mod usage;
 
+/// The inquiry commands: DIST, ID, LIST, AREA, TIME, STATUS, drawing inspection and entity
+/// queries, shapes, usage, texts and the count tools.
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = vec![
         CommandSpec::new("dist", "Distance", run_dist)

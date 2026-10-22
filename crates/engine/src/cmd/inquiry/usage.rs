@@ -38,6 +38,7 @@ enum Category {
 impl Category {
     const ALL: [Category; 4] = [Category::Layer, Category::Block, Category::TextStyle, Category::Linetype];
 
+    /// The singular JSON `type` value of this kind (`layer`, `block`, `textStyle`, `linetype`).
     fn key(self) -> &'static str {
         match self {
             Category::Layer => "layer",
@@ -46,6 +47,8 @@ impl Category {
             Category::Linetype => "linetype",
         }
     }
+    /// The JSON key under which this kind's objects are grouped (`layers`, `blocks`,
+    /// `textStyles`, `linetypes`).
     fn plural(self) -> &'static str {
         match self {
             Category::Layer => "layers",
@@ -54,6 +57,7 @@ impl Category {
             Category::Linetype => "linetypes",
         }
     }
+    /// The capitalised plural noun used in the human-readable message.
     fn label(self) -> &'static str {
         match self {
             Category::Layer => "Layers",
@@ -62,6 +66,7 @@ impl Category {
             Category::Linetype => "Linetypes",
         }
     }
+    /// The PURGE kind whose scan answers whether this kind's objects are unused.
     fn purge(self) -> purge::Kind {
         match self {
             Category::Layer => purge::Kind::Layers,
@@ -93,6 +98,8 @@ fn each_entity(d: &Drawing) -> impl Iterator<Item = (&Entity, bool)> {
 /// Uses per lower-case name: (in model space and layouts, in block definitions).
 type Uses = HashMap<String, (usize, usize)>;
 
+/// Counts one use of a named object, separately for model space and the layouts (`in_block`
+/// false) and for block definitions (`in_block` true); names compare case-insensitively.
 fn bump(map: &mut Uses, name: &str, in_block: bool) {
     let slot = map.entry(name.to_ascii_lowercase()).or_default();
     if in_block {
@@ -102,6 +109,8 @@ fn bump(map: &mut Uses, name: &str, in_block: bool) {
     }
 }
 
+/// Counts one named table entry that refers to `name`: a layer's linetype, or a dimension or
+/// multileader style's text style. Names compare case-insensitively.
 fn bump_reference(map: &mut HashMap<String, usize>, name: &str) {
     let slot = map.entry(name.to_ascii_lowercase()).or_default();
     *slot = slot.saturating_add(1);
@@ -129,6 +138,8 @@ struct Scan {
 }
 
 impl Scan {
+    /// Scans the drawing once: counts each entity's layer, explicit linetype, block, text style
+    /// and attribute style, plus the table references, and borrows block reachability from PURGE.
     fn new(d: &Drawing) -> Scan {
         let mut sc = Scan { used_blocks: purge::used_blocks(d), ..Scan::default() };
         for (e, in_block) in each_entity(d) {
@@ -183,6 +194,8 @@ struct Unused {
 }
 
 impl Unused {
+    /// Runs PURGE's unused scan for all four kinds, keeping each list in table order plus a
+    /// lower-case set for fast membership checks.
     fn new(d: &Drawing) -> Unused {
         let lists = Category::ALL
             .into_iter()
@@ -194,12 +207,17 @@ impl Unused {
             .collect();
         Unused { lists }
     }
+    /// Whether PURGE would offer `name` of kind `c` as unused (case-insensitive).
     fn has(&self, c: Category, name: &str) -> bool {
         self.lists.iter().find(|(k, ..)| *k == c).is_some_and(|(_, _, lower)| lower.contains(&name.to_ascii_lowercase()))
     }
+    /// How many objects of kind `c` PURGE would offer — the full count, even when the name list
+    /// in the JSON output is truncated.
     fn count(&self, c: Category) -> usize {
         self.lists.iter().find(|(k, ..)| *k == c).map_or(0, |(_, names, _)| names.len())
     }
+    /// The `unused` member: per kind, the total count, the returned page of names capped at
+    /// `MAX_NAMES`, and whether that page is truncated.
     fn json(&self) -> Value {
         let mut out = serde_json::Map::new();
         for (c, names, _) in &self.lists {
@@ -218,6 +236,9 @@ impl Unused {
     }
 }
 
+/// One report item: the use counts, the caller's `used`/`empty` verdicts, `insideBlocksOnly`
+/// derived from those counts and PURGE's `unused` answer. `current` is emitted only for the kinds
+/// that have a current entry (layers, text styles and linetypes).
 fn item_json(
     c: Category,
     name: &str,
@@ -246,6 +267,8 @@ fn item_json(
     v
 }
 
+/// Builds one item per named object in table order — layers, blocks, text styles, linetypes —
+/// reading the scanned use counts and adding the current-object flag where the drawing has one.
 fn items(scan: &Scan, unused: &Unused, d: &Drawing) -> Vec<Value> {
     let mut out = Vec::new();
     let current_layer = d.header.str("CLAYER", "0");
@@ -280,6 +303,8 @@ fn items(scan: &Scan, unused: &Unused, d: &Drawing) -> Vec<Value> {
     out
 }
 
+/// Totals per kind over every item — total, used, inside blocks only, empty — plus how many
+/// objects of that kind PURGE would offer.
 fn summary(items: &[Value], unused: &Unused) -> Value {
     let mut out = serde_json::Map::new();
     for c in Category::ALL {
@@ -298,6 +323,8 @@ fn summary(items: &[Value], unused: &Unused) -> Value {
     Value::Object(out)
 }
 
+/// The human-readable summary, one line per kind, plus a note when the filter matched no named
+/// objects at all.
 fn message(items: &[&Value], summary: &Value) -> String {
     let mut lines = Vec::new();
     for c in Category::ALL {
@@ -318,6 +345,9 @@ fn message(items: &[&Value], summary: &Value) -> String {
     lines.join("\n")
 }
 
+/// Runs `USAGE`: validates `type`, `limit` and `offset` (rejecting bad input without touching the
+/// drawing), scans read-only, and returns the paged items with the per-kind summary, PURGE's
+/// unused lists and the message.
 pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).filter(|v| !v.is_null());
     let count = |k: &str, default: usize| -> Result<usize> {

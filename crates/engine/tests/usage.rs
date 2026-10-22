@@ -8,12 +8,14 @@ use cadcraft_engine::doc::{Block, Common, Drawing, Entity, EntityKind, Handle, I
 use cadcraft_engine::geom::Vec3;
 use serde_json::{Value, json};
 
+/// A LINE on `layer` with an explicit `linetype`, ten units long so it is never degenerate.
 fn line(handle: u64, layer: &str, linetype: &str) -> Entity {
     let mut e = Entity::new(Handle(handle), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) }));
     e.common = Common { layer: layer.into(), linetype: linetype.into(), ..Common::default() };
     e
 }
 
+/// A TEXT reading NOTE in `style` on `layer`, so the text-style table has a visible user.
 fn text(handle: u64, layer: &str, style: &str) -> Entity {
     let mut e = Entity::new(
         Handle(handle),
@@ -34,6 +36,7 @@ fn text(handle: u64, layer: &str, style: &str) -> Entity {
     e
 }
 
+/// An INSERT of `block` on `layer`, at unit scale and without attributes.
 fn insert(handle: u64, block: &str, layer: &str) -> Entity {
     let mut e = Entity::new(
         Handle(handle),
@@ -53,6 +56,8 @@ fn insert(handle: u64, block: &str, layer: &str) -> Entity {
     e
 }
 
+/// A block definition named `name` holding `entities`, shared the way the drawing's block table
+/// stores it.
 fn block(name: &str, entities: Vec<Entity>) -> Arc<Block> {
     let mut b = Block::new(name);
     for e in entities {
@@ -88,10 +93,12 @@ fn drawing() -> Session {
     s
 }
 
+/// Runs the `usage` command with `p` and unwraps the result, so a rejected call fails the test.
 fn usage(s: &mut Session, p: Value) -> Value {
     s.execute("usage", &p).unwrap()
 }
 
+/// The report item of kind `ty` named `name`, failing with the whole item list when it is absent.
 fn item<'a>(r: &'a Value, ty: &str, name: &str) -> &'a Value {
     r["items"]
         .as_array()
@@ -101,10 +108,14 @@ fn item<'a>(r: &'a Value, ty: &str, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no {ty} \"{name}\" in {}", r["items"]))
 }
 
+/// The `unused` names of kind `kind` as plain strings, in the order USAGE returned them.
 fn names(r: &Value, kind: &str) -> Vec<String> {
     r["unused"][kind]["names"].as_array().unwrap().iter().map(|n| n.as_str().unwrap().to_string()).collect()
 }
 
+/// Guards that each layer separates uses in model space and the layouts from uses inside block
+/// definitions, that Defpoints is empty yet kept by PURGE, and that the current layer is never
+/// offered as unused.
 #[test]
 fn layers_report_uses_and_where() {
     let mut s = drawing();
@@ -139,6 +150,9 @@ fn layers_report_uses_and_where() {
     assert_eq!(names(&r, "layers"), ["Empty"]);
 }
 
+/// Guards that a block's `used` follows reachability from model space — INNER, referenced only
+/// by the inserted WALLS, is used but inside blocks only — and that an unreferenced definition
+/// such as OLD is empty and purgeable.
 #[test]
 fn blocks_report_references_and_reachability() {
     let mut s = drawing();
@@ -159,6 +173,9 @@ fn blocks_report_references_and_reachability() {
     assert_eq!(r["summary"]["blocks"]["unused"], 1);
 }
 
+/// Guards that text styles count the entities that use them and the dimension/multileader styles
+/// that name them, that ByLayer and ByBlock are values rather than uses of the linetype table,
+/// and that a layer's linetype counts as a reference to it.
 #[test]
 fn styles_and_linetypes_report_uses() {
     let mut s = drawing();
@@ -198,6 +215,8 @@ fn styles_and_linetypes_report_uses() {
     assert_eq!((continuous["used"].clone(), continuous["unused"].clone()), (json!(true), json!(false)));
 }
 
+/// Guards the promise that USAGE is read-only: the drawing is not copied and its uid, revision,
+/// dirty flag, undo stack and tables are exactly as they were.
 #[test]
 fn nothing_is_modified() {
     let mut s = drawing();
@@ -224,6 +243,8 @@ fn nothing_is_modified() {
     assert_eq!(st.is_dirty(), dirty);
 }
 
+/// Guards the paging envelope (`count`, `returned`, `offset`, `truncated`), the `type` filter and
+/// that a bad `type`, `limit` or `offset` is reported as an error rather than panicking.
 #[test]
 fn paging_and_filters() {
     let mut s = drawing();
