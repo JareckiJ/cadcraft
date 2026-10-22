@@ -6,6 +6,8 @@ use cadcraft_doc::{Drawing, Space};
 use cadcraft_engine::Session;
 use cadcraft_engine::cmd::file::{IoHooks, base64_decode, set_io};
 use cadcraft_engine::cmd::plotters::{PlotterStore, set_plotter_store};
+use cadcraft_engine::snap::tracking::CursorQuery;
+use cadcraft_engine::{Input, geom::Vec2};
 use serde_json::{Value, json};
 
 /// The plot hook echoes the options it gets.
@@ -189,4 +191,35 @@ fn plotwindow_keeps_the_picked_window_for_the_plot_dialog() {
     let r = s.execute("plotwindow", &json!({"p1": [0, 0], "p2": [3, 4]})).unwrap();
     assert_eq!(r["window"], json!([[0.0, 0.0], [3.0, 4.0]]));
     assert!(s.execute("plotwindow", &json!({"p1": [0, 0], "p2": [3, 0]})).is_err());
+}
+
+/// The cursor at the current prompt, snapped as the canvas does.
+fn hover(s: &mut Session, raw: Vec2) -> Vec2 {
+    let p = s.current_prompt().expect("a prompt");
+    let q = CursorQuery { base: p.base, deferred: p.deferred, corner: p.corner, aperture: 1e-6, tol: 1e-6, now: 0.0, shift: false };
+    s.snap_cursor(raw, &q).point
+}
+
+#[test]
+fn plotwindow_picks_both_corners_with_ortho_on() {
+    let mut s = Session::new();
+    s.execute("setvar", &json!({"name": "OSMODE", "value": 0})).unwrap();
+    s.execute("setvar", &json!({"name": "ORTHOMODE", "value": 1})).unwrap();
+    s.cmdline("plotwindow").unwrap();
+    assert_eq!(s.current_prompt().unwrap().message, "Specify first corner");
+    let a = hover(&mut s, Vec2::new(10.0, 20.0));
+    s.input(Input::Point(a)).unwrap();
+    assert_eq!(s.current_prompt().unwrap().message, "Specify opposite corner");
+    let c = hover(&mut s, Vec2::new(40.0, 5.0));
+    assert!(c.near(Vec2::new(40.0, 5.0), 1e-9), "the opposite corner is where the cursor is: {c:?}");
+    s.input(Input::Point(c)).unwrap();
+    assert!(s.running.is_none());
+    let w = s.plot_window.expect("the picked window");
+    assert!(w.width() > 0.0 && w.height() > 0.0, "the window has both extents: {w:?}");
+    assert_eq!((w.min.x, w.min.y, w.max.x, w.max.y), (10.0, 5.0, 40.0, 20.0));
+
+    // An ordinary point prompt still follows ortho: a line's next point stays on its axis.
+    s.cmdline("line 0,0").unwrap();
+    let c = hover(&mut s, Vec2::new(10.0, 4.0));
+    assert!(c.near(Vec2::new(10.0, 0.0), 1e-9), "ortho keeps the line horizontal: {c:?}");
 }
