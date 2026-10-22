@@ -282,6 +282,9 @@ struct Ctx<'a> {
     /// Extra linetype scale for model space seen through a viewport: 1 / viewport scale when
     /// `PSLTSCALE` is on (dashes keep their paper-space length at any viewport scale), else 1.
     lt_factor: f64,
+    /// The model window a layout viewport draws, in the space `xf` maps to (paper units): block
+    /// entities whose bounds through `xf` miss it are not expanded. `None` when not culling.
+    cull: Option<Bounds2>,
     /// Named plot style (table index) of the block reference being expanded, for `ByBlock`.
     block_pstyle: Option<usize>,
     /// Transparency (percent) of the block reference being expanded, for `ByBlock`.
@@ -508,6 +511,7 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
         frozen,
         vp_colors,
         lt_factor: 1.0,
+        cull: None,
         block_pstyle: None,
         block_transparency: 0,
     }
@@ -721,10 +725,15 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
     let mcenter = vp.view_center + (area.center() - center) / s;
     // Model window with slack: entity bounds are approximate (text, dimensions).
     let win = Bounds2::new(mcenter - mhalf, mcenter + mhalf).expand(mhalf.x.max(mhalf.y) * 0.1);
+    // The same window in paper units, where `xf` maps block coordinates (these are model units):
+    // block contents that cannot reach it are skipped instead of built and clipped away. An
+    // unbounded window (hostile sizes) leaves culling off rather than dropping everything.
+    let cull = Bounds2::from_points(win.corners().map(|c| xf.apply(c)));
+    let cull = (!cull.is_empty()).then_some(cull);
     // PSLTSCALE on: model-space dashes are scaled so they measure the same on paper as in
     // paper space, whatever the viewport scale.
     let lt_factor = if d.header.i64("PSLTSCALE", 1) != 0 { 1.0 / s } else { 1.0 };
-    let ctx = || Ctx { lt_factor, ..top_ctx(d, xf, VIEWPORT_CONTENT, &vp.frozen_layers, &vp.layer_colors) };
+    let ctx = || Ctx { lt_factor, cull, ..top_ctx(d, xf, VIEWPORT_CONTENT, &vp.frozen_layers, &vp.layer_colors) };
     let seen = |me: &Entity| {
         if matches!(me.kind, EntityKind::Viewport(_)) {
             return false;
@@ -1529,10 +1538,24 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
         frozen: ctx.frozen,
         vp_colors: ctx.vp_colors,
         lt_factor: ctx.lt_factor,
+        cull: ctx.cull,
         block_pstyle: ctx.block_pstyle,
         // The reference's own, set by the caller (`Builder::transparency` while it draws).
         block_transparency: ctx.block_transparency,
     }
+}
+
+/// Whether a block entity can reach `win` (in the space `xf` maps to) when drawn through `xf`.
+/// False only when its bounds are known and miss the window: approximate bounds (text,
+/// dimensions) are safe, and a transform without finite bounds is not culled.
+fn reaches_window(win: Option<Bounds2>, d: &Drawing, e: &Entity, xf: &Mat3, depth: usize) -> bool {
+    let Some(win) = win else { return true };
+    let eb = cadcraft_doc::entity_bounds(d, e, depth);
+    if eb.is_empty() {
+        return true;
+    }
+    let out = Bounds2::from_points(eb.corners().map(|c| xf.apply(c)));
+    out.is_empty() || out.intersects(&win)
 }
 
 fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) {
@@ -1553,6 +1576,10 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 for be in blk.entities.iter() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {
+                        continue;
+                    }
+                    // A layout viewport only builds what can reach its model window (#1719).
+                    if !reaches_window(ctx.cull, ctx.d, be, &sub.xf, sub.depth) {
                         continue;
                     }
                     if !b.expand() {
