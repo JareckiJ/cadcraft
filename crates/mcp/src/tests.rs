@@ -111,6 +111,17 @@ fn bad_tool_calls_are_invalid_params() {
     assert_eq!(s.handle_line("[]").map(|r| serde_json::from_str::<Value>(&r).unwrap()["error"]["code"].clone()), Some(json!(-32600)));
 }
 
+/// `open` reads both DXF and DWG, so `tools/list` must advertise both (#1875).
+#[test]
+fn open_tool_description_names_dxf_and_dwg() {
+    let mut s = Server::new(Box::new(Headless::default()));
+    let tools = call(&mut s, 1, "tools/list", json!({}));
+    let open = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "open").unwrap();
+    let desc = open["description"].as_str().unwrap();
+    assert!(desc.contains("DXF"), "`open` must still name DXF: {desc}");
+    assert!(desc.contains("DWG"), "`open` reads DWG too: {desc}");
+}
+
 #[test]
 fn query_entities_selection_filter_is_discoverable_and_forwarded() {
     let mut s = Server::new(Box::new(Headless::default()));
