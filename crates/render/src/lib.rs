@@ -498,6 +498,10 @@ pub fn build_plot(d: &Drawing, space: &Space, opts: &Options) -> DisplayList {
     build_space(d, space, opts, true)
 }
 
+/// The context for a space's top-level entities: the transform `xf` from their coordinates to the
+/// output space, handle `top` for the primitives built with it, `frozen`/`vp_colors` overrides from
+/// a layout viewport, and no inherited block properties. `lt_factor` is 1 and `cull` is `None`;
+/// `contents` overrides both for model space seen through a viewport.
 fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_colors: &'a [(String, Color)]) -> Ctx<'a> {
     Ctx {
         d,
@@ -706,7 +710,8 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
 }
 
 /// Model space seen through `vp`, in paper units, appended to `b`'s list clipped to `clip`;
-/// `area` (the clip's bounds on paper) picks the model objects to draw.
+/// `area` (the clip's bounds on paper) picks the model objects to draw, and the model window it
+/// maps to also culls block contents, which are never built when they miss it (#1719).
 fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bounds2, clip: &Clip, unit_mm: f64) {
     if b.list.expanded >= MAX_BLOCK_EXPANSION || !vp.on {
         return;
@@ -1509,6 +1514,10 @@ fn align(h: cadcraft_doc::HAlign, v: cadcraft_doc::VAlign) -> (cadcraft_fonts::A
     (ha, va)
 }
 
+/// The context for the contents of block reference `e` placed through transform `m`: `m` is
+/// composed with the parent's transform, ByBlock/ByLayer colours, lineweights and linetypes
+/// resolve against the reference and its layer, the nesting depth grows by one, and the parent's
+/// linetype factor and cull window carry into the block.
 fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
     let layer = if e.common.layer == "0" { ctx.block_layer.clone() } else { Some(e.common.layer.clone()) };
     let color = match e.common.color {
@@ -1558,6 +1567,10 @@ fn reaches_window(win: Option<Bounds2>, d: &Drawing, e: &Entity, xf: &Mat3, dept
     out.is_empty() || out.intersects(&win)
 }
 
+/// Append block reference `ins` to `b`: every array copy and nested block of its definition, in
+/// the colour `rgb` resolved for the reference, followed by its visible attributes. Stops at
+/// `MAX_BLOCK_DEPTH` and once the block-expansion budget is spent; inside a layout viewport,
+/// entities that cannot reach the cull window are skipped instead of built and clipped away.
 fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) {
     if ctx.depth >= cadcraft_doc::MAX_BLOCK_DEPTH {
         return;
