@@ -286,6 +286,7 @@ mod web {
                 });
             }
 
+            self.0.touch_hook(ctx, raw);
             self.0.raw_input_hook(raw);
             cadcraft_ui_egui::cmdline::capture_tab(ctx, raw);
         }

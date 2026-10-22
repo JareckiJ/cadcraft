@@ -1294,9 +1294,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let _ = app.session.zoom_about(f, about);
     }
     let zoom_pinch = ui.input(|i| crate::animation::zoom_delta(i, &opts, app.shows_animations()));
+    // A touch-screen pinch zooms about the fingers, not the (virtual) mouse crosshair.
+    let pinch_centre = ui.input(|i| i.multi_touch().map(|t| t.center_pos)).filter(|p| rect.contains(*p));
     if inside
         && (zoom_pinch - 1.0).abs() > 1e-4
-        && let Some(hp) = hover_pos
+        && let Some(hp) = pinch_centre.or(hover_pos)
     {
         let _ = app.session.zoom_about(f64::from(zoom_pinch), xf.to_world(hp));
     }

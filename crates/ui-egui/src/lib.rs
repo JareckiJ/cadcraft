@@ -44,6 +44,7 @@ pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
 pub mod theme;
+pub mod touch;
 pub mod viewcube;
 pub mod vpscale;
 
@@ -213,6 +214,8 @@ pub struct CadApp {
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
     pub synthetic: Vec<egui::Event>,
+    /// The virtual mouse that turns canvas touches into pointer events ([`touch`]).
+    pub touch: touch::TouchMouse,
     /// Caps the frame rate when presenting without vsync (see [`gpu::FrameCap`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub frame_cap: Option<gpu::FrameCap>,
@@ -265,6 +268,7 @@ impl CadApp {
             queued_shots: Vec::new(),
             shot_token: 0,
             synthetic: Vec::new(),
+            touch: touch::TouchMouse::default(),
             #[cfg(not(target_arch = "wasm32"))]
             frame_cap: None,
             fonts_language: None,
@@ -564,7 +568,7 @@ impl CadApp {
         self.drain_control(ctx);
         self.finish_opening();
         self.opening.show(ctx);
-        if !self.synthetic.is_empty() {
+        if !self.synthetic.is_empty() || self.touch.busy() {
             ctx.request_repaint();
         }
         self.collect_screenshots(ctx);
@@ -581,6 +585,16 @@ impl CadApp {
                 self.open_path(&p);
             }
         }
+    }
+
+    /// Turn touches that start on the drawing canvas into virtual-mouse pointer events
+    /// ([`touch`]). Touches elsewhere and mouse input pass through.
+    pub fn touch_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let canvas = self.canvas.rect;
+        let now = raw.time.unwrap_or_else(|| now_ms() / 1000.0);
+        let on_canvas =
+            |p: egui::Pos2| canvas.is_some_and(|r| r.contains(p)) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background);
+        self.touch.filter(&mut raw.events, now, canvas, &on_canvas);
     }
 
     /// Wait for the frame cap (if any), then inject synthetic events (one pointer event per frame).
