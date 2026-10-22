@@ -179,6 +179,48 @@ mod web {
         }
     }
 
+    /// Stop the browser events that would reach eframe as pointer events at a finger: the
+    /// browser's own pointer events for canvas touches, and the mouse events it emulates right
+    /// after a touch. Canvas touches then reach the app only as touch events, which
+    /// [`cadcraft_ui_egui::touch::TouchMouse`] turns into pointer events at the crosshair.
+    /// Registered before eframe's listeners, so stopping an event here skips them; a touch's
+    /// `pointerup` still focuses the canvas, as eframe's listener does.
+    fn install_touch_gate(canvas: &web_sys::HtmlCanvasElement) {
+        use cadcraft_ui_egui::touch::{DomEvent, NativeGate};
+        let gate = std::rc::Rc::new(std::cell::Cell::new(NativeGate::default()));
+        let pointer = ["pointerdown", "pointerup", "pointermove", "pointercancel"];
+        let touch = ["touchstart", "touchmove", "touchend", "touchcancel"];
+        let mouse = ["mousedown", "mouseup", "mousemove", "mouseleave", "click"];
+        for name in pointer.into_iter().chain(touch).chain(mouse) {
+            let gate = gate.clone();
+            let element = canvas.clone();
+            let callback = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |event: web_sys::Event| {
+                let kind = event.type_();
+                let dom = if kind.starts_with("pointer") {
+                    DomEvent::Pointer { touch: event.dyn_ref::<web_sys::PointerEvent>().is_some_and(|p| p.pointer_type() == "touch") }
+                } else if kind.starts_with("touch") {
+                    DomEvent::Touch
+                } else {
+                    DomEvent::Mouse
+                };
+                let mut g = gate.get();
+                let admit = g.admit(dom, js_sys::Date::now() / 1000.0);
+                gate.set(g);
+                if !admit {
+                    event.stop_immediate_propagation();
+                    if kind == "pointerup" {
+                        let options = web_sys::FocusOptions::new();
+                        options.set_prevent_scroll(true);
+                        let _ = element.focus_with_options(&options);
+                    }
+                }
+            }));
+            if canvas.add_event_listener_with_callback(name, callback.as_ref().unchecked_ref()).is_ok() {
+                callback.forget();
+            }
+        }
+    }
+
     const CANVAS_ID: &str = "cadcraft_canvas";
     const LOADING_ID: &str = "cadcraft_loading";
 
@@ -379,6 +421,7 @@ mod web {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
                 return;
             };
+            install_touch_gate(&canvas);
             let mut options = eframe::WebOptions::default();
             if query().contains("webgl")
                 && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
