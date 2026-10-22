@@ -2,8 +2,9 @@
 //! continuous line (#1068): one path instead of one per dash. Dashes that are visible on paper
 //! still come out one by one.
 
-use cadcraft_doc::Space;
-use cadcraft_io::{PdfOptions, pdf::pdf, read_dxf};
+use cadcraft_doc::{Common, Drawing, Layout, Space};
+use cadcraft_io::{PdfOptions, pdf::pdf, plotter::plot, read_dxf};
+use serde_json::json;
 
 /// N horizontal lines on a 0.5/-0.25 DASHED linetype, each `len` long (as in the #1068 control).
 fn dashed_lines(n: usize, len: f64) -> Vec<u8> {
@@ -56,4 +57,29 @@ fn visible_dashes_still_plot_one_by_one() {
     let d = read_dxf(&dashed_lines(10, 15.0)).expect("dxf");
     let n = moves(&d);
     assert!(n >= 10 * 20, "{n} path segments; expected every dash");
+}
+
+/// Strokes in an SVG plot of a layout holding copies of `d`'s model lines at linetype scale `ltscale`.
+fn layout_svg_strokes(d: &Drawing, ltscale: f64) -> usize {
+    let mut d = d.clone();
+    let sheet = Space::Paper("SHEET".into());
+    d.layouts.push(Layout::new("SHEET", 3));
+    let lines: Vec<_> = d.model.iter().map(|e| (e.common.linetype.clone(), e.kind.clone())).collect();
+    for (linetype, kind) in lines {
+        d.add(&sheet, Common { linetype, ltscale, ..Common::default() }, kind).expect("add");
+    }
+    let svg = plot(&d, &sheet, &json!({ "output": "svg" })).expect("svg");
+    let svg = String::from_utf8(svg).expect("utf-8");
+    svg.matches("<polyline").count() + svg.matches("<line ").count()
+}
+
+#[test]
+fn layout_svg_plots_draw_sub_resolution_dashes_as_one_line() {
+    // 10 lines of 30 paper units. At linetype scale 0.001 a period is 0.00075 units, under
+    // 0.05 mm whatever the paper unit; at scale 1 it is 0.75 units, and every dash shows.
+    let d = read_dxf(&dashed_lines(10, 30.0)).expect("dxf");
+    let n = layout_svg_strokes(&d, 0.001);
+    assert!(n <= 20, "{n} strokes for 10 sub-resolution dashed lines on a layout");
+    let n = layout_svg_strokes(&d, 1.0);
+    assert!(n >= 10 * 20, "{n} strokes; expected every dash");
 }
