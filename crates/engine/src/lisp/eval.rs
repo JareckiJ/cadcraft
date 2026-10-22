@@ -655,12 +655,17 @@ impl Ctx<'_> {
         // thread and bypassing the blocking execution cap (CWE-400).
         let mut spent: u64 = 0;
         loop {
-            match m.run(&mut sub, SYNC_SLICE) {
+            let remaining = cap.saturating_sub(spent);
+            if remaining == 0 {
+                return Err(LispError::new(format!("callback stopped after {cap} steps")));
+            }
+            let slice = remaining.min(SYNC_SLICE);
+            match m.run(&mut sub, slice) {
                 Outcome::Done(v) => return Ok(v),
                 Outcome::Error(e) => return Err(e),
                 Outcome::Wait(Need::Yield) => {
-                    spent = spent.saturating_add(SYNC_SLICE);
-                    if spent > cap {
+                    spent = spent.saturating_add(slice);
+                    if spent >= cap {
                         return Err(LispError::new(format!("callback stopped after {cap} steps")));
                     }
                 }
