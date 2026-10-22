@@ -407,10 +407,15 @@ fn run_publish(s: &mut Session, p: &Value) -> Result<Value> {
         // `file_part` maps `A+` and `A_` to the same name, and some file systems ignore case.
         let mut files: BTreeMap<String, &String> = BTreeMap::new();
         for name in &sheets {
-            if let Some(other) = files.insert(file_part(name).to_lowercase(), name)
-                && other != name
-            {
-                return Err(bad("publish", format!("`{other}` and `{name}` would be published to the same file; rename one of them")));
+            if let Some(other) = files.insert(file_part(name).to_lowercase(), name) {
+                return Err(bad(
+                    "publish",
+                    if other == name {
+                        format!("`{name}` is listed twice")
+                    } else {
+                        format!("`{other}` and `{name}` would be published to the same file; rename one of them")
+                    },
+                ));
             }
         }
     }
@@ -788,6 +793,10 @@ mod tests {
         let text = String::from_utf8(std::fs::read(&path).unwrap()).unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(text.contains("\"output\":\"pdf\""), "{text}");
+        // A layout listed twice would be written twice to one file.
+        let twice = json!({ "path": temp("twice.pdf").to_string_lossy(), "layouts": ["Layout2", "layout2"] });
+        let e = s.execute("publish", &twice).unwrap_err().to_string();
+        assert!(e.contains("`Layout2` is listed twice"), "{e}");
         // `Sheet A+` and `Sheet A_` would both be written to `clash-Sheet A_.pdf`: refused before plotting.
         s.execute("layout", &json!({ "option": "rename", "name": "Layout1", "to": "Sheet A+" })).unwrap();
         s.execute("layout", &json!({ "option": "rename", "name": "Layout2", "to": "Sheet A_" })).unwrap();
