@@ -192,6 +192,15 @@ impl DisplayList {
             _ => Vec::new(),
         }
     }
+    /// A filled primitive ([`Kind::Tris`], [`Kind::Mask`]) as closed contours whose nonzero
+    /// winding covers its triangles, for writing it as one path; `None` for other kinds or when
+    /// the triangles should be written as they are (very large fills).
+    pub fn fill_contours(&self, p: &DPrim) -> Option<Vec<Vec<Vec2>>> {
+        match p.kind {
+            Kind::Tris | Kind::Mask => outline::fill_contours(self.points(p)),
+            _ => None,
+        }
+    }
 }
 
 /// Build options.

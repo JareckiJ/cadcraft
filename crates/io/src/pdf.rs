@@ -720,14 +720,27 @@ fn content_stream(
                     glyph(&mut c, &mut text_font, *font, t, map);
                     continue;
                 }
+                // One path around the fill (nonzero winding covers what the triangles cover)
+                // instead of a subpath per triangle: a text hatch is hundreds of triangles a glyph.
                 let mut any = false;
-                for t in raw.as_chunks::<3>().0 {
-                    for (i, q) in t.iter().enumerate() {
-                        pt(&mut c, map.pt(*q));
-                        c.push_str(if i == 0 { " m\n" } else { " l\n" });
+                if let Some(contours) = list.fill_contours(p) {
+                    for l in &contours {
+                        for (i, q) in l.iter().enumerate() {
+                            pt(&mut c, map.pt(*q));
+                            c.push_str(if i == 0 { " m\n" } else { " l\n" });
+                        }
+                        c.push_str("h\n");
+                        any = true;
                     }
-                    c.push_str("h\n");
-                    any = true;
+                } else {
+                    for t in raw.as_chunks::<3>().0 {
+                        for (i, q) in t.iter().enumerate() {
+                            pt(&mut c, map.pt(*q));
+                            c.push_str(if i == 0 { " m\n" } else { " l\n" });
+                        }
+                        c.push_str("h\n");
+                        any = true;
+                    }
                 }
                 if any {
                     c.push_str("f\n");
