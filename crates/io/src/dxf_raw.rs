@@ -91,7 +91,7 @@ fn handle(s: &str) -> Option<Handle> {
 }
 
 /// Group codes whose values are handles of other objects (DXF Reference, group code ranges).
-fn is_pointer(code: i32) -> bool {
+pub(crate) fn is_pointer(code: i32) -> bool {
     matches!(code, 320..=369 | 390..=399 | 480..=481 | 1005)
 }
 
@@ -473,6 +473,10 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
     for e in all_entities(d) {
         note(&e.common.xdata);
+    }
+    // Header variables that point at records (written back as read, see `finish`).
+    if let Some(h) = secs.iter().find(|s| s.name == "HEADER") {
+        note(&h.tags.iter().filter(|t| is_pointer(t.code)).map(raw).collect::<Vec<_>>());
     }
     for e in all_entities(d) {
         if let EntityKind::Unknown(u) = &e.kind {
@@ -878,6 +882,12 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             record(&map, &ur, ub, x.as_deref(), true, false, &mut out);
         }
         out.extend(tags.get(r.start).cloned());
+        // Header variables that point at records (kept from the file read, `kept_header_vars`):
+        // at what has their role now, as references of kept data are.
+        if r.kind == "SECTION" && b.first().is_some_and(|t| t.code == 2 && t.str().trim() == "HEADER") {
+            out.extend(b.iter().map(|t| if is_pointer(t.code) { map.group(&raw(t)) } else { t.clone() }));
+            continue;
+        }
         let x = extra_for(f, &xd, r, b, &block);
         if x.is_none() && Some(r.start) != root {
             out.extend(b.iter().cloned());
@@ -1101,6 +1111,29 @@ fn add_appids(out: &mut Vec<Tag>) {
         *count = Tag::i(70, count.i64().saturating_add(i64::try_from(missing.len()).unwrap_or(0)));
     }
     out.splice(end_at..end_at, add);
+}
+
+/// The handles a header variable read from the file may still point at: the records CADCraft
+/// writes itself (by role), the kept objects and the entities. Other pointers are written as the
+/// null handle.
+pub(crate) fn known_records(d: &Drawing) -> HashSet<Handle> {
+    let f = d.foreign.as_ref();
+    f.targets.keys().copied().chain(f.objects.iter().map(|o| o.handle)).chain(all_entities(d).map(|e| e.handle)).collect()
+}
+
+/// Header variables that point at records (codes 320–369, 390–399): a pointer to a record the
+/// written file doesn't have becomes the null handle.
+pub(crate) fn null_dangling_header_refs(tags: &mut [Tag]) {
+    let Some(end) = tags.iter().position(|t| t.code == 0 && t.str() == "ENDSEC") else { return };
+    if !tags.iter().take(end).any(|t| is_pointer(t.code)) {
+        return;
+    }
+    let handles: HashSet<String> = written_records(tags).iter().filter_map(|r| head(tags.get(r.start + 1..r.end).unwrap_or(&[])).handle).collect();
+    for t in tags.iter_mut().take(end) {
+        if is_pointer(t.code) && handle(&t.str()).is_none_or(|h| !handles.contains(&h.hex())) {
+            *t = Tag::s(t.code, "0");
+        }
+    }
 }
 
 /// The index of the `$HANDSEED` value in the header.
