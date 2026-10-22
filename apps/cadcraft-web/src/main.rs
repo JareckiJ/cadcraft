@@ -24,9 +24,16 @@ mod web {
     const LOADING_ID: &str = "cadcraft_loading";
 
     /// The app, the files File > Open… and drag and drop read for it in the background, the
-    /// page embedding it (`?host=parent`), and the browser's `prefers-reduced-motion` (it stays
-    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change).
-    struct Shell(CadApp, crate::upload::Inbox, Option<(crate::host::Bridge, crate::host::DirtyReport)>, Option<web_sys::MediaQueryList>);
+    /// page embedding it (`?host=parent`), the browser's `prefers-reduced-motion` (it stays
+    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change),
+    /// and the viewport title last sent to the page.
+    struct Shell(
+        CadApp,
+        crate::upload::Inbox,
+        Option<(crate::host::Bridge, crate::host::DirtyReport)>,
+        Option<web_sys::MediaQueryList>,
+        Option<String>,
+    );
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -34,6 +41,10 @@ mod web {
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
+            let drawing = self.0.session.state().ok();
+            if let Some(title) = crate::title_to_send(&mut self.4, drawing.map(|d| d.title.as_str()), drawing.is_some_and(|d| d.is_dirty())) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            }
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
@@ -152,7 +163,7 @@ mod web {
                             (bridge, crate::host::DirtyReport::default())
                         });
                         let reduced_motion = web_sys::window().and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten());
-                        Ok(Box::new(Shell(app, inbox, host, reduced_motion)))
+                        Ok(Box::new(Shell(app, inbox, host, reduced_motion, None)))
                     }),
                 )
                 .await;
@@ -177,6 +188,29 @@ fn wants_cpu(query: &str) -> bool {
     query.trim_start_matches('?').split('&').any(|p| p == "cpu" || p.starts_with("cpu="))
 }
 
+/// The browser tab title: the open drawing's file name, a bullet once it has unsaved changes,
+/// and the app name (`drawing.dwg • — CADCraft`), or just the app name with no drawing. An
+/// embedding page (`?host=parent`) reads it to tell which drawing opened and whether it is dirty.
+#[cfg(any(target_arch = "wasm32", test))]
+fn document_title(name: Option<&str>, dirty: bool) -> String {
+    match name.filter(|n| !n.trim().is_empty()) {
+        Some(name) => format!("{name}{} — CADCraft", if dirty { " •" } else { "" }),
+        None => "CADCraft".to_string(),
+    }
+}
+
+/// The title to send this frame, or `None` while the page already shows it: a viewport title
+/// command asks for a repaint, so resending an unchanged title would keep an idle tab drawing.
+#[cfg(any(target_arch = "wasm32", test))]
+fn title_to_send(sent: &mut Option<String>, name: Option<&str>, dirty: bool) -> Option<String> {
+    let title = document_title(name, dirty);
+    if sent.as_deref() == Some(title.as_str()) {
+        return None;
+    }
+    *sent = Some(title.clone());
+    Some(title)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod upload;
 
@@ -192,7 +226,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::wants_cpu;
+    use super::{document_title, title_to_send, wants_cpu};
 
     #[test]
     fn cpu_flag_is_detected() {
@@ -203,5 +237,32 @@ mod tests {
         assert!(!wants_cpu("?sample"));
         assert!(!wants_cpu("?webgl&sample"));
         assert!(!wants_cpu("?gpucpu"));
+    }
+
+    #[test]
+    fn viewport_title_names_the_document_and_marks_unsaved_changes() {
+        assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — CADCraft");
+        assert_eq!(document_title(Some("drawing.dwg"), true), "drawing.dwg • — CADCraft");
+        assert_eq!(document_title(Some("Drawing1"), false), "Drawing1 — CADCraft");
+        assert_eq!(document_title(None, false), "CADCraft");
+        assert_eq!(document_title(None, true), "CADCraft");
+        assert_eq!(document_title(Some("   "), true), "CADCraft");
+    }
+
+    #[test]
+    fn viewport_title_follows_open_rename_and_dirty_changes_only() {
+        let mut sent = None;
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false).as_deref(), Some("drawing.dwg — CADCraft"));
+        // The page already has it: send nothing.
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false), None);
+        // Unsaved changes add the bullet.
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), true).as_deref(), Some("drawing.dwg • — CADCraft"));
+        // A rename shows the new name.
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), true).as_deref(), Some("plan.dwg • — CADCraft"));
+        // Saving clears it again.
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), false).as_deref(), Some("plan.dwg — CADCraft"));
+        // Closing the last drawing leaves the app name only.
+        assert_eq!(title_to_send(&mut sent, None, false).as_deref(), Some("CADCraft"));
+        assert_eq!(title_to_send(&mut sent, None, false), None);
     }
 }
