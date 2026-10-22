@@ -76,6 +76,8 @@ pub struct UiOptions {
 }
 
 impl Default for UiOptions {
+    /// The defaults, AutoCAD's where it matters: time-sensitive right-click is off, so a
+    /// right-click at a prompt with options opens the menu and one without options is Enter.
     fn default() -> Self {
         UiOptions {
             model_background: None,
@@ -115,6 +117,7 @@ pub fn parse_hex(s: &str) -> Option<Color32> {
     Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?))
 }
 
+/// A colour as `"#rrggbb"`, or JSON null when unset.
 fn color_json(c: Option<Color32>) -> Value {
     c.map_or(Value::Null, |c| json!(hex(c)))
 }
@@ -152,6 +155,7 @@ struct UiChanges {
     interface_scale: Option<f32>,
 }
 
+/// A `"#rrggbb"` parameter (null for unset), refused with a message naming `key`.
 fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
     match v {
         Value::Null => Ok(None),
@@ -160,6 +164,8 @@ fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
     }
 }
 
+/// Apply one interface preference from the JSON form to `c`: `Ok(false)` when `key` belongs to
+/// the engine's variables instead, an error naming the expected value when it is malformed.
 fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
     let text = || v.as_str().ok_or_else(|| format!("{key} must be text"));
     match key {
@@ -383,6 +389,8 @@ impl CadApp {
 mod tests {
     use super::*;
 
+    /// Lower- and upper-case hex round-trip; short, long and non-ASCII forms are refused with
+    /// `None` (never a panic).
     #[test]
     fn hex_colours_round_trip_and_bad_ones_are_refused() {
         let c = Color32::from_rgb(0x12, 0xab, 0xff);
@@ -393,6 +401,8 @@ mod tests {
         }
     }
 
+    /// Every label typed with `crate::tl!` in the Options dialog has a Ukrainian translation
+    /// (file format names excepted), so no English text leaks into the translated dialog.
     #[test]
     fn dialog_labels_have_ukrainian_translations() {
         let sources = [include_str!("dialog.rs")];

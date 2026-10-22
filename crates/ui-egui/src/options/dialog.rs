@@ -85,14 +85,17 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     }
 }
 
+/// A two-column label/control grid with the dialog's spacing, laid out under the unique `id`.
 fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id).num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, add);
 }
 
+/// Dimmed small text under the control it explains.
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).small().color(Tokens::get().text_dim));
 }
 
+/// The translated label of a theme preference in the Display tab's combo box.
 fn theme_label(t: ThemePref) -> &'static str {
     match t {
         ThemePref::System => crate::tl!("Use System Setting"),
@@ -101,6 +104,7 @@ fn theme_label(t: ThemePref) -> &'static str {
     }
 }
 
+/// The translated label of an animation preference in the Display tab's combo box.
 fn animations_label(a: AnimationPref) -> &'static str {
     match a {
         AnimationPref::System => crate::tl!("Use System Setting"),
@@ -135,6 +139,8 @@ fn preview_square(ui: &mut egui::Ui, side: f32, color: Color32) {
     p.rect_stroke(egui::Rect::from_center_size(rect.center(), vec2(side, side)), 0.0, Stroke::new(2.0, color), egui::StrokeKind::Middle);
 }
 
+/// Display tab: theme, animations, interface scale, model and paper backgrounds, crosshair size,
+/// command-line history and the system cursor.
 fn display(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     grid(ui, "options_display", |ui| {
         ui.label(crate::tl!("Interface theme"));
@@ -204,6 +210,8 @@ fn display(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     hint(ui, crate::tl!("Screen magnifiers, screen readers and recorders follow the system cursor."));
 }
 
+/// Open and Save tab: the format and version new drawings are saved in, and automatic save's
+/// interval and folder (applied when the path field loses focus).
 fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     grid(ui, "options_files", |ui| {
         ui.label(crate::tl!("Save new drawings as"));
@@ -262,6 +270,8 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     hint(ui, crate::tl!("Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off."));
 }
 
+/// Drafting tab: object snap marker size and aperture with previews; the Drafting Settings button
+/// asks the caller to start `dsettings` via `start`.
 fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, start: &mut Option<&'static str>) {
     let t = Tokens::get();
     grid(ui, "options_drafting", |ui| {
@@ -295,6 +305,8 @@ fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, s
     });
 }
 
+/// Selection tab: pickbox and grip sizes, the selection modes, selection preview, and the Visual
+/// Effect Settings window (whose open state lives in egui temp data).
 fn selection(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     let t = Tokens::get();
     let st = &app.session.settings;
@@ -384,6 +396,7 @@ fn selection(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) 
 /// Whether the Visual Effect Settings window is open (egui temp data).
 const VISUAL_EFFECTS: &str = "cc_options_visual_effects";
 
+/// A strong heading above a group of controls.
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).strong());
 }
@@ -462,6 +475,9 @@ fn aci_row(ui: &mut egui::Ui, current: u8, key: &str, changes: &mut Map<String, 
     });
 }
 
+/// User Preferences: the interface language, the largest array, and the right-click behaviour —
+/// time-sensitive (a quick click is Enter, holding opens the menu) or, as in AutoCAD by default,
+/// the menu only when the prompt has options and Enter otherwise.
 fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     grid(ui, "options_preferences", |ui| {
         ui.label(crate::tl!("Interface language"));
@@ -492,6 +508,8 @@ fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>
     hint(ui, crate::tl!("Turned off (AutoCAD's default), a right-click opens the shortcut menu when the prompt has options and is otherwise Enter."));
 }
 
+/// Profiles tab: Reset to Defaults (which keeps the interface language) and Copy as JSON of the
+/// whole [`super::report`].
 fn profiles(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     ui.label(crate::tl!(
         "CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts."
