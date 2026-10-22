@@ -962,7 +962,7 @@
 	Viewport {id}	Видовой экран {id}
 	Viewports	Видовые экраны
 	W	З
-	WCS ⌄	МСК ⌄
+	WCS	МСК
 	White	Белый
 	Width factor	Коэффициент ширины
 	Window	Окно
@@ -1010,3 +1010,4 @@
 	Query Texts	Запрос текстов
 	Ignore hatch objects	Игнорировать объекты штриховки
 	Ignore dimension extension-line endpoints	Игнорировать конечные точки выносных линий размеров
+	Analyze Shapes	Анализ фигур
