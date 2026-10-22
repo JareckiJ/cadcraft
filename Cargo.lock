@@ -647,6 +647,7 @@ name = "cadcraft-fonts"
 version = "0.10.0"
 dependencies = [
  "cadcraft-geom",
+ "encoding_rs",
  "harfrust",
  "skrifa 0.47.0",
  "unicode-bidi",
@@ -731,6 +732,7 @@ name = "cadcraft-web"
 version = "0.10.0"
 dependencies = [
  "cadcraft-engine",
+ "cadcraft-fonts",
  "cadcraft-io",
  "cadcraft-ui-egui",
  "eframe",
