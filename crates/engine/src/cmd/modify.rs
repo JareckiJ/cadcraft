@@ -2254,6 +2254,10 @@ impl Interactive for OffsetM {
     fn name(&self) -> &'static str {
         "OFFSET"
     }
+    /// Starts OFFSET, keeping a single preselected offsettable object (issue #1610) so the prompt
+    /// sequence goes distance then side instead of asking for the object again; any other
+    /// selection is cleared and the object loop asks for it. With PICKFIRST off the selection is
+    /// likewise ignored and cleared.
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         // Exactly one offsettable object selected before the command is taken at once, so only the
         // side is asked for; the object loop stays for the ones after it (issue #1610). A multiple

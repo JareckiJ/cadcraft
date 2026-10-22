@@ -19,6 +19,7 @@ fn lines(s: &Session) -> Vec<((f64, f64), (f64, f64))> {
     v
 }
 
+/// A session with two horizontal lines at y=0 and y=5 and their handles in drawing order.
 fn two_lines() -> (Session, Vec<Handle>) {
     let mut s = Session::new();
     s.script("LINE 0,0 10,0\n\nLINE 0,5 10,5\n\n").unwrap();
@@ -26,10 +27,13 @@ fn two_lines() -> (Session, Vec<Handle>) {
     (s, hs)
 }
 
+/// The message of the current prompt, or an empty string when no command is running.
 fn prompt(s: &Session) -> String {
     s.current_prompt().map(|p| p.message.clone()).unwrap_or_default()
 }
 
+/// Guards #1610: one preselected line is remembered on start, so after the distance only the side
+/// point is asked for and the offset copy lands on that side; the object loop still runs afterwards.
 #[test]
 fn one_preselected_object_goes_straight_to_the_side_prompt() {
     let (mut s, hs) = two_lines();
@@ -48,6 +52,8 @@ fn one_preselected_object_goes_straight_to_the_side_prompt() {
     assert!(s.running.is_none());
 }
 
+/// Guards that a multiple preselection is not silently reduced: OFFSET still asks which one object
+/// to offset, then offsets only the one picked, as AutoCAD does.
 #[test]
 fn two_preselected_objects_still_ask_to_select_one() {
     let (mut s, hs) = two_lines();
@@ -64,6 +70,8 @@ fn two_preselected_objects_still_ask_to_select_one() {
     assert!(s.running.is_none());
 }
 
+/// Guards that a preselected object OFFSET cannot offset (here a text entity) is cleared, so the
+/// command falls back to asking for the object instead of jumping to the side prompt.
 #[test]
 fn one_preselected_non_offsettable_object_still_asks_to_select() {
     let mut s = Session::new();
