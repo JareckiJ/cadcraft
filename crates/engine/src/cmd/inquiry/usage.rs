@@ -13,11 +13,17 @@ use super::super::*;
 use crate::{Result, Session};
 
 const CMD: &str = "usage";
-/// Names listed per kind in `unused`; the counts are always complete.
+/// Names listed per kind in `unused`; the counts are complete unless the scan was cut short
+/// (`incomplete`).
 const MAX_NAMES: usize = 5_000;
+/// The most objects one scan reads, across model space, the layouts and the block definitions. A
+/// drawing with more is reported as `incomplete` instead of with counts that look complete. This
+/// is USAGE's own limit; PURGE's scan limit is separate and unchanged.
+const MAX_SCAN: usize = 5_000_000;
 
 pub const PARAMS: &str = "{type?: layers|blocks|textstyles|linetypes|all (default all), limit? (default 200), offset?} → \
-    {schema: 1, count (all items of the type), returned, offset, truncated, \
+    {schema: 1, count (all items of the type), returned, offset, truncated, incomplete (true when the drawing has more \
+    objects than one scan reads, so every count, status and summary is partial), incompleteReason? (why), \
     items: [{type: layer|block|textStyle|linetype, name, entities (objects in model space and layouts that use it), \
     blockEntities (objects in block definitions that use it), references (named objects that use it: a layer's linetype, \
     a text style's dimension and multileader styles), used (for a block: reachable from model space, a layout or a dimension), \
@@ -88,11 +94,37 @@ impl Category {
     }
 }
 
-/// Objects in model space and the layouts (`false`), and in block definitions (`true`).
-fn each_entity(d: &Drawing) -> impl Iterator<Item = (&Entity, bool)> {
+/// Objects in model space and the layouts (`false`), and in block definitions (`true`), up to
+/// `limit` — the USAGE scan limit, past which later objects are not read.
+fn each_entity(d: &Drawing, limit: usize) -> impl Iterator<Item = (&Entity, bool)> {
     let top = d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())).map(|e| (&**e, false));
     let blocks = d.blocks.values().flat_map(|b| b.entities.iter()).map(|e| (&**e, true));
-    top.chain(blocks).take(5_000_000)
+    top.chain(blocks).take(limit)
+}
+
+/// Objects in model space, the layouts and the block definitions — everything one scan reads.
+fn entity_total(d: &Drawing) -> usize {
+    d.blocks.values().fold(d.entity_count(), |n, b| n.saturating_add(b.entities.len()))
+}
+
+/// A scan that stopped at its limit: the drawing holds `total` objects but only the first
+/// `scanned` were read, so objects after the limit are missing from the counts, verdicts and
+/// summary. Present in the report as `incomplete`/`incompleteReason`, never silently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Incomplete {
+    scanned: usize,
+    total: usize,
+}
+
+impl Incomplete {
+    /// Why the report is partial, naming both counts so a caller can judge it.
+    fn reason(self) -> String {
+        format!(
+            "USAGE read the first {} of {} objects (model space, layouts and block definitions); \
+             references after the limit are missing, so counts, statuses and summaries are partial",
+            self.scanned, self.total
+        )
+    }
 }
 
 /// Uses per lower-case name: (in model space and layouts, in block definitions).
@@ -135,14 +167,20 @@ struct Scan {
     linetype_refs: HashMap<String, usize>,
     /// Upper-case names of blocks reachable from model space, the layouts and dimensions.
     used_blocks: HashSet<String>,
+    /// Set when the scan stopped at its limit, so every count and verdict is partial.
+    incomplete: Option<Incomplete>,
 }
 
 impl Scan {
-    /// Scans the drawing once: counts each entity's layer, explicit linetype, block, text style
-    /// and attribute style, plus the table references, and borrows block reachability from PURGE.
-    fn new(d: &Drawing) -> Scan {
+    /// Scans the drawing once, reading at most `limit` objects: counts each entity's layer,
+    /// explicit linetype, block, text style and attribute style, plus the table references, and
+    /// borrows block reachability from PURGE. Records whether the limit cut the drawing short.
+    fn new(d: &Drawing, limit: usize) -> Scan {
+        let total = entity_total(d);
+        let scanned = total.min(limit);
         let mut sc = Scan { used_blocks: purge::used_blocks(d), ..Scan::default() };
-        for (e, in_block) in each_entity(d) {
+        sc.incomplete = (scanned < total).then_some(Incomplete { scanned, total });
+        for (e, in_block) in each_entity(d, scanned) {
             bump(&mut sc.layers, &e.common.layer, in_block);
             if !linetype_value(&e.common.linetype) {
                 bump(&mut sc.linetypes, &e.common.linetype, in_block);
@@ -324,8 +362,8 @@ fn summary(items: &[Value], unused: &Unused) -> Value {
 }
 
 /// The human-readable summary, one line per kind, plus a note when the filter matched no named
-/// objects at all.
-fn message(items: &[&Value], summary: &Value) -> String {
+/// objects at all and a note when the scan was cut short.
+fn message(items: &[&Value], summary: &Value, incomplete: Option<Incomplete>) -> String {
     let mut lines = Vec::new();
     for c in Category::ALL {
         let s = &summary[c.plural()];
@@ -341,6 +379,9 @@ fn message(items: &[&Value], summary: &Value) -> String {
     }
     if items.is_empty() {
         lines.push("There are no named objects of this type.".into());
+    }
+    if let Some(inc) = incomplete {
+        lines.push(format!("Scan incomplete: read the first {} of {} objects; the counts above are partial.", inc.scanned, inc.total));
     }
     lines.join("\n")
 }
@@ -366,22 +407,31 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let offset = count("offset", 0)?;
     let st = s.state()?;
     let d = &st.doc;
-    let scan = Scan::new(d);
+    let scan = Scan::new(d, MAX_SCAN);
     let unused = Unused::new(d);
     let all = items(&scan, &unused, d);
     let matched: Vec<&Value> = all.iter().filter(|i| ty.is_none_or(|c| i["type"] == c.key())).collect();
     let total = matched.len();
     let page: Vec<&Value> = matched.iter().skip(offset).take(limit).copied().collect();
     let summary = summary(&all, &unused);
-    Ok(json!({
+    let mut out = json!({
         "schema": 1,
         "count": total,
         "returned": page.len(),
         "offset": offset,
         "truncated": page.len() < total.saturating_sub(offset),
+        "incomplete": scan.incomplete.is_some(),
         "items": page,
         "summary": summary,
         "unused": unused.json(),
-        "message": message(&matched, &summary),
-    }))
+        "message": message(&matched, &summary, scan.incomplete),
+    });
+    if let (Some(inc), Some(o)) = (scan.incomplete, out.as_object_mut()) {
+        o.insert("incompleteReason".into(), json!(inc.reason()));
+    }
+    Ok(out)
 }
+
+#[cfg(test)]
+#[path = "usage_tests.rs"]
+mod tests;

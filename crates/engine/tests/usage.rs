@@ -271,3 +271,14 @@ fn paging_and_filters() {
     assert!(s.execute("usage", &json!({ "limit": "x" })).is_err());
     assert!(s.execute("usage", &json!({ "offset": -1 })).is_err());
 }
+
+/// Guards that a drawing within the scan limit reports itself complete: `incomplete` is a real
+/// signal, false here and with no reason, so callers can tell complete counts from partial ones.
+#[test]
+fn a_complete_scan_is_marked_complete() {
+    let mut s = drawing();
+    let r = usage(&mut s, json!({}));
+    assert_eq!(r["incomplete"], false);
+    assert!(r.get("incompleteReason").is_none(), "a complete scan has no reason: {r}");
+    assert!(!r["message"].as_str().unwrap().contains("incomplete"), "{}", r["message"]);
+}
