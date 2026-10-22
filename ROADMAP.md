@@ -119,6 +119,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Entry |
 |---|---|
+| 2026-10-18 | DWG read (#1076): the DXF rendition's sections and records are views into the tag list instead of two more copies of it. Peak memory −40% (58 MB plan: 8.9 → 5.4 GB). Measured over 381 office DWGs: all open and render. Estimates unchanged. |
 | 2026-10-14 | HATCHEDIT adds boundaries from internal points or closed objects and removes selected loops in the dialog, command line and JSON command; associative links and undo are covered by tests. |
 | 2026-10-12 | TRIM: a pick after a closed polyline's last cut keeps only the complementary run instead of an extra circuit of the outline (#726) |
 | 2026-10-12 | HATCHEDIT refuses an explicit bad `scale` or `angle` before it edits anything, so a rejected request leaves the drawing, undo and redo as they were (#724) |
