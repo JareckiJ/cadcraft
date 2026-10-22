@@ -619,6 +619,7 @@ version = "0.10.0"
 dependencies = [
  "encoding_rs",
  "log",
+ "oem_cp",
  "thiserror 2.0.21",
 ]
 

@@ -12,3 +12,5 @@ workspace = true
 thiserror = { workspace = true }
 log = { workspace = true }
 encoding_rs = { workspace = true }
+# The DOS code pages of pre-2007 DXF text (decoding tables only; MIT, already used by acadrust).
+oem_cp = { version = "2.1.2", default-features = false }

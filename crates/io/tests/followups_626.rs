@@ -184,7 +184,8 @@ fn code_page_is_kept_before_2007() {
         assert_eq!(back.header.str("DWGCODEPAGE", ""), "ANSI_1251");
         assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::Text(t) if t.value == "Привет")));
     }
-    assert_eq!(code_page(&dxf(&d, Version::R2018)), "ANSI_1252", "2007+: UTF-8 text");
+    // 2007+: UTF-8 text, and the drawing's code page declared all the same (FF4).
+    assert_eq!(code_page(&dxf(&d, Version::R2018)), "ANSI_1251");
     // Without one, or with one CADCraft doesn't know: ANSI_1252.
     d.header.set_str("DWGCODEPAGE", "NO_SUCH\n0\nEOF");
     assert_eq!(code_page(&dxf(&d, Version::R2000)), "ANSI_1252");
