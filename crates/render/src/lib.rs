@@ -86,8 +86,9 @@ pub struct DisplayList {
     /// it is drawn on (block contents on layer 0: the block reference's; [`NO_LAYER`] when the
     /// layer isn't in the table), for PDF layers. Empty for other lists.
     pub prim_layers: Vec<u32>,
-    /// Plots: outline-font glyphs that a plotter can write as text instead of drawing the
-    /// filled outline primitive they stand for ([`PlotText::prim`]), in drawing order.
+    /// Plots and text exports: outline-font glyphs that a plotter can write as text instead of
+    /// drawing the filled outline primitive they stand for ([`PlotText::prim`]), in drawing
+    /// order. Empty for other builds.
     pub texts: Vec<PlotText>,
     pub bounds: Bounds2,
     /// The paper sheet when the list was built for a layout (paper space); the UI draws the
@@ -226,6 +227,10 @@ pub struct Options {
     /// rebuild the view no longer needs). A cancelled build returns a partial list, which the
     /// caller must discard; see [`Options::cancelled`].
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Record the outline-font glyphs that stand for filled glyph primitives in
+    /// [`DisplayList::texts`], so output formats can write text instead of outlines. Plots
+    /// record them anyway; exports ask for them with this flag.
+    pub text_glyphs: bool,
 }
 
 impl Options {
@@ -249,6 +254,7 @@ impl Default for Options {
             skip_viewport: None,
             transparency: false,
             cancel: None,
+            text_glyphs: false,
         }
     }
 }
@@ -406,8 +412,9 @@ impl Builder<'_> {
         if sh.glyphs.is_empty() {
             return;
         }
-        let fill = self.opts.fill && ctx.d.header.i64("TEXTFILL", 1) != 0;
-        // Plots note which filled outlines are font glyphs (see `DisplayList::texts`).
+        let fill = self.opts.fill && (ctx.d.header.i64("TEXTFILL", 1) != 0 || self.opts.text_glyphs);
+        // Plots note which filled outlines are font glyphs (see `DisplayList::texts`); so do
+        // exports that want to write text.
         let mut text = sh.text.iter().peekable();
         let pixel = if self.plotting { 0.0 } else { self.opts.min_dash * 0.5 };
         for (i, g) in sh.glyphs.iter().enumerate() {
@@ -425,7 +432,7 @@ impl Builder<'_> {
                     self.tris(ctx, color, &tris);
                     tris.len()
                 };
-                if let Some(t) = glyph.filter(|_| self.plotting)
+                if let Some(t) = glyph.filter(|_| self.plotting || self.opts.text_glyphs)
                     && self.list.prims.len() > at
                     && let (Ok(prim), Ok(verts)) = (u32::try_from(at), u32::try_from(len))
                 {
