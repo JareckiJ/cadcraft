@@ -198,8 +198,8 @@ pub fn file_tabs(app: &mut CadApp, ui: &mut egui::Ui) {
             |ui: &mut egui::Ui, label: &str, dirty: bool, active: bool, closable: bool, w: f32, id: egui::Id| -> (bool, bool, egui::Response) {
                 let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, r.height()));
                 let resp = ui.interact(tr, id, Sense::click());
-                // Not `resp.hovered()`: the close button takes the tab's hover, so the tab and its X
-                // would flicker while the pointer is on the X.
+                // The close button takes the tab's hover, so `resp.hovered()` would make the tab and
+                // its X flicker while the pointer is on the X.
                 let hovered = ui.rect_contains_pointer(tr);
                 ui.painter().rect_filled(
                     tr,
