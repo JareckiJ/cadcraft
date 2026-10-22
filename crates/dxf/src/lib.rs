@@ -90,6 +90,13 @@ impl Tag {
     pub fn str(&self) -> String {
         self.value.as_str()
     }
+    /// The value when it is text, without a copy.
+    pub fn str_ref(&self) -> Option<&str> {
+        match &self.value {
+            Value::Str(s) | Value::Hex(s) => Some(s),
+            _ => None,
+        }
+    }
     pub fn f64(&self) -> f64 {
         self.value.as_f64()
     }
@@ -186,7 +193,7 @@ pub fn parse_with_limit(bytes: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
     if tags > max_tags {
         return Err(DxfError::TooLarge { tags, limit: max_tags });
     }
-    parse_ascii_with_limit(&codepage::decode_ascii_file(bytes), max_tags)
+    parse_ascii_sized(&codepage::decode_ascii_file(bytes), max_tags, tags)
 }
 
 /// The four hex digits of a `\U+XXXX` escape starting at `chars[i]`, if there is one.
@@ -261,9 +268,16 @@ pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
     parse_ascii_with_limit(text, MAX_TAGS)
 }
 
-#[allow(clippy::while_let_loop)]
 fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
-    let mut tags = Vec::new();
+    parse_ascii_sized(text, max_tags, 0)
+}
+
+/// [`parse_ascii_with_limit`] into a list made for `expected` tags: a large file's list is
+/// gigabytes, and growing it by doubling leaves up to half of it unused and holds the old and the
+/// new copy at once while it moves.
+#[allow(clippy::while_let_loop)]
+fn parse_ascii_sized(text: &str, max_tags: usize, expected: usize) -> Result<Vec<Tag>> {
+    let mut tags = Vec::with_capacity(expected.min(max_tags));
     let mut lines = text.lines().enumerate();
     loop {
         let Some((ln, code_line)) = lines.next() else { break };
@@ -275,14 +289,14 @@ fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
         let Some((_, val)) = lines.next() else { return Err(DxfError::Eof) };
         let v = typed(code, val);
         let v = match v {
-            Value::Str(s) => Value::Str(unescape_unicode(&s)),
+            Value::Str(s) if s.contains("\\U+") || s.contains("\\M+") => Value::Str(unescape_unicode(&s)),
             o => o,
         };
         tags.push(Tag { code, value: v });
         if tags.len() > max_tags {
             return Err(DxfError::TooLarge { tags: tags.len(), limit: max_tags });
         }
-        if code == 0 && tags.last().is_some_and(|t| t.str() == "EOF") {
+        if code == 0 && tags.last().is_some_and(|t| t.str_ref() == Some("EOF")) {
             break;
         }
     }
@@ -552,6 +566,50 @@ pub fn sections(tags: &[Tag]) -> Vec<Section> {
     out
 }
 
+/// A section borrowed from the tag stream it was split from: [`Section`] without the copy.
+#[derive(Clone, Copy, Debug)]
+pub struct SectionRef<'a> {
+    pub name: &'a str,
+    pub tags: &'a [Tag],
+}
+
+/// [`sections`] without copying the tags: each section is a slice of `tags`. A large file's tags
+/// take gigabytes (40 bytes a tag, 25 million tags in a 0.5 GB DXF), so a reader that holds the
+/// stream while it reads the sections should take them this way.
+pub fn section_slices(tags: &[Tag]) -> Vec<SectionRef<'_>> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tags.len() {
+        let is_sec = tags.get(i).is_some_and(|t| t.code == 0 && t.str_ref() == Some("SECTION"));
+        if is_sec {
+            let name = tags.get(i + 1).filter(|t| t.code == 2).and_then(Tag::str_ref).unwrap_or_default();
+            let start = i + 2;
+            let mut j = start;
+            while j < tags.len() && !(tags.get(j).is_some_and(|t| t.code == 0 && t.str_ref() == Some("ENDSEC"))) {
+                j += 1;
+            }
+            out.push(SectionRef { name, tags: tags.get(start..j).unwrap_or(&[]) });
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// [`records`] without copying the tags: each record's tags are a slice of `tags`.
+pub fn record_slices(tags: &[Tag]) -> Vec<(String, &[Tag])> {
+    let starts: Vec<usize> = tags.iter().enumerate().filter(|(_, t)| t.code == 0).map(|(i, _)| i).collect();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(n, &i)| {
+            let end = starts.get(n + 1).copied().unwrap_or(tags.len());
+            (tags.get(i).map(Tag::str).unwrap_or_default(), tags.get(i + 1..end).unwrap_or(&[]))
+        })
+        .collect()
+}
+
 /// Split a run of tags into records starting at each code-0 tag: (type, tags after the 0).
 pub fn records(tags: &[Tag]) -> Vec<(String, Vec<Tag>)> {
     let mut out: Vec<(String, Vec<Tag>)> = Vec::new();
@@ -638,6 +696,33 @@ mod tests {
     fn surrogate_pair_escapes() {
         let t = parse(b"1\n\\U+D83D\\U+DE00 \\u+56fe\\U+53f7\n0\nEOF\n").unwrap();
         assert_eq!(t[0].str(), "😀 \\u+56fe号");
+    }
+
+    #[test]
+    fn borrowed_sections_and_records_match_the_copies() {
+        let text = "999\nstray\n  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n  5\n1A\n  0\nLINE\n  8\n0\n 10\n1.5\n  0\nCIRCLE\n 40\n2.0\n  0\nENDSEC\n  0\nEOF\n";
+        let tags = parse(text.as_bytes()).unwrap();
+        let (copies, slices) = (sections(&tags), section_slices(&tags));
+        assert_eq!(copies.len(), slices.len());
+        for (c, s) in copies.iter().zip(&slices) {
+            assert_eq!(c.name, s.name);
+            assert_eq!(c.tags.as_slice(), s.tags);
+            let (rc, rs) = (records(&c.tags), record_slices(s.tags));
+            assert_eq!(rc.len(), rs.len());
+            for ((kc, tc), (ks, ts)) in rc.iter().zip(&rs) {
+                assert_eq!((kc, tc.as_slice()), (ks, *ts));
+            }
+        }
+        // Tags before the first record start none, as in `records`.
+        assert_eq!(record_slices(slices[1].tags).iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["LINE", "CIRCLE"]);
+    }
+
+    #[test]
+    fn a_sized_parse_holds_no_more_than_it_was_sized_for() {
+        let text = "  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n";
+        let tags = parse(text.as_bytes()).unwrap();
+        assert_eq!(tags.len(), 4);
+        assert!(tags.capacity() <= 4, "{}", tags.capacity());
     }
 
     #[test]
