@@ -181,6 +181,70 @@ pub(crate) fn candidates<'a>(
     }
 }
 
+/// The topmost entity within `aperture` of `p` under the given 3D `orbit` projection.
+pub fn pick_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, p: Vec2, aperture: f64) -> Option<Handle> {
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return pick(d, space, p, aperture);
+    }
+    pick_all_in_orbit(d, space, orbit, p, aperture).into_iter().next()
+}
+
+/// Every entity within `aperture` of `p` under the given 3D `orbit` projection, nearest first.
+pub fn pick_all_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, p: Vec2, aperture: f64) -> Vec<Handle> {
+    if orbit.is_top() || matches!(space, Space::Paper(_)) {
+        return pick_all(d, space, p, aperture);
+    }
+    let Some(store) = d.space(space) else { return Vec::new() };
+    let opts = cadcraft_render::Options { tolerance: aperture / 4.0, orbit, ..Default::default() };
+    let mut hits: Vec<(f64, Handle)> = Vec::new();
+    let ents: Vec<&Entity> = store.iter().map(|e| e.as_ref()).collect();
+    for e in ents.into_iter().rev() {
+        if !selectable(d, e) {
+            continue;
+        }
+        let list = cadcraft_render::build_entities(d, std::iter::once(e), &opts);
+        if !list.bounds.is_empty() && !list.bounds.expand(aperture).contains(p) {
+            continue;
+        }
+        let mut best = f64::INFINITY;
+        for prim in &list.prims {
+            let pts = list.points(prim);
+            let dist = match prim.kind {
+                cadcraft_render::Kind::Polyline => dist_to_polyline(pts, p),
+                cadcraft_render::Kind::Point => pts.first().map_or(f64::INFINITY, |q| q.dist(p)),
+                cadcraft_render::Kind::Infinite { ray } => match (pts.first(), pts.get(1)) {
+                    (Some(&b), Some(&dir)) => {
+                        let far = 1e9;
+                        let a = if ray { b } else { b - dir * far };
+                        Line::new(a, b + dir * far).dist(p)
+                    }
+                    _ => f64::INFINITY,
+                },
+                cadcraft_render::Kind::Tris | cadcraft_render::Kind::Mask => {
+                    let mut d_tri = f64::INFINITY;
+                    for tri in pts.as_chunks::<3>().0 {
+                        if point_in_polygon(tri, p) {
+                            d_tri = 0.0;
+                            break;
+                        }
+                        d_tri = d_tri.min(dist_to_polyline(&[tri[0], tri[1], tri[2], tri[0]], p));
+                    }
+                    d_tri
+                }
+            };
+            best = best.min(dist);
+            if best == 0.0 {
+                break;
+            }
+        }
+        if best <= aperture {
+            hits.push((best, e.handle));
+        }
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.into_iter().map(|(_, h)| h).collect()
+}
+
 /// The topmost entity within `aperture` of `p`.
 pub fn pick(d: &Drawing, space: &Space, p: Vec2, aperture: f64) -> Option<Handle> {
     let ix = spatial::index(d, space);

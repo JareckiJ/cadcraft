@@ -412,9 +412,9 @@ const VP_SETTLE_MS: f64 = 150.0;
 #[derive(Default)]
 struct VpContent {
     list: DisplayList,
-    /// What the list was built from: drawing, revision, document, viewport, tessellation band
-    /// and lineweight display.
-    key: Option<(u64, u64, usize, Handle, i32, bool, bool)>,
+    /// What the list was built from: drawing, revision, document, viewport, tessellation band,
+    /// lineweight display, transparency display and 3D orbit key.
+    key: Option<(u64, u64, usize, Handle, i32, bool, bool, u64)>,
     /// The viewport's view (centre, height) the list was built for, and the paper area it covers.
     view: (Vec2, f64),
     area: Bounds2,
@@ -481,7 +481,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
     };
     let px = 1.0 / xf_paper.scale.max(1e-300);
     let band = px.max(1e-300).log2().floor() as i32;
-    let key = (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, h, band, lwdisplay, transparency);
+    let key = (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, h, band, lwdisplay, transparency, st.orbit.hash_key());
     let now = crate::now_ms();
     let view = (vp.view_center, vp.view_height);
     if view != c.last_view {
@@ -662,12 +662,12 @@ impl VpHighlight {
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, tolerance.to_bits(), handles).hash(&mut h);
+            (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, tolerance.to_bits(), st.orbit.hash_key(), handles).hash(&mut h);
             h.finish()
         };
         if self.key != Some(key) {
             let ents = handles.iter().filter_map(|h| st.doc.model.get(*h)).map(|e| e.as_ref());
-            self.list = cadcraft_render::build_entities(&st.doc, ents, &cadcraft_render::Options { tolerance, ..Default::default() });
+            self.list = cadcraft_render::build_entities(&st.doc, ents, &cadcraft_render::Options { tolerance, orbit: st.orbit, ..Default::default() });
             self.key = Some(key);
             self.list_gen = self.list_gen.wrapping_add(1);
         }
@@ -1747,7 +1747,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             && let (Some(w), Ok(st)) = (raw_world, app.session.state())
         {
             let filter = app.session.settings.previewfilter;
-            app.canvas.hover = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, app.session.settings.pickbox.max(1.0) * 1.5 / scale)
+            let edit_space = st.edit_space();
+            let pick_orbit = if matches!(edit_space, cadcraft_doc::Space::Model) { st.orbit } else { cadcraft_render::Orbit3d::default() };
+            app.canvas.hover = cadcraft_engine::select::pick_in_orbit(&st.doc, &edit_space, pick_orbit, w, app.session.settings.pickbox.max(1.0) * 1.5 / scale)
                 .filter(|h| st.doc.entity(*h).is_none_or(|e| !cadcraft_engine::select::preview_filtered(&st.doc, e, filter)));
             app.canvas.hover_at = hover_pos;
         }

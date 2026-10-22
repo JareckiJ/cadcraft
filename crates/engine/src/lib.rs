@@ -1145,7 +1145,8 @@ impl Session {
                     let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
-                match select::pick(self.doc()?, &space, p, ap) {
+                let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+                match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
                     Some(h) => Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h])))),
                     None => {
                         self.pending_window = Some(PendingWindow { corner: p, during_command: true });
@@ -1699,7 +1700,8 @@ impl Session {
             return Ok(());
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        match select::pick(self.doc()?, &space, p, ap) {
+        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
             Some(h) => self.idle_pick(h, shift),
             None => self.pending_window = Some(PendingWindow { corner: p, during_command: false }),
         }
@@ -1748,7 +1750,8 @@ impl Session {
             return Vec::new();
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        self.doc().map(|d| select::pick_all(d, &self.space(), p, ap)).unwrap_or_default()
+        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        self.doc().map(|d| select::pick_all_in_orbit(d, &self.space(), orbit, p, ap)).unwrap_or_default()
     }
 
     /// Whether selection cycling marks `p` with its badge (SELECTIONCYCLING 1 or 2): overlapping

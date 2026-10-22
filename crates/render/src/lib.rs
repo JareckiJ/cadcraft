@@ -379,6 +379,12 @@ struct Ctx<'a> {
     block_transparency: u8,
     /// Accumulated Z elevation for 3D orbit projection.
     z_offset: f64,
+    /// Accumulated Z scale for 3D orbit projection inside block references.
+    z_scale: f64,
+    /// Viewport model-to-paper transform when rendering inside a layout viewport.
+    vp_xf: Mat3,
+    /// Inverse of `vp_xf` (paper-to-model) when rendering inside a layout viewport.
+    vp_xf_inv: Mat3,
 }
 
 impl Ctx<'_> {
@@ -448,11 +454,17 @@ impl Builder<'_> {
         self.push_polyline(ctx, color, 0.0, pts);
     }
     fn project_pt(&self, ctx: &Ctx, p: Vec2, extra_z: f64) -> Vec2 {
-        let q = ctx.xf.apply(p);
         if self.opts.orbit.is_top() {
-            q
+            return ctx.xf.apply(p);
+        }
+        let z = ctx.z_offset + extra_z * ctx.z_scale;
+        let q = ctx.xf.apply(p);
+        if ctx.top == VIEWPORT_CONTENT {
+            let m = ctx.vp_xf_inv.apply(q);
+            let m_proj = self.opts.orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, z));
+            ctx.vp_xf.apply(m_proj)
         } else {
-            self.opts.orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, ctx.z_offset + extra_z))
+            self.opts.orbit.project(cadcraft_geom::Vec3::new(q.x, q.y, z))
         }
     }
     fn polyline_3d(&mut self, ctx: &Ctx, color: Ink, lw: f32, pts: &[cadcraft_geom::Vec3]) {
@@ -507,11 +519,17 @@ impl Builder<'_> {
         let (color, _) = self.styled(color, 0.0);
         let start = self.list.tris.len() as u32;
         for p in tris {
-            let q0 = xf.apply(*p);
             let q = if self.opts.orbit.is_top() {
-                q0
+                xf.apply(*p)
             } else {
-                self.opts.orbit.project(cadcraft_geom::Vec3::new(q0.x, q0.y, ctx.z_offset))
+                let q0 = xf.apply(*p);
+                if ctx.top == VIEWPORT_CONTENT {
+                    let m = ctx.vp_xf_inv.apply(q0);
+                    let m_proj = self.opts.orbit.project(cadcraft_geom::Vec3::new(m.x, m.y, ctx.z_offset));
+                    ctx.vp_xf.apply(m_proj)
+                } else {
+                    self.opts.orbit.project(cadcraft_geom::Vec3::new(q0.x, q0.y, ctx.z_offset))
+                }
             };
             self.list.bounds.add(q);
             self.list.tris.push(q);
@@ -646,6 +664,9 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
         block_pstyle: None,
         block_transparency: 0,
         z_offset: 0.0,
+        z_scale: 1.0,
+        vp_xf: xf,
+        vp_xf_inv: xf.inverse().unwrap_or(Mat3::IDENTITY),
     }
 }
 
@@ -1222,7 +1243,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             _ => 0.0,
         }
     };
-    let ctx_z = Ctx { z_offset: ctx.z_offset + ent_z, ..ctx.clone() };
+    let ctx_z = Ctx { z_offset: ctx.z_offset + ent_z * ctx.z_scale, ..ctx.clone() };
     let ctx = &ctx_z;
     // A plot style's linetype replaces the object's.
     let lt = match b.styles.and_then(|s| s.linetype(rgb, b.named)) {
@@ -1705,9 +1726,19 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
         block_transparency: ctx.block_transparency,
         z_offset: ctx.z_offset
             + match &e.kind {
-                EntityKind::Insert(ins) => ins.insert.z,
+                EntityKind::Insert(ins) => {
+                    let base_z = ctx.d.block(&ins.block).map_or(0.0, |b| b.base.z);
+                    (ins.insert.z - base_z * ins.scale.z) * ctx.z_scale
+                }
                 _ => 0.0,
             },
+        z_scale: ctx.z_scale
+            * match &e.kind {
+                EntityKind::Insert(ins) => ins.scale.z,
+                _ => 1.0,
+            },
+        vp_xf: ctx.vp_xf,
+        vp_xf_inv: ctx.vp_xf_inv,
     }
 }
 

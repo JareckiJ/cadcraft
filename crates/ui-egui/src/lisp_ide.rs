@@ -142,28 +142,41 @@ pub fn load_path_into_ide(app: &mut CadApp, path: &str) {
             let log_before = app.session.log.len();
             match app.session.lisp_load(&name, &text, false) {
                 Ok(res) => {
-                    ide.loaded_code = Some(text);
                     for line in app.session.log.get(log_before..).unwrap_or(&[]) {
                         ide.output.push(line.clone());
                     }
-                    if let Some(Ok(v)) = res {
-                        let printed = cadcraft_engine::lisp::value::to_text(&v, true);
-                        if printed != "nil" {
-                            ide.output.push(format!("⇒ {printed}"));
+                    let msg = match res {
+                        Some(Ok(v)) => {
+                            ide.loaded_code = Some(text);
+                            let printed = cadcraft_engine::lisp::value::to_text(&v, true);
+                            if printed != "nil" {
+                                ide.output.push(format!("⇒ {printed}"));
+                            }
+                            if cmds.is_empty() {
+                                format!("{}: {name}", t("Loaded"))
+                            } else {
+                                format!("{}: {name} ({}: {})", t("Loaded"), t("Commands"), cmds.join(", "))
+                            }
                         }
-                    } else if let Some(Err(e)) = res {
-                        ide.output.push(format!("{}: {e}", t("Error")));
-                    }
-                    let msg = if cmds.is_empty() {
-                        format!("{}: {name}", t("Loaded"))
-                    } else {
-                        format!("{}: {name} ({}: {})", t("Loaded"), t("Commands"), cmds.join(", "))
+                        Some(Err(e)) => {
+                            ide.loaded_code = None;
+                            format!("{}: {e}", t("Error"))
+                        }
+                        None => {
+                            ide.loaded_code = Some(text);
+                            if cmds.is_empty() {
+                                format!("{}: {name}", t("Loaded"))
+                            } else {
+                                format!("{}: {name} ({}: {})", t("Loaded"), t("Commands"), cmds.join(", "))
+                            }
+                        }
                     };
                     ide.output.push(msg.clone());
                     ide.status = Some(msg.clone());
                     app.session.echo(msg);
                 }
                 Err(e) => {
+                    ide.loaded_code = None;
                     let msg = format!("{} {name}: {e}", t("Error loading"));
                     ide.output.push(msg.clone());
                     ide.status = Some(msg.clone());
@@ -182,16 +195,17 @@ pub fn load_path_into_ide(app: &mut CadApp, path: &str) {
     }
 }
 
-/// Evaluate the current LISP editor buffer in `app.session` and update discovered `c:` commands.
-fn execute_current_code(app: &mut CadApp) {
-    let Some(ide) = app.lisp_ide.as_ref() else { return };
+/// Evaluate the current LISP editor buffer in `app.session`, update discovered `c:` commands,
+/// and return `true` when the buffer loaded without errors.
+fn execute_current_code(app: &mut CadApp) -> bool {
+    let Some(ide) = app.lisp_ide.as_ref() else { return false };
     let name = ide.file_name.clone();
     let code = ide.code.clone();
     let cmds = extract_c_commands(&code);
     let log_before = app.session.log.len();
     let res = app.session.lisp_load(&name, &code, false);
     let new_logs: Vec<String> = app.session.log.get(log_before..).map(|s| s.to_vec()).unwrap_or_default();
-    let Some(ide) = app.lisp_ide.as_mut() else { return };
+    let Some(ide) = app.lisp_ide.as_mut() else { return false };
     ide.commands = cmds.clone();
     for l in new_logs {
         ide.output.push(l);
@@ -207,20 +221,26 @@ fn execute_current_code(app: &mut CadApp) {
                 format!("{} ({name}) — {}: {}", t("Loaded"), t("Available commands"), cmds.join(", "))
             };
             ide.status = Some(msg);
+            true
         }
         Ok(Some(Err(e))) => {
+            ide.loaded_code = None;
             let err_msg = format!("{}: {e}", t("Error"));
             ide.output.push(err_msg.clone());
             ide.status = Some(err_msg);
+            false
         }
         Ok(None) => {
             ide.loaded_code = Some(code);
             ide.status = Some(format!("{} ({name})...", t("Routine started")));
+            true
         }
         Err(e) => {
+            ide.loaded_code = None;
             let err_msg = format!("{}: {e}", t("Error"));
             ide.output.push(err_msg.clone());
             ide.status = Some(err_msg);
+            false
         }
     }
 }
@@ -464,7 +484,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         }
     }
     if do_run_code {
-        execute_current_code(app);
+        let _ = execute_current_code(app);
     }
     if do_eval_quick {
         eval_quick_expr(app);
@@ -474,10 +494,8 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             .lisp_ide
             .as_ref()
             .is_some_and(|i| i.loaded_code.as_deref() != Some(i.code.as_str()));
-        if needs_load {
-            execute_current_code(app);
-        }
-        if !app.session.prompting() {
+        let ok = if needs_load { execute_current_code(app) } else { true };
+        if ok && !app.session.prompting() {
             app.cmdline(&cmd);
         }
     }
