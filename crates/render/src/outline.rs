@@ -171,7 +171,12 @@ fn close(mut segs: Vec<(Vec2, Vec2)>) -> Option<Vec<Vec<Vec2>>> {
             end = q;
             line.push(q);
         }
-        out.push(straighten(line));
+        // A sliver thinner than `STRAIGHT` can lose its corners: keep the triangles instead.
+        let line = straighten(line);
+        if line.len() < 4 {
+            return None;
+        }
+        out.push(line);
     }
     Some(out)
 }
@@ -434,6 +439,13 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(fill_contours(&tris), first);
         }
+    }
+
+    #[test]
+    fn a_sliver_the_straightening_would_flatten_keeps_its_triangles() {
+        // The turn at the middle corner is below `STRAIGHT`, so straightening drops it.
+        let sliver = [Vec2::new(0.0, 0.0), Vec2::new(1e9, 0.0), Vec2::new(2e9, 1.0)];
+        assert_eq!(fill_contours(&sliver), None, "the exporters keep the triangle");
     }
 
     #[test]
