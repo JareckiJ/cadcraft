@@ -8,6 +8,8 @@ use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
+/// A 1280×760 app with the in-window menu bar shown, stepped a few frames so menus and palettes
+/// have laid out before the test hovers anything.
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::new(), Services::default());
     app.ui.in_window_menu = true;
@@ -27,11 +29,15 @@ fn cursor(harness: &Harness<'_, CadApp>) -> egui::CursorIcon {
     harness.output().platform_output.cursor_icon
 }
 
+/// Point at the middle of the drawing area and settle the frames it takes the canvas to react, so
+/// `CursorIcon::None` there means the crosshair really is hiding the OS cursor.
 fn hover_canvas(harness: &mut Harness<'_, CadApp>) {
     harness.hover_at(egui::pos2(640.0, 400.0));
     harness.run_steps(3);
 }
 
+/// The canvas hides the OS cursor; moving onto a menu title, which sits on a higher layer over no
+/// drawing, must bring the plain arrow back and must not leave `CursorIcon::None` behind.
 #[test]
 fn the_menu_bar_brings_the_os_cursor_back() {
     let mut harness = harness();
@@ -46,6 +52,9 @@ fn the_menu_bar_brings_the_os_cursor_back() {
     assert_eq!(cursor(&harness), egui::CursorIcon::Default);
 }
 
+/// Both parts of an open menu keep the OS cursor visible over the drawing: its items, and the
+/// frame between them and the border, where no item is hovered. Guards the layer check against
+/// `hovered()` alone, which still counts the canvas underneath the popup.
 #[test]
 fn an_open_menu_keeps_the_os_cursor_visible_over_the_drawing() {
     let mut harness = harness();
@@ -79,6 +88,8 @@ fn an_open_menu_keeps_the_os_cursor_visible_over_the_drawing() {
     assert_ne!(cursor(&harness), egui::CursorIcon::None, "the menu's frame keeps the OS cursor visible");
 }
 
+/// The docked palettes are ordinary (non-floating) panels, still above the canvas in the layer
+/// stack: leaving the drawing for one restores the OS cursor.
 #[test]
 fn docked_palettes_keep_the_os_cursor_visible() {
     let mut harness = harness();
@@ -91,6 +102,9 @@ fn docked_palettes_keep_the_os_cursor_visible() {
     assert_ne!(cursor(&harness), egui::CursorIcon::None, "moving to a palette restores the OS cursor");
 }
 
+/// With the assistive-technology fallback (`system_cursor`, #39) the canvas asks for the crosshair
+/// instead of hiding the pointer; off the canvas that request must not follow, so the menu bar
+/// gets the default arrow rather than a drafting crosshair.
 #[test]
 fn show_system_cursor_restores_the_arrow_off_the_canvas() {
     let mut harness = harness();

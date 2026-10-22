@@ -1347,6 +1347,14 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// Draw the drawing area and handle its input (zoom and pan, picking, the crosshair) for this
+/// frame.
+///
+/// It also owns the cursor-visibility contract: the OS cursor is hidden only while the pointer is
+/// over the drawing area *and* the canvas is the topmost layer under it, so the drawn crosshair
+/// replaces the pointer over the drawing alone. A menu bar, an open menu (including its frame, not
+/// just its items), a tooltip or a floating palette above the canvas keeps the normal OS cursor
+/// visible (#1701).
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
