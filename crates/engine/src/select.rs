@@ -398,6 +398,20 @@ pub fn pick_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d
     pick_all_in_orbit(d, space, orbit, p, aperture).into_iter().next()
 }
 
+/// Candidate entity handles in `space` whose 3D-projected bounds under `orbit` come within
+/// `aperture` of `view_cursor` (in ascending draw order).
+pub(crate) fn orbit_near_handles(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, view_cursor: Vec2, aperture: f64) -> Vec<Handle> {
+    let Some(ix) = orbit_index(d, space, orbit, aperture / 4.0) else { return Vec::new() };
+    let probe = Bounds2::new(view_cursor, view_cursor).expand(aperture);
+    ix.query(&probe, true)
+        .into_iter()
+        .filter_map(|idx| {
+            let ent = ix.ents.get(idx)?;
+            (ent.infinite || ent.bounds.is_empty() || ent.bounds.expand(aperture).contains(view_cursor)).then_some(ent.handle)
+        })
+        .collect()
+}
+
 /// Every entity within `aperture` of `p` under the given 3D `orbit` projection, nearest first.
 pub fn pick_all_in_orbit(d: &Drawing, space: &Space, orbit: cadcraft_render::Orbit3d, p: Vec2, aperture: f64) -> Vec<Handle> {
     if orbit.is_top() || matches!(space, Space::Paper(_)) {

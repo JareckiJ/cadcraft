@@ -192,18 +192,15 @@ pub fn osnap_in_orbit_with_proj(
         return osnap(d, space, view_cursor, aperture, osmode, base, deferred).map(|h| (h, h.point));
     }
     let store = d.space(space)?;
-    let probe = Bounds2::new(view_cursor, view_cursor).expand(aperture);
+    let handles = crate::select::orbit_near_handles(d, space, orbit, view_cursor, aperture);
     let mut cands3: Vec<(u32, Vec2, f64)> = Vec::new();
-    let mut near_prims: Vec<Prim> = Vec::new();
-    let mut count = 0usize;
+    let mut near_prims: Vec<(Prim, f64)> = Vec::new();
     let mut budget = MAX_BLOCK_LEAVES;
-    for e in store.iter() {
+    let all = Bounds2::new(Vec2::new(-1e18, -1e18), Vec2::new(1e18, 1e18));
+    for h in handles.into_iter().take(2000) {
+        let Some(e) = store.get(h) else { continue };
         if !d.is_visible(e) {
             continue;
-        }
-        count += 1;
-        if count > 2000 {
-            break;
         }
         let elev = cadcraft_render::entity_elevation(&e.kind);
         if osmode & mode::INS != 0 {
@@ -274,35 +271,76 @@ pub fn osnap_in_orbit_with_proj(
         }
         let mut flat: Vec<(u32, Vec2)> = Vec::new();
         let mut ent_prims: Vec<Prim> = Vec::new();
-        let all = Bounds2::new(Vec2::new(-1e18, -1e18), Vec2::new(1e18, 1e18));
-        let mut sink = Sink { osmode, aperture, probe: all, cands: &mut flat, near: &mut ent_prims };
-        sink.object(&e.kind, None);
-        if let EntityKind::Insert(ins) = &e.kind {
-            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, &[], &mut |k, m| sink.object(k, Some(m)));
-        }
-        if let EntityKind::Dimension(dm) = &e.kind {
-            sink.dimension(d, dm, &mut budget, &[]);
+        {
+            let mut sink = Sink { osmode, aperture, probe: all, cands: &mut flat, near: &mut ent_prims };
+            sink.object(&e.kind, None);
+            if let EntityKind::Dimension(dm) = &e.kind
+                && dm.block.as_ref().and_then(|n| d.block(n)).is_none()
+            {
+                sink.dimension(d, dm, &mut budget, &[]);
+            }
         }
         cands3.extend(flat.into_iter().map(|(m, p)| (m, p, elev)));
-        near_prims.extend(ent_prims);
+        near_prims.extend(
+            ent_prims
+                .into_iter()
+                .filter(|p| prim_near_in_orbit(p, elev, orbit, view_cursor, aperture))
+                .map(|p| (p, elev)),
+        );
+        let mut push_block = |ins: &Insert, z0: f64| {
+            block_leaves_z(d, ins, &Mat3::IDENTITY, z0, 1.0, 0, &mut budget, &[], &mut |k, m, z| {
+                let mut leaf_cands: Vec<(u32, Vec2)> = Vec::new();
+                let mut leaf_prims: Vec<Prim> = Vec::new();
+                let mut sink = Sink { osmode, aperture, probe: all, cands: &mut leaf_cands, near: &mut leaf_prims };
+                sink.object(k, Some(m));
+                cands3.extend(leaf_cands.into_iter().map(|(md, pt)| (md, pt, z)));
+                near_prims.extend(
+                    leaf_prims
+                        .into_iter()
+                        .filter(|p| prim_near_in_orbit(p, z, orbit, view_cursor, aperture))
+                        .map(|p| (p, z)),
+                );
+            });
+        };
+        if let EntityKind::Insert(ins) = &e.kind {
+            push_block(ins, 0.0);
+        }
+        if let EntityKind::Dimension(dm) = &e.kind
+            && let Some(blk) = dm.block.as_ref().and_then(|n| d.block(n))
+        {
+            let ins = Insert {
+                block: blk.name.clone(),
+                insert: blk.base,
+                scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 1,
+                rows: 1,
+                col_spacing: 0.0,
+                row_spacing: 0.0,
+            };
+            push_block(&ins, elev);
+        }
     }
     if osmode & (mode::INT | mode::APP) != 0 {
-        let segs: Vec<Vec<Segment>> = near_prims.iter().take(200).map(prim_segments).collect();
+        let segs: Vec<(Vec<Segment>, f64)> = near_prims.iter().take(200).map(|(p, z)| (prim_segments(p), *z)).collect();
         let real = if osmode & mode::INT != 0 { mode::INT } else { mode::APP };
         for i in 0..segs.len() {
             for j in i + 1..segs.len() {
-                let extend = osmode & mode::APP != 0 && [i, j].iter().all(|k| near_prims.get(*k).is_some_and(extendable));
-                for a in segs.get(i).into_iter().flatten() {
-                    for b in segs.get(j).into_iter().flatten() {
+                let extend = osmode & mode::APP != 0 && [i, j].iter().all(|k| near_prims.get(*k).is_some_and(|(p, _)| extendable(p)));
+                let (Some((sa, za)), Some((sb, zb))) = (segs.get(i), segs.get(j)) else { continue };
+                let z = (*za + *zb) * 0.5;
+                for a in sa {
+                    for b in sb {
                         for x in intersect_ext(&fix_circle(a), &fix_circle(b), false) {
-                            if orbit.project(x.to3(0.0)).dist(view_cursor) <= aperture {
-                                cands3.push((real, x, 0.0));
+                            if orbit.project(x.to3(z)).dist(view_cursor) <= aperture {
+                                cands3.push((real, x, z));
                             }
                         }
                         if extend {
                             for x in intersect_ext(a, b, true) {
-                                if x.is_finite() && orbit.project(x.to3(0.0)).dist(view_cursor) <= aperture {
-                                    cands3.push((mode::APP, x, 0.0));
+                                if x.is_finite() && orbit.project(x.to3(z)).dist(view_cursor) <= aperture {
+                                    cands3.push((mode::APP, x, z));
                                 }
                             }
                         }
@@ -312,15 +350,15 @@ pub fn osnap_in_orbit_with_proj(
         }
     }
     if let Some(bp) = base {
-        for p in &near_prims {
+        for (p, z) in &near_prims {
             if osmode & mode::PER != 0 {
                 match p {
-                    Prim::Seg(Segment::Line(l)) => cands3.push((mode::PER, l.project(bp), 0.0)),
-                    Prim::Seg(Segment::Arc { arc, .. }) => cands3.push((mode::PER, Circle::new(arc.center, arc.radius).closest(bp), 0.0)),
-                    Prim::Circle(c) => cands3.push((mode::PER, c.closest(bp), 0.0)),
-                    Prim::Infinite { base: b0, dir, .. } => cands3.push((mode::PER, *b0 + *dir * (bp - *b0).dot(*dir), 0.0)),
-                    Prim::Ellipse(e) => cands3.extend(curves::ellipse_perpendiculars(e, bp).into_iter().map(|q| (mode::PER, q, 0.0))),
-                    Prim::Spline(s) => cands3.extend(curves::spline_perpendiculars(s, bp).into_iter().map(|q| (mode::PER, q, 0.0))),
+                    Prim::Seg(Segment::Line(l)) => cands3.push((mode::PER, l.project(bp), *z)),
+                    Prim::Seg(Segment::Arc { arc, .. }) => cands3.push((mode::PER, Circle::new(arc.center, arc.radius).closest(bp), *z)),
+                    Prim::Circle(c) => cands3.push((mode::PER, c.closest(bp), *z)),
+                    Prim::Infinite { base: b0, dir, .. } => cands3.push((mode::PER, *b0 + *dir * (bp - *b0).dot(*dir), *z)),
+                    Prim::Ellipse(e) => cands3.extend(curves::ellipse_perpendiculars(e, bp).into_iter().map(|q| (mode::PER, q, *z))),
+                    Prim::Spline(s) => cands3.extend(curves::spline_perpendiculars(s, bp).into_iter().map(|q| (mode::PER, q, *z))),
                     _ => {}
                 }
             }
@@ -332,7 +370,7 @@ pub fn osnap_in_orbit_with_proj(
                     Prim::Spline(s) => curves::spline_tangents(s, bp),
                     _ => Vec::new(),
                 };
-                cands3.extend(pts.into_iter().map(|t| (mode::TAN, t, 0.0)));
+                cands3.extend(pts.into_iter().map(|t| (mode::TAN, t, *z)));
             }
         }
     }
@@ -353,42 +391,37 @@ pub fn osnap_in_orbit_with_proj(
     if let Some((m, w, pr)) = best {
         return Some((SnapHit { point: w, mode: m, name: name_of(m), viewport: None, deferred: None }, pr));
     }
-    if let Some(work_cursor) = orbit.unproject_xy(view_cursor) {
-        if base.is_none()
-            && deferred
-            && let Some(h) = deferred_hit(&near_prims, work_cursor, aperture, osmode, None)
-        {
-            let pr = orbit.project(h.point.to3(0.0));
-            if pr.dist(view_cursor) <= aperture {
-                return Some((h, pr));
+    if base.is_none()
+        && deferred
+        && let Some((h, pr)) = deferred_hit_in_orbit(&near_prims, orbit, view_cursor, aperture, osmode)
+    {
+        return Some((h, pr));
+    }
+    if osmode & mode::NEA != 0 {
+        let mut nb: Option<(f64, Vec2, Vec2)> = None;
+        let mut consider = |c: Vec2, z: f64| {
+            if !c.is_finite() || !z.is_finite() {
+                return;
+            }
+            let pr = orbit.project(c.to3(z));
+            let dd = pr.dist(view_cursor);
+            if dd <= aperture && nb.is_none_or(|(bd, ..)| dd < bd) {
+                nb = Some((dd, c, pr));
+            }
+        };
+        for (p, z) in &near_prims {
+            let Some(cur_z) = orbit.unproject_z(view_cursor, *z) else { continue };
+            for s in prim_segments(p) {
+                consider(fix_circle(&s).closest(cur_z), *z);
+            }
+            if let Prim::Circle(c) = p {
+                consider(c.closest(cur_z), *z);
             }
         }
-        if osmode & mode::NEA != 0 {
-            let mut nb: Option<(f64, Vec2, Vec2)> = None;
-            let mut consider = |c: Vec2| {
-                if !c.is_finite() {
-                    return;
-                }
-                let pr = orbit.project(c.to3(0.0));
-                let dd = pr.dist(view_cursor);
-                if dd <= aperture && nb.is_none_or(|(bd, ..)| dd < bd) {
-                    nb = Some((dd, c, pr));
-                }
-            };
-            for p in &near_prims {
-                for s in prim_segments(p) {
-                    consider(fix_circle(&s).closest(work_cursor));
-                }
-                if let Prim::Circle(c) = p {
-                    consider(c.closest(work_cursor));
-                }
-            }
-            if let Some((_, p, pr)) = nb {
-                return Some((SnapHit { point: p, mode: mode::NEA, name: "Nearest", viewport: None, deferred: None }, pr));
-            }
+        if let Some((_, p, pr)) = nb {
+            return Some((SnapHit { point: p, mode: mode::NEA, name: "Nearest", viewport: None, deferred: None }, pr));
         }
     }
-    let _ = probe;
     None
 }
 
@@ -959,6 +992,125 @@ fn block_leaves(d: &Drawing, ins: &Insert, m: &Mat3, depth: usize, budget: &mut 
             }
         }
     }
+}
+
+/// Calls `f` with each object drawn by a block reference, its 2D placement transform and its
+/// accumulated Z elevation (`z_offset + entity_elevation * z_scale`), matching [`cadcraft_render`]'s
+/// `sub_ctx`.
+#[allow(clippy::too_many_arguments)]
+fn block_leaves_z(
+    d: &Drawing,
+    ins: &Insert,
+    m: &Mat3,
+    z_offset: f64,
+    z_scale: f64,
+    depth: usize,
+    budget: &mut usize,
+    frozen: &[String],
+    f: &mut dyn FnMut(&EntityKind, &Mat3, f64),
+) {
+    if depth >= MAX_BLOCK_DEPTH {
+        return;
+    }
+    let Some(blk) = d.block(&ins.block) else { return };
+    if blk.entities.is_empty() {
+        return;
+    }
+    let sub_z_offset = z_offset + (ins.insert.z - blk.base.z * ins.scale.z) * z_scale;
+    let sub_z_scale = z_scale * ins.scale.z;
+    let (cols, rows) = (ins.cols.clamp(1, 10_000), ins.rows.clamp(1, 10_000));
+    for r in 0..rows {
+        for c in 0..cols {
+            if *budget == 0 {
+                return;
+            }
+            *budget -= 1;
+            let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
+            let mm = m.then_before(Mat3::translate(off).then_before(ins.transform(blk.base.xy())));
+            for be in blk.entities.iter() {
+                if *budget == 0 {
+                    return;
+                }
+                *budget -= 1;
+                if !be.common.visible
+                    || (be.common.layer != "0" && (!d.is_visible(be) || frozen.iter().any(|l| l.eq_ignore_ascii_case(&be.common.layer))))
+                {
+                    continue;
+                }
+                match &be.kind {
+                    EntityKind::AttDef(_) => {}
+                    EntityKind::Insert(inner) => block_leaves_z(d, inner, &mm, sub_z_offset, sub_z_scale, depth + 1, budget, frozen, f),
+                    k => f(k, &mm, sub_z_offset + cadcraft_render::entity_elevation(k) * sub_z_scale),
+                }
+            }
+        }
+    }
+}
+
+/// Whether `p` at elevation `z` comes within `aperture` of `view_cursor` under `orbit`.
+fn prim_near_in_orbit(p: &Prim, z: f64, orbit: cadcraft_render::Orbit3d, view_cursor: Vec2, aperture: f64) -> bool {
+    let b = match p {
+        Prim::Seg(s) => s.bounds(),
+        Prim::Circle(c) => c.bounds(),
+        Prim::Ellipse(e) => e.bounds(),
+        Prim::Spline(s) => Bounds2::from_points(s.control.iter().copied()),
+        Prim::Point(q) => Bounds2::new(*q, *q),
+        Prim::Infinite { .. } => return true,
+        Prim::Fill(f) => Bounds2::from_points(f.iter().copied()),
+    };
+    if b.is_empty() || !b.min.is_finite() || !b.max.is_finite() {
+        return true;
+    }
+    let corners = [
+        orbit.project(Vec2::new(b.min.x, b.min.y).to3(z)),
+        orbit.project(Vec2::new(b.max.x, b.min.y).to3(z)),
+        orbit.project(Vec2::new(b.max.x, b.max.y).to3(z)),
+        orbit.project(Vec2::new(b.min.x, b.max.y).to3(z)),
+    ];
+    Bounds2::from_points(corners).expand(aperture).contains(view_cursor)
+}
+
+/// The nearest deferred tangent/perpendicular within `aperture` of `view_cursor` under `orbit`.
+fn deferred_hit_in_orbit(
+    prims: &[(Prim, f64)],
+    orbit: cadcraft_render::Orbit3d,
+    view_cursor: Vec2,
+    aperture: f64,
+    osmode: u32,
+) -> Option<(SnapHit, Vec2)> {
+    let mut best: Option<(f64, SnapHit, Vec2)> = None;
+    for (p, z) in prims {
+        let Some(cur_z) = orbit.unproject_z(view_cursor, *z) else { continue };
+        let curve = match p {
+            Prim::Circle(c) => SnapCurve::Circle { center: c.center, radius: c.radius },
+            Prim::Seg(Segment::Arc { arc, .. }) => SnapCurve::Circle { center: arc.center, radius: arc.radius },
+            Prim::Seg(Segment::Line(l)) => SnapCurve::Line { a: l.a, b: l.b },
+            Prim::Infinite { base, dir, .. } => SnapCurve::Line { a: *base, b: *base + *dir },
+            _ => continue,
+        };
+        let (m, name, at) = match curve {
+            SnapCurve::Circle { center, radius } if osmode & mode::TAN != 0 => {
+                (mode::TAN, "Deferred Tangent", Circle::new(center, radius).closest(cur_z))
+            }
+            SnapCurve::Circle { center, radius } if osmode & mode::PER != 0 => {
+                (mode::PER, "Deferred Perpendicular", Circle::new(center, radius).closest(cur_z))
+            }
+            SnapCurve::Line { a, b } if osmode & mode::PER != 0 => {
+                let l = cadcraft_geom::Line::new(a, b);
+                (mode::PER, "Deferred Perpendicular", if matches!(p, Prim::Seg(_)) { l.closest(cur_z) } else { l.project(cur_z) })
+            }
+            _ => continue,
+        };
+        if !at.is_finite() {
+            continue;
+        }
+        let pr = orbit.project(at.to3(*z));
+        let dd = pr.dist(view_cursor);
+        if pr.is_finite() && dd <= aperture && best.as_ref().is_none_or(|(bd, ..)| dd < *bd) {
+            best = Some((dd, SnapHit { point: at, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }) }, pr));
+        }
+    }
+    best.map(|(_, h, pr)| (h, pr))
 }
 
 /// Whether `p` comes within `aperture` of the box `probe`.

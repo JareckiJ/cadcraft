@@ -1326,6 +1326,8 @@ pub fn entity_elevation(kind: &EntityKind) -> f64 {
         EntityKind::MText(t) => t.insert.z,
         EntityKind::Point(p) => p.p.z,
         EntityKind::Dimension(d) => d.defpt.z,
+        EntityKind::Solid(s) | EntityKind::Trace(s) => s.corners[0].z,
+        EntityKind::Image(i) => i.insert.z,
         EntityKind::Line(l) if (l.a.z - l.b.z).abs() <= 1e-12 => l.a.z,
         _ => 0.0,
     }

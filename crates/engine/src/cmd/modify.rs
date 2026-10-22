@@ -279,7 +279,10 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
         }
         k => {
             let g = k.grips();
-            let elev = cadcraft_render::entity_elevation(k);
+            let elev = match &*k {
+                EntityKind::Insert(i) => i.insert.z,
+                other => cadcraft_render::entity_elevation(other),
+            };
             if g.first().is_some_and(|p| inside3(p.to3(elev))) {
                 k.transform(&Mat3::translate(d));
             }
