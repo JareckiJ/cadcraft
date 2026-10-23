@@ -46,7 +46,7 @@ pub use cadcraft_doc as doc;
 pub use cadcraft_geom as geom;
 pub use cadcraft_render as render;
 pub use cmd::hatch::{HatchPicks, PatternChoice, PickMode, pattern_choices};
-pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
+pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command, is_system_xdata_app};
 pub use prompt::{Accept, Drag, Input, Interactive, Picker, Prompt, Step};
 
 #[derive(Debug, thiserror::Error)]
@@ -147,11 +147,14 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// 3D Orbit orientation of model space (`Orbit3d::default()` = Top 2D plan view).
+    pub orbit: cadcraft_render::Orbit3d,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl DocState {
+    /// Create a fresh document state for `doc` with the given tab `title` and optional file `path`.
     pub fn new(doc: Drawing, title: &str, path: Option<String>) -> Self {
         let doc = Arc::new(doc);
         DocState {
@@ -173,6 +176,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            orbit: cadcraft_render::Orbit3d::default(),
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -690,6 +694,8 @@ pub struct Session {
     pub last_used: LastUsed,
     /// Where `clipboard` came from and the layers, styles and blocks its objects need.
     pub clipboard_source: Option<cmd::clipboard::ClipSource>,
+    /// A raster image payload on the clipboard.
+    pub clipboard_image: Option<cmd::clipboard::ClipboardImage>,
     /// The window last picked with PLOTWINDOW (the Plot dialog's "Window <").
     pub plot_window: Option<cadcraft_geom::Bounds2>,
     /// AutoLISP: each drawing's symbols and the routine running ([`lisp`]).
@@ -698,6 +704,22 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// State of an active interactive pick requested by a .NET DLL plugin (`dotnet.bridge`).
+    pub dotnet_pick: DotNetPickState,
+    /// Optional Z coordinate of a 3D point passed programmatically (e.g. from LISP `command` into `3DPOLY`).
+    pub(crate) pending_point_z: Option<f64>,
+    /// Directory of the most recently loaded LISP file, searched by `findfile`, `open` and `-INSERT`.
+    pub lisp_file_dir: Option<String>,
+}
+
+/// Interactive pick state requested by an external .NET plugin via `dotnet.bridge`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DotNetPickState {
+    pub status: String,
+    pub point: Option<[f64; 3]>,
+    pub handle: Option<String>,
+    pub handles: Vec<String>,
+    pub value: Option<f64>,
 }
 
 impl Default for Session {
@@ -743,11 +765,30 @@ impl Session {
             last_dim: None,
             last_used: LastUsed::default(),
             clipboard_source: None,
+            clipboard_image: None,
             plot_window: None,
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            dotnet_pick: DotNetPickState::default(),
+            pending_point_z: None,
+            lisp_file_dir: None,
         }
+    }
+    /// Record the folder of a loaded LISP file so `findfile`, `open` and `-INSERT` search it.
+    pub fn set_lisp_file_dir(&mut self, dir: Option<String>) {
+        self.lisp_file_dir = dir;
+    }
+    /// Put a raster image payload onto the clipboard.
+    pub fn set_clipboard_image(&mut self, bytes: Vec<u8>, width: u32, height: u32) {
+        self.clipboard = Vec::new();
+        self.clipboard_base = Vec2::ZERO;
+        self.clipboard_source = None;
+        self.clipboard_image = Some(cmd::clipboard::ClipboardImage { bytes: std::sync::Arc::new(bytes), width, height });
+    }
+    /// The file path of the active drawing, if known.
+    pub fn drawing_path(&self) -> Option<String> {
+        self.state().ok().and_then(|s| s.path.clone())
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
         self.untitled_counter += 1;
@@ -963,6 +1004,9 @@ impl Session {
         let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
         let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
         let Some(spec) = find_command(&id) else {
+            if !transparent {
+                self.lisp_ensure_user_loaded();
+            }
             // A command defined in LISP: (defun c:NAME …).
             if !transparent && let Some(f) = self.lisp_command(&lower) {
                 if self.running.is_some() {
@@ -1141,12 +1185,13 @@ impl Session {
         match input {
             Input::Point(p) => {
                 let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
+                let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
                 if let Some(pw) = self.pending_window.take() {
                     let crossing = p.x < pw.corner.x;
-                    let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+                    let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
-                match select::pick(self.doc()?, &space, p, ap) {
+                match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
                     Some(h) => Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h])))),
                     None => {
                         self.pending_window = Some(PendingWindow { corner: p, during_command: true });
@@ -1200,17 +1245,22 @@ impl Session {
                 }
             };
         }
+        let orbit = self
+            .state()
+            .ok()
+            .filter(|st| matches!(st.edit_space(), Space::Model))
+            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         match input {
             Input::Point(p) => {
                 if mode.push(p) {
-                    return Ok(mode.select(self.doc()?, &self.space()).map(Input::Pick));
+                    return Ok(mode.select(self.doc()?, &self.space(), orbit).map(Input::Pick));
                 }
             }
             Input::Keyword(k) if k == "Undo" => {
                 mode.pts.pop();
             }
             // Enter ends a fence or polygon; with too few points the mode is dropped.
-            Input::Enter => return Ok(mode.select(self.doc()?, &self.space()).map(Input::Pick)),
+            Input::Enter => return Ok(mode.select(self.doc()?, &self.space(), orbit).map(Input::Pick)),
             Input::Cancel | Input::Pick(_) => return Ok(Some(input)),
             _ => self.echo("Invalid point."),
         }
@@ -1350,8 +1400,11 @@ impl Session {
     /// transparent command, cancels it and the command it interrupted.
     pub fn cancel(&mut self) {
         self.point_mods.clear();
+        if self.dotnet_pick.status == "waiting" {
+            self.dotnet_pick.status = "cancel".into();
+        }
         // Esc stops a LISP routine waiting for input, and the command it paused in.
-        if self.lisp_waiting() {
+        if self.lisp_waiting() || (self.lisp_running() && !self.lisp.executing) {
             if self.running.is_some() {
                 let _ = self.feed(Some(Input::Cancel));
             }
@@ -1400,6 +1453,37 @@ impl Session {
             Some(p) => p.picks_objects(),
             None => self.settings.pickfirst,
         }
+    }
+
+    /// Whether the current prompt collects points on the model work plane (`z = 0`) rather than
+    /// picking objects or selection areas in the 2D view plane. Returns `false` when the `z = 0`
+    /// work plane is viewed edge-on ([`cadcraft_render::Orbit3d::is_edge_on`]).
+    pub fn accepts_work_point(&self) -> bool {
+        if self.pending_window.is_some() || self.select_mode.is_some() {
+            return false;
+        }
+        if self
+            .state()
+            .ok()
+            .is_some_and(|st| matches!(st.edit_space(), Space::Model) && st.orbit.is_edge_on())
+        {
+            return false;
+        }
+        if let Some(r) = &self.running {
+            if r.id.starts_with("zoom") {
+                return false;
+            }
+            if r.id == "stretch" && self.point_mods.is_empty() {
+                let msg = r.machine.prompt(self).message;
+                if !matches!(
+                    msg.as_str(),
+                    "Specify base point" | "Specify displacement" | "Specify second point or <use first point as displacement>"
+                ) {
+                    return false;
+                }
+            }
+        }
+        self.current_prompt().as_ref().is_some_and(pointmod::accepts)
     }
 
     /// Whether the object under the cursor is highlighted (SELECTIONPREVIEW): the cursor picks
@@ -1482,6 +1566,13 @@ impl Session {
         loop {
             if self.running.is_none() {
                 if !script && !first {
+                    return Ok(());
+                }
+                if self.lisp_prompt().is_none() && is_bare_lisp_prefix(rest) {
+                    let wrapped = format!("({})", rest.trim());
+                    if let Err(e) = self.lisp_eval(&wrapped, true, false, Vec::new()) {
+                        self.echo(e.to_string());
+                    }
                     return Ok(());
                 }
                 // `cmd {json}`: programmatic call with parameters.
@@ -1679,9 +1770,10 @@ impl Session {
     pub fn idle_click(&mut self, p: Vec2, shift: bool) -> Result<()> {
         let space = self.space();
         let pickadd = self.settings.pickadd;
+        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
         if let Some(pw) = self.pending_window.take() {
             let crossing = p.x < pw.corner.x;
-            let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
+            let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
             let hs = cmd::groups::expand(self, hs);
             let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
             if shift && pickadd {
@@ -1693,7 +1785,7 @@ impl Session {
             return Ok(());
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        match select::pick(self.doc()?, &space, p, ap) {
+        match select::pick_in_orbit(self.doc()?, &space, orbit, p, ap) {
             Some(h) => self.idle_pick(h, shift),
             None => self.pending_window = Some(PendingWindow { corner: p, during_command: false }),
         }
@@ -1742,7 +1834,8 @@ impl Session {
             return Vec::new();
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        self.doc().map(|d| select::pick_all(d, &self.space(), p, ap)).unwrap_or_default()
+        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        self.doc().map(|d| select::pick_all_in_orbit(d, &self.space(), orbit, p, ap)).unwrap_or_default()
     }
 
     /// Whether selection cycling marks `p` with its badge (SELECTIONCYCLING 1 or 2): overlapping
@@ -1851,6 +1944,46 @@ impl Session {
 fn lisp_expression(t: &str) -> bool {
     let t = t.trim();
     t.starts_with('(') || (t.starts_with('!') && t.len() > 1)
+}
+
+/// Bare prefix LISP/arithmetic expression typed at `Command:` without outer parentheses (e.g. `+ 1 2`).
+pub fn is_bare_lisp_prefix(t: &str) -> bool {
+    let t = t.trim_start();
+    let Some((op, rest)) = t.split_once([' ', '\t']) else {
+        return false;
+    };
+    is_bare_lisp_operator(op) && !rest.trim().is_empty()
+}
+
+/// Whether `op` is a LISP prefix operator that accepts space-separated arguments on the command line.
+pub fn is_bare_lisp_operator(op: &str) -> bool {
+    let op = op.to_ascii_lowercase();
+    matches!(
+        op.as_str(),
+        "+" | "-"
+            | "*"
+            | "/"
+            | "="
+            | "/="
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "1+"
+            | "1-"
+            | "sin"
+            | "cos"
+            | "sqrt"
+            | "abs"
+            | "min"
+            | "max"
+            | "expt"
+            | "rem"
+            | "gcd"
+            | "strcat"
+            | "setq"
+            | "defun"
+    )
 }
 
 /// The next command-line input in `rest` and what follows it: up to a space or tab, except that

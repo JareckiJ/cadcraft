@@ -92,7 +92,7 @@ fn tab(app: &mut CadApp) {
     {
         // Both values typed: Tab locks the second one as well.
         app.cmd.locked_second = Some(app.cmd.buffer.clone());
-    } else if let Some(s) = suggestions(&app.cmd.buffer).first() {
+    } else if let Some(s) = suggestions_with_plugins(app, &app.cmd.buffer).first() {
         app.cmd.buffer = s.id.clone();
     }
 }
@@ -108,40 +108,100 @@ pub struct Suggestion {
     pub label: &'static str,
 }
 
+/// Matching command names/aliases for AutoComplete, including loaded AutoLISP `c:` and `.NET` plugin commands.
+fn suggestions_with_plugins(app: &CadApp, prefix: &str) -> Vec<Suggestion> {
+    if prefix.is_empty() || prefix.contains(' ') {
+        return Vec::new();
+    }
+    let mut dynamic: Vec<(String, &'static str)> = Vec::new();
+    let mut seen_dyn: HashSet<String> = HashSet::new();
+    for cmd in app.session.lisp_commands() {
+        let up = cmd.to_ascii_uppercase();
+        if seen_dyn.insert(up.clone()) {
+            dynamic.push((up, "AutoLISP Command"));
+        }
+    }
+    if let Some(ide) = &app.lisp_ide {
+        if ide.loaded_code.is_some() {
+            for cmd in &ide.commands {
+                let up = cmd.to_ascii_uppercase();
+                if seen_dyn.insert(up.clone()) {
+                    dynamic.push((up, "AutoLISP Command"));
+                }
+            }
+        }
+        for dll in &ide.loaded_dlls {
+            for cmd in &dll.commands {
+                let up = cmd.to_ascii_uppercase();
+                if seen_dyn.insert(up.clone()) {
+                    dynamic.push((up, ".NET Plugin Command"));
+                }
+            }
+        }
+    }
+    suggestions_inner(prefix, &dynamic)
+}
+
 /// Matching command names/aliases for AutoComplete.
 fn suggestions(prefix: &str) -> Vec<Suggestion> {
+    suggestions_inner(prefix, &[])
+}
+
+fn suggestions_inner(prefix: &str, dynamic: &[(String, &'static str)]) -> Vec<Suggestion> {
     if prefix.is_empty() || prefix.contains(' ') {
         return Vec::new();
     }
     let p = prefix.to_ascii_lowercase();
+    let p_up = prefix.to_ascii_uppercase();
 
     let mut out: Vec<Suggestion> = Vec::new();
-    let mut seen_ids: HashSet<&'static str> = HashSet::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+
+    // 0. Exact match on a loaded AutoLISP / .NET plugin command.
+    for (cmd_up, label) in dynamic {
+        if *cmd_up == p_up && seen_ids.insert(cmd_up.clone()) {
+            out.push(Suggestion { id: cmd_up.clone(), display: cmd_up.clone(), label });
+        }
+    }
 
     // 1. Exact match: alias resolution or exact command name match.
     let resolved = cadcraft_engine::cmd::resolve_alias(&p);
     if let Some(spec) = cadcraft_engine::cmd::find_command(&resolved)
         && !spec.id.contains('.')
     {
-        let display =
-            if spec.id == p { spec.id.to_ascii_uppercase() } else { format!("{} ({})", p.to_ascii_uppercase(), spec.id.to_ascii_uppercase()) };
-        out.push(Suggestion { id: spec.id.to_ascii_uppercase(), display, label: spec.label });
-        seen_ids.insert(spec.id);
+        let up_id = spec.id.to_ascii_uppercase();
+        if seen_ids.insert(up_id.clone()) {
+            let display = if spec.id == p { up_id.clone() } else { format!("{} ({})", p_up, up_id) };
+            out.push(Suggestion { id: up_id, display, label: spec.label });
+        }
     }
 
-    // 2. Command ID prefix matches (excluding already matched exact command).
-    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> =
-        cadcraft_engine::command_specs().iter().filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p)).collect();
+    // 2. Prefix matches on loaded AutoLISP / .NET plugin commands and built-in command IDs.
+    let mut dyn_matches: Vec<&(String, &'static str)> =
+        dynamic.iter().filter(|(cmd_up, _)| !seen_ids.contains(cmd_up) && cmd_up.starts_with(&p_up)).collect();
+    dyn_matches.sort_by_key(|(cmd_up, _)| (cmd_up.len(), cmd_up.as_str()));
+    for (cmd_up, label) in dyn_matches {
+        if seen_ids.insert(cmd_up.clone()) {
+            out.push(Suggestion { id: cmd_up.clone(), display: cmd_up.clone(), label });
+        }
+    }
+
+    let mut id_matches: Vec<&'static cadcraft_engine::CommandSpec> = cadcraft_engine::command_specs()
+        .iter()
+        .filter(|c| !c.id.contains('.') && !seen_ids.contains(&c.id.to_ascii_uppercase()) && c.id.starts_with(&p))
+        .collect();
     id_matches.sort_by_key(|c| (c.id.len(), c.id));
     for c in id_matches {
-        out.push(Suggestion { id: c.id.to_ascii_uppercase(), display: c.id.to_ascii_uppercase(), label: c.label });
-        seen_ids.insert(c.id);
+        let up_id = c.id.to_ascii_uppercase();
+        if seen_ids.insert(up_id.clone()) {
+            out.push(Suggestion { id: up_id.clone(), display: up_id, label: c.label });
+        }
     }
 
     // 3. Command alias prefix matches (for commands not yet added).
     let mut alias_matches: Vec<(&'static str, &'static cadcraft_engine::CommandSpec)> = Vec::new();
     for c in cadcraft_engine::command_specs() {
-        if c.id.contains('.') || seen_ids.contains(c.id) {
+        if c.id.contains('.') || seen_ids.contains(&c.id.to_ascii_uppercase()) {
             continue;
         }
         let matching_alias = c.aliases.iter().copied().filter(|a| a.starts_with(&p)).min_by_key(|a| (a.len(), *a));
@@ -151,10 +211,11 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
     }
     alias_matches.sort_by_key(|(alias, c)| (alias.len(), *alias, c.id));
     for (alias, c) in alias_matches {
-        if seen_ids.insert(c.id) {
+        let up_id = c.id.to_ascii_uppercase();
+        if seen_ids.insert(up_id.clone()) {
             out.push(Suggestion {
-                id: c.id.to_ascii_uppercase(),
-                display: format!("{} ({})", alias.to_ascii_uppercase(), c.id.to_ascii_uppercase()),
+                id: up_id.clone(),
+                display: format!("{} ({})", alias.to_ascii_uppercase(), up_id),
                 label: c.label,
             });
         }
@@ -189,6 +250,21 @@ impl CmdLine {
     pub fn option_at(&self, at: Pos2) -> Option<String> {
         self.options.as_ref()?;
         self.option_rows.iter().find(|(r, _)| r.contains(at)).map(|(_, k)| k.clone())
+    }
+
+    /// Record a command in the command-line Up/Down arrow history.
+    pub fn push_history(&mut self, entry: &str) {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() || trimmed.starts_with("ui.") {
+            return;
+        }
+        if self.history.last().is_none_or(|last| !last.eq_ignore_ascii_case(trimmed)) {
+            self.history.push(trimmed.to_string());
+            if self.history.len() > 200 {
+                self.history.remove(0);
+            }
+        }
+        self.history_pos = None;
     }
 }
 
@@ -247,6 +323,42 @@ pub struct KeyPress {
     pub plain: bool,
 }
 
+/// Whether pressing Space on the command line should insert a literal space instead of submitting
+/// the buffer: true while a LISP expression has unclosed parentheses/strings (`(+ 1 2`), or when
+/// typing a bare LISP prefix expression at `Command:` (`+ 1 2`).
+pub fn lisp_accepts_space(buffer: &str, prompting: bool) -> bool {
+    let b = buffer.trim_start();
+    let rest = b.strip_prefix('!').unwrap_or(b);
+    if rest.starts_with('(') {
+        let (mut depth, mut in_str, mut escaped) = (0i32, false, false);
+        for c in rest.chars() {
+            if in_str {
+                match (escaped, c) {
+                    (true, _) => escaped = false,
+                    (false, '\\') => escaped = true,
+                    (false, '"') => in_str = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match c {
+                '"' => in_str = true,
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+        }
+        return depth > 0 || in_str;
+    }
+    if !prompting {
+        let first = b.split_whitespace().next().unwrap_or("");
+        if cadcraft_engine::is_bare_lisp_operator(first) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Handle keyboard input destined for the command line (when no text field has focus).
 pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     if ctx.egui_wants_keyboard_input() {
@@ -259,9 +371,10 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     let text_prompt = app.session.current_prompt().is_some_and(|p| p.accept.text && !p.accept.point && !p.accept.number);
     options_still_fit(app);
     for ev in events {
+        let keep_space = text_prompt || lisp_accepts_space(&app.cmd.buffer, app.session.prompting());
         // The options menu takes the arrows, Enter and Escape; typing closes it.
         if app.cmd.options.is_some() {
-            let space = matches!(&ev, egui::Event::Text(t) if t == " ") && !text_prompt;
+            let space = matches!(&ev, egui::Event::Text(t) if t == " ") && !keep_space;
             match &ev {
                 _ if space => {
                     if let Some(k) = app.cmd.options.as_ref().and_then(|m| m.current()).map(str::to_owned) {
@@ -294,15 +407,17 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
             egui::Event::Text(t) => {
                 if t == "\t" {
                     tab(app);
-                } else if t == " " && !text_prompt {
+                } else if t == " " && !keep_space {
                     submit(app);
                 } else {
+                    app.cmd.history_pos = None;
                     app.cmd.buffer.push_str(&t);
                 }
             }
             egui::Event::Key { key, pressed: true, repeat, modifiers, .. } => match key {
                 Key::Enter => submit(app),
                 Key::Escape => {
+                    app.cmd.history_pos = None;
                     app.cmd.buffer.clear();
                     app.session.cancel();
                 }
@@ -319,6 +434,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     if erase {
                         let _ = app.run("erase.selection", serde_json::json!({}));
                     } else {
+                        app.cmd.history_pos = None;
                         app.cmd.buffer.pop();
                     }
                 }
@@ -356,6 +472,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     }
 }
 
+/// Submit the current command-line buffer to the CAD session.
 pub fn submit(app: &mut CadApp) {
     // Grip dimensional input: the typed lengths and angles place the grip.
     if crate::grip_dyn::submit(app) {
@@ -375,10 +492,7 @@ pub fn submit(app: &mut CadApp) {
     app.cmd.locked_second = None;
     app.cmd.history_pos = None;
     if !text.trim().is_empty() && !app.session.prompting() {
-        app.cmd.history.push(text.clone());
-        if app.cmd.history.len() > 200 {
-            app.cmd.history.remove(0);
-        }
+        app.cmd.push_history(&text);
     }
     crate::context_menu::note_input(app, &text);
     if text.is_empty() {
@@ -508,8 +622,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
         false,
     );
     // AutoComplete list.
-    if !app.session.prompting() {
-        let sug = suggestions(&app.cmd.buffer);
+    if !app.session.prompting() && app.cmd.history_pos.is_none() {
+        let sug = suggestions_with_plugins(app, &app.cmd.buffer);
         if !sug.is_empty() {
             let rh = 20.0;
             let lr = Rect::from_min_size(
@@ -570,8 +684,8 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let top = window.or(lines).map_or(bar.top(), |r| r.top());
     let grip = Rect::from_min_max(pos2(bar.left(), top - 3.0), pos2(bar.right(), top + 3.0));
     let mut all = bar.union(grip);
-    if !app.session.prompting() {
-        let k = suggestions(&app.cmd.buffer).len();
+    if !app.session.prompting() && app.cmd.history_pos.is_none() {
+        let k = suggestions_with_plugins(app, &app.cmd.buffer).len();
         if k > 0 {
             let above = if n == 0 { 0.0 } else { LINE_H * n as f32 + 6.0 };
             all = all.union(Rect::from_min_size(pos2(bar.left(), bar.top() - 6.0 - 20.0 * k as f32 - above), vec2(bar.width(), 1.0)));
@@ -609,6 +723,11 @@ fn history(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect, bar: Rect) {
             }
         } else {
             app.cmd.resize_from = None;
+        }
+    }
+    if resp.clicked() {
+        if let Some(id) = ui.ctx().memory(|m| m.focused()) {
+            ui.ctx().memory_mut(|m| m.surrender_focus(id));
         }
     }
     if resp.clicked() && resp.interact_pointer_pos().is_some_and(on_toggle) {

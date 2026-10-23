@@ -516,6 +516,7 @@ fn substr(a: &[Value]) -> R {
     }
     let chars = s.chars().skip(start as usize - 1);
     let out: String = match a.get(2) {
+        None | Some(Value::Nil) => chars.collect(),
         Some(n) => {
             let n = int(n)?;
             if n < 0 {
@@ -523,7 +524,6 @@ fn substr(a: &[Value]) -> R {
             }
             chars.take(n as usize).collect()
         }
-        None => chars.collect(),
     };
     Ok(Value::str(&out))
 }
@@ -598,10 +598,28 @@ fn vl_symbolp(a: &[Value]) -> R {
 fn vl_string_search(a: &[Value]) -> R {
     arity(a, 2, 3)?;
     let (pat, s) = (string(&a[0])?, string(&a[1])?);
-    let start = a.get(2).map(int).transpose()?.unwrap_or(0).max(0) as usize;
+    let start = a.get(2).filter(|v| !v.is_nil()).map(int).transpose()?.unwrap_or(0).max(0) as usize;
     let chars: Vec<char> = s.chars().collect();
     let tail: String = chars.iter().skip(start).collect();
     Ok(tail.find(&*pat).map(|b| Value::Int((start + tail[..b].chars().count()) as i32)).unwrap_or_default())
+}
+fn vl_string_position(a: &[Value]) -> R {
+    arity(a, 2, 4)?;
+    let code = u32::try_from(int(&a[0])?).ok().and_then(char::from_u32);
+    let Some(target) = code else { return Ok(Value::Nil) };
+    let s = string(&a[1])?;
+    let start = a.get(2).filter(|v| !v.is_nil()).map(int).transpose()?.unwrap_or(0).max(0) as usize;
+    let from_end = a.get(3).is_some_and(|v| !v.is_nil());
+    let chars: Vec<char> = s.chars().collect();
+    if start >= chars.len() {
+        return Ok(Value::Nil);
+    }
+    let pos = if from_end {
+        (start..chars.len()).rev().find(|&i| chars[i] == target)
+    } else {
+        (start..chars.len()).find(|&i| chars[i] == target)
+    };
+    Ok(pos.map(|i| Value::Int(i as i32)).unwrap_or_default())
 }
 fn vl_string_subst(a: &[Value]) -> R {
     arity(a, 3, 4)?;
@@ -1020,7 +1038,8 @@ fn open(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     };
     let mut f = LispFile { path: path.clone(), writing, append, lines: Default::default(), text: String::new() };
     if !writing {
-        match read_text_file(&path) {
+        let resolved = resolve_support_file(ctx.s, &path).unwrap_or_else(|| path.clone());
+        match read_text_file(&resolved) {
             Some(t) => {
                 charge_bytes(t.len())?;
                 f.lines = t.lines().map(str::to_string).collect();
@@ -1060,10 +1079,54 @@ fn write_line(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     Ok(Flow::Value(Value::Str(s)))
 }
 
-fn findfile(a: &[Value]) -> R {
-    arity(a, 1, 1)?;
+fn findfile(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
     let p = string(&a[0])?;
-    Ok(if file_exists(&p) { Value::Str(p) } else { Value::Nil })
+    Ok(Flow::Value(resolve_support_file(ctx.s, &p).map(|found| Value::str(&found)).unwrap_or_default()))
+}
+
+/// Resolve a file path against as-is, active drawing folder, `lisp_file_dir`, and their immediate subfolders.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn resolve_support_file(s: &crate::Session, path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        return Some(path.to_string());
+    }
+    let mut base_dirs = Vec::new();
+    if let Ok(st) = s.state()
+        && let Some(fp) = &st.path
+        && let Some(parent) = std::path::Path::new(fp).parent()
+    {
+        base_dirs.push(parent.to_path_buf());
+    }
+    if let Some(dir) = &s.lisp_file_dir {
+        base_dirs.push(std::path::PathBuf::from(dir));
+    }
+    if let Some(dir) = s.lisp_support_dir() {
+        base_dirs.push(dir.to_path_buf());
+    }
+    for dir in &base_dirs {
+        let cand = dir.join(path);
+        if cand.is_file() {
+            return Some(cand.to_string_lossy().into_owned());
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    let sub_cand = entry.path().join(path);
+                    if sub_cand.is_file() {
+                        return Some(sub_cand.to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn resolve_support_file(_s: &crate::Session, _path: &str) -> Option<String> {
+    None
 }
 
 /// Read a regular text file up to 64 MiB, replacing invalid UTF-8 and returning `None` on read failure.
@@ -1098,14 +1161,6 @@ fn write_text_file(path: &str, text: &str, append: bool) {
 }
 #[cfg(target_arch = "wasm32")]
 fn write_text_file(_path: &str, _text: &str, _append: bool) {}
-#[cfg(not(target_arch = "wasm32"))]
-fn file_exists(path: &str) -> bool {
-    std::path::Path::new(path).is_file()
-}
-#[cfg(target_arch = "wasm32")]
-fn file_exists(_path: &str) -> bool {
-    false
-}
 
 // ---------------- functions of functions ----------------
 
@@ -1469,6 +1524,7 @@ static BUILTINS: &[Builtin] = &[
     pure!("VL-SYMBOL-NAME", vl_symbol_name),
     pure!("VL-SYMBOLP", vl_symbolp),
     pure!("VL-STRING-SEARCH", vl_string_search),
+    pure!("VL-STRING-POSITION", vl_string_position),
     pure!("VL-STRING-SUBST", vl_string_subst),
     pure!("VL-STRING-TRIM", vl_string_trim),
     pure!("VL-STRING-LEFT-TRIM", vl_string_left_trim),
@@ -1483,13 +1539,17 @@ static BUILTINS: &[Builtin] = &[
     pure!("DISTANCE", distance),
     pure!("ANGLE", angle),
     pure!("INTERS", inters),
-    pure!("FINDFILE", findfile),
     pure!("VL-CATCH-ALL-ERROR-P", vl_catch_all_error_p),
     pure!("VL-CATCH-ALL-ERROR-MESSAGE", vl_catch_all_error_message),
     pure!("VL-LOAD-COM", noop),
     pure!("GC", noop),
     pure!("REDRAW", noop),
+    pure!("GRDRAW", noop),
+    pure!("GRCLEAR", noop),
+    pure!("GRTEXT", noop),
+    pure!("GRVECS", noop),
     pure!("VER", ver),
+    ctx!("FINDFILE", findfile),
     ctx!("PRINC", princ),
     ctx!("PRIN1", prin1),
     ctx!("PRINT", print),
@@ -1529,6 +1589,7 @@ static BUILTINS: &[Builtin] = &[
     ctx!("GETKWORD", input::getkword),
     ctx!("ENTSEL", input::entsel),
     ctx!("NENTSEL", input::entsel),
+    ctx!("GETFILED", input::getfiled),
     ctx!("COMMAND", drawing::command),
     ctx!("COMMAND-S", drawing::command),
     ctx!("VL-CMDF", drawing::command),
@@ -1542,6 +1603,8 @@ static BUILTINS: &[Builtin] = &[
     ctx!("ENTNEXT", drawing::entnext),
     ctx!("ENTUPD", drawing::entupd),
     ctx!("HANDENT", drawing::handent),
+    ctx!("TEXTBOX", drawing::textbox),
+    ctx!("LAYOUTLIST", drawing::layoutlist),
     ctx!("SSGET", drawing::ssget),
     ctx!("SSADD", drawing::ssadd),
     ctx!("SSDEL", drawing::ssdel),

@@ -285,10 +285,13 @@ pub fn page_for(d: &Drawing, space: &Space, o: &PdfOptions) -> Result<PageSetup>
         }
     };
     if let Some(name) = &o.paper {
-        let ps = paper::paper_size(name).ok_or_else(|| IoError::Format(format!("unknown paper size `{name}`")))?;
-        page.paper = ps.name.into();
-        page.width_mm = ps.width_mm;
-        page.height_mm = ps.height_mm;
+        if let Some(ps) = paper::paper_size(name) {
+            page.paper = ps.name.into();
+            page.width_mm = ps.width_mm;
+            page.height_mm = ps.height_mm;
+        } else if !(page.paper.eq_ignore_ascii_case(name) && page.width_mm > 0.0 && page.height_mm > 0.0) {
+            return Err(IoError::Format(format!("unknown paper size `{name}`")));
+        }
     }
     if let Some((w, h)) = o.paper_mm {
         page.paper = format!("User ({w:.2} x {h:.2} MM)");
@@ -410,6 +413,7 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
         view: None,
         skip_viewport: None,
         cancel: None,
+        orbit: cadcraft_render::Orbit3d::default(),
     };
     let k = unit_mm * PT_PER_MM;
     let window = o.window.filter(|w| matches!(space, Space::Model) && !w.is_empty());
@@ -604,6 +608,7 @@ fn content_stream(
     clip_pt: &Bounds2,
     layers: &[u32],
     texts: &std::collections::HashMap<u32, (usize, &cadcraft_render::PlotText)>,
+    img_slots: &[Option<usize>],
 ) -> (String, Vec<u8>) {
     let marked: std::collections::HashSet<u32> = layers.iter().copied().collect();
     let white = Rgb(255, 255, 255);
@@ -616,6 +621,32 @@ fn content_stream(
     c.push(' ');
     num(&mut c, clip_pt.height());
     c.push_str(" re W n\n");
+    for (img, slot) in list.images.iter().zip(img_slots.iter()) {
+        let Some(idx) = slot else { continue };
+        let o = map.pt(img.origin);
+        let u = map.pt(img.origin + img.u) - o;
+        let v = map.pt(img.origin + img.v) - o;
+        if !(o.is_finite() && u.is_finite() && v.is_finite()) {
+            continue;
+        }
+        c.push_str("q\n");
+        if let Some(cb) = img.clip {
+            let cr = Bounds2::new(map.pt(cb.min), map.pt(cb.max));
+            if cr.width() > 0.0 && cr.height() > 0.0 {
+                pt(&mut c, cr.min);
+                c.push(' ');
+                num(&mut c, cr.width());
+                c.push(' ');
+                num(&mut c, cr.height());
+                c.push_str(" re W n\n");
+            }
+        }
+        for val in [u.x, u.y, v.x, v.y, o.x, o.y] {
+            num(&mut c, val);
+            c.push(' ');
+        }
+        let _ = writeln!(c, "cm /Im{idx} Do Q");
+    }
     let mut stroke: Option<Rgb> = None;
     let mut fill: Option<Rgb> = None;
     let mut width: Option<f64> = None;
@@ -899,11 +930,37 @@ fn assemble(d: &Drawing, pages: &[SheetPage], fonts: &fonts::Fonts, o: &PdfOptio
     let mut ocgs: Vec<(u32, usize)> = Vec::new();
     let mut kids = Vec::new();
     // Page dictionaries are completed once the fonts are written: (page, its fonts, the rest).
-    let mut page_dicts: Vec<(usize, Vec<usize>, String, String, String)> = Vec::new();
+    let mut page_dicts: Vec<(usize, Vec<usize>, String, String, String, String)> = Vec::new();
     for p in pages {
         let page = objs.reserve();
+        let mut xobjs = String::new();
+        let mut img_slots: Vec<Option<usize>> = Vec::with_capacity(p.list.images.len());
+        for (idx, img) in p.list.images.iter().enumerate() {
+            let slot = image::load_from_memory(&img.bytes).ok().and_then(|dyn_img| {
+                let (w, h) = (dyn_img.width(), dyn_img.height());
+                if w == 0 || h == 0 || w > 8192 || h > 8192 {
+                    return None;
+                }
+                let rgba = dyn_img.to_rgba8();
+                let fade = u32::from(img.fade.min(100));
+                let mut rgb_bytes = Vec::with_capacity((w as usize) * (h as usize) * 3);
+                for px in rgba.pixels() {
+                    let a = u32::from(px[3]);
+                    for ch in [px[0], px[1], px[2]] {
+                        let c = (u32::from(ch) * a + 255 * (255 - a)) / 255;
+                        let faded = (c * (100 - fade) + 255 * fade) / 100;
+                        rgb_bytes.push(faded.min(255) as u8);
+                    }
+                }
+                let extra = format!(" /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB /BitsPerComponent 8");
+                let id = objs.add(stream(&rgb_bytes, true, &extra));
+                let _ = write!(xobjs, " /Im{idx} {id} 0 R");
+                Some(idx)
+            });
+            img_slots.push(slot);
+        }
         let texts = fonts.texts(&p.list);
-        let (marks, alphas) = content_stream(&p.list, &p.map, &p.clip_pt, &p.layers, &texts);
+        let (marks, alphas) = content_stream(&p.list, &p.map, &p.clip_pt, &p.layers, &texts, &img_slots);
         let content = objs.add(stream(marks.as_bytes(), o.compress, ""));
         let mut used: Vec<usize> = texts.values().map(|(f, _)| *f).collect();
         used.sort_unstable();
@@ -934,16 +991,19 @@ fn assemble(d: &Drawing, pages: &[SheetPage], fonts: &fonts::Fonts, o: &PdfOptio
         let mut mb = String::new();
         pt(&mut mb, p.media);
         let annots = if annots.is_empty() { String::new() } else { format!(" /Annots [{}]", refs(annots)) };
-        page_dicts.push((page, used, props, ext_gstates(&alphas), format!("/MediaBox [0 0 {mb}] /Contents {content} 0 R{annots}")));
+        page_dicts.push((page, used, props, ext_gstates(&alphas), xobjs, format!("/MediaBox [0 0 {mb}] /Contents {content} 0 R{annots}")));
         kids.push(page);
     }
     let font_ids = if fonts.is_empty() { Vec::new() } else { fonts.write(&mut objs, o.compress) };
-    for (page, used, props, gstates, rest) in page_dicts {
+    for (page, used, props, gstates, xobjs, rest) in page_dicts {
         let mut res = String::new();
         if !props.is_empty() {
             let _ = write!(res, " /Properties <<{props} >>");
         }
         res.push_str(&gstates);
+        if !xobjs.is_empty() {
+            let _ = write!(res, " /XObject <<{xobjs} >>");
+        }
         let f: Vec<String> = used.iter().filter_map(|i| Some(format!("/F{i} {} 0 R", font_ids.get(*i)?))).collect();
         if !f.is_empty() {
             let _ = write!(res, " /Font << {} >>", f.join(" "));

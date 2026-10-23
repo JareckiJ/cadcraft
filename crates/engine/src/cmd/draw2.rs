@@ -1856,13 +1856,13 @@ fn run_3dpoly(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[derive(Default)]
 struct Poly3dM {
-    pts: Vec<Vec2>,
+    pts: Vec<Vec3>,
     handle: Option<Handle>,
 }
 
 impl Poly3dM {
     fn sync(&mut self, s: &mut Session, closed: bool) -> Result<()> {
-        let k = EntityKind::Polyline3d(Polyline3d { points: self.pts.iter().map(|p| v3(*p)).collect(), closed });
+        let k = EntityKind::Polyline3d(Polyline3d { points: self.pts.clone(), closed });
         match (self.handle, self.pts.len() >= 2) {
             (Some(h), true) => s.doc_mut()?.modify_entity(h, |e| e.kind = k)?,
             (None, true) => self.handle = Some(s.add_entity(k)?),
@@ -1881,17 +1881,20 @@ impl Interactive for Poly3dM {
         "3DPOLY"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
+        let last2 = self.pts.last().map(|p| p.xy());
         match self.pts.len() {
             0 => Prompt::new("Specify start point of polyline", Accept::POINT),
-            1 | 2 => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Undo"]).base_opt(self.pts.last().copied()),
-            _ => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Close", "Undo"]).base_opt(self.pts.last().copied()),
+            1 | 2 => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Undo"]).base_opt(last2),
+            _ => Prompt::new("Specify endpoint of line", Accept::POINT).kw(&["Close", "Undo"]).base_opt(last2),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match i {
             Input::Point(p) => {
-                if self.pts.last().is_none_or(|l| !l.near(p, 1e-12)) && self.pts.len() < MAX_GEN {
-                    self.pts.push(p);
+                let z = s.pending_point_z.take().unwrap_or(0.0);
+                let p3 = Vec3::new(p.x, p.y, z);
+                if self.pts.last().is_none_or(|l| !l.xy().near(p, 1e-12) || (l.z - z).abs() > 1e-12) && self.pts.len() < MAX_GEN {
+                    self.pts.push(p3);
                     self.sync(s, false)?;
                 }
                 Ok(Step::Continue)
@@ -1910,7 +1913,7 @@ impl Interactive for Poly3dM {
         }
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
-        self.pts.last().map(|l| vec![line(*l, c)]).unwrap_or_default()
+        self.pts.last().map(|l| vec![line(l.xy(), c)]).unwrap_or_default()
     }
 }
 
