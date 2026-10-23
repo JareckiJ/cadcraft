@@ -11,7 +11,6 @@ use super::helpers::*;
 use super::machines::{SelOutcome, SelectPhase, number};
 use super::trimextend::{self, TrimM};
 use super::*;
-use crate::select::{SelectKind, SelectMode};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -202,25 +201,8 @@ fn run_mirror(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
-/// An area whose vertices STRETCH moves: a window's box, or a polygon closed back to its first
-/// point.
-#[derive(Clone)]
-enum StretchArea {
-    Box(cadcraft_geom::Bounds2),
-    Polygon(Vec<Vec2>),
-}
-
-impl StretchArea {
-    fn contains(&self, p: Vec2) -> bool {
-        match self {
-            StretchArea::Box(bx) => bx.contains(p),
-            StretchArea::Polygon(poly) => cadcraft_geom::point_in_polygon(poly, p),
-        }
-    }
-}
-
 /// Move the vertices of `e` that lie inside any of the areas `wins` by `d` (STRETCH).
-fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
+fn stretch_entity(e: &mut Entity, wins: &[crate::select::SelectArea], d: Vec2) {
     let inside = |p: Vec2| wins.iter().any(|a| a.contains(p));
     let mv = |p: &mut cadcraft_geom::Vec3| {
         if inside(p.xy()) {
@@ -280,12 +262,12 @@ fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({ "stretched": moved.len() }));
     }
     let (mut hs, area) = if let Some(poly) = listed("polygon", 3)? {
-        (crate::select::select_polygon(s.doc()?, &space, &poly, true), StretchArea::Polygon(poly))
+        (crate::select::select_polygon(s.doc()?, &space, &poly, true), crate::select::SelectArea::Polygon(poly))
     } else {
         let w = points_param(p, "window").ok_or_else(|| bad("stretch", "`window` [[x,y],[x,y]], `polygon` or `fence` is required"))?;
         let (Some(a), Some(b)) = (w.first(), w.get(1)) else { return Err(bad("stretch", "window needs 2 corners")) };
         let bx = cadcraft_geom::Bounds2::new(*a, *b);
-        (crate::select::select_window(s.doc()?, &space, bx, true), StretchArea::Box(bx))
+        (crate::select::select_window(s.doc()?, &space, bx, true), crate::select::SelectArea::Box(bx))
     };
     hs.retain(|h| !super::curves::is_locked(s, *h));
     let doc = s.doc_mut()?;
@@ -305,10 +287,12 @@ enum StretchPhase {
     Second,
 }
 
-/// STRETCH: "Select objects" repeats until Enter. Crossing windows (implied right to left, or after
-/// `C`), windows (left to right, or after `W`) and polygons (`CP`, `WP`) select objects and mark
-/// the area whose vertices move; objects picked one at a time (or by a fence, `F`, or
-/// All/Last/Previous) move whole. Then the base point or Displacement, and the second point.
+/// STRETCH: "Select objects" repeats until Enter. It is the session's own selection prompt, as in
+/// every other command (#1116): crossing windows (implied right to left, or after `C`), windows
+/// (left to right, or after `W`) and polygons (`CP`, `WP`) select objects and mark the area whose
+/// vertices move ([`Session::take_pick_area`]); objects picked one at a time (or by a fence, `F`,
+/// or All/Last/Previous) move whole. `R`/`A` switch to removing and back. Then the base point or
+/// Displacement, and the second point.
 #[derive(Default)]
 struct StretchM {
     phase: StretchPhase,
@@ -316,12 +300,8 @@ struct StretchM {
     /// Objects selected without a window: they move whole.
     whole: Vec<Handle>,
     /// The selection windows and polygons: vertices inside any of them move.
-    windows: Vec<StretchArea>,
+    windows: Vec<crate::select::SelectArea>,
     removing: bool,
-    /// `C`, `W`, `BOX`, `CP`, `WP` or `F` was typed: the next points are that kind of selection.
-    mode: Option<SelectMode>,
-    /// First corner of the window being drawn.
-    corner: Option<Vec2>,
     base: Option<Vec2>,
 }
 
@@ -349,106 +329,22 @@ impl StretchM {
         s.set_selection(self.objs.clone());
     }
 
-    /// Select with a typed mode that has its points. With too few (a fence of one point, a polygon
-    /// of two) the mode is dropped.
-    fn finish_mode(&mut self, s: &mut Session, m: SelectMode) -> Result<()> {
-        let space = s.space();
-        let Some(hs) = m.select(s.doc()?, &space) else { return Ok(()) };
-        let area = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
-            (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::Polygon(m.pts)),
-            (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, Some((a, b))) => {
-                Some(StretchArea::Box(cadcraft_geom::Bounds2::new(*a, *b)))
-            }
-            // A fence marks no area: what it crosses moves whole.
-            _ => None,
-        };
-        let whole = area.is_none();
-        if let (Some(a), false) = (area, self.removing) {
-            self.windows.push(a);
-        }
-        self.add(s, hs, whole);
-        Ok(())
-    }
-
     fn select(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        if let Some(mut m) = self.mode.take() {
-            match &i {
-                Input::Point(p) => {
-                    if m.push(*p) {
-                        self.finish_mode(s, m)?;
-                    } else {
-                        self.mode = Some(m);
-                    }
-                    return Ok(Step::Continue);
-                }
-                Input::Text(t) | Input::Keyword(t) if matches!(t.trim().to_ascii_lowercase().as_str(), "u" | "undo") => {
-                    m.pts.pop();
-                    self.mode = Some(m);
-                    return Ok(Step::Continue);
-                }
-                // Enter ends a fence or closes a polygon.
-                Input::Enter => {
-                    self.finish_mode(s, m)?;
-                    return Ok(Step::Continue);
-                }
-                // Anything else leaves the mode and is read as usual.
-                _ => {}
-            }
-        }
         match i {
-            Input::Point(p) => match self.corner.take() {
-                Some(c) => {
-                    let bx = cadcraft_geom::Bounds2::new(c, p);
-                    let space = s.space();
-                    let hs = crate::select::select_window(s.doc()?, &space, bx, p.x < c.x);
-                    if !self.removing {
-                        self.windows.push(StretchArea::Box(bx));
-                    }
-                    self.add(s, hs, false);
+            // Whatever selected the objects; a window or polygon marks where vertices move.
+            Input::Pick(hs) => {
+                let area = s.take_pick_area();
+                let whole = area.is_none();
+                if let (Some(a), false) = (area, self.removing) {
+                    self.windows.push(a);
                 }
-                None => {
-                    let aperture = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
-                    let space = s.space();
-                    match crate::select::pick(s.doc()?, &space, p, aperture) {
-                        Some(h) => self.add(s, vec![h], true),
-                        None => self.corner = Some(p),
-                    }
-                }
-            },
-            Input::Pick(hs) => self.add(s, hs, true),
-            Input::Text(t) | Input::Keyword(t) => {
-                self.corner = None;
-                let d = s.doc()?;
-                let store = d.space(&s.space());
-                let word = t.trim().to_ascii_lowercase();
-                // `_C`, `_L`: the English name, as scripts write it.
-                let word = word.strip_prefix('_').unwrap_or(&word).to_string();
-                if let Some(m) = SelectMode::from_keyword(&word).filter(|m| m.kind != SelectKind::Group) {
-                    self.mode = Some(m);
-                    return Ok(Step::Continue);
-                }
-                let picked = match word.as_str() {
-                    "r" | "remove" => {
-                        self.removing = true;
-                        None
-                    }
-                    "a" | "add" => {
-                        self.removing = false;
-                        None
-                    }
-                    "all" => Some(store.map(|st| st.iter().filter(|e| d.is_visible(e)).map(|e| e.handle).collect()).unwrap_or_default()),
-                    "l" | "last" => Some(store.and_then(|st| st.last()).map(|e| vec![e.handle]).unwrap_or_default()),
-                    "p" | "previous" => Some(s.state()?.previous_selection.clone()),
-                    _ => {
-                        s.echo("*Invalid selection*");
-                        None
-                    }
-                };
-                if let Some(hs) = picked {
-                    self.add(s, hs, true);
-                }
+                self.add(s, hs, whole);
             }
-            Input::Enter if self.corner.is_some() => self.corner = None,
+            Input::Text(t) | Input::Keyword(t) => match t.trim().to_ascii_lowercase().as_str() {
+                "r" | "remove" => self.removing = true,
+                "a" | "add" => self.removing = false,
+                _ => s.echo("*Invalid selection*"),
+            },
             Input::Enter if self.objs.is_empty() => return Ok(Step::Done),
             Input::Enter => {
                 s.remember_selection(&self.objs);
@@ -484,15 +380,11 @@ impl Interactive for StretchM {
         Ok(Step::Continue)
     }
     fn prompt(&self, _s: &Session) -> Prompt {
-        if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
-            return m.prompt();
-        }
-        match (self.phase, self.corner) {
-            (StretchPhase::Select, Some(c)) => Prompt::new("Specify opposite corner", Accept::POINT).base(c),
-            (StretchPhase::Select, None) => Prompt::new(if self.removing { "Remove objects" } else { "Select objects" }, Accept::POINT),
-            (StretchPhase::Base, _) => Prompt::new("Specify base point", Accept::POINT).kw(&["Displacement"]).default("Displacement"),
-            (StretchPhase::Displacement, _) => Prompt::new("Specify displacement", Accept::POINT).default("0,0"),
-            (StretchPhase::Second, _) => Prompt::new("Specify second point or <use first point as displacement>", Accept::POINT).base_opt(self.base),
+        match self.phase {
+            StretchPhase::Select => Prompt::new(if self.removing { "Remove objects" } else { "Select objects" }, Accept::SELECT),
+            StretchPhase::Base => Prompt::new("Specify base point", Accept::POINT).kw(&["Displacement"]).default("Displacement"),
+            StretchPhase::Displacement => Prompt::new("Specify displacement", Accept::POINT).default("0,0"),
+            StretchPhase::Second => Prompt::new("Specify second point or <use first point as displacement>", Accept::POINT).base_opt(self.base),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -519,26 +411,8 @@ impl Interactive for StretchM {
         }
     }
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
-        let rect = |a: Vec2| {
-            let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
-            vec![line(a, b), line(b, c), line(c, d), line(d, a)]
-        };
-        if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
-            let Some(first) = m.pts.first().copied() else { return Vec::new() };
-            if !matches!(m.kind, SelectKind::Fence | SelectKind::WPolygon | SelectKind::CPolygon) {
-                return rect(first);
-            }
-            // The fence or polygon so far, on to the cursor; a polygon closes back to its start.
-            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| Some(line(*w.first()?, *w.get(1)?))).collect();
-            out.extend(m.pts.last().map(|l| line(*l, c)));
-            if m.kind != SelectKind::Fence && m.pts.len() >= 2 {
-                out.push(line(c, first));
-            }
-            return out;
-        }
-        match (self.phase, self.corner, self.base) {
-            (StretchPhase::Select, Some(a), _) => rect(a),
-            (StretchPhase::Second, _, Some(base)) => {
+        match (self.phase, self.base) {
+            (StretchPhase::Second, Some(base)) => {
                 let Ok(doc) = s.doc() else { return Vec::new() };
                 let m = Mat3::translate(c - base);
                 let mut out: Vec<EntityKind> = self
