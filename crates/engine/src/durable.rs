@@ -1,8 +1,9 @@
 //! Durable file replacement for saving drawings (native builds only; the web build has no files).
 //!
-//! [`write_atomic`] stages the bytes in a temporary file beside the target, flushes them to disk,
-//! renames the file over the target and (on Unix) flushes the folder, so a crash or power loss
-//! leaves either the old file or the new one, never a torn mix. [`backup_previous`] keeps the
+//! [`write_durable`] replaces the file atomically ([`crate::atomic_write::write_atomic`]: a fresh,
+//! exclusively created temporary file, synced and renamed over the target) and then (on Unix)
+//! flushes the folder, so a crash or power loss leaves either the old file or the new one, never a
+//! torn mix. [`backup_previous`] keeps the
 //! version being replaced as `<name>.bak`, but only when that version is itself a readable drawing:
 //! a damaged file never replaces a good backup.
 
@@ -10,20 +11,11 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Write `bytes` to `path` so that `path` is always either the old or the new content.
-/// `tmp_suffix` names the staging file (`<path><tmp_suffix>`); it is removed if the write fails.
-pub fn write_atomic(path: &str, bytes: &[u8], tmp_suffix: &str) -> io::Result<()> {
-    let tmp = format!("{path}{tmp_suffix}");
-    let staged = (|| {
-        let mut f = File::create(&tmp)?;
-        io::Write::write_all(&mut f, bytes)?;
-        f.sync_all()
-    })();
-    if let Err(e) = staged.and_then(|()| fs::rename(&tmp, path)) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    sync_parent(Path::new(path));
+/// Write `bytes` to `path` so that `path` is always either the old or the new content, and the
+/// rename itself survives a power loss.
+pub fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    crate::atomic_write::write_atomic(path, bytes)?;
+    sync_parent(path);
     Ok(())
 }
 
@@ -62,7 +54,7 @@ pub fn backup_previous(path: &str, is_valid: impl FnOnce(&[u8]) -> bool) -> io::
     if old.is_empty() || !is_valid(&old) {
         return Ok(false);
     }
-    write_atomic(&bak.to_string_lossy(), &old, ".cadcraft-tmp")?;
+    write_durable(&bak, &old)?;
     Ok(true)
 }
 
@@ -79,27 +71,19 @@ mod tests {
     }
 
     #[test]
-    fn write_atomic_replaces_and_leaves_no_staging_file() {
-        let d = dir("atomic");
-        let p = d.join("a.dxf").to_string_lossy().to_string();
-        write_atomic(&p, b"one", ".t").unwrap();
-        write_atomic(&p, b"two", ".t").unwrap();
+    fn write_durable_replaces_and_leaves_no_staging_file() {
+        let d = dir("durable");
+        let p = d.join("a.dxf");
+        write_durable(&p, b"one").unwrap();
+        write_durable(&p, b"two").unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"two");
         assert_eq!(fs::read_dir(&d).unwrap().count(), 1);
-        let _ = fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn a_failed_write_removes_the_staging_file_and_keeps_the_old_content() {
-        let d = dir("fail");
-        let p = d.join("a.dxf").to_string_lossy().to_string();
-        write_atomic(&p, b"old", ".t").unwrap();
-        // The target is a folder now, so the rename fails.
-        let blocked = d.join("blocked").to_string_lossy().to_string();
+        // A failed write (the target is a folder, so the rename fails) leaves nothing behind.
+        let blocked = d.join("blocked");
         fs::create_dir(&blocked).unwrap();
-        assert!(write_atomic(&blocked, b"new", ".t").is_err());
-        assert!(!Path::new(&format!("{blocked}.t")).exists());
-        assert_eq!(fs::read(&p).unwrap(), b"old");
+        assert!(write_durable(&blocked, b"new").is_err());
+        assert_eq!(fs::read_dir(&d).unwrap().count(), 2);
+        assert_eq!(fs::read(&p).unwrap(), b"two");
         let _ = fs::remove_dir_all(&d);
     }
 
