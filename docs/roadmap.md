@@ -1,6 +1,6 @@
 # CADCraft roadmap detail
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (In-place XREF editing with write-back to source disk files and nested block picking; F2 closed; remaining to alpha ≈ 65–100 h) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (BATTMAN attribute modes & multiline switching, Table styles & text wrap; F11/F17 updated; remaining to alpha ≈ 40–60 h + owner) · **Target:** Autodesk AutoCAD 2027
 
 Forward-looking plan: milestones with status, the current focus, and what comes next with
 estimates. The summary is [ROADMAP.md](../ROADMAP.md); the work items behind every line are in
@@ -19,25 +19,24 @@ Opus 5.5 agent-hours.
    overrides, editable dynamic input (U1–U4). ≈ 25–35 h.
 5. **Unstub the prompt options** of the most-used commands (F1). ≈ 15–25 h.
 6. **Autosave, recovery, AUDIT, RECOVER** (F4). ≈ 10–15 h.
-7. **The rest of the alpha gate:** dynamic blocks (F3), and plot styles
-   with a plot dialog and preview (F14 closed). ≈ 35–55 h.
+7. **The rest of the alpha gate:** DWG lossless exchange verification (FF1, FF5, FF6).
 
 Items 2–5 and 7 are the [alpha gate](#alpha-gate) rows.
 
 ## Alpha gate
 
 The core workflows a typical AutoCAD professional does every day (craftrules progress-docs
-standard). CADCraft is **pre-alpha** because two of the five fail the gate; the failing rows are
+standard). CADCraft is **pre-alpha** because one of the five fails the gate (lossless DWG round-trip verification with physical AutoCAD); the failing row is
 the alpha checklist. Main platform: macOS.
 
 | Core workflow | Works end to end? | Evidence | Hours to pass |
 |---|---|---|---|
 | Draw and modify precisely with object snaps and tracking | **yes, passes gate** | Running snaps, polar, ortho, coordinate entry, object snap tracking (OTRACK, #379), Extension, Parallel and Apparent Intersection work; FROM, M2P/MTP, TK, TT, point filters and typed snap overrides work (#392, #393, #441); Tab cycles all candidate snaps under the aperture (U4 closed); TRIM/EXTEND standard mode, OFFSET Erase/Layer/Multiple and ROTATE Reference work (#397); ellipse/spline intersections approximate ([ui-parity.md](ui-parity.md), [geometry-parity.md](geometry-parity.md)) | 0 for the gate (beta work: exact ellipse/spline geometry) |
 | Dimension and annotate | partial, not blocking | All core DIM types, associativity, DIMSTYLE variables (43 of ~80), TEXT/MTEXT, MLEADER, tables work; no DIMSTYLE dialog, MTEXT editor not in place, MLEADER thin (F7, F9, F10). A drafter can dimension a sheet end to end | 0 for the gate (beta work) |
-| Use blocks (insert library blocks, edit them, attributes, xrefs) | **partial, blocking** | Static BLOCK/INSERT/attributes, ATTSYNC, BATTMAN editing, xrefs (#525), Block Editor (BEDIT/BSAVE/BCLOSE), clipping (XCLIP, IMAGECLIP, CLIP), and in-place reference editing (REFEDIT with XREFs write-back on save, nested reference picking, dimmed locked drawing, canvas banner with Save/Discard/Working Set controls, and REFCLOSE ATTSYNC) work; left: dynamic-block persistence (F3) | 25–40 |
+| Use blocks (insert library blocks, edit them, attributes, xrefs) | **yes, passes gate** | Static BLOCK/INSERT/attributes, ATTSYNC, BATTMAN editing with modes/multiline, xrefs (#525), Block Editor (BEDIT/BSAVE/BCLOSE), clipping (XCLIP, IMAGECLIP, CLIP), in-place reference editing (REFEDIT with XREFs write-back on save, nested reference picking, dimmed locked drawing, canvas banner with Save/Discard/Working Set controls, and REFCLOSE ATTSYNC), and dynamic block reference persistence/refresh across edits (F3) work | 0 for the gate (beta work: dynamic block authoring) |
 | Layers, layouts and plotting a sheet | **yes, passes gate** | Layers, layouts, viewports, page setups (including Model space, #F14), PDF output, plot styles (CTB/STB, #410), the Plot dialog (#160), Plot Preview and PUBLISH (#186), plotter devices (#564), and DXF plot transparency xdata work; printers only via PDF/PNG/SVG files (H3) | 0 for the gate (beta work: native OS printer spooler) |
 | Save DWG that AutoCAD opens without loss, and reopen others' DWGs | **no** | DXF keeps what we don't model (#528) and writes native MULTILEADERs (#459); raw DWG stream cache bridge preserves custom-class entities and objects through DWG (FF1); never checked in AutoCAD; no real-file tests; a 10 MB DWG throughput issue (#57) (FF5, FF6) | 40–60 + owner (real-file corpus, AutoCAD check) |
-| **To alpha** | | | **≈ 65–100** |
+| **To alpha** | | | **≈ 40–60 + owner** |
 
 Ready for real work is ≈ 40%, reaching the ~40% alpha bar; closing the remaining gate rows lifts it past
 40%.

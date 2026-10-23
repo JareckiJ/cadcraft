@@ -1,18 +1,15 @@
 # CADCraft roadmap
 
-**Stage: pre-alpha** · next: alpha, ~65–100 Opus 5.5 hours away (the remaining failing core workflows of the [alpha gate](docs/roadmap.md#alpha-gate))
+**Stage: pre-alpha** · next: alpha, ~40–60 Opus 5.5 hours + owner test corpus away (the remaining failing core workflow of the [alpha gate](docs/roadmap.md#alpha-gate))
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (In-place XREF editing with write-back to source disk files and nested block picking; F2 closed; remaining to alpha ≈ 65–100 h) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (BATTMAN attribute modes & multiline, Table styles & text wrap; blocks workflow passes; remaining to alpha ≈ 40–60 h + owner) · **Target:** Autodesk AutoCAD 2027
 
 CADCraft targets full parity with AutoCAD (2D drafting first, then annotation, layouts and
 plotting, DWG, parametrics and 3D), plus what AutoCAD doesn't have: agent control over MCP, a
 scriptable CLI, a web build, Linux and FreeBSD builds, and a free licence.
 
-**Why pre-alpha:** two of AutoCAD's five core workflows fail the [alpha gate](docs/roadmap.md#alpha-gate).
-Precise drafting, dimensioning, and layers/layouts/plotting pass; blocks
-have in-place reference editing (REFEDIT with dimmed locked drawing, banner, ATTSYNC, XREFs with disk write-back, and nested hierarchy picking), dynamic blocks remain (F3); and a DWG saved by
-CADCraft drops foreign data it doesn't model and has never been checked in
-AutoCAD. Ready for real work reaches ≈ 40% (the alpha bar). Beta
+**Why pre-alpha:** one of AutoCAD's five core workflows fails the [alpha gate](docs/roadmap.md#alpha-gate).
+Precise drafting, dimensioning, layers/layouts/plotting, and blocks (BEDIT, BSAVE, BSAVEAS, BCLOSE, REFEDIT with XREFs disk write-back, and dynamic block reference persistence/refresh across edits) pass; saving DWG that AutoCAD opens without loss and reopening others' DWGs without regressions requires checking against physical AutoCAD with a real-file test corpus (FF5, FF6). Ready for real work reaches ≈ 40% (the alpha bar). Beta
 is ≈ 590–920 h away.
 
 ## Headline numbers
@@ -23,7 +20,7 @@ is ≈ 590–920 h away.
 | Ready for real work | **≈ 40%** | estimated ([target-app-parity.md](docs/target-app-parity.md)) |
 | Mainstream practitioner (2D drafter) | **≈ 30%** (lower than the full number: file exchange, stability and interaction discounts multiply) | estimated ([target-app-parity.md](docs/target-app-parity.md#mainstream-practitioner)) |
 | Essentials user | **≈ 50%** | estimated ([target-app-parity.md](docs/target-app-parity.md#essentials-user)) |
-| Remaining to alpha | **≈ 65–100 h** (the gate rows) | estimated |
+| Remaining to alpha | **≈ 40–60 h + owner** (the gate row) | estimated |
 | Remaining to beta | **≈ 600–930 h** (≈ 150–250 h elapsed with 4–6 agents) | estimated |
 | Remaining to full parity | **≈ 1,300–2,100 h** (≈ 330–550 h elapsed) | estimated |
 
