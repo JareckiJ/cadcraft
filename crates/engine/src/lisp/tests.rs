@@ -746,3 +746,18 @@ fn a_panic_inside_a_routine_ends_it_with_an_error() {
     assert!(s.log.iter().any(|l| l.contains("internal error")), "{:?}", s.log);
     assert_eq!(ok(&mut s, "(+ 1 2)"), "3");
 }
+
+/// #1930: `append` over many references to one long list is refused before it builds the
+/// result, not after it has filled memory.
+#[test]
+fn append_checks_the_cell_cap_before_building_its_result() {
+    let _heavy = super::value::HEAVY_CELLS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = session();
+    s.lisp.limits.cells = 50_000;
+    let before = super::value::live_cells();
+    let e =
+        eval(&mut s, "(setq l nil) (repeat 10000 (setq l (cons 1 l))) (setq m nil) (repeat 1000 (setq m (cons l m))) (apply 'append m)").unwrap_err();
+    assert!(e.contains("too many list cells"), "{e}");
+    assert!(super::value::live_cells() < before + 50_000, "no oversized result was built");
+    assert_eq!(ok(&mut s, "(setq l nil m nil) (length (append '(1) '(2 3)))"), "3");
+}
