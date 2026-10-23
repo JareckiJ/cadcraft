@@ -468,7 +468,20 @@ fn backup(path: &std::path::Path) -> std::io::Result<()> {
         log::warn!("save: {} doesn't look like a drawing; its backup is left as it was", path.display());
         return Ok(());
     }
-    craft_atomic::atomic_write_with(&backup_path(path), |out| {
+    let bak = backup_path(path);
+    // The backup is no more readable than the drawing (a private 0600 drawing keeps a private
+    // .bak): a .bak already there takes the drawing's mode first (only a plain file, never
+    // through a symlink), as craft-atomic keeps an existing file's mode; a new one is staged
+    // privately and given the drawing's mode.
+    #[cfg(unix)]
+    let mode = src.metadata()?.permissions();
+    #[cfg(unix)]
+    if std::fs::symlink_metadata(&bak).is_ok_and(|m| m.is_file()) {
+        std::fs::set_permissions(&bak, mode.clone())?;
+    }
+    craft_atomic::WriteOptions::default().with_new_file_permissions(craft_atomic::NewFilePermissions::Private).atomic_write_with(&bak, |out| {
+        #[cfg(unix)]
+        out.set_permissions(mode)?;
         std::io::Write::write_all(out, &head)?;
         std::io::copy(&mut src, out).map(|_| ())
     })

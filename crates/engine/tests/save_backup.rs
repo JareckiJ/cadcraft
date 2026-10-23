@@ -32,12 +32,31 @@ fn files(dir: &std::path::Path) -> Vec<String> {
     v
 }
 
+/// ISAVEBAK is process-wide: the tests that save hold this lock, so one turning it off can't
+/// race another's save. Dropping the guard turns it back on, also when a test fails.
+static SAVES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct Saving(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+impl Drop for Saving {
+    fn drop(&mut self) {
+        cadcraft_engine::autosave::set_isavebak(true);
+    }
+}
+
+fn saving() -> Saving {
+    let g = SAVES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    cadcraft_engine::autosave::set_isavebak(true);
+    Saving(g)
+}
+
 fn add_circle(s: &mut Session, x: f64) {
     s.execute("circle", &json!({ "center": [x, 0], "radius": 1 })).unwrap();
 }
 
 #[test]
 fn each_save_keeps_the_previous_file_as_bak() {
+    let _saving = saving();
     hooks();
     let dir = temp_dir("rotate");
     let path = dir.join("Plan.dxf");
@@ -60,6 +79,7 @@ fn each_save_keeps_the_previous_file_as_bak() {
 
 #[test]
 fn a_damaged_file_never_replaces_a_good_backup_and_isavebak_0_keeps_none() {
+    let _saving = saving();
     hooks();
     let dir = temp_dir("damaged");
     let path = dir.join("Plan.dxf");
@@ -82,7 +102,6 @@ fn a_damaged_file_never_replaces_a_good_backup_and_isavebak_0_keeps_none() {
     add_circle(&mut s, 15.0);
     s.execute("qsave", &json!({})).unwrap();
     assert_eq!((circles(&path), circles(&backup_path(&path))), (4, 1));
-    s.execute("setvar", &json!({ "name": "ISAVEBAK", "value": 1 })).unwrap();
     assert_eq!(files(&dir), ["Plan.bak", "Plan.dxf"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -96,4 +115,32 @@ fn drawings_are_recognised_by_their_start() {
     for junk in [&b""[..], b"\0\0\0\0", b"0\nEOF\n", b"<svg>", b"hello"] {
         assert!(!looks_like_drawing(junk), "{junk:?}");
     }
+}
+
+/// A private drawing (0600) keeps a private backup: a new .bak, and a .bak already there that
+/// others could read, both take the drawing's mode.
+#[cfg(unix)]
+#[test]
+fn the_backup_is_no_more_readable_than_the_drawing() {
+    use std::os::unix::fs::PermissionsExt;
+    let _saving = saving();
+    hooks();
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    let dir = temp_dir("mode");
+    let path = dir.join("Plan.dxf");
+    let p = path.to_string_lossy().to_string();
+    let mut s = Session::new();
+    add_circle(&mut s, 0.0);
+    s.execute("saveas", &json!({ "path": p })).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    add_circle(&mut s, 5.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(mode(&backup_path(&path)), 0o600, "a new .bak");
+
+    std::fs::set_permissions(backup_path(&path), std::fs::Permissions::from_mode(0o644)).unwrap();
+    add_circle(&mut s, 10.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(mode(&backup_path(&path)), 0o600, "a .bak already there");
+    assert_eq!(circles(&backup_path(&path)), 2);
+    let _ = std::fs::remove_dir_all(&dir);
 }
