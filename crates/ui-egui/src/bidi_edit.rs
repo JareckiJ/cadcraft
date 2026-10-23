@@ -55,6 +55,8 @@ impl EditState {
 pub struct Output {
     pub response: egui::Response,
     pub changed: bool,
+    /// The caret's bottom on screen (where a completion list goes).
+    pub caret: Pos2,
 }
 
 /// A character placed on a line.
@@ -521,6 +523,11 @@ pub fn show(
             }
         }
     }
+    let caret_bottom = {
+        let l = lay.lines.get(cl);
+        let (top, hgt) = l.map_or((0.0, row_h), |l| (l.top, l.height));
+        at(cx, top + hgt)
+    };
     if focused {
         let l = lay.lines.get(cl);
         let (top, hgt) = l.map_or((0.0, row_h), |l| (l.top, l.height));
@@ -539,7 +546,7 @@ pub fn show(
             })
         });
     }
-    Output { response, changed }
+    Output { response, changed, caret: caret_bottom }
 }
 
 #[cfg(test)]

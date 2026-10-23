@@ -22,6 +22,21 @@ use serde_json::Value;
 pub(crate) const APP: &str = "CADCRAFT";
 /// AutoCAD's hatch background colour xdata application (one `1071` colour value).
 pub(crate) const HATCH_BACKGROUND_APP: &str = "HATCHBACKGROUNDCOLOR";
+/// Extended data of a text's formula (`=...`), in 1000 strings of at most 250 characters.
+pub(crate) const FORMULA_APP: &str = "CADCRAFTFORMULA";
+
+/// A text's formula from its `CADCRAFTFORMULA` extended data.
+pub(crate) fn formula(tags: &[Tag]) -> Option<String> {
+    let x = xdata(tags, FORMULA_APP);
+    let s: String = x.iter().filter(|t| t.code == 1000).map(|t| t.str()).collect();
+    (!s.is_empty()).then_some(s)
+}
+
+/// A formula as 1000 strings of at most 250 characters (whole characters).
+pub(crate) fn formula_chunks(f: &str) -> Vec<String> {
+    let chars: Vec<char> = f.chars().take(4000).collect();
+    chars.chunks(250).map(|c| c.iter().collect()).collect()
+}
 
 /// An AutoCAD colour value (`1071`/`420`-style, top byte the method): 0xC2 RGB, 0xC3 an index
 /// colour in the low byte, 0xC0 ByLayer, 0xC1 ByBlock; `None` for none or anything else.

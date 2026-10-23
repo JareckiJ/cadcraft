@@ -1409,3 +1409,70 @@
 	Current Lineweight	Текущий вес линий
 	Snap the crosshair to grips	Привязывать перекрестие к ручкам
 	With no command running, the crosshair locks onto a grip of the selected objects under it.	Когда команда не выполняется, перекрестие притягивается к ручке выбранного объекта под курсором.
+	Grid with previews	Сетка с эскизами
+	File not found	Файл не найден
+	Making a preview...	Создаётся эскиз...
+	Backwards	Справа налево (зеркально)
+	Upside down	Вверх ногами
+	Top left	Вверху слева
+	Top center	Вверху по центру
+	Top right	Вверху справа
+	Middle left	Посередине слева
+	Middle center	Посередине по центру
+	Middle right	Посередине справа
+	Bottom left	Внизу слева
+	Bottom center	Внизу по центру
+	Bottom right	Внизу справа
+	Text Formulas	Формулы в тексте
+	Update Fields	Обновить поля
+	Tab or Enter: insert · Esc: close	Tab или Enter: вставить · Esc: закрыть
+	A text that starts with = shows the result of a formula, as in a spreadsheet: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). The formula stays with the text: editing the text edits the formula. Dates and times follow the computer's clock and are worked out again when the drawing is opened (Tools ▸ Update Fields does it at once). Date fields in AutoCAD drawings are updated the same way.	Текст, который начинается со знака =, показывает результат формулы, как в электронной таблице: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). Формула хранится вместе с текстом: при редактировании текста редактируется формула. Даты и время берутся из часов компьютера и пересчитываются при открытии чертежа (Сервис ▸ Обновить поля делает это сразу). Поля даты в чертежах AutoCAD обновляются так же.
+	Operators: + - * / ^ (power), % (percent), & (joins texts), = <> < > <= >= (compare). Texts in double quotes. Arguments are separated by commas or semicolons. While typing a formula, a list of functions appears: the arrows choose, Tab or Enter inserts.	Операции: + - * / ^ (степень), % (процент), & (соединяет тексты), = <> < > <= >= (сравнение). Тексты пишутся в двойных кавычках. Аргументы разделяются запятыми или точками с запятой. Пока вы набираете формулу, появляется список функций: стрелки выбирают, Tab или Enter вставляет.
+	The number without its sign.	Число без знака.
+	Arccosine, in radians.	Арккосинус в радианах.
+	TRUE when all arguments are true.	TRUE, если все аргументы истинны.
+	Arcsine, in radians.	Арксинус в радианах.
+	Arctangent, in radians.	Арктангенс в радианах.
+	The average of the numbers.	Среднее значение чисел.
+	Joins texts (as the & operator).	Соединяет тексты (как операция &).
+	Cosine of an angle in radians.	Косинус угла в радианах.
+	A date.	Дата.
+	The day of the month of a date.	День месяца даты.
+	Radians to degrees.	Радианы в градусы.
+	e raised to a power.	Число e в степени.
+	The drawing's file name.	Имя файла чертежа.
+	A number as text with that many decimals.	Число как текст с заданным числом знаков после запятой.
+	The hour of a time.	Час времени.
+	One of two values, by a condition.	Одно из двух значений, в зависимости от условия.
+	Rounds down to an integer.	Округляет вниз до целого.
+	The first characters of a text.	Первые символы текста.
+	The number of characters of a text.	Число символов в тексте.
+	Natural logarithm.	Натуральный логарифм.
+	Base-10 logarithm.	Десятичный логарифм.
+	A text in lower case.	Текст строчными буквами.
+	The largest number.	Наибольшее число.
+	Characters from the middle of a text (start = 1 for the first).	Символы из середины текста (start = 1 — первый символ).
+	The smallest number.	Наименьшее число.
+	The minutes of a time.	Минуты времени.
+	The remainder of a division.	Остаток от деления.
+	The month of a date (1 to 12).	Месяц даты (от 1 до 12).
+	The opposite of a logical value.	Противоположное логическое значение.
+	The current date and time (worked out again when the drawing is opened).	Текущие дата и время (пересчитываются при открытии чертежа).
+	TRUE when any argument is true.	TRUE, если хотя бы один аргумент истинен.
+	The number π.	Число π.
+	A number raised to a power (as ^).	Число в степени (как ^).
+	Degrees to radians.	Градусы в радианы.
+	The last characters of a text.	Последние символы текста.
+	Rounds to that many decimals.	Округляет до заданного числа знаков после запятой.
+	Rounds toward zero.	Округляет к нулю.
+	Rounds away from zero.	Округляет от нуля.
+	The name of the current layout ("Model" in model space).	Имя текущего листа ("Model" в пространстве модели).
+	Sine of an angle in radians.	Синус угла в радианах.
+	Square root.	Квадратный корень.
+	Adds the numbers.	Сумма чисел.
+	Tangent of an angle in radians.	Тангенс угла в радианах.
+	A value as text in a format: "0.00", "#,##0", "0%", "dd.mm.yyyy", "hh:mm"...	Значение как текст в формате: "0.00", "#,##0", "0%", "dd.mm.yyyy", "hh:mm"...
+	Today's date (worked out again when the drawing is opened).	Сегодняшняя дата (пересчитывается при открытии чертежа).
+	A text without spaces at its ends and double spaces.	Текст без пробелов по краям и двойных пробелов.
+	A text in capitals.	Текст прописными буквами.
+	The year of a date.	Год даты.

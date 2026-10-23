@@ -1714,3 +1714,18 @@
 	Current Lineweight	Поточна товщина ліній
 	Snap the crosshair to grips	Прив’язувати перехрестя до ручок
 	With no command running, the crosshair locks onto a grip of the selected objects under it.	Коли команда не виконується, перехрестя притягується до ручки вибраного об’єкта під курсором.
+	Grid with previews	Сітка з ескізами
+	File not found	Файл не знайдено
+	Making a preview...	Створюється ескіз...
+	Backwards	Справа наліво (дзеркально)
+	Upside down	Догори ногами
+	Top center	Угорі по центру
+	Middle left	Посередині ліворуч
+	Middle center	Посередині по центру
+	Middle right	Посередині праворуч
+	Bottom center	Унизу по центру
+	Text Formulas	Формули в тексті
+	Update Fields	Оновити поля
+	Tab or Enter: insert · Esc: close	Tab або Enter: вставити · Esc: закрити
+	A text that starts with = shows the result of a formula, as in a spreadsheet: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). The formula stays with the text: editing the text edits the formula. Dates and times follow the computer's clock and are worked out again when the drawing is opened (Tools ▸ Update Fields does it at once). Date fields in AutoCAD drawings are updated the same way.	Текст, що починається зі знака =, показує результат формули, як в електронній таблиці: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). Формула зберігається разом із текстом: під час редагування тексту редагується формула. Дати й час беруться з годинника комп’ютера та перераховуються під час відкриття креслення (Сервіс ▸ Оновити поля робить це одразу). Поля дати в кресленнях AutoCAD оновлюються так само.
+	Operators: + - * / ^ (power), % (percent), & (joins texts), = <> < > <= >= (compare). Texts in double quotes. Arguments are separated by commas or semicolons. While typing a formula, a list of functions appears: the arrows choose, Tab or Enter inserts.	Операції: + - * / ^ (степінь), % (відсоток), & (з’єднує тексти), = <> < > <= >= (порівняння). Тексти пишуться в подвійних лапках. Аргументи розділяються комами або крапками з комою. Поки ви набираєте формулу, з’являється список функцій: стрілки вибирають, Tab або Enter вставляє.

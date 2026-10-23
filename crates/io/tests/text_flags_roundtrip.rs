@@ -8,7 +8,6 @@ use cadcraft_geom::Vec3;
 fn text_flags_and_mtext_frame_roundtrip() {
     let mut d = Drawing::new_metric();
     let t = Text {
-        formula: None,
         insert: Vec3::new(1.0, 2.0, 0.0),
         align_pt: None,
         height: 2.5,
@@ -21,6 +20,7 @@ fn text_flags_and_mtext_frame_roundtrip() {
         valign: VAlign::Baseline,
         backwards: true,
         upside_down: true,
+        formula: Some("=1+1".into()),
     };
     d.add(&Space::Model, Common::default(), EntityKind::Text(t)).unwrap();
     let m = MText {
@@ -41,6 +41,6 @@ fn text_flags_and_mtext_frame_roundtrip() {
     let bytes = cadcraft_io::write(&d, "a.dxf").unwrap();
     let back = cadcraft_io::read(&bytes, "a.dxf").unwrap();
     let kinds: Vec<EntityKind> = back.model.iter().map(|e| e.kind.clone()).collect();
-    assert!(kinds.iter().any(|k| matches!(k, EntityKind::Text(t) if t.backwards && t.upside_down)));
+    assert!(kinds.iter().any(|k| matches!(k, EntityKind::Text(t) if t.backwards && t.upside_down && t.formula.as_deref() == Some("=1+1"))));
     assert!(kinds.iter().any(|k| matches!(k, EntityKind::MText(m) if m.frame)));
 }

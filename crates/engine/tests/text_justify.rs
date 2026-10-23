@@ -59,3 +59,25 @@ fn backwards_upside_down_and_frame_are_properties() {
     let frame = cadcraft_render::mtext_frame(d, &mt).unwrap();
     assert_eq!(frame.len(), 5);
 }
+
+#[test]
+fn text_formulas_show_their_result_and_edit_as_formulas() {
+    let mut s = Session::new();
+    let r = s.execute("text", &json!({ "at": [0, 0], "height": 1, "text": "=2400-2*18" })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    let get = |s: &Session| match &s.doc().unwrap().model.iter().next().unwrap().kind {
+        EntityKind::Text(t) => (t.value.clone(), t.formula.clone()),
+        _ => panic!(),
+    };
+    assert_eq!(get(&s), ("2364".to_string(), Some("=2400-2*18".to_string())));
+    // Edited as the formula; plain text drops it.
+    s.execute("textedit", &json!({ "handle": h, "text": "=ROUND(10/3,2)" })).unwrap();
+    assert_eq!(get(&s).0, "3.33");
+    s.execute("textedit", &json!({ "handle": h, "text": "plain" })).unwrap();
+    assert_eq!(get(&s), ("plain".to_string(), None));
+    // Dates follow the clock when fields are updated.
+    s.execute("textedit", &json!({ "handle": h, "text": "=TEXT(TODAY(),\"yyyy\")" })).unwrap();
+    let year = get(&s).0;
+    assert!(year.len() == 4 && year.starts_with("20"), "{year}");
+    assert_eq!(s.execute("updatefield", &json!({})).unwrap()["updated"], 1);
+}

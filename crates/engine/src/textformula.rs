@@ -665,8 +665,10 @@ fn call(name: &str, a: &[Val], env: &Env) -> R {
             if v.is_empty() { Err(Err::Div0) } else { Ok(Val::Num(v.iter().sum::<f64>() / v.len() as f64)) }
         }
         "SUM" => Ok(Val::Num(nums(a)?.iter().sum())),
-        "MIN" => Ok(Val::Num(nums(a)?.into_iter().fold(f64::INFINITY, f64::min)).clone()).and_then(|v| if v.num()?.is_finite() { Ok(v) } else { Ok(Val::Num(0.0)) }),
-        "MAX" => Ok(Val::Num(nums(a)?.into_iter().fold(f64::NEG_INFINITY, f64::max))).and_then(|v| if v.num()?.is_finite() { Ok(v) } else { Ok(Val::Num(0.0)) }),
+        "MIN" => Ok(Val::Num(nums(a)?.into_iter().fold(f64::INFINITY, f64::min)).clone())
+            .and_then(|v| if v.num()?.is_finite() { Ok(v) } else { Ok(Val::Num(0.0)) }),
+        "MAX" => Ok(Val::Num(nums(a)?.into_iter().fold(f64::NEG_INFINITY, f64::max)))
+            .and_then(|v| if v.num()?.is_finite() { Ok(v) } else { Ok(Val::Num(0.0)) }),
         "CONCAT" => Ok(Val::Text(a.iter().map(Val::text).collect())),
         "COS" => Ok(Val::Num(n0(a)?.cos())),
         "SIN" => Ok(Val::Num(n0(a)?.sin())),
@@ -897,7 +899,16 @@ mod tests {
         assert_eq!(ev("=\"a\"*2"), "#VALUE!");
         assert_eq!(ev("=SQRT(-1)"), "#NUM!");
         assert_eq!(ev("=(1+"), "#ERROR!");
-        for f in ["=", "==", "=(((((", &format!("={}", "-".repeat(500)), &format!("={}1", "(".repeat(100)), "=\"", "=MID(\"a\",-5,1e300)", "=DATE(1e300,1,1)"] {
+        for f in [
+            "=",
+            "==",
+            "=(((((",
+            &format!("={}", "-".repeat(500)),
+            &format!("={}1", "(".repeat(100)),
+            "=\"",
+            "=MID(\"a\",-5,1e300)",
+            "=DATE(1e300,1,1)",
+        ] {
             let _ = evaluate(f, &env());
         }
         assert!(!is_formula("plain"));

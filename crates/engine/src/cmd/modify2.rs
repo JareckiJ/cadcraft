@@ -73,6 +73,9 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Modify", "Array", "Path Array"])
             .params("{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true)}")
             .interactive(|_| Ok(Box::new(PathArrayM::default()))),
+        CommandSpec::new("updatefield", "Update Fields", run_updatefield)
+            .menu(&["Tools", "Update Fields"])
+            .params("{} (works out every text formula and known field again: dates, file name)"),
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
             .alias(&["ed", "ddedit"])
@@ -2211,9 +2214,22 @@ pub(crate) fn editor_for(s: &Session, h: Handle) -> Option<crate::TextEditor> {
     let d = s.doc().ok()?;
     let key = h.hex();
     match &d.entity(h)?.kind {
-        EntityKind::MText(t) => Some(TextEditor { mtext: t.clone(), kind: EditorKind::MText, key }),
+        // A text with a formula is edited as its formula.
+        EntityKind::MText(t) => {
+            let mut m = t.clone();
+            if let Some(f) = t.formula.as_ref().filter(|f| crate::textformula::is_formula(f)) {
+                m.contents.clone_from(f);
+            }
+            Some(TextEditor { mtext: m, kind: EditorKind::MText, key })
+        }
         EntityKind::MLeader(m) => m.text.clone().map(|mtext| TextEditor { mtext, kind: EditorKind::MText, key }),
-        EntityKind::Text(t) => Some(TextEditor { mtext: line_box(t), kind: EditorKind::Line, key }),
+        EntityKind::Text(t) => {
+            let mut b = line_box(t);
+            if let Some(f) = t.formula.as_ref().filter(|f| crate::textformula::is_formula(f)) {
+                b.contents.clone_from(f);
+            }
+            Some(TextEditor { mtext: b, kind: EditorKind::Line, key })
+        }
         EntityKind::AttDef(a) => Some(TextEditor { mtext: line_box(&a.text), kind: EditorKind::Line, key }),
         EntityKind::Dimension(dm) => {
             let g = cadcraft_render::dimension_in(d, dm);
@@ -2243,6 +2259,15 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
         return Err(other("The object is on a locked layer."));
     }
     let mut k = curves::entity(s, h)?.kind;
+    // The text as the editor showed it (a formula, else the value): unchanged, it keeps its
+    // formula or AutoCAD field.
+    let shown = match &k {
+        EntityKind::Text(t) => t.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| t.value.clone()),
+        EntityKind::AttDef(a) => a.text.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| a.text.value.clone()),
+        EntityKind::MText(t) => t.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| t.contents.clone()),
+        _ => String::new(),
+    };
+    let unchanged = shown == text || shown == text.replace('\n', "\\P");
     match &mut k {
         EntityKind::Text(t) => t.value = text.to_string(),
         EntityKind::AttDef(a) => a.text.value = text.to_string(),
@@ -2257,7 +2282,16 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
         },
         _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
     }
+    let env = crate::textformula::env(s);
+    crate::textformula::apply(&mut k, &env, !unchanged);
     set_kind(s, h, k)
+}
+
+fn run_updatefield(s: &mut Session, _p: &Value) -> Result<Value> {
+    let env = crate::textformula::env(s);
+    let n = crate::textformula::refresh(s.doc_mut()?, &env);
+    s.echo(format!("{n} field(s) updated"));
+    Ok(json!({ "updated": n }))
 }
 
 fn run_textedit(s: &mut Session, p: &Value) -> Result<Value> {

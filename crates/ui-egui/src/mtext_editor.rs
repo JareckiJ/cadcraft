@@ -48,6 +48,11 @@ struct State {
     font: crate::editor_glyphs::EditorFont,
     /// The text box's caret and selection.
     edit: crate::bidi_edit::EditState,
+    /// Formula completion: the highlighted function, and the text it was closed for (Escape).
+    fx_index: usize,
+    fx_closed: Option<String>,
+    /// Where the completion list goes (the caret's bottom, last frame).
+    fx_at: egui::Pos2,
 }
 
 fn state_id() -> egui::Id {
@@ -112,6 +117,9 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             focus: true,
             font,
             edit: crate::bidi_edit::EditState::at(end),
+            fx_index: 0,
+            fx_closed: None,
+            fx_at: pos2(0.0, 0.0),
         }
     });
     let line = kind == EditorKind::Line;
@@ -132,6 +140,27 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
                 done = Done::Move("Down");
             }
         });
+    }
+    // Formula completion: the arrows choose a function, Tab or Enter puts it in, Escape closes
+    // the list (taken before the text box and before Enter finishes one line of text).
+    let fx = completion(&st);
+    if let Some((_, list)) = &fx {
+        let n = list.len().max(1);
+        ctx.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                st.fx_index = (st.fx_index + 1) % n;
+            }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                st.fx_index = (st.fx_index + n - 1) % n;
+            }
+        });
+        let pick = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        if pick {
+            let k = st.fx_index;
+            accept_completion(&mut st, k);
+        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            st.fx_closed = Some(st.fmt.text().to_string());
+        }
     }
     if line && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
         done = Done::Ok;
@@ -205,6 +234,28 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             });
         });
     });
+    if let Some((_, list)) = completion(&st) {
+        let mut clicked = None;
+        egui::Area::new(egui::Id::new("mtext_formula_list")).order(egui::Order::Tooltip).fixed_pos(st.fx_at + vec2(0.0, 4.0)).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_min_width(260.0);
+                for (k, (name, args, _)) in list.iter().enumerate().take(10) {
+                    let r = ui.selectable_label(k == st.fx_index, RichText::new(format!("{name}({args})")).monospace());
+                    if r.clicked() {
+                        clicked = Some(k);
+                    }
+                }
+                if let Some((_, _, what)) = list.get(st.fx_index) {
+                    ui.separator();
+                    ui.label(RichText::new(crate::i18n::t(what)).small().color(t.text_dim));
+                }
+                ui.label(RichText::new(crate::tl!("Tab or Enter: insert · Esc: close")).small().color(t.text_faint));
+            });
+        });
+        if let Some(k) = clicked {
+            accept_completion(&mut st, k);
+        }
+    }
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         done = Done::Cancel;
     }
@@ -736,6 +787,7 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
         px,
         cadcraft_engine::mtext_edit::MAX_CHARS,
     );
+    st.fx_at = out.caret;
     let focused = ui.memory(|m| m.has_focus(id));
     if !focused && (st.focus || (buf.is_empty() && st.fmt.is_empty())) {
         ui.memory_mut(|m| m.request_focus(id));
@@ -756,6 +808,50 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
             st.typing_at = a;
         }
     }
+}
+
+/// The formula functions whose names start with the word before the caret, when the text is
+/// a formula (`=...`) and the caret is not inside a quoted string: (the word's start, the
+/// functions).
+fn completion(st: &State) -> Option<(usize, Vec<&'static (&'static str, &'static str, &'static str)>)> {
+    let text = st.fmt.text();
+    if !text.trim_start().starts_with('=') || st.edit.cursor != st.edit.anchor || st.fx_closed.as_deref() == Some(text) {
+        return None;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let at = st.edit.cursor.min(chars.len());
+    if chars.get(..at)?.iter().filter(|c| **c == '"').count() % 2 == 1 {
+        return None;
+    }
+    let mut s = at;
+    while s > 0 && chars.get(s - 1).is_some_and(|c| c.is_ascii_alphanumeric() || *c == '_') {
+        s -= 1;
+    }
+    let word: String = chars.get(s..at)?.iter().collect::<String>().to_ascii_uppercase();
+    if word.is_empty() || !word.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let list: Vec<_> = cadcraft_engine::textformula::FUNCTIONS.iter().filter(|(n, _, _)| n.starts_with(&word) && *n != word).collect();
+    (!list.is_empty()).then_some((s, list))
+}
+
+/// Put function `k` of the completion list in place of the word before the caret, with its
+/// opening parenthesis (and the closing one when it takes no arguments).
+fn accept_completion(st: &mut State, k: usize) {
+    let Some((start, list)) = completion(st) else { return };
+    let Some((name, args, _)) = list.get(k).map(|f| **f) else { return };
+    let mut chars: Vec<char> = st.fmt.text().chars().collect();
+    let at = st.edit.cursor.min(chars.len());
+    let ins: Vec<char> = format!("{name}({}", if args.is_empty() { ")" } else { "" }).chars().collect();
+    let n = ins.len();
+    chars.splice(start..at, ins);
+    let text: String = chars.iter().collect();
+    let typing = st.typing.clone();
+    st.fmt.set_text(&text, &typing);
+    st.edit.cursor = start + n;
+    st.edit.anchor = st.edit.cursor;
+    st.typing_at = st.edit.cursor;
+    st.fx_index = 0;
 }
 
 /// The style font's family as an inline font switch would name it (`txt.shx` → `txt`).

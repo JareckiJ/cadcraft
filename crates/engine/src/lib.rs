@@ -29,6 +29,7 @@ pub mod select;
 pub mod snap;
 pub mod spatial;
 pub mod sysvars;
+pub mod textformula;
 pub mod undoctl;
 pub mod units;
 
@@ -840,6 +841,12 @@ impl Session {
 
     /// Add an entity to the current space with current properties.
     pub fn add_entity(&mut self, kind: EntityKind) -> Result<Handle> {
+        // Text starting with `=` is a formula: it keeps the formula and shows the result.
+        let mut kind = kind;
+        if matches!(kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
+            let env = textformula::env(self);
+            textformula::apply(&mut kind, &env, true);
+        }
         let common = self.current_common();
         let space = self.space();
         let true_color = self.doc()?.header.get("CECOLOR_RGB").and_then(|v| v.as_i64());

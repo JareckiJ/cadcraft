@@ -458,6 +458,15 @@ fn attrib_flags(a: &Attrib) -> i64 {
 /// A TEXT's groups, or an attribute's (`attrib`, in a file of version `target`) with its
 /// subclass: the subclass version (`280 0`, 2010 and later), prompt, tag, flags and alignment,
 /// then Lock position (`280`, 2007 and later; readers take the 280 after the tag as it).
+/// A text's own formula (`=...`) as extended data; AutoCAD fields stay in their own objects.
+fn formula_xdata(w: &mut W, f: Option<&str>) {
+    let Some(f) = f.filter(|f| f.trim_start().starts_with('=')) else { return };
+    w.s(1001, dxf_ext::FORMULA_APP);
+    for c in dxf_ext::formula_chunks(f) {
+        w.s(1000, c);
+    }
+}
+
 fn text_tags(w: &mut W, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_prompt: Option<&str>) {
     w.p(10, t.insert);
     w.f(40, t.height);
@@ -697,6 +706,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             common(w, e, owner, paper, "AcDbText");
             thickness(w, e);
             text_tags(w, t, None, None);
+            formula_xdata(w, t.formula.as_deref());
         }
         // Closed polylines, one per loop (`dxf_region`): REGION's own data is ACIS.
         EntityKind::Region(r) => {
@@ -752,6 +762,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 w.f(45, 1.5);
             }
             w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
+            formula_xdata(w, t.formula.as_deref());
         }
         EntityKind::Insert(i) => {
             w.s(0, "INSERT");
@@ -2050,8 +2061,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let apps =
-        ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP, dxf_ext::HATCH_BACKGROUND_APP];
+    let apps = [
+        "ACAD",
+        dxf_ext::APP,
+        "AcadAnnotative",
+        dxf_ext::LAYER_TRANSPARENCY_APP,
+        dxf_ext::LAYER_DESCRIPTION_APP,
+        dxf_ext::HATCH_BACKGROUND_APP,
+        dxf_ext::FORMULA_APP,
+    ];
     let th = table_head(&mut w, "APPID", apps.len());
     for app in apps {
         record_head(&mut w, "APPID", &th, "AcDbRegAppTableRecord");
