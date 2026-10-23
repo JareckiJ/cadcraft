@@ -187,7 +187,7 @@ fn wrap(r: Result<Value, String>) -> Outcome {
 }
 
 /// What `control.methods` replies: method, params, description. Keep in step with `handle` and the
-/// table in `docs/control-protocol.md` (`tests/control_methods.rs` checks the table).
+/// table in `docs/control-protocol.md` (`tests/it/control_methods.rs` checks the table).
 const METHODS: &[(&str, &str, &str)] = &[
     ("cmdline.input", "{text}", "Type a line at the command line exactly like a user (commands, prompts, keywords; empty = Enter)."),
     ("cmdline.script", "{text}", "Run a multi-line script, like a .scr file."),
@@ -267,7 +267,7 @@ pub fn inspect(app: &CadApp, ctx: &egui::Context) -> Value {
         "snap": app.canvas.snap.map(|s| json!({"point": [s.point.x, s.point.y], "mode": s.name})),
         "session": app.session.summary(),
         "closePrompt": app.close_prompt(),
-        "perf": {"frameMs": app.frame_ms, "buildMs": app.canvas.build_ms, "drawMs": app.canvas.draw_ms, "meshMs": app.canvas.mesh_ms, "renderer": if app.canvas.gpu.is_some() { "gpu" } else { "cpu" }, "prims": app.canvas.list.as_ref().map(|l| l.prims.len())},
+        "perf": {"frameMs": app.frame_ms, "buildMs": app.canvas.build_ms, "drawMs": app.canvas.draw_ms, "meshMs": app.canvas.mesh_ms, "building": app.canvas.building(), "renderer": if app.canvas.gpu.is_some() { "gpu" } else { "cpu" }, "prims": app.canvas.list.as_ref().map(|l| l.prims.len())},
     })
 }
 
