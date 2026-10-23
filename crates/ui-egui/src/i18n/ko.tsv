@@ -31,7 +31,7 @@
 	% of all commits	전체 커밋 중 비율(%)
 	* Wildcard Match	* 와일드카드 일치
 	*VARIES*	*다양함*
-	+  |  Top  |  2D Wireframe	+  |  평면  |  2D 와이어프레임
+	+  |  Top  |  2D Wireframe	+  |  위  |  2D 와이어프레임
 	+Bin	+Bin
 	+LOC	+LOC
 	1 Viewport	뷰포트 1개
@@ -750,7 +750,7 @@
 	Save As...	다른 이름으로 저장...
 	Save Layer State	도면층 상태 저장
 	Save State	상태 저장
-	Scale	축척
+	Scale	배율
 	Search for layer	도면층 검색
 	Search for parameter	매개변수 검색
 	Second and next points:	두 번째 이후 점:

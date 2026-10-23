@@ -121,6 +121,12 @@ pub struct CanvasState {
     pub param: crate::parametric::Cache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
+    /// A Shift+left-drag Zoom Window in progress: its two world corners (start, current). The
+    /// gesture is transparent and never disturbs a running command.
+    zoom_window: Option<(Vec2, Vec2)>,
+    /// Shift was held when the primary button went down: the release still belongs to the zoom
+    /// gesture even if Shift is let go first.
+    shift_press: bool,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -1382,6 +1388,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         )
     });
     let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
+    // Shift+left owns its release: remember the modifier from the press, not from the release.
+    if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        app.canvas.shift_press = inside && mods.shift && !mods.ctrl && !mods.alt;
+    }
     // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
     // previews that read `Session::ctrl_down` always see the current state. The engine
     // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
@@ -1450,12 +1460,44 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     } else {
         app.canvas.pan_last = None;
     }
-    if dbl_middle && inside {
+    if dbl_middle && inside && !mods.shift {
         let _ = app.session.zoom_extents();
     }
+    // Shift+left over the drawing area is a zoom modifier, with or without a command running: a
+    // drag sets a region (Zoom Window) and a double-click goes back (Zoom Previous). A plain
+    // Shift+click does nothing while a command runs — so the gesture can never cancel it — and
+    // otherwise keeps its usual idle meaning (deselect).
+    let shift_zoom = inside && mods.shift && !mods.ctrl && !mods.alt;
+    let shift_click = app.canvas.shift_press && app.session.running.is_some();
     // ZOOM Realtime: dragging up zooms in, down zooms out.
-    if resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
+    if !shift_zoom && resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
+    }
+    if shift_zoom && dbl_primary {
+        let _ = app.run("zoom.previous", serde_json::json!({}));
+    }
+    // The zoom gesture owns the double-click: it must not also switch space or open an editor.
+    let dbl_primary = dbl_primary && !shift_zoom;
+    if shift_zoom
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        && rect.contains(origin)
+    {
+        app.canvas.zoom_window = Some((xf.to_world(origin), xf.to_world(origin)));
+    }
+    if let (Some((start, _)), Some(hp)) = (app.canvas.zoom_window, hover_pos) {
+        app.canvas.zoom_window = Some((start, xf.to_world(hp)));
+    }
+    // A Shift drag can end after Shift itself was let go: the release belongs to the zoom, not to
+    // the command, so remember it before the window is consumed below.
+    let primary_drag_stopped = resp.drag_stopped_by(egui::PointerButton::Primary);
+    let zoom_drag_stopped = primary_drag_stopped && app.canvas.zoom_window.is_some();
+    if primary_drag_stopped
+        && let Some((start, end)) = app.canvas.zoom_window.take()
+        && (start.x - end.x).abs() > 1e-9
+        && (start.y - end.y).abs() > 1e-9
+    {
+        let _ = app.run("zoom.window", serde_json::json!({"p1": [start.x, start.y], "p2": [end.x, end.y]}));
     }
     // A click in another tile makes it current (or answers -VPORTS Join's prompts).
     if pressed_primary
@@ -1538,13 +1580,15 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let point_prompt = app.session.current_prompt().is_some_and(|p| cadcraft_engine::pointmod::accepts(&p))
         && app.session.pending_window.is_none()
         && !app.session.realtime_zoom_active();
-    let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
+    let pressed_primary = pressed_primary || (point_prompt && primary_drag_stopped && !zoom_drag_stopped);
     if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
-                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } => Some(*pos),
+                    // A Shift release is the zoom gesture, never a point.
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers, .. }
+                        if !modifiers.shift && !shift_click && !zoom_drag_stopped => Some(*pos),
                     _ => None,
                 })
                 .collect()
@@ -1642,6 +1686,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && pressed_primary
         && !middle_down
         && !cycled
+        && !resp.dragged_by(egui::PointerButton::Primary)
+        && !shift_click
+        && !zoom_drag_stopped
         && let Some(p) = app.canvas.cursor
     {
         if app.session.prompting() {
@@ -1681,6 +1728,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
         && app.canvas.cycle.is_none()
+        && !shift_zoom
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
@@ -1981,6 +2029,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         } else {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
         }
+    }
+    // The Shift+left-drag Zoom Window rubber band.
+    if let Some((a, b)) = app.canvas.zoom_window {
+        let r = Rect::from_two_pos(xf.to_screen(a), xf.to_screen(b));
+        if let Some(fill) = selection_area_fill(&app.session.settings, false) {
+            painter.rect_filled(r, 0.0, fill);
+        }
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, t.window_stroke), egui::StrokeKind::Middle);
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {

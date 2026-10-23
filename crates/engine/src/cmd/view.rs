@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["View", "Zoom", "Previous"])
             .noundo()
             .transparent(),
-        CommandSpec::new("zoom.window", "Zoom Window", run_zoom)
+        CommandSpec::new("zoom.window", "Zoom Window", |s, p| zoom(s, &with_mode(p.clone(), "window", None)))
             .menu(&["View", "Zoom", "Window"])
             .params("{p1, p2}")
             .noundo()
