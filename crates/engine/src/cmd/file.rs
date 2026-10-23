@@ -53,6 +53,9 @@ pub fn io() -> Option<&'static IoHooks> {
 pub struct EntityCodec {
     /// The entity's type name and the groups of its record, without its `0` group.
     pub groups: fn(&Drawing, &cadcraft_doc::Entity) -> (String, Vec<cadcraft_dxf::Tag>),
+    /// The records written after the entity's own (an INSERT's ATTRIBs and SEQEND), each as its
+    /// type name and groups.
+    pub sub_groups: fn(&Drawing, &cadcraft_doc::Entity) -> Vec<(String, Vec<cadcraft_dxf::Tag>)>,
     /// An entity from a type name and groups.
     pub entity: fn(&str, &[cadcraft_dxf::Tag]) -> Option<(cadcraft_doc::Common, cadcraft_doc::EntityKind)>,
 }

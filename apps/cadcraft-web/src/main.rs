@@ -85,6 +85,7 @@ mod web {
         // AutoLISP's entget, entmake and entmod see entities as DXF groups.
         cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
             groups: cadcraft_io::entity_groups,
+            sub_groups: cadcraft_io::entity_sub_groups,
             entity: cadcraft_io::entity_from_groups,
         });
         // `?host=parent`: a same-origin page framing CADCraft (such as a Nextcloud app) opens

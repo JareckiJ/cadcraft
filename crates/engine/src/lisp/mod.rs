@@ -56,6 +56,9 @@ pub struct Env {
     pub deleted: HashMap<Handle, (cadcraft_doc::Space, Arc<cadcraft_doc::Entity>)>,
     /// Every entity's handle in creation order, for the drawing it was taken from (`entnext`).
     pub order: Option<(usize, Arc<Vec<Handle>>)>,
+    /// The records after an INSERT's own (its ATTRIBs, then its SEQEND) LISP has named: the
+    /// INSERT and the record's place. The one at `i` is named `Handle(u64::MAX - i)`.
+    pub subents: Vec<(Handle, usize)>,
     /// `tblnext`'s place in each table.
     pub tblnext: HashMap<String, usize>,
     /// The command history's length after LISP last printed a line: when something else wrote since
@@ -74,6 +77,7 @@ impl Default for Env {
             next_file: 1,
             deleted: HashMap::new(),
             order: None,
+            subents: Vec::new(),
             tblnext: HashMap::new(),
             printed_at: None,
         };
