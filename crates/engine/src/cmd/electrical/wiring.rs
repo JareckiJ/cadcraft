@@ -60,7 +60,7 @@ fn run_clean(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The empty rungs: wires of one vertical segment whose two ends both land on other, horizontal
 /// wires, with nothing else on them.
-fn empty_rungs(s: &Session) -> Result<Vec<(Handle, Vec2, Vec2)>> {
+pub(super) fn empty_rungs(s: &Session) -> Result<Vec<(Handle, Vec2, Vec2)>> {
     const TOL: f64 = 1e-6;
     let (handles, segs) = super::wires::wire_segments(s, WIRE_LAYERS)?;
     let pins = PinIndex::build(s)?;

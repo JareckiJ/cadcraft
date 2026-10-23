@@ -67,6 +67,7 @@ cmd text '{"at": [52, 234], "text": "+24V DC", "height": 2.5}'
   --cmd "eproject.wires {}" \
   --cmd "eproject.xref {}" \
   --cmd "etitle {\"project\": true, \"set\": {\"TITLE\": \"Pump station\", \"CUSTOMER\": \"Demo\", \"DRAWNBY\": \"CADCraft\", \"REV\": \"A\"}}" \
-  --cmd "eproject.sync {}"
+  --cmd "eproject.sync {}" \
+  --cmd "echeck {}"
 
 echo "wrote $proj"

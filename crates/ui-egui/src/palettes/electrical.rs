@@ -138,6 +138,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                         crate::tl!("Cross-reference coils and contacts across sheets"),
                     );
                     project_cmd(app, ui, crate::tl!("Database"), "eproject.sync", crate::tl!("Update the project database from every sheet"));
+                    project_cmd(app, ui, crate::tl!("Check"), "echeck", crate::tl!("Duplicate tags, shorts, contacts without a coil, open pins"));
                 });
             }
             None => {
@@ -199,6 +200,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 tool(app, ui, crate::tl!("Number Wires"), "ewirenum", crate::tl!("One number per network, at its start"));
                 project_cmd(app, ui, crate::tl!("Number Terminals"), "etermnum", crate::tl!("Terminals numbered per strip"));
                 project_cmd(app, ui, crate::tl!("Cross-References"), "exref", crate::tl!("Contacts and coils on this drawing"));
+                project_cmd(app, ui, crate::tl!("Check Project"), "echeck", crate::tl!("Duplicate tags, shorts, contacts without a coil, open pins"));
             });
             ui.horizontal_wrapped(|ui| {
                 if ui.button(crate::tl!("Devices")).on_hover_text(crate::tl!("Edit device data")).clicked() {

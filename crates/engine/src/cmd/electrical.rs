@@ -13,6 +13,7 @@
 //! (`RELAY_24V` → `K`, see [`classes`]).
 
 mod builder;
+mod check;
 mod classes;
 mod conductors;
 pub mod generate;
@@ -153,6 +154,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(titleblock::specs());
     v.extend(project::specs());
     v.extend(sync::specs());
+    v.extend(check::specs());
     v
 }
 
