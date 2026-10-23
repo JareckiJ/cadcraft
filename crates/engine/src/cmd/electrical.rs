@@ -79,9 +79,30 @@ fn retag_copies(s: &mut Session, before: Option<&std::sync::Arc<cadcraft_doc::Dr
     for d in all.iter().filter(|d| !is_child(d, &overrides) && d.family.as_deref() != Some("TERMINAL") && is_numbered(&d.tag)) {
         *seen.entry(d.tag.clone()).or_default() += 1;
     }
+    // A copy carries the database id (EID) of the device it was copied from; a device inserted
+    // with a duplicate tag on purpose has none, and keeps its tag (EDEVICES reports it).
+    let eids: HashMap<Handle, String> = st
+        .doc
+        .space(&space)
+        .map(|store| {
+            store
+                .iter()
+                .filter_map(|e| match &e.kind {
+                    EntityKind::Insert(i) => i
+                        .attribs
+                        .iter()
+                        .find(|a| a.tag.eq_ignore_ascii_case("EID"))
+                        .filter(|a| !a.text.value.is_empty())
+                        .map(|a| (e.handle, a.text.value.clone())),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let copied = |h: &Handle| eids.get(h).is_some_and(|id| eids.iter().any(|(o, x)| o != h && existed.contains(o) && x == id));
     let fresh: Vec<String> = all
         .iter()
-        .filter(|d| !existed.contains(&d.handle))
+        .filter(|d| !existed.contains(&d.handle) && copied(&d.handle))
         .filter(|d| !is_child(d, &overrides) && d.family.as_deref() != Some("TERMINAL"))
         .filter(|d| seen.get(&d.tag).is_some_and(|n| *n > 1))
         .map(|d| d.handle.hex())
