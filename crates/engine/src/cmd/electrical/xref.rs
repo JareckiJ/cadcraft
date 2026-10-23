@@ -461,6 +461,35 @@ mod tests {
     }
 
     #[test]
+    fn moving_a_symbol_with_ordinary_commands_updates_the_references() {
+        let mut s = Session::new();
+        let a = s.active;
+        if let Some(d) = s.docs.get_mut(a) {
+            d.title = "live-xref".into();
+        }
+        let k = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [63, 100]})).unwrap();
+        let tag = k["tag"].as_str().unwrap().to_string();
+        let k = k["handle"].as_str().unwrap().to_string();
+        let c = s.execute("esymbol", &json!({"name": "IEC_NO", "at": [200, 150], "tag": tag})).unwrap()["handle"].as_str().unwrap().to_string();
+        let xref = |s: &Session, h: &str| match &s.doc().unwrap().entity(Handle::parse_hex(h).unwrap()).unwrap().kind {
+            EntityKind::Insert(i) => i.attribs.iter().find(|a| a.tag == "XREF").unwrap().text.value.clone(),
+            _ => panic!(),
+        };
+        // No EXREF needed: placing the contact cross-referenced both.
+        assert_eq!(xref(&s, &c), "/1.2");
+        assert_eq!(xref(&s, &k), "NO 13-14 /1.5");
+        // MOVE the coil four columns right: the contact's reference follows.
+        s.execute("move", &json!({"handles": [k], "delta": [168, 0]})).unwrap();
+        assert_eq!(xref(&s, &c), "/1.6");
+        // MOVE the contact: the coil's list follows.
+        s.execute("move", &json!({"handles": [c], "delta": [-126, 0]})).unwrap();
+        assert_eq!(xref(&s, &k), "NO 13-14 /1.2");
+        // Undo takes the move and its reference update back together.
+        s.execute("undo", &json!({})).unwrap();
+        assert_eq!(xref(&s, &k), "NO 13-14 /1.5");
+    }
+
+    #[test]
     fn library_symbols_show_references_in_their_xref_attribute() {
         let mut s = Session::new();
         let k = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [63, 100]})).unwrap();
