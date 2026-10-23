@@ -168,7 +168,7 @@ fn potentials(wires: usize, segs: &[Seg], tol: f64) -> Vec<Vec<usize>> {
             }
         }
     }
-    for (i, s) in segs.iter().enumerate() {
+    for s in segs {
         for p in [s.a, s.b] {
             let near = grid.get(&(key(p.x, lo.x), key(p.y, lo.y))).into_iter().flatten().chain(big.iter());
             for &j in near {
@@ -259,7 +259,7 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
     let counted = format.contains("{count}");
     let height = f64_or(p, "height", 2.5);
     let tol = f64_or(p, "tolerance", 0.01);
-    if !(height > 0.0 && height < 1e6) || !(tol >= 0.0 && tol < 1e6) {
+    if !(height > 0.0 && height < 1e6) || !(0.0..1e6).contains(&tol) {
         return Err(bad(CMD, "`height` must be positive and `tolerance` zero or more"));
     }
     let grid = Grid::from_params(CMD, p)?;
