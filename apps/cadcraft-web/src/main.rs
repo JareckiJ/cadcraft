@@ -6,9 +6,11 @@
 //! with egui shapes instead of the GPU canvas, `?sample` opens the sample drawing. Saving downloads
 //! the drawing through the browser (`download.rs`). With `?host=parent` (inside an `<iframe>`), a
 //! same-origin parent page sends the drawing to open and stores what CADCraft saves instead
-//! (`host.rs`).
+//! (`host.rs`). Characters typed with AltGr on Windows reach the app through `altgr.rs`.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(target_arch = "wasm32")]
+mod altgr;
 #[cfg(target_arch = "wasm32")]
 pub mod download;
 #[cfg(target_arch = "wasm32")]
@@ -24,9 +26,16 @@ mod web {
     const LOADING_ID: &str = "cadcraft_loading";
 
     /// The app, the files File > Open… and drag and drop read for it in the background, the
-    /// page embedding it (`?host=parent`), and the browser's `prefers-reduced-motion` (it stays
-    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change).
-    struct Shell(CadApp, crate::upload::Inbox, Option<(crate::host::Bridge, crate::host::DirtyReport)>, Option<web_sys::MediaQueryList>);
+    /// page embedding it (`?host=parent`), the browser's `prefers-reduced-motion` (it stays
+    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change),
+    /// and the characters typed with AltGr on Windows.
+    struct Shell(
+        CadApp,
+        crate::upload::Inbox,
+        Option<(crate::host::Bridge, crate::host::DirtyReport)>,
+        Option<web_sys::MediaQueryList>,
+        crate::altgr::AltGrKeys,
+    );
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -39,6 +48,9 @@ mod web {
             }
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+            // Before the app adds its own events, whose text may be a whole word.
+            cadcraft_ui_egui::altgr::drop_key_names(ctx, raw);
+            cadcraft_ui_egui::altgr::restore_typed(ctx, raw, self.4.take());
             self.0.raw_input_hook(raw);
             cadcraft_ui_egui::cmdline::capture_tab(ctx, raw);
         }
@@ -105,6 +117,8 @@ mod web {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
                 return;
             };
+            let altgr = crate::altgr::AltGrKeys::default();
+            altgr.listen(&canvas);
             let mut options = eframe::WebOptions::default();
             if query().contains("webgl")
                 && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
@@ -152,7 +166,7 @@ mod web {
                             (bridge, crate::host::DirtyReport::default())
                         });
                         let reduced_motion = web_sys::window().and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten());
-                        Ok(Box::new(Shell(app, inbox, host, reduced_motion)))
+                        Ok(Box::new(Shell(app, inbox, host, reduced_motion, altgr)))
                     }),
                 )
                 .await;

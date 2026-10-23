@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (stable dash anchors on filled-object highlights) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** trivial (distinguish AltGr input tests from pending physical keyboard checks) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -190,6 +190,14 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
   shortcuts. AutoCAD for Mac's defaults are similar in number; F4 (3D osnap) and F6 (dynamic UCS)
   are missing.
 - Delete erases the selection on macOS (#64); Escape cancels.
+- AltGr input handling (#1551): synthetic event tests cover command-line typing and restoration
+  of browser text, dropping key names such as `AltGraph`, and keeping Ctrl shortcuts separate
+  from Ctrl+Alt text input. Physical keyboard checks remain pending for Chrome and Firefox on
+  Windows, and the native apps on Windows and Linux. With a Norwegian, German or Polish layout,
+  focus the canvas and enter `line 0,0 @10,0` using the layout's key combination for `@`. Check
+  that the line ends at `(10,0)`, no `AltGraph` text appears, and AltGr+E types the layout's
+  character without changing ISOPLANE. Record the OS, browser or native app, layout and result
+  for each run.
 - Right-click on the canvas is Enter while a command runs; holding it (250 ms, AutoCAD's
   time-sensitive right-click) opens the command menu: Enter, Cancel, Recent Input, the prompt's
   options, Snap Overrides, Pan/Zoom. Otherwise it opens a shortcut menu (Repeat, Recent Commands,
@@ -203,6 +211,8 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | trivial | Clarify that AltGr input tests use synthetic events; list the pending physical keyboard checks requested in #1572 |
+| 2026-10-18 | minor | AltGr types `@`, `{`, `[`, `$` and `€` at the command line (#1551): the browser build no longer types `AltGraph` or drops AltGr characters on Windows; Ctrl+Alt never runs a Ctrl shortcut |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |
 | 2026-10-14 | minor | Hatch Edit dialog adds boundaries from picked points or closed objects and removes selected loops |

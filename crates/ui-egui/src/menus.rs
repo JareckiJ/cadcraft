@@ -610,6 +610,17 @@ pub fn activate(app: &mut CadApp, id: &str) {
     app.start(id);
 }
 
+/// egui's `consume_shortcut`, but Ctrl+Alt never matches: on Windows it is AltGr typing a
+/// character, such as `€` with AltGr+E (#1551).
+fn consume_shortcut(i: &mut egui::InputState, s: &egui::KeyboardShortcut) -> bool {
+    let before = i.events.len();
+    i.events.retain(|e| {
+        !matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. }
+            if *key == s.logical_key && !crate::altgr::is_altgr(*modifiers) && modifiers.matches_logically(s.modifiers))
+    });
+    i.events.len() < before
+}
+
 /// Run `id` with default parameters without cancelling the active command, as the drafting
 /// toggles (F3, F7-F12, the status bar buttons) are in AutoCAD.
 pub fn run_transparent(app: &mut CadApp, id: &str) {
@@ -670,7 +681,7 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
     let mut fire = crate::clipboard::shortcut_commands(app, ctx);
     ctx.input_mut(|i| {
         for (s, id) in pairs {
-            if i.consume_shortcut(s) && !fire.contains(id) {
+            if consume_shortcut(i, s) && !fire.contains(id) {
                 fire.push(*id);
             }
         }
