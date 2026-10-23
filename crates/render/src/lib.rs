@@ -1229,7 +1229,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             b.polyline(ctx, rgb, lw, &[o, o + u + v]);
             b.polyline(ctx, rgb, lw, &[o + u, o + v]);
         }
-        EntityKind::Table(t) => table(b, ctx, t, rgb, lw),
+        EntityKind::Table(t) => table(b, ctx, e, t, rgb, lw),
         EntityKind::Tolerance(t) => tolerance::draw(b, ctx, e, t, lw, tol),
         EntityKind::Leader(l) => {
             let pts: Vec<Vec2> = l.vertices.iter().map(|v| v.xy()).collect();
@@ -1473,10 +1473,12 @@ fn dimension(b: &mut Builder, ctx: &Ctx, e: &Entity, dm: &cadcraft_doc::Dimensio
 }
 
 mod table;
-pub use table::{MAX_LAYOUT_CELLS, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_style_of};
+pub use table::{
+    MAX_LAYOUT_CELLS, TableBlock, TableFill, TableGeom, TableLine, TableText, table_covered, table_geometry, table_row_needs, table_style_of,
+};
 
-fn table(b: &mut Builder, ctx: &Ctx, t: &cadcraft_doc::Table, rgb: Ink, lw: f32) {
-    table::draw(b, ctx, t, rgb, lw);
+fn table(b: &mut Builder, ctx: &Ctx, e: &Entity, t: &cadcraft_doc::Table, rgb: Ink, lw: f32) {
+    table::draw(b, ctx, e, t, rgb, lw);
 }
 
 /// A TEXT's justification as the fonts' alignment (used where text is placed outside a build).
@@ -1539,6 +1541,12 @@ fn sub_ctx<'a>(ctx: &Ctx<'a>, e: &Entity, m: Mat3) -> Ctx<'a> {
 }
 
 fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink) {
+    insert_shown(b, ctx, e, ins, rgb, None);
+}
+
+/// Draw block reference `ins` (of entity `e`); a table cell's block draws only the objects its
+/// visibility state `vis` shows.
+fn insert_shown(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rgb: Ink, vis: Option<&cadcraft_doc::CellVisibility>) {
     if ctx.depth >= cadcraft_doc::MAX_BLOCK_DEPTH {
         return;
     }
@@ -1561,7 +1569,16 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                     if !b.expand() {
                         break 'copies;
                     }
-                    entity(b, &sub, be);
+                    match vis {
+                        Some(v) if !v.shows(be) => {}
+                        // Shown by the state though hidden in the definition.
+                        Some(v) if !be.common.visible && v.controlled.contains(&be.handle) => {
+                            let mut shown = (**be).clone();
+                            shown.common.visible = true;
+                            entity(b, &sub, &shown);
+                        }
+                        _ => entity(b, &sub, be),
+                    }
                 }
             }
         }
