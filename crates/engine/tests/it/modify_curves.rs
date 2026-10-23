@@ -685,6 +685,15 @@ fn an_arc_segment_crossed_by_a_line_is_cut_there() {
     let (p, l) = shape(&mut s);
     s.execute("fillet", &json!({ "h1": l, "p1": [48, 1.5], "h2": p, "p2": [47.2, 0.25], "radius": 0 })).unwrap();
     assert_eq!(verts(&s, &p), vec![(45.0, 0.0, 0.0), (47.0, 0.0, half), (48.0, 0.4, 0.0), (48.0, 2.2, 0.0)]);
+    // A pick a little before the arc's start (within the pick box) keeps the start side.
+    let mut s = Session::new();
+    let p = h(&s.execute("pline", &json!({ "vertices": [{ "p": [47, 0], "bulge": -0.4 }, [49, 0], [49, -1.5]], "closed": false })).unwrap());
+    let l = h(&s.execute("line", &json!({ "points": [[48, -0.5], [48, 2.2]] })).unwrap());
+    // On the arc's circle (centre 48,-1.05, radius 1.45), 2.4° before its start.
+    let a = (1.05f64).atan2(-1.0) + 2.4f64.to_radians();
+    let pick = [48.0 + 1.45 * a.cos(), -1.05 + 1.45 * a.sin()];
+    s.execute("fillet", &json!({ "h1": l, "p1": [48, 1.5], "h2": p, "p2": pick, "radius": 0 })).unwrap();
+    assert_eq!(verts(&s, &p), vec![(47.0, 0.0, half), (48.0, 0.4, 0.0), (48.0, 2.2, 0.0)]);
     // An end arc the line doesn't reach, at radius 0 or not: refused, nothing changed.
     for r in [0.0, 0.3] {
         let mut s = Session::new();

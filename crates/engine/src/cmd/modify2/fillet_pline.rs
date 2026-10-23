@@ -313,7 +313,13 @@ fn arc_segment_and_other(
     let tmpl = end;
     let plain = |v: PolyVertex| if other_pl.is_some() { v } else { PolyVertex { p: v.p, bulge: 0.0, ..tmpl } };
     let mut out: Vec<PolyVertex> = Vec::new();
-    if along(pp).min(total) <= tx {
+    // Where the pick lies along the arc: one a little outside its sweep (within the pick box)
+    // counts at the nearer end, not always at the far one.
+    let picked = {
+        let a = along(pp);
+        if a > total && std::f64::consts::TAU - a < a - total { 0.0 } else { a.min(total) }
+    };
+    if picked <= tx {
         // Keep the start of the arc: the polyline up to the crossing, then the other object.
         out.extend(vs.get(..k).unwrap_or_default().iter().copied());
         out.push(PolyVertex { bulge: sub(tx), ..start });
