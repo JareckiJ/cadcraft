@@ -429,6 +429,9 @@ pub struct Settings {
     pub grips: u8,
     /// GRIPOBJLIMIT: no grips while more objects than this are selected (0: no limit).
     pub gripobjlimit: u32,
+    /// GROUPDISPLAYMODE: 0 shows grips on all group members; 1 shows a single grip at group center;
+    /// 2 (default) shows group bounding box and a single grip at group center.
+    pub groupdisplaymode: u8,
     /// SELECTIONAREA: the selection window and crossing areas are filled.
     pub selectionarea: bool,
     /// WINDOWAREACOLOR, CROSSINGAREACOLOR: their colours (ACI 1-255).
@@ -506,6 +509,7 @@ impl Default for Settings {
             previewfilter: 3,
             grips: 1,
             gripobjlimit: 100,
+            groupdisplaymode: 2,
             selectionarea: true,
             windowareacolor: 150,
             crossingareacolor: 100,
@@ -1491,6 +1495,49 @@ impl Session {
     pub fn shows_grips(&self, selected: usize) -> bool {
         let limit = self.settings.gripobjlimit;
         self.settings.grips > 0 && (limit == 0 || selected <= limit as usize)
+    }
+
+    /// For selected objects belonging to selectable groups (when `pickstyle & 1 != 0`),
+    /// returns the group index, group bounding box (if non-empty) and the member handles in the current space.
+    pub fn selected_groups(&self) -> Vec<(usize, Bounds2, Vec<Handle>)> {
+        if self.settings.pickstyle & 1 == 0 {
+            return Vec::new();
+        }
+        let Ok(d) = self.doc() else { return Vec::new() };
+        let space = self.space();
+        let Some(store) = d.space(&space) else { return Vec::new() };
+        let sel = self.selection();
+        if sel.is_empty() {
+            return Vec::new();
+        }
+
+        let mut groups: Vec<(usize, Bounds2, Vec<Handle>)> = Vec::new();
+        let mut seen_groups = std::collections::HashSet::new();
+
+        for h in &sel {
+            for gi in cmd::groups::groups_of(d, *h) {
+                if !seen_groups.insert(gi) {
+                    continue;
+                }
+                let Some(g) = d.groups.get(gi) else { continue };
+                if !g.selectable {
+                    continue;
+                }
+                // Group members that exist in current space and are visible
+                let members: Vec<Handle> = g.members.iter().copied().filter(|m| store.get(*m).is_some_and(|e| d.is_visible(e))).collect();
+                if members.is_empty() {
+                    continue;
+                }
+                let mut b = Bounds2::EMPTY;
+                for m in &members {
+                    if let Some(e) = store.get(*m) {
+                        b = b.union(&cadcraft_doc::entity_bounds(d, e, 0));
+                    }
+                }
+                groups.push((gi, b, members));
+            }
+        }
+        groups
     }
 
     /// The text shown on the command line: the active prompt, or "Command:".

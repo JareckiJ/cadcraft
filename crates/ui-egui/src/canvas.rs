@@ -100,6 +100,8 @@ pub struct CanvasState {
     /// Hot grips (object, grip index): the ones Shift+clicked while idle, then the ones the
     /// running GRIP edit works on (the engine's grip modes take them from there).
     pub hot_grips: Vec<(Handle, usize)>,
+    /// Hot group-centre grips (group indices from `selected_groups()`): Shift+clicked ones.
+    pub hot_group_grips: Vec<usize>,
     /// Grip dimensional input: the value fields of the grip being stretched.
     pub grip_dyn: crate::grip_dyn::GripDyn,
     /// A GRIP edit was running last frame (its grips go cold when it ends).
@@ -1538,6 +1540,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         } else if let Some(g) = crate::dyngrips::at(app, &xf, hover_pos) {
             crate::dyngrips::click(app, g);
+        } else if let Some(gi) = group_grip_at(app, &xf, hover_pos) {
+            click_group_grip(app, gi, mods.shift);
         } else if let Some(g) = grip_at(app, &xf, hover_pos) {
             click_grip(app, g, mods.shift);
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
@@ -1553,6 +1557,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && app.session.pending_lasso.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
+        && group_grip_at(app, &xf, Some(origin)).is_none()
         && grip_at(app, &xf, Some(origin)).is_none()
         && crate::dyngrips::at(app, &xf, Some(origin)).is_none()
     {
@@ -1788,6 +1793,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let grip_edit = app.session.running.as_ref().is_some_and(|r| r.id == "grip");
     if (!grip_edit && (app.canvas.grip_editing || app.session.prompting())) || sel.is_empty() {
         app.canvas.hot_grips.clear();
+        app.canvas.hot_group_grips.clear();
     }
     if !grip_edit {
         app.canvas.dyn_hot = None;
@@ -1823,6 +1829,47 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
+
+        // GROUPDISPLAYMODE: bounding box (mode 2) and centre grip (mode >= 1) for selected groups.
+        let gdm = app.session.settings.groupdisplaymode;
+        if gdm >= 1 {
+            let gs = app.session.settings.gripsize as f32;
+            let groups = app.session.selected_groups();
+            for (gi, bounds, _members) in &groups {
+                if bounds.is_empty() {
+                    continue;
+                }
+                let center = bounds.center();
+                let sc = xf.to_screen(center);
+                // Bounding box outline (mode 2 only).
+                if gdm >= 2 {
+                    let corners: Vec<Pos2> = bounds.corners().iter().map(|p| xf.to_screen(*p)).collect();
+                    let bbox_color = Color32::from_rgba_premultiplied(0x40, 0xa0, 0xff, 0xb0);
+                    let stroke = Stroke::new(1.0, bbox_color);
+                    // Draw the 4 sides as dashed segments.
+                    let pairs = [(0, 1), (1, 2), (2, 3), (3, 0)];
+                    for (a, b) in pairs {
+                        draw_dashed_line(&painter, corners[a], corners[b], stroke);
+                    }
+                }
+                // Centre grip square.
+                let gr = Rect::from_center_size(sc, vec2(gs * 2.0, gs * 2.0));
+                let warm = hover_pos.is_some_and(|hp| gr.expand(2.0).contains(hp));
+                let hot_gi = app.canvas.hot_group_grips.contains(gi);
+                painter.rect_filled(
+                    gr,
+                    0.0,
+                    if hot_gi {
+                        t.grip_hot
+                    } else if warm {
+                        Color32::from_rgb(0xff, 0x7f, 0x9f)
+                    } else {
+                        t.grip
+                    },
+                );
+                painter.rect_stroke(gr, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
+            }
+        }
     }
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
@@ -2320,7 +2367,28 @@ fn dynamic_input_boxes(
     r
 }
 
-/// A small padlock, drawn in code: body plus shackle.
+/// Draw a dashed line between two screen points, used for group bounding box overlays.
+fn draw_dashed_line(p: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
+    let dash_len: f32 = 6.0;
+    let gap_len: f32 = 4.0;
+    let d = b - a;
+    let total = d.length();
+    if total < 1.0 {
+        return;
+    }
+    let dir = d / total;
+    let mut t = 0.0_f32;
+    let mut drawing = true;
+    while t < total {
+        let t_end = (t + if drawing { dash_len } else { gap_len }).min(total);
+        if drawing {
+            p.line_segment([a + dir * t, a + dir * t_end], stroke);
+        }
+        t = t_end;
+        drawing = !drawing;
+    }
+}
+
 fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     p.rect_filled(Rect::from_center_size(c + vec2(0.0, 1.5), vec2(7.0, 5.0)), 1.0, color);
     p.add(Shape::line(
@@ -2379,6 +2447,74 @@ fn click_grip(app: &mut CadApp, g: (Handle, usize), shift: bool) {
     let hs = hot.clone();
     if let Err(e) = app.session.start_grip_edit(&hs) {
         app.canvas.hot_grips.clear();
+        app.session.echo(e.to_string());
+    }
+}
+
+/// The group index (into `selected_groups()`) whose centre grip is under the cursor, if any.
+/// Only active when `groupdisplaymode >= 1`.
+fn group_grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<usize> {
+    let hp = hover?;
+    if app.session.settings.groupdisplaymode == 0 {
+        return None;
+    }
+    if !app.session.shows_grips(app.session.selection().len()) {
+        return None;
+    }
+    let gs = app.session.settings.gripsize as f32 + 3.0;
+    let groups = app.session.selected_groups();
+    for (gi, bounds, _) in &groups {
+        if bounds.is_empty() {
+            continue;
+        }
+        let sc = xf.to_screen(bounds.center());
+        if (sc.x - hp.x).abs() <= gs && (sc.y - hp.y).abs() <= gs {
+            return Some(*gi);
+        }
+    }
+    None
+}
+
+/// Click on a group centre grip: Shift toggles it hot/cold; a plain click starts a GRIP
+/// stretch-move on the first available grip of each visible group member.
+fn click_group_grip(app: &mut CadApp, gi: usize, shift: bool) {
+    if shift {
+        let hot = &mut app.canvas.hot_group_grips;
+        match hot.iter().position(|x| *x == gi) {
+            Some(i) => {
+                hot.remove(i);
+            }
+            None => hot.push(gi),
+        }
+        return;
+    }
+    // Build a list of (Handle, grip_index=0) for every member that has grips, to
+    // use as the hot set. This makes the GRIP command treat the whole group as
+    // one stretch base, exactly like AutoCAD.
+    let groups = app.session.selected_groups();
+    let Some((_, _, members)) = groups.iter().find(|(g, _, _)| *g == gi) else { return };
+    let hot: Vec<(Handle, usize)> = {
+        let Ok(st) = app.session.state() else { return };
+        members
+            .iter()
+            .filter_map(|h| {
+                let e = st.doc.entity(*h)?;
+                if st.doc.entity_grips(e).is_empty() {
+                    return None;
+                }
+                Some((*h, 0))
+            })
+            .collect()
+    };
+    if hot.is_empty() {
+        return;
+    }
+    app.canvas.hot_group_grips.clear();
+    app.canvas.hot_group_grips.push(gi);
+    app.canvas.hot_grips = hot.clone();
+    if let Err(e) = app.session.start_grip_edit(&hot) {
+        app.canvas.hot_grips.clear();
+        app.canvas.hot_group_grips.clear();
         app.session.echo(e.to_string());
     }
 }
