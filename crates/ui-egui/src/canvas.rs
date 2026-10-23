@@ -106,8 +106,10 @@ pub struct CanvasState {
     pub grip_dyn: crate::grip_dyn::GripDyn,
     /// A GRIP edit was running last frame (its grips go cold when it ends).
     grip_editing: bool,
-    /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click opened.
+    /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click or hover opened.
     grip_menu: Option<(Handle, usize)>,
+    /// Hover tracking for opening grip menu on pause over a multifunctional grip.
+    grip_hover: Option<((Handle, usize), f64)>,
     /// Dynamic block grips of the selection (cached), the one being dragged, and the list grip
     /// whose choices are open (and whether it opened this frame).
     pub(crate) dyn_grips: crate::dyngrips::Cache,
@@ -1613,13 +1615,32 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if crate::context_menu::in_command(app, ui, inside, pressed_secondary) {
         let _ = app.session.input(Input::Enter);
     }
-    // Right-click on a grip with options (polyline vertex, line end…) opens the grip menu.
+    // Right-click or hover on a grip with options (polyline vertex, line end, mleader…) opens the grip menu.
     if inside && pressed_secondary && idle && !app.canvas.snap_menu {
         app.canvas.grip_menu = grip_at(app, &xf, hover_pos).filter(|g| !grip_options(app, *g).is_empty());
+    } else if inside && idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_none() {
+        let hover_grip = grip_at(app, &xf, hover_pos).filter(|g| !grip_options(app, *g).is_empty());
+        let now = crate::now_ms();
+        match (app.canvas.grip_hover, hover_grip) {
+            (Some((prev_g, start_t)), Some(curr_g)) if prev_g == curr_g => {
+                if now - start_t >= 400.0 {
+                    app.canvas.grip_menu = Some(curr_g);
+                    app.canvas.grip_hover = None;
+                }
+            }
+            (_, Some(curr_g)) => {
+                app.canvas.grip_hover = Some((curr_g, now));
+            }
+            _ => {
+                app.canvas.grip_hover = None;
+            }
+        }
+    } else if !inside || !idle {
+        app.canvas.grip_hover = None;
     }
     crate::dyngrips::menu(app, ui.ctx(), &xf);
     if idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_some() {
-        grip_menu(app, &resp);
+        grip_menu(app, &resp, ui.ctx(), &xf);
     } else if idle || app.canvas.snap_menu {
         crate::context_menu::show(app, &resp);
     }
@@ -2527,28 +2548,47 @@ fn grip_options(app: &CadApp, (h, i): (Handle, usize)) -> Vec<cadcraft_engine::g
 
 /// The menu of a multifunctional grip: Stretch and its options. A choice makes the grip hot and
 /// runs the option at the grip prompt, as typing its keyword would.
-fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
+fn grip_menu(app: &mut CadApp, resp: &egui::Response, ctx: &egui::Context, xf: &Xf) {
     let Some(g) = app.canvas.grip_menu else { return };
     let options = grip_options(app, g);
+    if options.is_empty() {
+        app.canvas.grip_menu = None;
+        return;
+    }
+    let grip_pos = app.session.state().ok().and_then(|st| st.doc.entity(g.0).and_then(|e| st.doc.entity_grips(e).into_iter().nth(g.1)));
+    let gs = app.session.settings.gripsize as f32;
+    let at = match grip_pos {
+        Some(w) => xf.to_screen(w) + egui::vec2(gs + 4.0, -gs),
+        None => resp.hover_pos().unwrap_or_default(),
+    };
+
     let mut chosen: Option<Option<cadcraft_engine::grips::GripAction>> = None;
-    let open = resp
-        .context_menu(|ui| {
+    let mut closed = false;
+
+    let area = egui::Area::new(egui::Id::new(("grip-menu-popup", g.0, g.1))).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(120.0);
             let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
             if ui.button(crate::i18n::t(if vertex { "Stretch Vertex" } else { "Stretch" })).clicked() {
                 chosen = Some(None);
-                ui.close();
             }
             for a in &options {
                 if ui.button(crate::i18n::t(a.label())).clicked() {
                     chosen = Some(Some(*a));
-                    ui.close();
                 }
             }
-        })
-        .is_some();
-    if !open || chosen.is_some() {
+        });
+    });
+
+    let clicked_elsewhere = ctx.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+    if clicked_elsewhere || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        closed = true;
+    }
+
+    if closed || chosen.is_some() {
         app.canvas.grip_menu = None;
     }
+
     let Some(choice) = chosen else { return };
     app.canvas.hot_grips = vec![g];
     let r = app.session.start_grip_edit(&[g]).and_then(|()| match choice {

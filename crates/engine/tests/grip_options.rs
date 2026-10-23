@@ -351,3 +351,73 @@ fn grip_option_json_form() {
         assert!(s.execute("grip.option", &p).is_err(), "{p}");
     }
 }
+
+#[test]
+fn test_cycling_multifunctional_grip_options() {
+    let mut s = Session::new();
+    let h = pline(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], false);
+    s.set_selection(vec![h]);
+    // Grip 0 on polyline has Add Vertex and Remove Vertex
+    s.start_grip_edit(&[(h, 0)]).unwrap();
+    assert!(s.prompt_text().contains("** STRETCH **"));
+
+    // Next cycles into the first action: Add Vertex
+    typed(&mut s, &["Next"]);
+    assert!(s.prompt_text().contains("** ADD VERTEX **"));
+
+    // Next from Add Vertex cycles to Remove Vertex (which removes the vertex immediately)
+    typed(&mut s, &["Next"]);
+    assert_eq!(vertices(&s, h).len(), 2);
+    assert!(s.running.is_none());
+
+    // Line end grip has Lengthen
+    let mut s2 = Session::new();
+    let l = line(&mut s2, [0.0, 0.0], [10.0, 0.0]);
+    s2.set_selection(vec![l]);
+    s2.start_grip_edit(&[(l, 2)]).unwrap();
+    assert!(s2.prompt_text().contains("** STRETCH **"));
+
+    typed(&mut s2, &["Next"]);
+    assert!(s2.prompt_text().contains("** LENGTHEN **"));
+
+    // Next from Lengthen cycles back to STRETCH mode
+    typed(&mut s2, &["Next"]);
+    assert!(s2.prompt_text().contains("** STRETCH **"));
+}
+
+#[test]
+fn test_mleader_multifunctional_grips() {
+    let mut s = Session::new();
+    let res = s.execute("mleader", &json!({ "points": [[0.0, 0.0], [5.0, 5.0]], "text": "Note" })).unwrap();
+    let h = Handle::parse_hex(res.get("handle").and_then(|v| v.as_str()).unwrap()).unwrap();
+    s.set_selection(vec![h]);
+
+    // Grip 0 is the arrowhead; grip 1 is the landing.
+    // Check grip_actions on arrowhead: Add Leader
+    let e = s.doc().unwrap().entity(h).unwrap().clone();
+    assert_eq!(cadcraft_engine::grips::grip_actions(&e.kind, 0), vec![cadcraft_engine::grips::GripAction::AddLeader]);
+    assert_eq!(cadcraft_engine::grips::grip_actions(&e.kind, 1), vec![cadcraft_engine::grips::GripAction::AddLeader]);
+
+    // Use grip.option to Add Leader
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": 0, "option": "addLeader", "to": [0.0, 10.0] })).unwrap();
+    let m = match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::MLeader(m) => m.clone(),
+        _ => panic!("expected mleader"),
+    };
+    assert_eq!(m.leaders.len(), 2);
+
+    // Now with 2 leaders, grip_actions on an arrowhead offers Add Leader and Remove Leader
+    let e = s.doc().unwrap().entity(h).unwrap().clone();
+    assert_eq!(
+        cadcraft_engine::grips::grip_actions(&e.kind, 0),
+        vec![cadcraft_engine::grips::GripAction::AddLeader, cadcraft_engine::grips::GripAction::RemoveLeader]
+    );
+
+    // Remove Leader option
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": 0, "option": "removeLeader" })).unwrap();
+    let m = match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::MLeader(m) => m.clone(),
+        _ => panic!("expected mleader"),
+    };
+    assert_eq!(m.leaders.len(), 1);
+}

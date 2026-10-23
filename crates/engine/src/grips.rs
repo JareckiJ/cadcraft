@@ -324,6 +324,10 @@ pub enum GripAction {
     Lengthen,
     /// Arc midpoint: change the radius, keeping the center and angles.
     Radius,
+    /// Multileader: add a new leader line arrowhead.
+    AddLeader,
+    /// Multileader: remove this leader line.
+    RemoveLeader,
 }
 
 impl GripAction {
@@ -336,6 +340,8 @@ impl GripAction {
             GripAction::ToLine => "conVert to line",
             GripAction::Lengthen => "Lengthen",
             GripAction::Radius => "Radius",
+            GripAction::AddLeader => "Add leader",
+            GripAction::RemoveLeader => "Remove leader",
         }
     }
     /// The grip menu label.
@@ -347,6 +353,8 @@ impl GripAction {
             GripAction::ToLine => "Convert to Line",
             GripAction::Lengthen => "Lengthen",
             GripAction::Radius => "Radius",
+            GripAction::AddLeader => "Add Leader",
+            GripAction::RemoveLeader => "Remove Leader",
         }
     }
     /// The mode name on the command line ("** ADD VERTEX **").
@@ -358,11 +366,13 @@ impl GripAction {
             GripAction::ToLine => "** CONVERT TO LINE **",
             GripAction::Lengthen => "** LENGTHEN **",
             GripAction::Radius => "** RADIUS **",
+            GripAction::AddLeader => "** ADD LEADER **",
+            GripAction::RemoveLeader => "** REMOVE LEADER **",
         }
     }
     /// Whether the option needs a point (or value); the others act at once.
     pub fn needs_point(self) -> bool {
-        !matches!(self, GripAction::RemoveVertex | GripAction::ToLine)
+        !matches!(self, GripAction::RemoveVertex | GripAction::ToLine | GripAction::RemoveLeader)
     }
 }
 
@@ -383,6 +393,17 @@ pub fn grip_actions(kind: &EntityKind, index: usize) -> Vec<GripAction> {
         EntityKind::Line(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
         EntityKind::Arc(_) if index == 0 || index == 2 => vec![GripAction::Lengthen],
         EntityKind::Arc(_) if index == 1 => vec![GripAction::Radius],
+        EntityKind::MLeader(m) => {
+            // Grips: arrowheads and vertices of leaders, followed by landing grip.
+            // On arrowhead / leader vertices: Add Leader, and if >1 leader, Remove Leader.
+            let total_leader_pts: usize = m.leaders.iter().map(|l| l.len()).sum();
+            if index < total_leader_pts {
+                if m.leaders.len() > 1 { vec![GripAction::AddLeader, GripAction::RemoveLeader] } else { vec![GripAction::AddLeader] }
+            } else {
+                // Landing grip: Add Leader
+                vec![GripAction::AddLeader]
+            }
+        }
         _ => Vec::new(),
     }
 }
@@ -514,6 +535,28 @@ pub fn grip_action(kind: &EntityKind, index: usize, action: GripAction, to: Opti
                 return None;
             }
             a.radius = r;
+        }
+        (EntityKind::MLeader(m), GripAction::AddLeader) => {
+            let to = to?;
+            // Add a new leader line from the picked point `to` to the landing
+            m.leaders.push(vec![to.to3(0.0)]);
+        }
+        (EntityKind::MLeader(m), GripAction::RemoveLeader) => {
+            // Find which leader line contains the grip `index`
+            let mut acc = 0usize;
+            let mut remove_leader_idx = None;
+            for (li, l) in m.leaders.iter().enumerate() {
+                if index >= acc && index < acc + l.len() {
+                    remove_leader_idx = Some(li);
+                    break;
+                }
+                acc += l.len();
+            }
+            let li = remove_leader_idx?;
+            if m.leaders.len() <= 1 || li >= m.leaders.len() {
+                return None;
+            }
+            m.leaders.remove(li);
         }
         _ => return None,
     }

@@ -1,10 +1,10 @@
 # Parity checklist
 
-> **Generated:** 2026-10-18 by `cargo xtask parity`. Do not edit by hand.
+> **Generated:** 2026-10-23 by `cargo xtask parity`. Do not edit by hand.
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 373 / 491 items (76%)** · 524 registered commands.
+**Menu breadth: 373 / 491 items (76%)** · 526 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
