@@ -290,11 +290,10 @@ mod native {
         }
     }
 
-    /// The DWG dimension flags byte. Its bit 0 is the opposite of DXF group 70's bit 128 (set: the
-    /// text is at its default position) and its bit 1 is group 70's bit 32 (ODA DWG
-    /// specification, common dimension data). acadrust 0.6.5 maps bit 0 both ways (0.6.4 wrote
-    /// `text_user_positioned` into it as is, #1094) but keeps no bit 32 from DXF, so it is set
-    /// here before a DWG is written, as CADCraft's DXF writer always sets it.
+    /// The DWG dimension flags byte. Its bit 1 is DXF group 70's bit 32 (ODA DWG specification,
+    /// common dimension data), which acadrust keeps no copy of from DXF: it is set here as
+    /// CADCraft's DXF writer always sets it (#1094). Bit 0, the opposite of group 70's bit 128,
+    /// acadrust 0.6.5 reads and writes itself.
     fn dimension_flags(doc: &mut acadrust::CadDocument) {
         for e in doc.entities_mut() {
             let acadrust::entities::EntityType::Dimension(d) = e else { continue };
