@@ -143,6 +143,14 @@ fn services() -> Services {
                 .save_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
+        pick_pgp: Some(Box::new(|dir: Option<&str>| {
+            let dialog = rfd::FileDialog::new().add_filter(i18n::t("Alias files (PGP)"), &["pgp"]);
+            let dialog = match dir {
+                Some(dir) => dialog.set_directory(dir),
+                None => dialog,
+            };
+            dialog.pick_file().map(|p| p.to_string_lossy().to_string())
+        })),
     }
 }
 
