@@ -49,6 +49,12 @@ const MAX_COLUMNS: u64 = 1_000;
 /// Most devices tagged in one go (and most suffixes tried for one tag).
 const MAX_DEVICES: usize = 200_000;
 
+/// Run after every command that changed the drawing (the engine's after-command hook): keeps
+/// the project database and the cross-references in step with ordinary CAD edits.
+pub(crate) fn after_command(s: &mut Session, before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
+    xref::live(s, before, uid);
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     let mut v = vec![
         CommandSpec::new("etag", "Tag Devices (IEC 81346)", run_etag)

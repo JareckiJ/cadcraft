@@ -229,24 +229,23 @@ fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
     // leave a tail that crosses the next symbol).
     let ix = PinIndex::build(s)?;
     let mut crossed: Vec<Handle> = Vec::new();
-    let mut pins: Vec<Vec2> = Vec::new();
+    // Each crossed symbol's pins, apart: cutting between the outermost pins of all of them at
+    // once would take out the wire running from one symbol to the next.
+    let mut per_symbol: Vec<Vec<Vec2>> = Vec::new();
     for w in pts.windows(2) {
         let [a0, b0] = w else { continue };
         for d in ix.crossed(*a0, *b0) {
             if !crossed.contains(&d.insert) {
                 crossed.push(d.insert);
-                pins.extend(d.pins.iter().filter_map(|i| ix.pins.get(*i)).map(|p| p.at));
+                per_symbol.push(d.pins.iter().filter_map(|i| ix.pins.get(*i)).map(|p| p.at).collect());
             }
         }
     }
     let mut cut = 0usize;
-    for _ in 0..MAX_PASSES {
-        let n = super::symbols::break_wires(s, &pins, &layer)?;
-        cut += n;
-        if n == 0 {
-            break;
-        }
+    for symbol_pins in per_symbol.iter().take(MAX_PASSES) {
+        cut += super::symbols::break_wires(s, symbol_pins, &layer)?;
     }
+    let pins: Vec<Vec2> = per_symbol.into_iter().flatten().collect();
     // Which pins the wire now ends on (its ends, and the pins it was cut at).
     let ix = PinIndex::build(s)?;
     let mut on_pins: Vec<Value> = Vec::new();

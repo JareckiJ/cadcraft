@@ -84,9 +84,9 @@ fn coil_and_contact_on_different_sheets() {
     let x = s.execute("eproject.xref", &json!({ "project": project })).unwrap();
     assert_eq!(x["orphans"], json!([]), "{x}");
     switch_to(&mut s, "plant-01.dxf");
-    assert_eq!(attr(&s, "IEC_COIL", "XREF"), vec!["NO 201"]);
+    assert_eq!(attr(&s, "IEC_COIL", "XREF"), vec!["NO 13-14 /2.1"]);
     switch_to(&mut s, "plant-02.dxf");
-    assert_eq!(attr(&s, "IEC_NO", "XREF"), vec!["/102"]);
+    assert_eq!(attr(&s, "IEC_NO", "XREF"), vec!["/1.2"]);
 
     // Wire numbers: each sheet numbers from its own sheet number, none repeated.
     s.execute("eproject.wires", &json!({ "project": project })).unwrap();
@@ -108,7 +108,7 @@ fn coil_and_contact_on_different_sheets() {
             _ => None,
         })
         .collect();
-    assert_eq!(saved, vec!["/102"]);
+    assert_eq!(saved, vec!["/1.2"]);
 
     // The project database: every symbol on both sheets, the contact linked to its coil.
     let r = s.execute("eproject.sync", &json!({ "project": project })).unwrap();

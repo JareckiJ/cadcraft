@@ -369,6 +369,40 @@ fn push_active(s: &mut Session, db: &EcadDb, page: &PageId) -> Result<usize> {
     Ok(changed)
 }
 
+/// The sheet grid of the active drawing (its project's layout and sheet number).
+pub(super) fn active_grid(s: &Session) -> Result<Grid> {
+    grid_for(&place_of_active(s)?)
+}
+
+/// The devices on the other pages of the active drawing's project, as cross-referencing sees
+/// them (from the database, as last synchronised). Empty outside a project.
+pub(super) fn devices_elsewhere(s: &Session) -> Result<Vec<super::xref::RefDev>> {
+    let place = place_of_active(s)?;
+    let Some((proj, _)) = &place.project else { return Ok(Vec::new()) };
+    let db = open_db(Some(proj))?;
+    let mut docs: HashMap<PageId, usize> = HashMap::new();
+    let mut out = Vec::new();
+    for d in db.devices().map_err(db_err)? {
+        let Some(g) = d.graphic.clone() else { continue };
+        if g.page == place.page.id {
+            continue;
+        }
+        let next = docs.len() + 1;
+        let doc = *docs.entry(g.page.clone()).or_insert(next);
+        out.push(super::xref::RefDev {
+            doc,
+            handle: Handle(g.handle),
+            tag: d.tag,
+            child: d.child,
+            kind: if d.family == DeviceFamily::Nc { "NC" } else { "NO" },
+            place: (g.reference.1 > 0).then_some((u64::from(g.reference.0), u64::from(g.reference.1))),
+            y: g.position[1],
+            pins: super::xref::pin_pair(d.pins.iter().map(|p| p.number.as_str())),
+        });
+    }
+    Ok(out)
+}
+
 /// Update the database from the active drawing after an electrical command. A failure (no
 /// database, a locked file) never fails the command: the next sync catches up.
 pub(super) fn auto(s: &mut Session) {

@@ -95,6 +95,13 @@ pub(super) struct RefDev {
     /// Sheet and column.
     pub place: Option<(u64, u64)>,
     pub y: f64,
+    /// Its first two pin numbers (`13-14`), shown in its main device's contact list.
+    pub pins: String,
+}
+
+/// `13-14` from a symbol's pin numbers.
+pub(super) fn pin_pair<'a>(numbers: impl Iterator<Item = &'a str>) -> String {
+    numbers.take(2).collect::<Vec<_>>().join("-")
 }
 
 /// The devices of the current drawing, numbered `doc`.
@@ -105,16 +112,27 @@ pub(super) fn ref_devices(
     overrides: &std::collections::HashMap<String, String>,
     doc: usize,
 ) -> Result<Vec<RefDev>> {
+    let dr = s.doc()?;
     Ok(devices(s, attribute, None)?
         .iter()
-        .map(|d| RefDev {
-            doc,
-            handle: d.handle,
-            tag: d.tag.clone(),
-            child: is_child(d, overrides),
-            kind: kind_of(d),
-            place: grid.locate(d.x),
-            y: d.y,
+        .map(|d| {
+            let pins = match dr.entity(d.handle).map(|e| &e.kind) {
+                Some(EntityKind::Insert(ins)) => {
+                    let p = super::sync::pins_of(ins);
+                    pin_pair(p.iter().map(|x| x.number.as_str()))
+                }
+                _ => String::new(),
+            };
+            RefDev {
+                doc,
+                handle: d.handle,
+                tag: d.tag.clone(),
+                child: is_child(d, overrides),
+                kind: kind_of(d),
+                place: grid.locate(d.x),
+                y: d.y,
+                pins,
+            }
         })
         .collect())
 }
@@ -128,8 +146,14 @@ pub(super) struct Refs {
     pub orphans: Vec<(usize, Handle)>,
 }
 
-fn place_text(p: (u64, u64)) -> String {
-    format!("{}{:02}", p.0, p.1)
+/// EPLAN-style page/column reference: `/2.5` is page 2, column 5.
+pub(super) fn place_text(p: (u64, u64)) -> String {
+    format!("/{}.{}", p.0, p.1)
+}
+
+/// A main device's line for one of its contacts: `NO 13-14 /2.5`.
+fn contact_line(c: &RefDev, p: (u64, u64)) -> String {
+    if c.pins.is_empty() { format!("{} {}", c.kind, place_text(p)) } else { format!("{} {} {}", c.kind, c.pins, place_text(p)) }
 }
 
 /// Under each main device the contacts it drives (`NO 105`), under each contact where its main
@@ -147,13 +171,13 @@ pub(super) fn compute(devs: &[RefDev]) -> Refs {
         let [main] = ms.as_slice() else { continue };
         let mut contacts: Vec<&RefDev> = devs.iter().filter(|d| d.child && d.tag == *tag).collect();
         contacts.sort_by(|a, b| a.place.cmp(&b.place).then(b.y.total_cmp(&a.y)));
-        let ls: Vec<String> = contacts.iter().filter_map(|c| c.place.map(|p| format!("{} {}", c.kind, place_text(p)))).take(MAX_LINES).collect();
+        let ls: Vec<String> = contacts.iter().filter_map(|c| c.place.map(|p| contact_line(c, p))).take(MAX_LINES).collect();
         if !ls.is_empty() {
             lines.insert((main.doc, main.handle), ls);
         }
         if let Some(p) = main.place {
             for c in &contacts {
-                lines.insert((c.doc, c.handle), vec![format!("/{}", place_text(p))]);
+                lines.insert((c.doc, c.handle), vec![place_text(p)]);
             }
         }
         report.push(json!({
@@ -248,13 +272,60 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
+/// The electrical symbols of `d`'s `space` as they stand: handle, place, rotation and tag. Two
+/// equal signatures mean no cross-reference can have changed.
+fn signature(d: &cadcraft_doc::Drawing, space: &cadcraft_doc::Space) -> Vec<(u64, u64, u64, u64, String)> {
+    let Some(store) = d.space(space) else { return Vec::new() };
+    store
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EntityKind::Insert(i) => i
+                .attribs
+                .iter()
+                .find(|a| ["TAG1", "TAG2", "TAG"].iter().any(|t| a.tag.eq_ignore_ascii_case(t)))
+                .map(|a| (e.handle.0, i.insert.x.to_bits(), i.insert.y.to_bits(), i.rotation.to_bits(), a.text.value.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Live cross-references: after any command that moved, copied, rotated, renumbered, added or
+/// erased an electrical symbol in the active drawing (MOVE, grips, COPY, ROTATE, ERASE…), update
+/// the project database and rewrite the references (`/2.5`) of every main device and contact,
+/// including those wired to symbols on other sheets. A failure never fails the command.
+pub(super) fn live(s: &mut Session, before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
+    let Some(before) = before else { return };
+    let Ok(st) = s.state() else { return };
+    if uid.is_some_and(|u| u != st.uid) || std::sync::Arc::ptr_eq(before, &st.doc) {
+        return;
+    }
+    let space = s.space();
+    if signature(before, &space) == signature(&st.doc, &space) {
+        return;
+    }
+    super::sync::auto(s);
+    let r = (|| -> Result<()> {
+        let grid = super::sync::active_grid(s)?;
+        let mut devs = ref_devices(s, None, &grid, &std::collections::HashMap::new(), 0)?;
+        devs.extend(super::sync::devices_elsewhere(s)?);
+        let refs = compute(&devs);
+        write_refs(s, 0, &devs, &refs, XREF_LAYER, 2.5)?;
+        Ok(())
+    })();
+    if let Err(e) = r {
+        log::warn!("cross-references not updated: {e}");
+    }
+}
+
 fn run_exref_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "exref";
     let attribute = attribute_param(p);
     let (layer, height) = layer_and_height(CMD, p)?;
     let grid = Grid::from_params(CMD, p)?;
     let overrides = class_overrides(CMD, p)?;
-    let devs = ref_devices(s, attribute.as_deref(), &grid, &overrides, 0)?;
+    let mut devs = ref_devices(s, attribute.as_deref(), &grid, &overrides, 0)?;
+    // Contacts and coils on the project's other sheets, from the database.
+    devs.extend(super::sync::devices_elsewhere(s)?);
     let refs = compute(&devs);
     let (written, in_attributes) = write_refs(s, 0, &devs, &refs, &layer, height)?;
     let orphans: Vec<String> = refs.orphans.iter().map(|(_, h)| h.hex()).collect();
@@ -380,7 +451,7 @@ mod tests {
         let orphan = put(&mut s, "CONTACT_NO", [300.0, 50.0], "-K9.9");
         put(&mut s, "MOTOR", [100.0, 20.0], "-M1.3");
         let r = s.execute("exref", &json!({})).unwrap();
-        assert_eq!(xref_texts(&s), vec!["/102", "/102", "NC 202", "NO 105"]);
+        assert_eq!(xref_texts(&s), vec!["/1.2", "/1.2", "NC /2.2", "NO /1.5"]);
         assert_eq!(r["orphans"], json!([orphan]));
         // Running again rebuilds rather than piling up.
         s.execute("exref", &json!({})).unwrap();
@@ -403,8 +474,8 @@ mod tests {
             EntityKind::Insert(i) => i.attribs.iter().find(|a| a.tag == "XREF").unwrap().text.value.clone(),
             _ => panic!(),
         };
-        assert_eq!(xref(&k), "NO 105");
-        assert_eq!(xref(&c), "/102");
+        assert_eq!(xref(&k), "NO 13-14 /1.5");
+        assert_eq!(xref(&c), "/1.2");
     }
 
     #[test]
