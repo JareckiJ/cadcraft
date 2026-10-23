@@ -168,15 +168,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
-        "ui.saveas" | "saveas" if no_path => {
-            let title = app.session.state().map(|s| s.title.clone()).ok();
-            let name = app.ui.save_format.suggested_name(title.as_deref());
-            if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name)) {
-                return Some(app.session.execute("saveas", &saveas_params(&app.ui, &app.session, &p)).map_err(|e| e.to_string()));
-            }
-            Ok(Value::Null)
-        }
-        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
+        // Save As and QSAVE of a drawing without a file: the picker and the Save As window
+        // (version), or with FILEDIA 0 the command-line prompts ([`crate::saving`]).
+        "ui.saveas" | "saveas" | "qsave" if no_path => return crate::saving::route(app, id, no_path),
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
         // params, never get here and never open a dialog.
@@ -411,16 +405,6 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         _ => return None,
     };
     Some(r)
-}
-
-/// SAVEAS parameters for a path picked in the Save dialog: a drawing that has no file yet is saved
-/// in the default save version; one opened from a file keeps that file's version.
-fn saveas_params(ui: &crate::UiState, session: &cadcraft_engine::Session, path: &str) -> Value {
-    let untitled = session.state().is_ok_and(|s| s.path.is_none());
-    match crate::SaveVersion::parse(&ui.save_version) {
-        Some(v) if untitled => json!({ "path": path, "version": v.year() }),
-        _ => json!({ "path": path }),
-    }
 }
 
 fn set_save_format(app: &mut CadApp, format: crate::SaveFormat) -> Value {
