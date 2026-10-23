@@ -1,0 +1,28 @@
+# Builds and tests the electrical (IEC 81346 tagging) commands on every push to a feature branch.
+name: Electrical
+
+on:
+  push:
+    branches: ["feature/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt -p cadcraft-engine -- --check
+      - name: Electrical tests
+        run: cargo test -p cadcraft-engine --lib electrical
+      - name: Whole engine tests (hostile params, interactive commands)
+        run: cargo test -p cadcraft-engine
+      - name: Clippy
+        run: cargo clippy -p cadcraft-engine --all-targets -- -D warnings
