@@ -1691,6 +1691,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         return Err(IoError::Format("no sections found".into()));
     }
     let mut d = Drawing::new_imperial();
+    let fresh_seed = d.handseed;
     d.layouts.clear();
     // A file without $INSUNITS declares no units (#1209); only new drawings take the template's.
     d.header.set_i64("INSUNITS", 0);
@@ -1860,10 +1861,28 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     objs.apply(&mut d, &rx);
     crate::dxf_image::resolve(&secs, &mut d);
     crate::dxf_mline::resolve(&secs, &mut d);
-    // Keep handles unique against the header's seed.
-    let seed = d.header.str("HANDSEED", "");
-    if let Some(h) = own_seed.or_else(|| Handle::parse_hex(&seed)) {
-        d.bump_handseed(Handle(h.0.saturating_sub(1)));
+    // Keep handles unique against the header's seed. A file CADCraft wrote names its own next
+    // handle, and the drawing keeps it: what it keeps above it (the `*D` block read with a
+    // dimension, on its first reopen) still raises it, but the entities of the blocks dropped
+    // above (a table's `*T` block, an arrowhead block nothing inserts) are numbered above it too
+    // and must not, or every save renumbered the whole file (#1177).
+    match own_seed {
+        Some(own) => {
+            let kept = d
+                .model
+                .iter()
+                .chain(d.layouts.iter().flat_map(|l| l.entities.iter()))
+                .chain(d.blocks.values().flat_map(|b| b.entities.iter()))
+                .map(|e| e.handle.0.saturating_add(1))
+                .max()
+                .unwrap_or(0);
+            d.handseed = own.0.max(kept).max(fresh_seed);
+        }
+        None => {
+            if let Some(h) = Handle::parse_hex(&d.header.str("HANDSEED", "")) {
+                d.bump_handseed(Handle(h.0.saturating_sub(1)));
+            }
+        }
     }
     if d.layer("0").is_none() {
         d.layers.insert(0, Layer::default());
