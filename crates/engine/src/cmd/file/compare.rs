@@ -70,6 +70,9 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(CompareM))),
         CommandSpec::new("compare.next", "Next Change", |s, _| step(s, 1)).params("→ {region, of}: zoom to the next area with changes").noundo(),
         CommandSpec::new("compare.previous", "Previous Change", |s, _| step(s, -1)).params("→ {region, of}").noundo(),
+        CommandSpec::new("compareexport", "Export Comparison", run_export)
+            .params("{path?: string} → {other, added, removed, changed, common, regions, path?: string, message}")
+            .noundo(),
         CommandSpec::new("compareclose", "Close Comparison", run_close).params("{}: end the comparison and its overlay").noundo(),
     ]
 }
@@ -387,6 +390,36 @@ fn step(s: &mut Session, dir: i64) -> Result<Value> {
     let (p1, p2) = (b.min - Vec2::new(pad, pad), b.max + Vec2::new(pad, pad));
     s.execute("zoom", &json!({ "mode": "window", "p1": [p1.x, p1.y], "p2": [p2.x, p2.y] }))?;
     Ok(json!({ "region": i, "of": n, "message": format!("Change area {} of {n}.", i + 1) }))
+}
+
+fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
+    let uid = s.state()?.uid;
+    let c = s.compare.as_ref().filter(|c| c.uid == uid).ok_or_else(|| bad("compareexport", "no comparison: run COMPARE first"))?;
+    let path = str_param(p, "path");
+    let report = json!({
+        "other": c.other_name,
+        "counts": {
+            "added": c.added.len(),
+            "removed": c.removed.len(),
+            "changed": c.changed.len(),
+            "common": c.common,
+        },
+        "added": c.added.iter().map(|h| h.hex()).collect::<Vec<_>>(),
+        "removed": c.removed.iter().map(|h| h.hex()).collect::<Vec<_>>(),
+        "changed": c.changed.iter().map(|(a, b)| json!({ "this": a.hex(), "other": b.hex() })).collect::<Vec<_>>(),
+        "regions": c.regions.iter().map(|b| json!([[b.min.x, b.min.y], [b.max.x, b.max.y]])).collect::<Vec<_>>(),
+        "truncated": c.truncated,
+        "message": format!(
+            "Comparison report with {}: {} added, {} removed, {} changed, {} common.",
+            c.other_name, c.added.len(), c.removed.len(), c.changed.len(), c.common
+        )
+    });
+    if let Some(target) = path {
+        let text = serde_json::to_string_pretty(&report).map_err(|e| bad("compareexport", format!("failed to serialize report: {e}")))?;
+        std::fs::write(target, text.as_bytes()).map_err(|e| bad("compareexport", format!("{target}: {e}")))?;
+        s.echo(format!("Comparison report exported to \"{target}\"."));
+    }
+    Ok(report)
 }
 
 fn run_close(s: &mut Session, _p: &Value) -> Result<Value> {

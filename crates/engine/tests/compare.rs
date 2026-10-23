@@ -195,3 +195,16 @@ fn derived_dimension_fields_are_not_differences() {
     let r = s.execute("compare", &json!({"document": 0})).unwrap();
     assert_eq!(counts(&r), (0, 0, 0, 1), "{r}");
 }
+
+#[test]
+fn compareexport_produces_json_report() {
+    let mut s = base();
+    edited_copy(&mut s);
+    s.execute("compare", &json!({"document": "drawing1"})).unwrap();
+    let rep = s.execute("compareexport", &json!({})).unwrap();
+    assert_eq!(rep["counts"]["added"], 1);
+    assert_eq!(rep["counts"]["removed"], 1);
+    assert_eq!(rep["counts"]["changed"], 1);
+    assert_eq!(rep["counts"]["common"], 1);
+    assert!(rep["message"].as_str().unwrap().contains("Comparison report with"));
+}
