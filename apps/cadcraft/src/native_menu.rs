@@ -7,11 +7,43 @@ use std::str::FromStr;
 use cadcraft_ui_egui::menus::{self, Entry};
 use cadcraft_ui_egui::{CadApp, i18n};
 use muda::accelerator::Accelerator;
-use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+
+/// A menu row: a plain command, or a switch / one choice of a group that shows a check mark.
+enum Item {
+    Plain(MenuItem),
+    Check(CheckMenuItem),
+}
+
+impl Item {
+    /// Sets the label of the row.
+    fn set_text(&self, text: &str) {
+        match self {
+            Self::Plain(i) => i.set_text(text),
+            Self::Check(i) => i.set_text(text),
+        }
+    }
+
+    /// Enables or greys out the row.
+    fn set_enabled(&self, enabled: bool) {
+        match self {
+            Self::Plain(i) => i.set_enabled(enabled),
+            Self::Check(i) => i.set_enabled(enabled),
+        }
+    }
+
+    /// The row as the type `Submenu::append` takes.
+    fn as_menu_item(&self) -> &dyn IsMenuItem {
+        match self {
+            Self::Plain(i) => i,
+            Self::Check(i) => i,
+        }
+    }
+}
 
 pub struct NativeMenu {
     _menu: Menu,
-    items: HashMap<String, (String, String, MenuItem)>,
+    items: HashMap<String, (String, String, Item)>,
     submenus: Vec<(String, Submenu)>,
     predefined: Vec<(&'static str, PredefinedMenuItem)>,
     language: &'static str,
@@ -30,6 +62,7 @@ fn accel(sc: &str) -> Option<Accelerator> {
 }
 
 impl NativeMenu {
+    /// Builds the system menu bar from the menu tree and installs it for the app.
     pub fn install(app: &mut CadApp) -> Self {
         let menu = Menu::new();
         let mut items = HashMap::new();
@@ -55,13 +88,13 @@ impl NativeMenu {
                 let _ = app_menu.append(&PredefinedMenuItem::separator());
             }
         }
-        items.insert("cc-about".into(), ("ui.dialog.about".into(), "About CADCraft".into(), about));
-        items.insert("cc-discord".into(), ("ui.discord".into(), "Join the ArtCraft Discord…".into(), discord));
-        items.insert("cc-settings".into(), ("options".into(), "Settings...".into(), settings));
+        items.insert("cc-about".into(), ("ui.dialog.about".into(), "About CADCraft".into(), Item::Plain(about)));
+        items.insert("cc-discord".into(), ("ui.discord".into(), "Join the ArtCraft Discord…".into(), Item::Plain(discord)));
+        items.insert("cc-settings".into(), ("options".into(), "Settings...".into(), Item::Plain(settings)));
         let _ = menu.append(&app_menu);
         for (title, entries) in menus::tree(app) {
             let sub = Submenu::new(i18n::tr_menu(language, &title), true);
-            build(&sub, &entries, &mut items, &mut submenus, &mut counter, language);
+            build(&sub, &entries, &mut items, &mut submenus, &mut counter, language, &|id| menus::checked(app, id));
             let _ = menu.append(&sub);
             submenus.push((title, sub));
         }
@@ -84,9 +117,12 @@ impl NativeMenu {
         for id in ids {
             self.items.remove(&id);
         }
-        build(&sub, &menus::recent_entries(app), &mut self.items, &mut self.submenus, &mut self.counter, self.language);
+        build(&sub, &menus::recent_entries(app), &mut self.items, &mut self.submenus, &mut self.counter, self.language, &|id| {
+            menus::checked(app, id)
+        });
     }
 
+    /// Runs the commands chosen in the menu, then keeps enablement and check marks current.
     pub fn poll(&mut self, app: &mut CadApp, ctx: &egui::Context) {
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
             if let Some((cmd, _, _)) = self.items.get(ev.id.as_ref()) {
@@ -95,6 +131,8 @@ impl NativeMenu {
                 } else {
                     menus::activate(app, &cmd.clone());
                 }
+                // Show the new state of switches and choices right away, not after the next refresh.
+                self.last_refresh = f64::NEG_INFINITY;
                 ctx.request_repaint();
             }
         }
@@ -121,30 +159,41 @@ impl NativeMenu {
             let en = cadcraft_engine::find_command(cmd).is_none_or(|c| (c.enabled)(&app.session).is_ok());
             item.set_enabled(en);
         }
+        for (cmd, _, item) in self.items.values() {
+            if let (Item::Check(check), Some(on)) = (item, menus::checked(app, cmd)) {
+                check.set_checked(on);
+            }
+        }
     }
 }
 
+/// Appends `entries` to `parent`; rows for which `checked` reports a state become check items.
 fn build(
     parent: &Submenu,
     entries: &[Entry],
-    items: &mut HashMap<String, (String, String, MenuItem)>,
+    items: &mut HashMap<String, (String, String, Item)>,
     submenus: &mut Vec<(String, Submenu)>,
     counter: &mut usize,
     language: &str,
+    checked: &dyn Fn(&str) -> Option<bool>,
 ) {
     for e in entries {
         match e {
             Entry::Sub { label, children } => {
                 let sub = Submenu::new(i18n::tr_menu(language, label), true);
-                build(&sub, children, items, submenus, counter, language);
+                build(&sub, children, items, submenus, counter, language, checked);
                 let _ = parent.append(&sub);
                 submenus.push((label.clone(), sub));
             }
             Entry::Item { label, id, shortcut, enabled } => {
                 *counter += 1;
                 let mid = format!("cc{counter}");
-                let i = MenuItem::with_id(mid.clone(), i18n::tr(language, label), *enabled, shortcut.as_deref().and_then(accel));
-                let _ = parent.append(&i);
+                let (text, accelerator) = (i18n::tr(language, label), shortcut.as_deref().and_then(accel));
+                let i = match checked(id) {
+                    Some(on) => Item::Check(CheckMenuItem::with_id(mid.clone(), text, *enabled, on, accelerator)),
+                    None => Item::Plain(MenuItem::with_id(mid.clone(), text, *enabled, accelerator)),
+                };
+                let _ = parent.append(i.as_menu_item());
                 items.insert(mid, (id.clone(), label.clone(), i));
             }
         }

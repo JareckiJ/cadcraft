@@ -460,6 +460,36 @@ fn animations_json(app: &CadApp) -> Value {
     json!({ "animations": app.ui.animations.as_str(), "shown": app.shows_animations() })
 }
 
+/// Whether the menu item `id` is a switch or one choice of a group, and if so whether it is on
+/// now: the check mark the native macOS menu shows. `None` for ordinary commands.
+pub fn checked(app: &CadApp, id: &str) -> Option<bool> {
+    Some(match id {
+        "ui.toggle.toolsets" => app.ui.show_toolsets,
+        "ui.toggle.palettes" => app.ui.show_palettes,
+        "ui.toggle.toolbar" => app.ui.show_toolbar,
+        "ui.toggle.filetabs" => app.ui.show_file_tabs,
+        "ui.toggle.statusbar" => app.ui.show_status_bar,
+        "ui.toggle.cmdline" => app.ui.show_command_line,
+        "ui.toggle.systemcursor" => app.ui.system_cursor,
+        "ui.toggle.viewcube" => app.ui.show_viewcube,
+        "ui.toggle.ucsicon" => app.ui.show_ucs_icon,
+        "ui.toggle.menubar" => app.ui.in_window_menu,
+        "ui.toggle.history" => app.cmd.expanded,
+        _ => {
+            let (choice, current) = if let Some(c) = id.strip_prefix("ui.theme.") {
+                (c, app.ui.theme.as_str().to_string())
+            } else if let Some(c) = id.strip_prefix("ui.animations.") {
+                (c, app.ui.animations.as_str().to_string())
+            } else if let Some(c) = id.strip_prefix("ui.saveformat.") {
+                (c, app.ui.save_format.as_str().to_string())
+            } else {
+                (id.strip_prefix("ui.saveversion.")?, app.ui.save_version.clone())
+            };
+            choice == current
+        }
+    })
+}
+
 /// A menu entry.
 #[derive(Clone, Debug)]
 pub enum Entry {
