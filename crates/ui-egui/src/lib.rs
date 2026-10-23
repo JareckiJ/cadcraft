@@ -189,6 +189,8 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Browser host: asynchronously reopen a cached imported drawing.
+    pub open_cached: Option<Box<dyn Fn(&str)>>,
 }
 
 pub struct CadApp {
@@ -420,6 +422,16 @@ impl CadApp {
     /// "Opening ..." card shows ([`opening`]); [`Self::finish_opening`] adds it when ready. On the
     /// web it opens at once.
     pub fn open_path(&mut self, path: &str) {
+        #[cfg(target_arch = "wasm32")]
+        if path.starts_with("cadcraft-cache:") {
+            if let Some(open) = &self.services.open_cached {
+                open(path);
+            } else {
+                self.open_failed("Recent-file storage is unavailable");
+            }
+            return;
+        }
+
         // A LISP file (dropped on the window): loaded as APPLOAD loads it.
         if is_lisp_file(path) {
             match cadcraft_engine::lisp::builtins::read_text_file(path) {
@@ -482,15 +494,32 @@ impl CadApp {
     /// picker, a dropped file). Runs OPEN with `{data, name}` as [`Self::open_path`] runs it with
     /// `{path}`; failures show on the command line and in the status bar.
     pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+        let _ = self.open_bytes_checked(name, bytes);
+    }
+
+    /// Returns true only when OPEN successfully decoded the drawing.
+    pub fn open_bytes_checked(&mut self, name: &str, bytes: &[u8]) -> bool {
         if let Some(e) = Self::open_size_error(name, bytes.len() as u64) {
-            return self.open_failed(e);
+            self.open_failed(e);
+            return false;
         }
         if is_lisp_file(name) {
-            return self.load_lisp(name, &String::from_utf8_lossy(bytes));
+            self.load_lisp(name, &String::from_utf8_lossy(bytes));
+            return false;
         }
         let data = cadcraft_engine::cmd::file::base64_encode(bytes);
         let r = self.run("open", json!({ "data": data, "name": name }));
+        let success = r.is_ok();
         self.opened(r);
+        success
+    }
+
+    /// Register a browser-cached drawing in the existing recent-file history.
+    #[cfg(target_arch = "wasm32")]
+    pub fn remember_cached_recent(&mut self, key: String) {
+        if key.starts_with("cadcraft-cache:") {
+            self.remember_recent(key);
+        }
     }
 
     /// Report a file that could not be opened before OPEN ran (unreadable, too large) as a failed

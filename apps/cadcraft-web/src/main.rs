@@ -34,6 +34,7 @@ mod web {
             self.1.drain(&mut self.0);
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
+            self.1.sync_recent(&self.0.ui.recent_files);
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
@@ -142,6 +143,10 @@ mod web {
                         // chosen file in the background (`upload.rs`), so the picker returns none.
                         let inbox = crate::upload::Inbox::new(&cc.egui_ctx);
                         let picker = inbox.clone();
+                        let cached_opener = inbox.clone();
+                        app.services.open_cached = Some(Box::new(move |key| {
+                            cached_opener.reopen(key);
+                        }));
                         app.services.pick_open = Some(Box::new(move || {
                             picker.pick();
                             None
@@ -179,6 +184,8 @@ fn wants_cpu(query: &str) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 mod upload;
+#[cfg(target_arch = "wasm32")]
+mod recent;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
