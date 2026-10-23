@@ -2097,6 +2097,12 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             shape_files.push(f.to_string());
         }
     }
+    // The file's other shape styles (a loaded shape file nothing uses yet), as read.
+    for f in &d.foreign.shape_files {
+        if !shape_files.iter().any(|x| x.eq_ignore_ascii_case(f)) {
+            shape_files.push(f.clone());
+        }
+    }
     let th = table_head(&mut w, "STYLE", d.text_styles.len() + shape_files.len());
     for s in &d.text_styles {
         let h = record_head(&mut w, "STYLE", &th, "AcDbTextStyleTableRecord");
@@ -2578,8 +2584,13 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.f(c, v);
         }
         w.i(70, plot_flags);
-        // Plot paper units: 1 millimetres, 0 inches (#1058).
-        w.i(72, i64::from(cadcraft_render::paper::page_unit_mm(d, page) == 1.0));
+        // Plot paper units: 1 millimetres, 0 inches (#1058); inches or pixels as the file read
+        // said, while the page doesn't say millimetres.
+        let units = match page.plot_paper_units.filter(|u| *u != 1 && !page.paper_mm) {
+            Some(u) => i64::from(u),
+            None => i64::from(cadcraft_render::paper::page_unit_mm(d, page) == 1.0),
+        };
+        w.i(72, units);
         w.i(73, i64::from(page.landscape));
         w.i(74, plot_type);
         w.s(7, &page.plot_style_table);

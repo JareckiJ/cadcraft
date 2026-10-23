@@ -66,6 +66,10 @@ pub struct Foreign {
     pub records: BTreeMap<ForeignKey, ForeignExtra>,
     /// The roles of the file handles the kept data refers to, for objects CADCraft rewrites.
     pub targets: BTreeMap<Handle, ForeignKey>,
+    /// The shape files of the file's unnamed shape styles (STYLE records with flag 1 and no name,
+    /// which AutoCAD adds when a shape file is loaded or a linetype uses one), written back as
+    /// such records.
+    pub shape_files: Vec<String>,
     /// The file's data store section (ACDSDATA, AutoCAD 2013 and later), as read: its groups
     /// after the section name. It holds the ACIS geometry of 3D solids, regions, bodies and
     /// surfaces, which from 2013 on those entities don't carry themselves: each `ACDSRECORD`
@@ -81,6 +85,7 @@ impl Foreign {
             && self.records.is_empty()
             && self.classes.is_empty()
             && self.targets.is_empty()
+            && self.shape_files.is_empty()
             && self.data_store.is_empty()
     }
 

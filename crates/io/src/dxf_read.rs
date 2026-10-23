@@ -1786,7 +1786,13 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         if name.eq_ignore_ascii_case("Model") {
             continue;
         }
-        d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
+        let mut page = page.clone();
+        // Plot paper units are kept only where saving would write others (see PageSetup).
+        let units = u8::from(cadcraft_render::paper::page_unit_mm(&d, &page) == 1.0);
+        if page.plot_paper_units == Some(units) {
+            page.plot_paper_units = None;
+        }
+        d.layouts.push(Layout { page, ..Layout::new(name, *order) });
         if let Some(bname) = rx.brs.get(br) {
             paper_block_for.insert(bname.to_ascii_uppercase(), name.clone());
         }
@@ -2246,6 +2252,7 @@ fn page_setup(t: &T) -> PageSetup {
     // Plot paper units 1: millimetres. 0 (inches) is left to MEASUREMENT: earlier CADCraft
     // versions wrote 0 for every layout.
     p.paper_mm = t.i(72) == Some(1);
+    p.plot_paper_units = t.i(72).and_then(|u| u8::try_from(u).ok()).filter(|u| *u <= 2);
     // Plot rotation 1 or 3 turns the media a quarter turn; media defined wider than tall is
     // already landscape.
     let rotated = matches!(t.i(73), Some(1 | 3));

@@ -49,6 +49,8 @@ const OWN_APPS: &[&str] = &["CADCRAFT", "ACADANNOTATIVE", "ACCMTRANSPARENCY", "A
 const MAX_OBJECTS: usize = 1_000_000;
 /// Most xdata groups kept per record (AutoCAD allows 16 KB of xdata per object).
 const MAX_XDATA_GROUPS: usize = 16_384;
+/// Most unnamed shape styles kept from one file.
+const MAX_SHAPE_FILES: usize = 4096;
 /// Longest ownership chain followed.
 const MAX_DEPTH: usize = 64;
 
@@ -404,6 +406,19 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         }
     }
     let mut f = Foreign::default();
+    // Unnamed shape styles (CADCraft's text styles have names).
+    let mut seen_files: HashSet<String> = HashSet::new();
+    for (kind, _, t) in &tables {
+        let file = val(t, 3).map(|f| f.trim().to_string()).unwrap_or_default();
+        if kind == "STYLE"
+            && val(t, 2).is_none_or(|n| n.trim().is_empty())
+            && !file.is_empty()
+            && f.shape_files.len() < MAX_SHAPE_FILES
+            && seen_files.insert(up(&file))
+        {
+            f.shape_files.push(file);
+        }
+    }
     let mut kept: HashSet<String> = HashSet::new();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
         if memo.get(&i) != Some(&true) || f.objects.len() >= MAX_OBJECTS {
