@@ -168,7 +168,7 @@ pub(super) fn for_each(
 }
 
 /// A new drawing for sheet `sheet`: a border, column numbers along the top and a title.
-fn sheet_drawing(pr: &Project, sheet: u64) -> Drawing {
+pub(super) fn sheet_drawing(pr: &Project, sheet: u64) -> Drawing {
     let mut d = Drawing::new_metric();
     let (w, h) = (pr.sheet_width, pr.sheet_width * 297.0 / 420.0);
     let cols = pr.columns.max(1);

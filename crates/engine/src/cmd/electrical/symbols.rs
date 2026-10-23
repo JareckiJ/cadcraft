@@ -452,6 +452,13 @@ pub(super) fn library() -> &'static [SymbolDef] {
 }
 
 /// The library symbol called `name` (any case).
+impl SymbolDef {
+    /// Its pins: (x, y) in symbol coordinates, direction digit, pin number.
+    pub fn pin_list(&self) -> Vec<(f64, f64, u8, &'static str)> {
+        self.pins.iter().map(|p| (p.x, p.y, p.dir, p.number)).collect()
+    }
+}
+
 pub(super) fn find(name: &str) -> Option<&'static SymbolDef> {
     library().iter().find(|d| d.name.eq_ignore_ascii_case(name))
 }

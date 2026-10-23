@@ -14,6 +14,7 @@
 
 mod builder;
 mod classes;
+pub mod generate;
 mod pins;
 mod project;
 mod symbols;
@@ -81,6 +82,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(symbols::specs());
     v.extend(wiring::specs());
     v.extend(builder::specs());
+    v.extend(generate::specs());
     v.extend(project::specs());
     v.extend(sync::specs());
     v

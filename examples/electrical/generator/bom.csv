@@ -1,0 +1,16 @@
+tag,type,manufacturer,catalog,description,pins
+-F1,Breaker3P,Acme,MCB-C16-3P,Motor feeder,
+-Q1,MainContacts,Acme,CT-9A,Pump contactor,
+-F2,Overload,Acme,OL-4-6A,Motor overload,
+-M1,Motor,Acme,M-2.2kW,Pump motor,
+-F3,Fuse,Acme,FU-2A,Control fuse,
+-S0,EStop,Acme,ES-40,Emergency stop,
+-S1,Stop,Acme,PB-RED,Stop,
+-S2,Start,Acme,PB-GRN,Start,
+-Q1,Contactor,Acme,CT-9A,Pump contactor,
+-Q1,Contact,,,Seal-in,13 14
+-F2,OverloadContact,,,Overload trip,95 96
+-Q1,Contact,,,Running lamp,23 24
+-H1,Lamp,Acme,LMP-G,Pump running,
+-H2,Lamp,Acme,LMP-R,Pump tripped,
+-F2,Contact,,,Trip lamp,97 98

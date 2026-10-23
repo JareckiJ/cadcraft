@@ -1,0 +1,12 @@
+{
+  "name": "Pump starter",
+  "sheetWidth": 420,
+  "columns": 10,
+  "top": 240,
+  "bottom": 40,
+  "railsTop": ["+24V", "L+"],
+  "railsBottom": ["0V", "M"],
+  "symbols": {
+    "OverloadContact": "IEC_OVERLOAD_NC"
+  }
+}

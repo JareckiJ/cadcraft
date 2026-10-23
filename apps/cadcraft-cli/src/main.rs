@@ -9,6 +9,7 @@
 //! cadcraft-cli perf [N]                            timing table on a synthetic N-entity drawing
 //! cadcraft-cli perf FILE                           canvas display-list build of a drawing, zoomed in step by step
 //! cadcraft-cli sample (bracket|floorplan) OUT       write a built-in sample drawing
+//! cadcraft-cli generate --bom B.csv --netlist N.csv (--out DIR | --emit -)  schematic project from a BOM
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -25,6 +26,8 @@ macro_rules! outln {
         }
     }};
 }
+
+mod generate;
 
 use std::process::ExitCode;
 
@@ -63,6 +66,7 @@ const USAGE: &str = "usage:
   cadcraft-cli mcp [--connect HOST:PORT [--lazy] [--launch]]
   cadcraft-cli perf [N | FILE]
   cadcraft-cli sample (bracket|floorplan) OUT.(dxf|dwg|svg|png)
+  cadcraft-cli generate --bom BOM.csv [--netlist NETS.csv] [--template DIR] (--out DIR [--name NAME] | --emit FILE|-)
   cadcraft-cli --version
 
 image framing (png 2400x1600, svg, pdf; always model space):
@@ -686,6 +690,7 @@ fn cli() -> ExitCode {
             outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
         }),
         Some("mcp") => mcp(&rest),
+        Some("generate") => generate::generate(&rest),
         Some("--version" | "-V") => {
             outln!("cadcraft-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())

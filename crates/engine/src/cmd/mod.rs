@@ -12,7 +12,7 @@ mod draw;
 mod draw2;
 mod draworder;
 mod edit;
-pub(crate) mod electrical;
+pub mod electrical;
 mod exchange;
 pub mod file;
 mod gripcmds;
