@@ -189,6 +189,9 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Electrical project files (`.ecproj`): open an existing one, or name a new one.
+    pub pick_project: Option<Box<dyn Fn() -> Option<String>>>,
+    pub pick_project_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
 }
 
 pub struct CadApp {

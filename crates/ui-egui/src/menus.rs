@@ -156,6 +156,19 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        // Electrical projects from the menu or typed: pick the project file.
+        "eproject.open" if params.is_null() && app.services.pick_project.is_some() => {
+            if let Some(p) = app.services.pick_project.as_ref().and_then(|f| f()) {
+                return Some(app.run("eproject.open", json!({ "path": p })));
+            }
+            Ok(Value::Null)
+        }
+        "eproject.new" if params.is_null() && app.services.pick_project_save.is_some() => {
+            if let Some(p) = app.services.pick_project_save.as_ref().and_then(|f| f("Project.ecproj")) {
+                return Some(app.run("eproject.new", json!({ "path": p, "overwrite": true })));
+            }
+            Ok(Value::Null)
+        }
         // Pick a template (.dwt or .dxf) and start a new drawing from it.
         "ui.newtemplate" => {
             if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
@@ -722,6 +735,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            ..Services::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }

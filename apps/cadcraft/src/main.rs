@@ -143,6 +143,20 @@ fn services() -> Services {
                 .save_file()
                 .map(|p| p.to_string_lossy().to_string())
         })),
+        pick_project: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .add_filter(i18n::t("Electrical projects (ECPROJ)"), &["ecproj"])
+                .add_filter(i18n::t("All files"), &["*"])
+                .pick_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
+        pick_project_save: Some(Box::new(|name: &str| {
+            rfd::FileDialog::new()
+                .set_file_name(name)
+                .add_filter(i18n::t("Electrical projects (ECPROJ)"), &["ecproj"])
+                .save_file()
+                .map(|p| p.to_string_lossy().to_string())
+        })),
     }
 }
 
