@@ -1,4 +1,5 @@
 # Builds and tests the electrical (IEC 81346 tagging) commands on every push to a feature branch.
+# Failures are also reported as annotations (readable through the checks API).
 name: Electrical
 
 on:
@@ -20,9 +21,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt -p cadcraft-engine -- --check
-      - name: Electrical tests
-        run: cargo test -p cadcraft-engine --lib electrical
-      - name: Whole engine tests (hostile params, interactive commands)
-        run: cargo test -p cadcraft-engine
-      - name: Clippy
-        run: cargo clippy -p cadcraft-engine --all-targets -- -D warnings
+      - name: Tests and clippy
+        shell: bash
+        run: |
+          set -o pipefail
+          report() {
+            # Errors and failing tests, without build progress, in annotations of 30 lines.
+            grep -v -E '^\s*(Compiling|Downloaded|Downloading|Checking|Running|Doc-tests)|^test .* ok$' "$1" \
+              | grep -E -A12 '^(error|warning)|panicked|FAILED|^failures:|test result' | head -270 > rep.txt || true
+            split -l 30 rep.txt part_
+            for f in part_*; do
+              msg=$(sed -e 's/%/%25/g' "$f" | awk 'BEGIN{ORS="%0A"} {print}')
+              echo "::error title=$2::$msg"
+            done
+          }
+          status=0
+          cargo test -p cadcraft-engine --lib electrical 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
+          if [ $status -eq 0 ]; then
+            cargo test -p cadcraft-engine 2>&1 | tee t2.txt || { report t2.txt engine-tests; status=1; }
+          fi
+          cargo clippy -p cadcraft-engine --all-targets -- -D warnings 2>&1 | tee t3.txt || { report t3.txt clippy; status=1; }
+          exit $status
