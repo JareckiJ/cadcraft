@@ -398,8 +398,7 @@ fn rungs(comps: &[Component], nets: &BTreeMap<String, Vec<(usize, usize)>>, t: &
     let follow = |start: usize, placed: &HashMap<usize, (usize, usize)>| -> (Vec<usize>, bool) {
         let mut chain = vec![start];
         let mut seen: HashSet<usize> = HashSet::from([start]);
-        loop {
-            let Some(cur) = chain.last().copied() else { break };
+        while let Some(cur) = chain.last().copied() {
             let c = &comps[cur];
             let bottom = c.bottom_pins();
             let Some(net) = bottom.first().and_then(|b| net_of.get(&(cur, *b))) else { return (chain, false) };
@@ -489,17 +488,17 @@ fn rungs(comps: &[Component], nets: &BTreeMap<String, Vec<(usize, usize)>>, t: &
         }
     }
     // Where paths that stop short of the bottom rail rejoin another rung.
-    for ri in 0..out.len() {
-        if out[ri].ends_on_bottom {
+    for (ri, rung) in out.iter_mut().enumerate() {
+        if rung.ends_on_bottom {
             continue;
         }
-        let Some(&last) = out[ri].comps.last() else { continue };
+        let Some(&last) = rung.comps.last() else { continue };
         let Some(net) = comps[last].bottom_pins().first().and_then(|b| net_of.get(&(last, *b))) else { continue };
         let target = nets.get(*net).into_iter().flatten().find_map(|(j, kk)| {
             let (r, k) = *placed.get(j)?;
             (r != ri && k > 0 && comps[*j].top_pins().first() == Some(kk)).then_some((r, k))
         });
-        out[ri].to = target;
+        rung.to = target;
     }
     out
 }
