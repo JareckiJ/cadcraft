@@ -24,6 +24,7 @@ symbol RELAY_COIL 'line {"points": [[-5, 0], [5, 0]]}'
 symbol PILOT_LAMP 'line {"points": [[-5, -5], [5, 5]]}' 'line {"points": [[-5, 5], [5, -5]]}'
 symbol FUSE 'line {"points": [[0, -5], [0, 5]]}'
 symbol CONTACTOR 'line {"points": [[-5, -5], [5, 5]]}'
+symbol RELAY_CONTACT_NO 'line {"points": [[-5, -5], [3, 5]]}'
 symbol MOTOR 'circle {"center": [0, 0], "radius": 4}'
 
 # Frames: two sheets side by side, column numbers along the top.
@@ -44,6 +45,7 @@ ins() { cmd insert "{\"name\": \"$1\", \"at\": [$2, $3], \"attribs\": {\"TAG\": 
 ins PUSHBUTTON 63 200
 ins RELAY_COIL 63 100
 ins PILOT_LAMP 189 150
+ins RELAY_CONTACT_NO 189 200
 ins PUSHBUTTON 315 200
 ins RELAY_COIL 315 100
 ins FUSE 483 200
@@ -60,7 +62,8 @@ for x in 63 315; do
   w $x 195 $x 105
   w $x 95 $x 30
 done
-w 189 270 189 155
+w 189 270 189 205
+w 189 195 189 155
 w 189 145 189 30
 w 483 280 483 205 # sheet 2: supply to fuse
 w 483 195 483 145

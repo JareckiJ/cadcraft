@@ -143,6 +143,30 @@ pub fn is_numbered(tag: &str) -> bool {
     !tag.contains('?') && product.chars().skip_while(|c| c.is_ascii_uppercase()).any(|c| c.is_ascii_digit())
 }
 
+/// Whether a block called `name` is an *auxiliary* part of another device: a relay or contactor
+/// contact, drawn apart from its coil and carrying the coil's tag (`CONTACT_NO`, `AUX_NC`), not
+/// a contactor itself.
+pub fn is_auxiliary(name: &str) -> bool {
+    let n = normalized(name);
+    n.contains("aux") || (n.contains("contact") && !n.contains("contactor"))
+}
+
+/// The kind of contact a block called `name` draws: `"NC"` for normally closed (a word `NC`,
+/// "break" or "opener" in the name), else `"NO"`.
+pub fn contact_kind(name: &str) -> &'static str {
+    let words: Vec<String> = name.split(|c: char| !c.is_ascii_alphanumeric()).map(str::to_ascii_lowercase).collect();
+    let n = normalized(name);
+    if words.iter().any(|w| w == "nc") || n.ends_with("nc") || n.contains("break") || n.contains("opener") || n.contains("normallyclosed") {
+        "NC"
+    } else {
+        "NO"
+    }
+}
+
+fn normalized(name: &str) -> String {
+    name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +192,20 @@ mod tests {
         assert_eq!(class_from_block_name("Motor 3ph"), Some("M"));
         assert_eq!(class_from_block_name("fuse"), Some("F"));
         assert_eq!(class_from_block_name("WINDOW_FRAME"), None);
+    }
+
+    #[test]
+    fn auxiliaries_and_contact_kinds() {
+        assert!(is_auxiliary("RELAY_CONTACT_NO"));
+        assert!(is_auxiliary("Aux NC"));
+        assert!(is_auxiliary("CONTACTOR_AUX_NO"));
+        assert!(!is_auxiliary("CONTACTOR"));
+        assert!(!is_auxiliary("RELAY_COIL"));
+        assert_eq!(contact_kind("RELAY_CONTACT_NO"), "NO");
+        assert_eq!(contact_kind("RELAY_CONTACT_NC"), "NC");
+        assert_eq!(contact_kind("ContactNC"), "NC");
+        assert_eq!(contact_kind("Break contact"), "NC");
+        assert_eq!(contact_kind("CONTACT"), "NO");
     }
 
     #[test]

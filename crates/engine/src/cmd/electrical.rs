@@ -14,6 +14,7 @@
 
 mod classes;
 mod wires;
+mod xref;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -24,7 +25,7 @@ use super::curves::KW;
 use super::{CommandSpec, bad, bool_or, f64_or, point_param, str_param};
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
-use classes::{class_from_block_name, class_from_tag, is_numbered};
+use classes::{class_from_block_name, class_from_tag, contact_kind, is_auxiliary, is_numbered};
 
 /// Default attribute that holds a device's tag.
 const TAG_ATTRIBUTE: &str = "TAG";
@@ -61,6 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo(),
     ];
     v.extend(wires::specs());
+    v.extend(xref::specs());
     v
 }
 
@@ -224,6 +226,18 @@ fn handle_list(cmd: &str, p: &Value) -> Result<Option<Vec<Handle>>> {
     }
 }
 
+/// Set the `attribute` value of block reference `h` to `tag`.
+fn set_tag(s: &mut Session, h: Handle, attribute: &str, tag: &str) -> Result<()> {
+    s.doc_mut()?.modify_entity(h, |e| {
+        if let EntityKind::Insert(ins) = &mut e.kind
+            && let Some(a) = ins.attribs.iter_mut().find(|a| a.tag.eq_ignore_ascii_case(attribute))
+        {
+            a.text.value = tag.to_string();
+        }
+    })?;
+    Ok(())
+}
+
 /// What ETAG does to one device.
 struct Planned {
     dev: Device,
@@ -253,7 +267,14 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
     let handles = handle_list(CMD, p)?;
 
     // Every device in the space; those outside `handles` keep their tags and reserve them.
-    let all = devices(s, &attribute, None)?;
+    // Auxiliary parts (contacts) carry their main device's tag: never tagged on their own, they
+    // follow a renamed main device.
+    let (aux, all): (Vec<Device>, Vec<Device>) =
+        devices(s, &attribute, None)?.into_iter().partition(|d| is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase()));
+    let mut main_tags: HashMap<String, usize> = HashMap::new();
+    for d in all.iter().filter(|d| is_numbered(&d.tag)) {
+        *main_tags.entry(d.tag.clone()).or_insert(0) += 1;
+    }
     let targeted: Option<HashSet<Handle>> = handles.map(|h| h.into_iter().collect());
     let in_scope = |d: &Device| targeted.as_ref().is_none_or(|t| t.contains(&d.handle));
 
@@ -308,7 +329,7 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
         planned.push(Planned { dev, tag });
     }
 
-    let mut tagged = 0usize;
+    let (mut tagged, mut followed) = (0usize, 0usize);
     if !dry_run {
         for pl in &planned {
             if pl.tag == pl.dev.tag {
@@ -325,6 +346,12 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
             })?;
             tagged += usize::from(changed);
         }
+        for pl in planned.iter().filter(|pl| pl.tag != pl.dev.tag && is_numbered(&pl.dev.tag) && main_tags.get(&pl.dev.tag) == Some(&1)) {
+            for a in aux.iter().filter(|a| a.tag == pl.dev.tag) {
+                set_tag(s, a.handle, &attribute, &pl.tag)?;
+                followed += 1;
+            }
+        }
         s.log.push(format!(
             "{tagged} device(s) tagged, {kept} kept{}{}.",
             if unclassified.is_empty() { String::new() } else { format!(", {} without a class", unclassified.len()) },
@@ -333,7 +360,9 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let list: Vec<Value> =
         planned.iter().map(|pl| json!({ "handle": pl.dev.handle.hex(), "block": pl.dev.block, "old": pl.dev.tag, "tag": pl.tag })).collect();
-    Ok(json!({ "tagged": tagged, "kept": kept, "devices": list, "unclassified": unclassified, "outside": outside, "dryRun": dry_run }))
+    Ok(
+        json!({ "tagged": tagged, "kept": kept, "contactsFollowed": followed, "auxiliary": aux.len(), "devices": list, "unclassified": unclassified, "outside": outside, "dryRun": dry_run }),
+    )
 }
 
 fn run_edevices(s: &mut Session, p: &Value) -> Result<Value> {
@@ -347,9 +376,11 @@ fn run_edevices(s: &mut Session, p: &Value) -> Result<Value> {
     let list: Vec<Value> = devs
         .iter()
         .map(|d| {
-            if is_numbered(&d.tag) {
+            let auxiliary = is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase());
+            // A contact shares its coil's tag: neither a duplicate nor untagged.
+            if !auxiliary && is_numbered(&d.tag) {
                 by_tag.entry(d.tag.clone()).or_default().push(d.handle.hex());
-            } else {
+            } else if !auxiliary {
                 untagged += 1;
             }
             let at = grid.locate(d.x);
@@ -358,6 +389,7 @@ fn run_edevices(s: &mut Session, p: &Value) -> Result<Value> {
                 "block": d.block,
                 "tag": d.tag,
                 "class": class_of(d, &overrides),
+                "auxiliary": auxiliary,
                 "sheet": at.map(|a| a.0),
                 "column": at.map(|a| a.1),
             })
