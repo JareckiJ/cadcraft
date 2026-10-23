@@ -2952,3 +2952,68 @@ mod hatch_pick_tests {
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
     }
 }
+
+/// #44: every segment LINE and PLINE add appears on the canvas as it is drawn, not only the first
+/// one until the command ends.
+#[cfg(test)]
+mod mid_command_redraw_tests {
+    use std::collections::BTreeSet;
+
+    use cadcraft_engine::Session;
+
+    use crate::{CadApp, Services};
+
+    fn frame(app: &mut CadApp, ctx: &egui::Context, time: f64) {
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)));
+        app.logic(ctx);
+        let input = egui::RawInput { screen_rect: screen, time: Some(time), ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| app.ui(ui));
+        out.textures_delta.clear();
+    }
+
+    /// Handles of the model's entities, and those the canvas's display list draws.
+    fn drawn(app: &CadApp) -> (BTreeSet<u64>, BTreeSet<u64>) {
+        let doc = app.session.doc().unwrap();
+        let model = doc.model.iter().map(|e| e.handle.0).collect();
+        let list = app.canvas.list.as_ref().map(|l| l.prims.iter().map(|p| p.handle.0).collect()).unwrap_or_default();
+        (model, list)
+    }
+
+    #[test]
+    fn successive_line_segments_are_drawn_while_line_runs() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, 0.0);
+        app.session.cmdline("line").unwrap();
+        for (i, p) in ["0,0", "10,0", "10,10", "20,10", "20,20"].iter().enumerate() {
+            app.session.cmdline(p).unwrap();
+            frame(&mut app, &ctx, 0.1 * (i + 1) as f64);
+            let (model, list) = drawn(&app);
+            assert_eq!(model.len(), i, "LINE adds a segment per point after the first");
+            assert!(model.is_subset(&list), "after point {}: drawing {model:?}, canvas {list:?}", i + 1);
+        }
+        assert!(app.session.running.is_some(), "still in LINE");
+    }
+
+    #[test]
+    fn successive_pline_segments_are_drawn_while_pline_runs() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, 0.0);
+        app.session.cmdline("pline").unwrap();
+        let mut last = 0;
+        for (i, p) in ["0,0", "10,0", "10,10", "20,10", "20,20"].iter().enumerate() {
+            app.session.cmdline(p).unwrap();
+            frame(&mut app, &ctx, 0.1 * (i + 1) as f64);
+            let (model, list) = drawn(&app);
+            assert!(model.is_subset(&list), "after point {}: drawing {model:?}, canvas {list:?}", i + 1);
+            // The polyline grows in place: the canvas draws its new vertex each time.
+            let verts = app.canvas.list.as_ref().map_or(0, |l| l.verts.len());
+            if i > 0 {
+                assert!(verts > last, "after point {}: {verts} vertices drawn, {last} before", i + 1);
+            }
+            last = verts;
+        }
+        assert!(app.session.running.is_some(), "still in PLINE");
+    }
+}

@@ -352,12 +352,20 @@ impl Drawing {
     }
 
     /// Bounds of all visible entities in a space.
+    ///
+    /// An entity whose box is not finite (hostile coordinates near `f64::MAX`, where a centre plus
+    /// a radius or a text width overflows) is left out: it can't be framed, and one such box would
+    /// make the whole drawing's extents infinite, so ZOOM Extents and the extents fit of exports
+    /// and plots would show nothing at all (#166).
     pub fn extents(&self, space: &Space) -> cadcraft_geom::Bounds2 {
         let mut b = cadcraft_geom::Bounds2::EMPTY;
         if let Some(store) = self.space(space) {
             for e in store.iter() {
                 if self.is_visible(e) {
-                    b = b.union(&entity_bounds(self, e, 0));
+                    let eb = entity_bounds(self, e, 0);
+                    if eb.min.is_finite() && eb.max.is_finite() {
+                        b = b.union(&eb);
+                    }
                 }
             }
         }

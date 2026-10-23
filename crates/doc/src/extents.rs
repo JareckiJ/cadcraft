@@ -309,6 +309,31 @@ mod tests {
         entity_bounds(&Drawing::default(), &Entity::new(crate::Handle(1), kind), 0)
     }
 
+    /// Extents of model space with a 10 x 10 line and one more entity of `kind`.
+    fn extents_with(kind: EntityKind) -> Bounds2 {
+        let mut d = Drawing::default();
+        let line = crate::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(10.0, 10.0, 0.0) };
+        d.add(&crate::Space::Model, crate::Common::default(), EntityKind::Line(line)).unwrap();
+        d.add(&crate::Space::Model, crate::Common::default(), kind).unwrap();
+        d.extents(&crate::Space::Model)
+    }
+
+    /// Hostile but finite numbers whose box overflows (a centre plus a radius past `f64::MAX`)
+    /// must not make the drawing's extents infinite: ZOOM Extents and the fit of exports would
+    /// show nothing (#166). Far-apart finite geometry still counts, as in ZOOM Extents.
+    #[test]
+    fn extents_skip_boxes_that_overflow_but_keep_far_geometry() {
+        let unit = Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0));
+        let huge = crate::Circle { center: Vec3::new(1.5e308, 0.0, 0.0), radius: 1.5e308 };
+        assert_eq!(extents_with(EntityKind::Circle(huge)), unit);
+        let nan = crate::Circle { center: Vec3::new(5.0, 5.0, 0.0), radius: f64::NAN };
+        assert_eq!(extents_with(EntityKind::Circle(nan)), unit);
+        let far = crate::Circle { center: Vec3::new(0.0, -200_000.0, 0.0), radius: 1.0 };
+        let b = extents_with(EntityKind::Circle(far));
+        assert!(b.min.is_finite() && b.max.is_finite());
+        assert_eq!((b.min.y, b.max.y), (-200_001.0, 10.0), "far-off geometry stays in the extents");
+    }
+
     #[test]
     fn right_justified_text_is_left_of_alignment_point() {
         let b = bounds(EntityKind::Text(text(HAlign::Right, VAlign::Baseline)));

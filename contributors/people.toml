@@ -73,3 +73,7 @@ sync_github_name = false
 
 [people.gurparvez]
 real_name = "Gurparvez"
+
+[people.francescoBV]
+display_name = "FraCiro"
+sync_github_name = false
