@@ -23,7 +23,7 @@ use super::curves::KW;
 use super::{CommandSpec, bad, bool_or, f64_or, point_param, str_param};
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
-pub use classes::{MAIN_CLASSES, class_from_block_name, class_from_tag, is_numbered};
+use classes::{class_from_block_name, class_from_tag, is_numbered};
 
 /// Default attribute that holds a device's tag.
 const TAG_ATTRIBUTE: &str = "TAG";
@@ -79,7 +79,10 @@ impl Grid {
         }
         let columns = match p.get("columns") {
             None | Some(Value::Null) => 10,
-            Some(v) => v.as_u64().filter(|c| (1..=MAX_COLUMNS).contains(c)).ok_or_else(|| bad(cmd, format!("`columns` must be a whole number from 1 to {MAX_COLUMNS}")))?,
+            Some(v) => v
+                .as_u64()
+                .filter(|c| (1..=MAX_COLUMNS).contains(c))
+                .ok_or_else(|| bad(cmd, format!("`columns` must be a whole number from 1 to {MAX_COLUMNS}")))?,
         };
         let first_sheet = match p.get("firstSheet") {
             None | Some(Value::Null) => 1,
@@ -148,9 +151,11 @@ fn class_overrides(cmd: &str, p: &Value) -> Result<HashMap<String, String>> {
         None | Some(Value::Null) => {}
         Some(Value::Object(m)) => {
             for (k, v) in m {
-                let c = v.as_str().map(|c| c.trim().to_ascii_uppercase()).filter(|c| valid_class(c)).ok_or_else(|| {
-                    bad(cmd, format!("`classes.{k}` must be IEC 81346-2 class letters such as \"K\" or \"QA\""))
-                })?;
+                let c = v
+                    .as_str()
+                    .map(|c| c.trim().to_ascii_uppercase())
+                    .filter(|c| valid_class(c))
+                    .ok_or_else(|| bad(cmd, format!("`classes.{k}` must be IEC 81346-2 class letters such as \"K\" or \"QA\"")))?;
                 out.insert(k.to_ascii_lowercase(), c);
             }
         }
@@ -204,7 +209,12 @@ fn handle_list(cmd: &str, p: &Value) -> Result<Option<Vec<Handle>>> {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Array(a)) => a
             .iter()
-            .map(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)).ok_or_else(|| bad(cmd, format!("`handles`: {v} is not an object handle"))))
+            .map(|v| {
+                v.as_str()
+                    .and_then(Handle::parse_hex)
+                    .or_else(|| v.as_u64().map(Handle))
+                    .ok_or_else(|| bad(cmd, format!("`handles`: {v} is not an object handle")))
+            })
             .collect::<Result<Vec<_>>>()
             .map(Some),
         Some(_) => Err(bad(cmd, "`handles` must be an array of object handles")),
