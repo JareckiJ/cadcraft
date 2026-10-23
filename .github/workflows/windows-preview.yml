@@ -27,7 +27,7 @@ jobs:
           cargo build --release -p cadcraft -p cadcraft-cli
           mkdir -p preview
           cp target/release/cadcraft.exe target/release/cadcraft-cli.exe preview/
-          bash examples/electrical/make-demo.sh target/release/cadcraft-cli.exe preview/demo-schematic.dxf
+          bash examples/electrical/make-demo.sh target/release/cadcraft-cli.exe preview/demo
           cp examples/electrical/README.md preview/HOW-TO-TRY.md
       - uses: actions/upload-artifact@v4
         with:

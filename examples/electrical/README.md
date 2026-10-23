@@ -1,30 +1,59 @@
-# Trying the electrical commands
+# Trying the electrical tools
 
-1. Double-click `cadcraft.exe`. Windows may warn that the app is unrecognised (it isn't signed):
-   click **More info → Run anyway**.
-2. **File → Open** `demo-schematic.dxf`. It has two A3 sheets (columns 1–10 along the top), nine
-   symbols without tags and red wires without numbers.
-3. **Tools → Electrical → Tag Devices** (or type `ETAG` and press Enter twice). Every symbol gets an
-   IEC 81346 tag from its sheet and column: the relay coil in column 2 of sheet 1 becomes `-K1.2`.
-4. **Tools → Electrical → Number Wires** (or `EWIRE`). Each connected potential gets one number,
-   e.g. `1.6` on the +24V rail, written on the `WIRENO` layer.
-5. **Tools → Electrical → Link Contacts** (`ELINK`): pick the relay coil in column 2, then the
-   contact above the lamp in column 5, then press Enter. The contact takes the coil's tag.
-6. **Tools → Electrical → Cross-References** (`EXREF`): under the coil appears `NO 1.5` (its
-   normally open contact is in column 5 of sheet 1), under the contact `/1.2` (its coil's place).
-7. **Tools → Electrical → List Devices** (`EDEVICES`) lists the tags and any duplicates.
+Everything is under **Tools → Electrical**. Every command can also be typed (its name is in
+brackets) and undone with Ctrl+Z, except the whole-project commands, which save the sheets.
 
-Ctrl+Z undoes each command. Run a command again after adding symbols or wires: existing tags and
-numbers are kept and only new ones are added; type `ETAG` then `All` to renumber everything.
+## 1. Open the demo project
 
-## Using your own drawings
+1. Double-click `cadcraft.exe` (if Windows warns that it is unrecognised: **More info → Run
+   anyway**).
+2. **Tools → Electrical → Project → Open Project...** and type the full path of
+   `demo\Demo.ecproj` (tip: in Explorer, Shift + right-click the file → *Copy as path*, then paste
+   with Ctrl+V). Both sheets open as tabs:
+   - **Demo-01**: a control circuit on a ladder (+24V / 0V rails, a rung in each column) with
+     stop/start push-buttons, a contactor coil `-Q101`, an e-stop, a relay `-K104`, their contacts
+     and lamps.
+   - **Demo-02**: the motor circuit: breaker, the contactor's three main contacts, overload,
+     motor.
 
-- A **device** is any block with an attribute called `TAG`. Its class letter comes from the tag
-  already typed (`-K`, `-Q?`) or from the block's name (RELAY → K, CONTACTOR/BREAKER → Q, FUSE → F,
-  MOTOR → M, PUSHBUTTON/SWITCH → S, SENSOR → B, LAMP → P, TERMINAL → X, …).
-- A **contact** is a block whose name contains `CONTACT` (but not `CONTACTOR`) or `AUX`; it
-  carries its coil's tag instead of its own, and `NC` in its name marks it normally closed.
-  Renumbering everything renames a coil's contacts with it.
-- A **wire** is a line or polyline on a layer whose name starts with `WIRE`. Wires that touch end to
-  end or meet in a T share a number; wires that only cross do not.
-- Sheets are 420 wide, side by side from x = 0, with 10 columns each.
+## 2. Add symbols and wires
+
+- **Insert Symbol** (`ESYMBOL`): type a name (`?` lists them all: `IEC_COIL`, `IEC_NO`,
+  `IEC_NC`, `IEC_PB_NO`, `IEC_PB_NC`, `IEC_ESTOP`, `IEC_SELECTOR`, `IEC_LAMP`, `IEC_FUSE`,
+  `IEC_MCB_1P`, `IEC_MCB_3P`, `IEC_OVERLOAD_3P`, `IEC_OVERLOAD_NC`, `IEC_MAIN_CONTACTS_3P`,
+  `IEC_MOTOR_3PH`, `IEC_TERMINAL`, `IEC_PSU`, `IEC_PE`), then click on an empty rung. The
+  rung is cut at the symbol's connection points and a main device is tagged at once (`-K106`).
+- **Draw Wire** (`EWIREDRAW`): click near a symbol's pin or a wire and the wire snaps to it,
+  turning at right angles; landing on a pin or wire ends it, landing on the middle of a wire adds a
+  junction dot.
+- **Insert Ladder** (`ELADDER`) lays out rails and rungs on a new sheet.
+- **Link Contacts** (`ELINK`): pick a coil, then its contacts, Enter: they take its tag.
+
+## 3. Number and cross-reference the whole project
+
+- **Project → Tag Devices (Whole Project)**: tags new devices, unique across all sheets
+  (`-K104`: sheet 1, column 04; a second one in the column is `-K104A`).
+- **Project → Number Wires (Whole Project)**: one number per connected network, placed at the
+  start (left end) of the network and taken from the sheet and column there: `101`, `101A`, `204`.
+- **Project → Cross-References (Whole Project)**: under the contactor coil `-Q101` appear its
+  contacts and where they are (`NO 103  NO 202`), under each contact where its coil is (`/101`) —
+  across sheets.
+
+The single-drawing versions (**Tag Devices**, **Number Wires**, **Cross-References**) do the same
+for the open drawing only.
+
+## 4. Make your own symbols
+
+**Symbol Builder** (`ESYMBUILD`): draw the shape with lines, circles and arcs, select it, pick its
+base point, click each connection point (Enter when done), then give a name, the IEC class letter
+(K relay, S switch, Q contactor/breaker, F protection, M motor, P lamp, X terminal…) and the family
+(Coil, NO, NC, Device, Terminal). It becomes a block with all the attributes; place it again with
+**Insert Symbol** and its name. Edit it like any block, or WBLOCK it to a file to reuse.
+
+## How it is stored (AutoCAD Electrical compatible)
+
+Symbols are blocks with the AutoCAD Electrical attribute names: `TAG1` (main device) or `TAG2`
+(contact), `DESC1`–`DESC3`, `MFG`, `CAT`, `LOC`, `INST`, `XREF`, `TERM01`… (pin numbers) and
+invisible `X1TERM01`, `X4TERM02`… on the connection points (1 up, 2 right, 4 down, 8 left). Wires
+are lines and polylines on layers named `WIRE…`; wire numbers are texts on `WIRENO`. A project is a
+small `.ecproj` file listing its DXF sheets in order.
