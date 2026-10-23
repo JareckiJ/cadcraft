@@ -40,7 +40,7 @@ jobs:
             rm -f part_* rep.txt
           }
           status=0
-          cargo test -p cadcraft-engine --lib electrical 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
+          cargo test -p cadcraft-engine --lib electrical --test electrical_project 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
           if [ $status -eq 0 ]; then
             cargo test -p cadcraft-engine 2>&1 | tee t2.txt || { report t2.txt engine-tests; status=1; }
           fi

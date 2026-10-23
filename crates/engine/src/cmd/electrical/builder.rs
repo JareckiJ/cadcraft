@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use cadcraft_doc::{Entity, EntityKind, Handle, entity_bounds};
+use cadcraft_doc::{Entity, Handle, entity_bounds};
 use cadcraft_geom::{Bounds2, Vec2};
 use serde_json::{Value, json};
 

@@ -23,7 +23,7 @@ use crate::cmd::{CommandSpec, bad, bool_or, f64_or, str_param};
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub(super) const WIRE_LAYERS: &str = "WIRE*";
-const LABEL_LAYER: &str = "WIRENO";
+pub(super) const LABEL_LAYER: &str = "WIRENO";
 const FORMAT: &str = "{sheet}{col2}";
 /// Most wire segments handled at once.
 const MAX_SEGMENTS: usize = 200_000;
@@ -195,7 +195,7 @@ fn potentials(wires: usize, segs: &[Seg], tol: f64) -> Vec<Vec<usize>> {
 }
 
 /// Texts on the label layer in the current space: handle, insertion point, value.
-fn labels(s: &Session, layer: &str) -> Result<Vec<(Handle, Vec2, String)>> {
+pub(super) fn labels(s: &Session, layer: &str) -> Result<Vec<(Handle, Vec2, String)>> {
     let d = s.doc()?;
     let Some(store) = d.space(&s.space()) else { return Ok(Vec::new()) };
     Ok(store
@@ -256,7 +256,7 @@ struct Potential {
     label: Option<(Handle, String)>,
 }
 
-fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ewire";
     let renumber_all = match str_param(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("new") => false,
@@ -328,6 +328,8 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
     // Numbers kept (new mode) are reserved first.
     let keep = |pt: &Potential| !renumber_all && pt.label.as_ref().is_some_and(|(_, v)| !v.is_empty());
     let mut used: HashSet<String> = pots.iter().filter(|pt| keep(pt)).filter_map(|pt| pt.label.as_ref().map(|(_, v)| v.clone())).collect();
+    // Numbers taken elsewhere (other drawings of a project).
+    used.extend(super::reserved_param(p));
     let mut counters: HashMap<String, u64> = HashMap::new();
     let mut plan: Vec<(usize, String)> = Vec::new();
     for (i, pt) in pots.iter().enumerate() {

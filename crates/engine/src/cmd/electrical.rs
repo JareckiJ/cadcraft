@@ -14,6 +14,7 @@
 
 mod builder;
 mod classes;
+mod project;
 mod symbols;
 mod wires;
 mod wiring;
@@ -72,6 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(symbols::specs());
     v.extend(wiring::specs());
     v.extend(builder::specs());
+    v.extend(project::specs());
     v
 }
 
@@ -312,6 +314,14 @@ fn set_tag(s: &mut Session, h: Handle, attribute: &str, tag: &str) -> Result<()>
     Ok(())
 }
 
+/// The `reserved` parameter: tags or numbers already used elsewhere (at most [`MAX_DEVICES`]).
+fn reserved_param(p: &Value) -> HashSet<String> {
+    p.get("reserved")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).take(MAX_DEVICES).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect())
+        .unwrap_or_default()
+}
+
 /// What ETAG does to one device.
 struct Planned {
     dev: Device,
@@ -351,7 +361,8 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
     let targeted: Option<HashSet<Handle>> = handles.map(|h| h.into_iter().collect());
     let in_scope = |d: &Device| targeted.as_ref().is_none_or(|t| t.contains(&d.handle));
 
-    let mut used: HashSet<String> = HashSet::new();
+    // Tags taken elsewhere (other drawings of a project).
+    let mut used: HashSet<String> = reserved_param(p);
     let mut todo: Vec<(Device, String, u64, u64)> = Vec::new();
     let (mut kept, mut unclassified, mut outside) = (0usize, Vec::new(), Vec::new());
     for dev in all {

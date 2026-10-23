@@ -77,94 +77,116 @@ fn xref_text(value: &str, at: Vec2, height: f64) -> Text {
     }
 }
 
-fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
-    const CMD: &str = "exref";
-    let attribute = attribute_param(p);
-    let layer = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).unwrap_or(XREF_LAYER).to_string();
-    if layer.chars().count() > 255 {
-        return Err(bad(CMD, "`layer` is too long"));
-    }
-    let height = f64_or(p, "height", 2.5);
-    if !(height > 0.0 && height < 1e6) {
-        return Err(bad(CMD, "`height` must be positive"));
-    }
-    let grid = Grid::from_params(CMD, p)?;
-    let overrides = class_overrides(CMD, p)?;
-    let devs = devices(s, attribute.as_deref(), None)?;
-    let aux = |d: &super::Device| is_child(d, &overrides);
+/// A device as cross-referencing sees it, in drawing `doc` of a set (a project, or just one).
+#[derive(Clone, Debug)]
+pub(super) struct RefDev {
+    pub doc: usize,
+    pub handle: Handle,
+    pub tag: String,
+    pub child: bool,
+    pub kind: &'static str,
+    /// Sheet and column.
+    pub place: Option<(u64, u64)>,
+    pub y: f64,
+}
 
+/// The devices of the current drawing, numbered `doc`.
+pub(super) fn ref_devices(
+    s: &Session,
+    attribute: Option<&str>,
+    grid: &Grid,
+    overrides: &std::collections::HashMap<String, String>,
+    doc: usize,
+) -> Result<Vec<RefDev>> {
+    Ok(devices(s, attribute, None)?
+        .iter()
+        .map(|d| RefDev {
+            doc,
+            handle: d.handle,
+            tag: d.tag.clone(),
+            child: is_child(d, overrides),
+            kind: kind_of(d),
+            place: grid.locate(d.x),
+            y: d.y,
+        })
+        .collect())
+}
+
+/// What cross-referencing works out for a set of devices.
+pub(super) struct Refs {
+    /// The reference lines of each device (by drawing and handle) that has any.
+    pub lines: BTreeMap<(usize, Handle), Vec<String>>,
+    pub report: Vec<Value>,
+    /// Contacts without a single main device of their tag.
+    pub orphans: Vec<(usize, Handle)>,
+}
+
+fn place_text(p: (u64, u64)) -> String {
+    format!("{}{:02}", p.0, p.1)
+}
+
+/// Under each main device the contacts it drives (`NO 105`), under each contact where its main
+/// device is (`/102`).
+pub(super) fn compute(devs: &[RefDev]) -> Refs {
     // Mains with a numbered tag, by tag (a duplicated tag has no single main: its contacts are
     // orphans until the duplicate is resolved).
-    let mut mains: BTreeMap<&str, Vec<&super::Device>> = BTreeMap::new();
-    for d in devs.iter().filter(|d| !aux(d) && is_numbered(&d.tag)) {
+    let mut mains: BTreeMap<&str, Vec<&RefDev>> = BTreeMap::new();
+    for d in devs.iter().filter(|d| !d.child && is_numbered(&d.tag)) {
         mains.entry(d.tag.as_str()).or_default().push(d);
     }
-    let place = |d: &super::Device| grid.locate(d.x).map(|(sh, c)| format!("{sh}{c:02}"));
-
-    // Texts to write: (anchor below the symbol, lines).
-    let mut texts: Vec<(Handle, Vec<String>)> = Vec::new();
+    let mut lines: BTreeMap<(usize, Handle), Vec<String>> = BTreeMap::new();
     let mut report = Vec::new();
-    let mut orphans = Vec::new();
     for (tag, ms) in &mains {
         let [main] = ms.as_slice() else { continue };
-        let mut contacts: Vec<&super::Device> = devs.iter().filter(|d| aux(d) && d.tag == *tag).collect();
-        contacts.sort_by(|a, b| {
-            let (pa, pb) = (grid.locate(a.x), grid.locate(b.x));
-            pa.cmp(&pb).then(b.y.total_cmp(&a.y))
-        });
-        let lines: Vec<String> = contacts.iter().filter_map(|c| place(c).map(|at| format!("{} {at}", kind_of(c)))).take(MAX_LINES).collect();
-        if !lines.is_empty() {
-            texts.push((main.handle, lines));
+        let mut contacts: Vec<&RefDev> = devs.iter().filter(|d| d.child && d.tag == *tag).collect();
+        contacts.sort_by(|a, b| a.place.cmp(&b.place).then(b.y.total_cmp(&a.y)));
+        let ls: Vec<String> = contacts.iter().filter_map(|c| c.place.map(|p| format!("{} {}", c.kind, place_text(p)))).take(MAX_LINES).collect();
+        if !ls.is_empty() {
+            lines.insert((main.doc, main.handle), ls);
         }
-        if let Some(at) = place(main) {
+        if let Some(p) = main.place {
             for c in &contacts {
-                texts.push((c.handle, vec![format!("/{at}")]));
+                lines.insert((c.doc, c.handle), vec![format!("/{}", place_text(p))]);
             }
         }
-        let at = grid.locate(main.x);
         report.push(json!({
             "tag": tag,
             "handle": main.handle.hex(),
-            "sheet": at.map(|a| a.0),
-            "column": at.map(|a| a.1),
-            "contacts": contacts.iter().map(|c| {
-                let at = grid.locate(c.x);
-                json!({ "handle": c.handle.hex(), "kind": kind_of(c), "sheet": at.map(|a| a.0), "column": at.map(|a| a.1) })
-            }).collect::<Vec<_>>(),
+            "drawing": main.doc,
+            "sheet": main.place.map(|a| a.0),
+            "column": main.place.map(|a| a.1),
+            "contacts": contacts.iter().map(|c| json!({
+                "handle": c.handle.hex(), "drawing": c.doc, "kind": c.kind, "sheet": c.place.map(|a| a.0), "column": c.place.map(|a| a.1),
+            })).collect::<Vec<_>>(),
         }));
     }
-    for d in devs.iter().filter(|d| aux(d)) {
-        if mains.get(d.tag.as_str()).is_none_or(|m| m.len() != 1) {
-            orphans.push(d.handle.hex());
-        }
-    }
+    let orphans = devs.iter().filter(|d| d.child && mains.get(d.tag.as_str()).is_none_or(|m| m.len() != 1)).map(|d| (d.doc, d.handle)).collect();
+    Refs { lines, report, orphans }
+}
 
-    // Symbols with an XREF attribute show their references in it (cleared first, as the texts
-    // are); the others get texts on the layer.
+/// Write the references of drawing `doc` into the current drawing: into each symbol's XREF
+/// attribute when it has one, else as texts on `layer` under the symbol. Old references (XREF
+/// values, the layer's texts) are cleared first. Returns (texts written, attributes filled).
+pub(super) fn write_refs(s: &mut Session, doc: usize, devs: &[RefDev], refs: &Refs, layer: &str, height: f64) -> Result<(usize, usize)> {
     let has_xref = |s: &Session, h: Handle| matches!(s.doc().ok().and_then(|d| d.entity(h)).map(|e| &e.kind), Some(EntityKind::Insert(i)) if i.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("XREF")));
-    let mut in_attr: Vec<(Handle, String)> = devs.iter().filter(|d| has_xref(s, d.handle)).map(|d| (d.handle, String::new())).collect();
-    let mut as_text = Vec::new();
-    for (h, lines) in texts {
-        if let Some(slot) = in_attr.iter_mut().find(|(x, _)| *x == h) {
-            slot.1 = lines.join("  ");
-        } else {
-            as_text.push((h, lines));
+    let mut in_attributes = 0usize;
+    let mut texts: Vec<(Handle, Vec<String>)> = Vec::new();
+    for d in devs.iter().filter(|d| d.doc == doc) {
+        let lines = refs.lines.get(&(doc, d.handle));
+        if has_xref(s, d.handle) {
+            let value = lines.map(|l| l.join("  ")).unwrap_or_default();
+            in_attributes += usize::from(!value.is_empty());
+            set_tag(s, d.handle, "XREF", &value)?;
+        } else if let Some(l) = lines {
+            texts.push((d.handle, l.clone()));
         }
     }
-    let texts = as_text;
-    let mut in_attributes = 0usize;
-    for (h, value) in &in_attr {
-        set_tag(s, *h, "XREF", value)?;
-        in_attributes += usize::from(!value.is_empty());
-    }
-
-    // Rebuild the layer's texts in the current space.
     let space = s.space();
     let old: Vec<Handle> = s
         .doc()?
         .space(&space)
         .map(|st| {
-            st.iter().filter(|e| e.common.layer.eq_ignore_ascii_case(&layer) && matches!(e.kind, EntityKind::Text(_))).map(|e| e.handle).collect()
+            st.iter().filter(|e| e.common.layer.eq_ignore_ascii_case(layer) && matches!(e.kind, EntityKind::Text(_))).map(|e| e.handle).collect()
         })
         .unwrap_or_default();
     let anchors: Vec<(Vec2, Vec<String>)> = {
@@ -181,14 +203,14 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
             .collect()
     };
     let mut common = s.current_common();
-    common.layer = layer.clone();
-    let mut written = 0usize;
+    common.layer = layer.to_string();
     {
         let d = s.doc_mut()?;
         for h in old {
             d.remove_entity(h);
         }
     }
+    let mut written = 0usize;
     for (at, lines) in anchors {
         for (i, line) in lines.iter().enumerate() {
             let y = at.y - height * 1.5 * i as f64;
@@ -196,12 +218,38 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
             written += 1;
         }
     }
+    Ok((written, in_attributes))
+}
+
+/// The `layer` and `height` parameters of EXREF.
+pub(super) fn layer_and_height(cmd: &str, p: &Value) -> Result<(String, f64)> {
+    let layer = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).unwrap_or(XREF_LAYER).to_string();
+    if layer.chars().count() > 255 {
+        return Err(bad(cmd, "`layer` is too long"));
+    }
+    let height = f64_or(p, "height", 2.5);
+    if !(height > 0.0 && height < 1e6) {
+        return Err(bad(cmd, "`height` must be positive"));
+    }
+    Ok((layer, height))
+}
+
+fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "exref";
+    let attribute = attribute_param(p);
+    let (layer, height) = layer_and_height(CMD, p)?;
+    let grid = Grid::from_params(CMD, p)?;
+    let overrides = class_overrides(CMD, p)?;
+    let devs = ref_devices(s, attribute.as_deref(), &grid, &overrides, 0)?;
+    let refs = compute(&devs);
+    let (written, in_attributes) = write_refs(s, 0, &devs, &refs, &layer, height)?;
+    let orphans: Vec<String> = refs.orphans.iter().map(|(_, h)| h.hex()).collect();
     s.log.push(format!(
-        "{} device(s) cross-referenced, {written} reference(s){}.",
-        report.len(),
+        "{} device(s) cross-referenced, {written} text(s), {in_attributes} attribute(s){}.",
+        refs.report.len(),
         if orphans.is_empty() { String::new() } else { format!(", {} contact(s) without a single main device", orphans.len()) }
     ));
-    Ok(json!({ "devices": report, "orphans": orphans, "written": written, "inAttributes": in_attributes }))
+    Ok(json!({ "devices": refs.report, "orphans": orphans, "written": written, "inAttributes": in_attributes }))
 }
 
 /// ELINK at the command line: pick the coil, then its contacts.
