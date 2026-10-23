@@ -789,13 +789,33 @@ pub(crate) fn fallback_glyph(c: char) -> Option<Arc<GlyphOutline>> {
     Some(glyph(&f, c)).filter(|g| g.mapped)
 }
 
-/// The glyph of `c` in `face`, or from a fallback font when `face` lacks it.
+/// The glyph of `c` in `face`, or from a fallback font when `face` lacks it. A character no
+/// available font has draws a hollow box: the face's own missing-glyph shape is empty in many
+/// fonts, which made whole runs of text (CJK in a Latin-only style, say) look absent instead
+/// of wrong.
 fn glyph_or_fallback(face: &Face, c: char) -> Arc<GlyphOutline> {
     let g = glyph(face, c);
     if g.mapped || c.is_whitespace() {
         return g;
     }
-    fallback_glyph(c).unwrap_or(g)
+    fallback_glyph(c).unwrap_or_else(|| missing_glyph_box(&g))
+}
+
+/// A hollow missing-glyph box in the face's font units (1000 per em): baseline to cap height,
+/// the face's own `.notdef` advance wide, as two rectangles so even-odd fill leaves the middle
+/// open like the stroke font's missing-glyph box.
+fn missing_glyph_box(g: &GlyphOutline) -> Arc<GlyphOutline> {
+    let cap = if g.cap.is_finite() && g.cap > 1.0 { g.cap } else { f64::from(UPEM) * 0.7 };
+    let w = if g.advance.is_finite() && g.advance > 1.0 { g.advance } else { f64::from(UPEM) * 0.5 };
+    let t = (f64::from(UPEM) * 0.05).min(w / 4.0).min(cap / 4.0);
+    let rect = |min: Vec2, max: Vec2| vec![min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y), min];
+    let contours = if t >= 1.0 {
+        vec![rect(Vec2::new(0.0, 0.0), Vec2::new(w, cap)), rect(Vec2::new(t, t), Vec2::new(w - t, cap - t))]
+    } else {
+        vec![rect(Vec2::new(0.0, 0.0), Vec2::new(w, cap))]
+    };
+    let points = contours.iter().map(Vec::len).sum();
+    Arc::new(GlyphOutline { points, contours: contours.into(), advance: w, cap, mapped: false, gid: g.gid, face: g.face.clone() })
 }
 
 /// The [`crate::TextGlyph`] of a glyph placed like [`place_glyph`] does (its outline index is
@@ -916,6 +936,49 @@ pub fn layout_line(face: &Face, s: &str, height: f64, width_factor: f64, oblique
     let mut strokes: Vec<Vec<Vec2>> = sh.glyphs.into_iter().flatten().collect();
     strokes.extend(sh.strokes);
     Some(Run { strokes, width: sh.width })
+}
+
+#[cfg(test)]
+mod missing_glyph_tests {
+    use super::*;
+
+    /// The box a font without the character draws: hollow (two rectangles, so even-odd fill
+    /// leaves the middle open), cap height tall, the `.notdef` advance wide.
+    #[test]
+    fn a_missing_glyph_draws_a_hollow_box() {
+        let g = GlyphOutline { advance: 500.0, cap: 700.0, gid: 0, ..Default::default() };
+        let b = missing_glyph_box(&g);
+        assert_eq!(b.contours.len(), 2, "outer and inner rectangle");
+        let outer = &b.contours[0];
+        assert!((outer[2].x - 500.0).abs() < 1e-9 && (outer[2].y - 700.0).abs() < 1e-9, "cap height tall, advance wide");
+        assert!(!b.mapped && b.advance > 0.0 && b.advance.is_finite());
+        // A degenerate cap or advance still yields one visible rectangle.
+        let flat = missing_glyph_box(&GlyphOutline { advance: 3.0, cap: 3.0, ..Default::default() });
+        assert_eq!(flat.contours.len(), 1, "too small to hollow out");
+        assert!(flat.contours[0].len() == 5 && flat.advance > 0.0);
+    }
+
+    /// End to end: a Han character a Latin-only face lacks draws the box when no installed font
+    /// has it. Skips when every available font covers the character (this needs a face that
+    /// lacks it; on a machine with only CJK-covering fonts there is nothing to show).
+    #[test]
+    fn cjk_a_latin_face_lacks_is_shaped_as_a_visible_box() {
+        let han = '图';
+        let Some(face) = ["dejavusans", "liberationsans", "arial", "helvetica", "notosans"]
+            .iter()
+            .find_map(|n| find(n).filter(|f| !f.has_glyph(han) && f.font().is_some()))
+        else {
+            return;
+        };
+        assert!(fallback_for(han).is_none_or(|f| f.has_glyph(han)), "fallback only ever yields a font that has it");
+        let sh = shape(&face, "A图B", 1.0, 1.0, 0.0).unwrap();
+        assert_eq!(sh.glyphs.len(), 3, "one outline per character, the missing one included");
+        // The A and B keep their own outlines; the middle one is a box: several points and a
+        // straight top edge at the same height on both sides.
+        let boxy = &sh.glyphs[1];
+        let ys: Vec<f64> = boxy.iter().flatten().map(|p| p.y).collect();
+        assert!(!ys.is_empty() && ys.iter().cloned().fold(f64::MIN, f64::max) > 0.5, "taller than the baseline");
+    }
 }
 
 #[cfg(test)]
