@@ -118,7 +118,11 @@ fn snap_rank(snap: &AssocSnap, i: usize) -> usize {
 
 /// Associations for named definition points found at their positions.
 pub fn auto_assoc(d: &Drawing, space: &Space, pts: &[(&str, Vec2)]) -> Vec<DimAssoc> {
-    pts.iter().filter_map(|(name, p)| find_snap(d, space, *p).map(|(handle, snap)| DimAssoc { point: (*name).into(), handle, snap })).collect()
+    pts.iter()
+        .filter_map(|(name, p)| {
+            find_snap(d, space, *p).map(|(handle, snap)| DimAssoc { read: Default::default(), point: (*name).into(), handle, snap })
+        })
+        .collect()
 }
 
 /// The snap candidates of one space, sorted by x, for many [`find_snap`] lookups in a row: a
@@ -157,7 +161,9 @@ impl SnapIndex {
 
     /// [`auto_assoc`] through the index.
     pub fn auto_assoc(&self, pts: &[(&str, Vec2)]) -> Vec<DimAssoc> {
-        pts.iter().filter_map(|(name, p)| self.find(*p).map(|(handle, snap)| DimAssoc { point: (*name).into(), handle, snap })).collect()
+        pts.iter()
+            .filter_map(|(name, p)| self.find(*p).map(|(handle, snap)| DimAssoc { read: Default::default(), point: (*name).into(), handle, snap }))
+            .collect()
     }
 }
 
@@ -191,8 +197,8 @@ pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> 
             let (c, p) = (dm.defpt.xy(), dm.p15.xy());
             match circle_at(d, space, c, Some(c.dist(p))) {
                 Some(h) => vec![
-                    DimAssoc { point: "defpt".into(), handle: h, snap: AssocSnap::Center },
-                    DimAssoc { point: "p15".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(p) } },
+                    DimAssoc { read: Default::default(), point: "defpt".into(), handle: h, snap: AssocSnap::Center },
+                    DimAssoc { read: Default::default(), point: "p15".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(p) } },
                 ],
                 None => Vec::new(),
             }
@@ -202,8 +208,8 @@ pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> 
             let c = a.mid(b);
             match circle_at(d, space, c, Some(a.dist(b) / 2.0)) {
                 Some(h) => vec![
-                    DimAssoc { point: "defpt".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(a) } },
-                    DimAssoc { point: "p15".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(b) } },
+                    DimAssoc { read: Default::default(), point: "defpt".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(a) } },
+                    DimAssoc { read: Default::default(), point: "p15".into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(b) } },
                 ],
                 None => Vec::new(),
             }
@@ -217,11 +223,16 @@ pub fn reassociate(d: &Drawing, space: &Space, dm: &Dimension) -> Vec<DimAssoc> 
 /// Associations for a radius/diameter dimension made by picking a circle or arc.
 pub fn radial_assoc(d: &Drawing, h: Handle, diameter: bool, defpt: Vec2, p15: Vec2) -> Vec<DimAssoc> {
     let Some((c, _)) = circle_of(d, h) else { return Vec::new() };
-    let on = |name: &str, p: Vec2| DimAssoc { point: name.into(), handle: h, snap: AssocSnap::OnCircle { angle: c.angle_to(p) } };
+    let on = |name: &str, p: Vec2| DimAssoc {
+        read: Default::default(),
+        point: name.into(),
+        handle: h,
+        snap: AssocSnap::OnCircle { angle: c.angle_to(p) },
+    };
     if diameter {
         vec![on("defpt", defpt), on("p15", p15)]
     } else {
-        vec![DimAssoc { point: "defpt".into(), handle: h, snap: AssocSnap::Center }, on("p15", p15)]
+        vec![DimAssoc { read: Default::default(), point: "defpt".into(), handle: h, snap: AssocSnap::Center }, on("p15", p15)]
     }
 }
 

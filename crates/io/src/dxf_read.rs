@@ -164,6 +164,7 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
     MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
+        defined_height: own.f(46).filter(|h| h.is_finite() && *h >= 0.0).unwrap_or(0.0),
         width: match &columns {
             Some((_, w)) if t.fd(41, 0.0) <= 0.0 => *w,
             _ => t.fd(41, 0.0).max(0.0),
@@ -437,10 +438,13 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 _ => DimKind::Aligned,
             };
             EntityKind::Dimension(Dimension {
+                flag_73: t.i(73).is_some_and(|v| v != 0),
+                flip_arrows: [t.i(74).is_some_and(|v| v != 0), t.i(75).is_some_and(|v| v != 0)],
                 kind,
                 defpt: t.p(10),
                 // The text midpoint is the one OCS point of a DIMENSION.
                 text_mid: if c.extrusion.z < 0.0 { ocs(&c, t.p(11)) } else { t.p(11) },
+                attachment: t.i(71).and_then(|v| u8::try_from(v).ok()).filter(|v| (1..=9).contains(v)).unwrap_or(0),
                 p13: t.p(13),
                 p14: t.p(14),
                 p15: t.p(15),
@@ -979,7 +983,7 @@ struct Rx {
     /// LTYPE record handle (upper case) → linetype name (DIMLTYPE, DIMLTEX1, DIMLTEX2).
     ltypes: HashMap<String, String>,
     /// Upper-case block name → (insertion units, explodable) from its BLOCK_RECORD.
-    block_props: HashMap<String, (u8, bool)>,
+    block_props: HashMap<String, (u8, bool, bool)>,
     /// Upper-case names of anonymous `*T` blocks drawn by ACAD_TABLE entities.
     table_blocks: std::collections::HashSet<String>,
     /// Upper-case block names used by INSERTs.
@@ -1339,6 +1343,12 @@ fn header(tags: &[Tag], d: &mut Drawing) {
                 }
                 continue;
             }
+            let code = match vals.as_slice() {
+                [x, _, _] if x.code == 10 => cadcraft_doc::POINT_3D,
+                [x, _] if x.code == 10 => cadcraft_doc::POINT_2D,
+                [v] => v.code,
+                _ => 0,
+            };
             let hv = match vals.as_slice() {
                 [x, y, z] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), z.f64())),
                 [x, y] if x.code == 10 => HVal::Point(Vec3::new(x.f64(), y.f64(), 0.0)),
@@ -1364,10 +1374,18 @@ fn header(tags: &[Tag], d: &mut Drawing) {
                 hv => hv,
             };
             d.header.set(&name, hv);
+            if code != 0 {
+                d.header.set_code(&name, code);
+            }
         } else {
             i += 1;
         }
     }
+}
+
+/// A record's handle (group `code`: 5, or 105 for DIMSTYLE), 0 when it has none.
+fn rec_handle(t: &T, code: i32) -> cadcraft_doc::KeptHandle {
+    t.s(code).and_then(|h| Handle::parse_hex(&h)).unwrap_or_default().into()
 }
 
 /// True when a style record carries `AcadAnnotative` xdata with the annotative flag set.
@@ -1422,7 +1440,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "BLOCK_RECORD" => {
                 let units = t.i(70).and_then(|u| u8::try_from(u).ok()).unwrap_or(0);
-                rx.block_props.insert(n.to_ascii_uppercase(), (units, t.i(280).unwrap_or(1) != 0));
+                rx.block_props.insert(n.to_ascii_uppercase(), (units, t.i(280).unwrap_or(1) != 0, t.i(281).unwrap_or(0) != 0));
                 if let Some(a) = crate::dxf_ext::read_array(tg) {
                     rx.block_arrays.insert(n.to_ascii_uppercase(), a);
                 }
@@ -1462,6 +1480,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                     locked: flags & 4 != 0,
                     vp_freeze_new: flags & 2 != 0,
                     plot: t.i(290).unwrap_or(1) != 0,
+                    handle: rec_handle(&t, 5),
                     ..Layer::default()
                 };
                 if let Some(tc) = t.i(420) {
@@ -1491,11 +1510,24 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             }
             "LTYPE" => {
                 let name = t.s(2).unwrap_or_default();
-                if name.is_empty() || d.linetype(&name).is_some() || d.linetypes.len() >= MAX_OBJECTS {
+                if name.is_empty() {
                     continue;
                 }
                 let pattern = ltype_pattern(&tg, &ltype_styles);
-                d.linetypes.push(Linetype { name, description: t.s(3).unwrap_or_default(), pattern });
+                // A line without dashes the drawing starts with (Continuous, ByLayer, ByBlock) takes
+                // the name, description and handle the file gave it.
+                if let Some(x) = d.linetypes.iter_mut().find(|l| l.name.eq_ignore_ascii_case(&name)) {
+                    if x.pattern.is_empty() && pattern.is_empty() {
+                        x.name = name;
+                        x.description = t.s(3).unwrap_or_default();
+                        x.handle = rec_handle(&t, 5);
+                    }
+                    continue;
+                }
+                if d.linetypes.len() >= MAX_OBJECTS {
+                    continue;
+                }
+                d.linetypes.push(Linetype { handle: rec_handle(&t, 5), name, description: t.s(3).unwrap_or_default(), pattern });
             }
             "STYLE" => {
                 let name = t.s(2).unwrap_or_default();
@@ -1505,6 +1537,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 // 70 bit 4: vertical; 71 bits 2/4: backwards / upside down.
                 let gen_flags = t.i(71).unwrap_or(0);
                 let st = TextStyle {
+                    handle: rec_handle(&t, 5),
                     name: name.clone(),
                     font: style_font(&tg, t.s(3).unwrap_or_default()),
                     big_font: t.s(4).unwrap_or_default(),
@@ -1560,7 +1593,16 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 // 70 bit 1: a paper space view; its layout is CADCraft xdata.
                 let layout = (t.i(70).unwrap_or(0) & 1 != 0).then(|| field("LAYOUT").unwrap_or_default());
                 let twist = t.f(50).filter(|a| a.is_finite()).map_or(0.0, |a| a.rem_euclid(360.0).to_radians());
-                let v = NamedView { name: name.clone(), center, height: h, width: w, layer_state: field("LAYERSTATE"), twist, layout };
+                let v = NamedView {
+                    handle: rec_handle(&t, 5),
+                    name: name.clone(),
+                    center,
+                    height: h,
+                    width: w,
+                    layer_state: field("LAYERSTATE"),
+                    twist,
+                    layout,
+                };
                 match d.views.iter_mut().find(|x| x.name.eq_ignore_ascii_case(&name)) {
                     Some(x) => *x = v,
                     None => d.views.push(v),
@@ -1573,7 +1615,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 if name.is_empty() || !finite || d.ucss.len() >= MAX_OBJECTS {
                     continue;
                 }
-                let u = Ucs { name: name.clone(), origin, x_axis, y_axis };
+                let u = Ucs { handle: rec_handle(&t, 5), name: name.clone(), origin, x_axis, y_axis };
                 match d.ucss.iter_mut().find(|x| x.name.eq_ignore_ascii_case(&name)) {
                     Some(x) => *x = u,
                     None => d.ucss.push(u),
@@ -1594,7 +1636,7 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                     }
                 }
                 fields.extend(crate::dxf_ext::read_newer_dimvars(&tg, &rx.styles, &rx.brs, &rx.ltypes));
-                let mut st = DimStyle { name: name.clone(), annotative: annotative(&tg), ..DimStyle::default() };
+                let mut st = DimStyle { name: name.clone(), annotative: annotative(&tg), handle: rec_handle(&t, 105), ..DimStyle::default() };
                 st.apply_fields(&fields);
                 match d.dim_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(&name)) {
                     Some(x) => *x = st,
@@ -1602,10 +1644,18 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 }
             }
             "VPORT" => vport_record(d, &t),
+            "APPID" => {
+                let name = t.s(2).map(|n| n.trim().to_string()).unwrap_or_default();
+                if !name.is_empty() && d.appids.len() < MAX_OBJECTS && !d.appids.iter().any(|a| a.name.eq_ignore_ascii_case(&name)) {
+                    d.appids.push(AppId { name, handle: rec_handle(&t, 5), flags: n16(&t, 70, 0) });
+                }
+            }
             _ => {}
         }
     }
     // One *Active viewport is no tiling: the view is the editor's (it zooms to the extents).
+    // Its handle, window shape and settings are kept apart.
+    d.active_vport = d.vports.iter().find(|c| c.is_active() && c.tiles.len() == 1).and_then(|c| c.tiles.first()).cloned().map(Box::new);
     d.vports.retain(|c| c.tiles.len() > usize::from(c.is_active()));
 }
 
@@ -1630,7 +1680,7 @@ fn vport_record(d: &mut Drawing, t: &T) {
     }
     let aspect = t.f(41).filter(|a| a.is_finite() && *a > 0.0).unwrap_or(0.0);
     let clamp = |p: Vec2| Vec2::new(p.x.clamp(0.0, 1.0), p.y.clamp(0.0, 1.0));
-    let tile = VportTile { min: clamp(min), max: clamp(max), center, height, aspect };
+    let tile = VportTile { settings: vport_settings(t), handle: rec_handle(t, 5), min: clamp(min), max: clamp(max), center, height, aspect };
     let name = if name.eq_ignore_ascii_case(VportConfig::ACTIVE) { VportConfig::ACTIVE.to_string() } else { name };
     let room = d.vports.len() < MAX_OBJECTS;
     match d.vports.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
@@ -1638,6 +1688,116 @@ fn vport_record(d: &mut Drawing, t: &T) {
         Some(_) => {}
         None if room => d.vports.push(VportConfig { name, tiles: vec![tile] }),
         None => {}
+    }
+}
+
+/// The rest of a multileader style from its MLEADERSTYLE object.
+fn mleader_props(t: &T, rx: &Rx) -> MLeaderStyleProps {
+    let d = MLeaderStyleProps::default();
+    let flag = |c: i32, v: bool| t.i(c).map_or(v, |x| x != 0);
+    let int = |c: i32, v: i32| t.i(c).and_then(|x| i32::try_from(x).ok()).unwrap_or(v);
+    let name = |map: &HashMap<String, String>, c: i32, v: &str| {
+        t.s(c).and_then(|h| map.get(&h.trim().to_ascii_uppercase()).cloned()).filter(|n| !n.is_empty()).unwrap_or_else(|| v.to_string())
+    };
+    MLeaderStyleProps {
+        version: n16(t, 179, d.version),
+        description: t.s(3).unwrap_or_default(),
+        content_type: n16(t, 170, d.content_type),
+        draw_mleader_order: n16(t, 171, d.draw_mleader_order),
+        draw_leader_order: n16(t, 172, d.draw_leader_order),
+        max_leader_points: int(90, d.max_leader_points),
+        first_angle: ffin(t, 40, d.first_angle),
+        second_angle: ffin(t, 41, d.second_angle),
+        leader_type: n16(t, 173, d.leader_type),
+        leader_color: t.i(91).unwrap_or(d.leader_color),
+        leader_linetype: name(&rx.ltypes, 340, &d.leader_linetype),
+        leader_lineweight: int(92, d.leader_lineweight),
+        landing: flag(290, d.landing),
+        dogleg_on: flag(291, d.dogleg_on),
+        arrow_block: name(&rx.brs, 341, ""),
+        default_text: t.s(300).unwrap_or_default(),
+        text_left_attachment: n16(t, 174, d.text_left_attachment),
+        text_right_attachment: n16(t, 178, d.text_right_attachment),
+        text_angle: n16(t, 175, d.text_angle),
+        text_alignment: n16(t, 176, d.text_alignment),
+        text_color: t.i(93).unwrap_or(d.text_color),
+        text_frame: flag(292, d.text_frame),
+        text_align_left: flag(297, d.text_align_left),
+        align_space: ffin(t, 46, d.align_space),
+        block: name(&rx.brs, 343, ""),
+        block_color: t.i(94).unwrap_or(d.block_color),
+        block_scale: [ffin(t, 47, 1.0), ffin(t, 49, 1.0), ffin(t, 140, 1.0)],
+        block_scale_on: flag(293, d.block_scale_on),
+        block_rotation: ffin(t, 141, d.block_rotation),
+        block_rotation_on: flag(294, d.block_rotation_on),
+        block_connection: n16(t, 177, d.block_connection),
+        scale: ffin(t, 142, d.scale),
+        overwrite: flag(295, d.overwrite),
+        break_gap: ffin(t, 143, d.break_gap),
+        attachment_direction: n16(t, 271, d.attachment_direction),
+        bottom_attachment: n16(t, 272, d.bottom_attachment),
+        top_attachment: n16(t, 273, d.top_attachment),
+        group_298: t.i(298).map(|x| x != 0),
+    }
+}
+
+/// A 16-bit group value, `d` when missing or out of range.
+fn n16(t: &T, code: i32, d: i16) -> i16 {
+    t.i(code).and_then(|v| i16::try_from(v).ok()).unwrap_or(d)
+}
+
+/// A finite real group value, `d` when missing or not finite.
+fn ffin(t: &T, code: i32, d: f64) -> f64 {
+    t.f(code).filter(|v| v.is_finite()).unwrap_or(d)
+}
+
+/// A finite point group (`code`, `code + 10`, `code + 20`), `d` when it isn't one.
+fn pfin(t: &T, code: i32, d: Vec3) -> Vec3 {
+    let p = Vec3::new(ffin(t, code, d.x), ffin(t, code + 10, d.y), ffin(t, code + 20, d.z));
+    if p.is_finite() { p } else { d }
+}
+
+/// A model space viewport's view settings from its VPORT record.
+fn vport_settings(t: &T) -> VportSettings {
+    let d = VportSettings::default();
+    let flag = |c: i32, v: bool| t.i(c).map_or(v, |x| x != 0);
+    VportSettings {
+        direction: pfin(t, 16, d.direction),
+        target: pfin(t, 17, d.target),
+        lens: ffin(t, 42, d.lens),
+        front_clip: ffin(t, 43, d.front_clip),
+        back_clip: ffin(t, 44, d.back_clip),
+        twist: ffin(t, 51, d.twist),
+        view_mode: n16(t, 71, d.view_mode),
+        circle_zoom: n16(t, 72, d.circle_zoom),
+        fast_zoom: n16(t, 73, d.fast_zoom),
+        ucs_icon: n16(t, 74, d.ucs_icon),
+        snap_on: n16(t, 75, d.snap_on),
+        grid_on: n16(t, 76, d.grid_on),
+        snap_style: n16(t, 77, d.snap_style),
+        snap_isopair: n16(t, 78, d.snap_isopair),
+        style_sheet: t.s(1),
+        render_mode: n16(t, 281, d.render_mode),
+        ucs_per_viewport: n16(t, 65, d.ucs_per_viewport),
+        ucs_origin: pfin(t, 110, d.ucs_origin),
+        ucs_x: pfin(t, 111, d.ucs_x),
+        ucs_y: pfin(t, 112, d.ucs_y),
+        ortho_type: n16(t, 79, d.ortho_type),
+        elevation: ffin(t, 146, d.elevation),
+        named_ucs: handle_of(t, 345),
+        base_ucs: handle_of(t, 346),
+        shade_plot: n16(t, 170, d.shade_plot),
+        grid_flags: n16(t, 60, d.grid_flags),
+        major_grid: n16(t, 61, d.major_grid),
+        background: handle_of(t, 332),
+        shade_plot_object: handle_of(t, 333),
+        visual_style: handle_of(t, 348),
+        default_lighting: flag(292, d.default_lighting),
+        lighting_type: n16(t, 282, d.lighting_type),
+        brightness: ffin(t, 141, d.brightness),
+        contrast: ffin(t, 142, d.contrast),
+        ambient: t.i(63).and_then(|v| i16::try_from(v).ok()),
+        ambient_rgb: t.i(421),
     }
 }
 
@@ -1695,8 +1855,9 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // A file without $INSUNITS declares no units (#1209); only new drawings take the template's.
     d.header.set_i64("INSUNITS", 0);
     let mut rx = Rx { pstyles: plot_style_names(&secs), ..Rx::default() };
-    let mut blocks: Vec<(String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)> = Vec::new();
-    let mut layout_objs: Vec<(String, u32, String, PageSetup)> = Vec::new();
+    let mut blocks: Vec<(String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64, (cadcraft_doc::KeptHandle, cadcraft_doc::KeptHandle))> =
+        Vec::new();
+    let mut layout_objs: Vec<(String, u32, String, PageSetup, cadcraft_doc::KeptHandle, LayoutRecord)> = Vec::new();
     let mut entities = Vec::new();
     let mut objs = Objects::default();
     // Every handle another program's file already uses is taken before anything gets a new one:
@@ -1740,7 +1901,8 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
                         }
                         let body = recs.get(i + 1..j).unwrap_or(&[]);
                         let ents = parse_entities(body, &mut d, &mut rx, &mut n, &mut table_cells_left);
-                        blocks.push((name, base, description, ents, xref));
+                        let end = recs.get(j).map_or(cadcraft_doc::KeptHandle::default(), |(_, et)| rec_handle(&T(et), 5));
+                        blocks.push((name, base, description, ents, xref, (rec_handle(&t, 5), end)));
                         i = j + 1;
                     } else {
                         // A record outside any BLOCK ... ENDBLK pair.
@@ -1769,7 +1931,17 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
                         // LAYOUT has two 330s: owner dict and the block record; take the last.
                         let br = tg.iter().rfind(|x| x.code == 330).map(Tag::str).unwrap_or_default();
                         let plot = T(tg.get(..start).unwrap_or(&[]));
-                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page_setup(&plot)));
+                        let own = rec_handle(&T(&tg), 5);
+                        let after_br = tg.iter().rposition(|x| x.code == 330).map_or(&[][..], |i| tg.get(i + 1..).unwrap_or(&[]));
+                        let rec = layout_record(&t, after_br);
+                        layout_objs.push((
+                            t.s(1).unwrap_or_default(),
+                            t.i(71).unwrap_or(0) as u32,
+                            br.to_ascii_uppercase(),
+                            page_setup(&plot),
+                            own,
+                            rec,
+                        ));
                     }
                 }
             }
@@ -1782,11 +1954,14 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // Layouts.
     let mut paper_block_for: HashMap<String, String> = HashMap::new();
     layout_objs.sort_by_key(|l| l.1);
-    for (name, order, br, page) in &layout_objs {
+    for (name, order, br, page, own, record) in &layout_objs {
         if name.eq_ignore_ascii_case("Model") {
+            // Model space's own page setup and layout data (its handles are the file's roles).
+            d.model_layout = Some(Box::new(Layout { page: page.clone(), record: record.clone(), ..Layout::new("Model", 0) }));
             continue;
         }
-        d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
+        let block_handle = Handle::parse_hex(br).unwrap_or_default().into();
+        d.layouts.push(Layout { page: page.clone(), handle: *own, block_handle, record: record.clone(), ..Layout::new(name, *order) });
         if let Some(bname) = rx.brs.get(br) {
             paper_block_for.insert(bname.to_ascii_uppercase(), name.clone());
         }
@@ -1797,7 +1972,9 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     }
     let first_layout = d.layouts.first().map(|l| l.name.clone()).unwrap_or_else(|| "Layout1".into());
     // Blocks: model/paper space blocks hold entities in newer files.
-    for (name, base, description, ents, xref) in blocks {
+    // Block record handles by upper-case block name.
+    let br_of: HashMap<String, Handle> = rx.brs.iter().filter_map(|(h, n)| Some((n.to_ascii_uppercase(), Handle::parse_hex(h)?))).collect();
+    for (name, base, description, ents, xref, (begin, end)) in blocks {
         let up = name.to_ascii_uppercase();
         if up == "*MODEL_SPACE" {
             for (_, _, e) in ents {
@@ -1809,6 +1986,10 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         if up.starts_with("*PAPER_SPACE") {
             let lname = paper_block_for.get(&up).cloned().unwrap_or_else(|| first_layout.clone());
             if let Some(l) = d.layouts.iter_mut().find(|l| l.name == lname) {
+                (l.begin_handle, l.end_handle) = (begin, end);
+                if l.block_handle.is_none() {
+                    l.block_handle = br_of.get(&up).copied().unwrap_or_default().into();
+                }
                 for (_, _, e) in ents {
                     l.entities.push(e);
                 }
@@ -1821,10 +2002,12 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
             continue;
         }
         let mut b = Block::new(&name);
+        b.handle = br_of.get(&up).copied().unwrap_or_default().into();
+        (b.begin_handle, b.end_handle) = (begin, end);
         b.base = base;
         b.description = description;
-        if let Some(&(units, explodable)) = rx.block_props.get(&up) {
-            (b.units, b.explodable) = (units, explodable);
+        if let Some(&(units, explodable, uniform)) = rx.block_props.get(&up) {
+            (b.units, b.explodable, b.scale_uniformly) = (units, explodable, uniform);
         }
         if xref & 4 != 0 {
             b.xref_path = Some(String::new());
@@ -1869,6 +2052,10 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         d.layers.insert(0, Layer::default());
     }
     crate::dxf_raw::read(&secs, &mut d);
+    // New objects never take a handle kept for a table, block, layout, style or kept object.
+    if let Some(top) = d.kept_handles().into_iter().max() {
+        d.bump_handseed(Handle(top));
+    }
     d.skipped_records = skipped;
     Ok(d)
 }
@@ -1978,9 +2165,10 @@ impl Objects {
         let h = T(tags).s(5).map(|h| h.trim().to_ascii_uppercase()).unwrap_or_default();
         match kind {
             "SCALE" if self.scales.len() < cadcraft_doc::MAX_SCALES => {
-                if let Some(s) = crate::dxf_ext::read_scale(tags)
+                if let Some(mut s) = crate::dxf_ext::read_scale(tags)
                     && !self.scales.iter().any(|x| x.name.eq_ignore_ascii_case(&s.name))
                 {
+                    s.handle = Handle::parse_hex(&h).unwrap_or_default().into();
                     self.scales.push(s);
                 }
             }
@@ -2043,7 +2231,8 @@ impl Objects {
         // Table styles (named by their ACAD_TABLESTYLE dictionary entries).
         for (h, tags) in &self.table_styles {
             let Some(name) = self.names.get(h).filter(|n| !n.is_empty()) else { continue };
-            let st = crate::dxf_table::read_table_style(name, tags);
+            let mut st = crate::dxf_table::read_table_style(name, tags);
+            st.handle = Handle::parse_hex(h).unwrap_or_default().into();
             match d.table_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,
                 None => d.table_styles.push(st),
@@ -2100,6 +2289,8 @@ impl Objects {
             let num = |code: i32, d: f64, min: f64| t.f(code).filter(|v| v.is_finite() && *v >= min).unwrap_or(d);
             let text_style = t.s(342).and_then(|sh| rx.styles.get(&sh.trim().to_ascii_uppercase()).cloned()).filter(|n| !n.is_empty());
             let st = MLeaderStyle {
+                props: mleader_props(&t, rx),
+                handle: Handle::parse_hex(h).unwrap_or_default().into(),
                 name: name.clone(),
                 arrow_size: num(44, def.arrow_size, 0.0),
                 text_height: t.f(45).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(def.text_height),
@@ -2130,7 +2321,13 @@ impl Objects {
                 .filter(|m| d.entity(*m).is_some())
                 .take(MAX_OBJECTS)
                 .collect();
-            let g = Group { name: name.clone(), description: t.s(300).unwrap_or_default(), selectable: t.i(71).unwrap_or(1) != 0, members };
+            let g = Group {
+                handle: Handle::parse_hex(h).unwrap_or_default().into(),
+                name: name.clone(),
+                description: t.s(300).unwrap_or_default(),
+                selectable: t.i(71).unwrap_or(1) != 0,
+                members,
+            };
             match d.groups.iter_mut().find(|x| x.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = g,
                 None => d.groups.push(g),
@@ -2172,7 +2369,17 @@ fn dimassoc(d: &mut Drawing, tags: &[Tag]) {
         // A polyline's segment (subentity type 73 = 2, edge; 91 its 1-based index).
         let segment = r.i(91).filter(|k| *k >= 1 && r.i(73) == Some(2));
         if let Some(snap) = infer_snap(d, r.i(72).unwrap_or(0), main, other, at, segment) {
-            links.push(DimAssoc { point: (*point).to_string(), handle: main, snap });
+            let read = OsnapRead {
+                handle: main,
+                snap: Some(snap.clone()),
+                osnap: n16(&r, 72, 0),
+                subent: n16(&r, 73, 0),
+                gs_marker: r.i(91).unwrap_or(0),
+                xref: r.s(301),
+                param: ffin(&r, 40, 0.0),
+                other: other.unwrap_or_default(),
+            };
+            links.push(DimAssoc { read: AsRead::new(read), point: (*point).to_string(), handle: main, snap });
         }
     }
     if !links.is_empty() {
@@ -2284,7 +2491,77 @@ fn page_setup(t: &T) -> PageSetup {
     .into();
     p.plot_window = [t.fd(48, 0.0), t.fd(49, 0.0), t.fd(140, 0.0), t.fd(141, 0.0)].map(|v| if v.is_finite() { v } else { 0.0 });
     p.plot_style_table = t.s(7).unwrap_or_default();
+    p.settings = plot_settings(t);
+    // The record's own values, written back while the page is as read.
+    if t.i(70).is_some() && t.f(44).is_some() && t.f(45).is_some() {
+        let n = |code: i32, d: i64| i16::try_from(t.i(code).unwrap_or(d)).unwrap_or(0);
+        let fin = |code: i32, d: f64| Some(t.fd(code, d)).filter(|v| v.is_finite()).unwrap_or(d);
+        p.read = AsRead::new(PlotRead {
+            basis: p.clone(),
+            device: t.s(2).unwrap_or_default(),
+            paper: t.s(4).unwrap_or_default(),
+            size: [fin(44, 0.0), fin(45, 0.0)],
+            flags: t.i(70).unwrap_or(0),
+            paper_units: n(72, 0),
+            rotation: n(73, 0),
+            scale: [fin(142, 1.0), fin(143, 1.0)],
+            standard_scale: n(75, 16),
+            factor: fin(147, 1.0),
+            plot_type: n(74, 5),
+        });
+    }
     p
+}
+
+/// The rest of a plot settings record: its name, view, plot and image origin, shade plot
+/// settings.
+fn plot_settings(t: &T) -> PlotSettings {
+    let d = PlotSettings::default();
+    let n = |code: i32, v: i16| i16::try_from(t.i(code).unwrap_or(i64::from(v))).unwrap_or(v);
+    let fin = |code: i32| Some(t.fd(code, 0.0)).filter(|v| v.is_finite()).unwrap_or(0.0);
+    PlotSettings {
+        name: t.s(1).unwrap_or_default(),
+        view_name: t.s(6).unwrap_or_default(),
+        origin: [fin(46), fin(47)],
+        image_origin: [fin(148), fin(149)],
+        shade_mode: n(76, d.shade_mode),
+        shade_resolution: n(77, d.shade_resolution),
+        shade_dpi: n(78, d.shade_dpi),
+        shade_plot: handle_of(t, 333),
+    }
+}
+
+/// A handle-valued group, `Handle(0)` when missing or not a handle.
+fn handle_of(t: &T, code: i32) -> Handle {
+    t.s(code).and_then(|s| Handle::parse_hex(s.trim())).unwrap_or_default()
+}
+
+/// A LAYOUT object's own data (the groups after its AcDbLayout marker).
+fn layout_record(t: &T, extra: &[Tag]) -> LayoutRecord {
+    let d = LayoutRecord::default();
+    let fin = |c: i32, v: f64| Some(t.fd(c, v)).filter(|v| v.is_finite()).unwrap_or(v);
+    let pt = |c: i32, v: Vec3| {
+        let p = Vec3::new(fin(c, v.x), fin(c + 10, v.y), fin(c + 20, v.z));
+        if p.is_finite() { p } else { v }
+    };
+    let n = |c: i32, v: i16| i16::try_from(t.i(c).unwrap_or(i64::from(v))).unwrap_or(v);
+    let x = T(extra);
+    LayoutRecord {
+        flags: n(70, d.flags),
+        limits_min: Vec2::new(fin(10, d.limits_min.x), fin(20, d.limits_min.y)),
+        limits_max: Vec2::new(fin(11, d.limits_max.x), fin(21, d.limits_max.y)),
+        insbase: pt(12, d.insbase),
+        extents_min: pt(14, d.extents_min),
+        extents_max: pt(15, d.extents_max),
+        elevation: fin(146, 0.0),
+        ucs_origin: pt(13, d.ucs_origin),
+        ucs_x: pt(16, d.ucs_x),
+        ucs_y: pt(17, d.ucs_y),
+        ortho_type: n(76, 0),
+        last_viewport: handle_of(&x, 331),
+        named_ucs: handle_of(&x, 345),
+        base_ucs: handle_of(&x, 346),
+    }
 }
 
 /// A layout's saved paper-space view (centre, height) from CADCraft xdata.

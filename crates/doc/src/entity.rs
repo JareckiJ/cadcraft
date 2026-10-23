@@ -13,9 +13,79 @@ pub use mline::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Handle(pub u64);
 
+/// The handle a table record, block, layout or style had in the file it was read from. It is the object's identity in files, not part of what it is: two
+/// layers that differ only in it are equal.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct KeptHandle(pub Handle);
+
+impl KeptHandle {
+    /// No handle kept: one is given when the drawing is written.
+    pub fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+    pub fn get(self) -> Handle {
+        self.0
+    }
+}
+
+impl PartialEq for KeptHandle {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl From<KeptHandle> for Handle {
+    fn from(h: KeptHandle) -> Self {
+        h.0
+    }
+}
+
+impl From<Handle> for KeptHandle {
+    fn from(h: Handle) -> Self {
+        KeptHandle(h)
+    }
+}
+
+/// Values a file held that CADCraft turns into its own (a page's paper name and size, a
+/// dimension link's snap data): kept so that saving writes the file's own values back while what
+/// CADCraft made of them is unchanged. Like [`KeptHandle`] it is not part of the value: two
+/// objects that differ only in it are equal.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AsRead<T>(pub Option<Box<T>>);
+
+impl<T> Default for AsRead<T> {
+    fn default() -> Self {
+        AsRead(None)
+    }
+}
+
+impl<T> AsRead<T> {
+    pub fn new(v: T) -> Self {
+        AsRead(Some(Box::new(v)))
+    }
+    pub fn get(&self) -> Option<&T> {
+        self.0.as_deref()
+    }
+    pub fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl<T> PartialEq for AsRead<T> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
 impl Handle {
     pub fn hex(self) -> String {
         format!("{:X}", self.0)
+    }
+    /// No handle (0): one is given when the drawing is written.
+    pub fn is_none(&self) -> bool {
+        self.0 == 0
     }
     pub fn parse_hex(s: &str) -> Option<Handle> {
         u64::from_str_radix(s.trim(), 16).ok().map(Handle)
@@ -258,6 +328,10 @@ pub use helix::*;
 pub struct MText {
     pub insert: Vec3,
     pub height: f64,
+    /// The defined annotation height (DXF group 46, AutoCAD 2011 and later): the height of the
+    /// text frame when it was set by hand, 0 when it follows the text.
+    #[serde(default)]
+    pub defined_height: f64,
     /// Reference rectangle width (0 = no wrapping).
     #[serde(default)]
     pub width: f64,
@@ -535,6 +609,17 @@ pub struct Dimension {
     pub kind: DimKind,
     pub defpt: Vec3,
     pub text_mid: Vec3,
+    /// The first and second arrowheads are flipped (ODA DWG specification, DIMENSION common data,
+    /// 2007 and later; DXF groups 74 and 75).
+    #[serde(default)]
+    pub flip_arrows: [bool; 2],
+    /// The flag before them (ODA: "unknown"; DXF group 73), kept as read.
+    #[serde(default)]
+    pub flag_73: bool,
+    /// The text's attachment point as read (DXF group 71: 1 top left … 9 bottom right), 0 when
+    /// not known (made here).
+    #[serde(default)]
+    pub attachment: u8,
     #[serde(default)]
     pub p13: Vec3,
     #[serde(default)]
@@ -659,6 +744,9 @@ pub struct DimAssoc {
     /// The object it is attached to.
     pub handle: Handle,
     pub snap: AssocSnap,
+    /// The DIMASSOC point reference it was read from (another program's file).
+    #[serde(default, skip_serializing_if = "AsRead::is_none")]
+    pub read: AsRead<crate::OsnapRead>,
 }
 
 /// Where on the object an associative definition point sits.
@@ -1264,6 +1352,7 @@ impl EntityKind {
             EntityKind::MText(t) => {
                 t3(&mut t.insert);
                 t.height *= s;
+                t.defined_height *= s;
                 t.width *= s;
                 if let Some(c) = &mut t.columns {
                     c.scale(s);
@@ -1312,6 +1401,7 @@ impl EntityKind {
                 if let Some(t) = &mut ml.text {
                     t3(&mut t.insert);
                     t.height *= s;
+                    t.defined_height *= s;
                     t.width *= s;
                     if let Some(c) = &mut t.columns {
                         c.scale(s);

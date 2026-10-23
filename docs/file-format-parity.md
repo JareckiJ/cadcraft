@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (DXF round trips keep handles, header variables, the dictionary tree and the rest of the records' fields) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -138,6 +138,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | DXF save keeps what it read: tables, blocks, layouts, dictionaries and styles keep their handles; every header variable is written back with its group codes; the dictionary tree and entity reactors survive; plot settings, layout data, viewport settings, multileader and table style fields, DIMASSOC snap data, dimension arrowhead flips (73–75) and the APPID table are modelled. An AutoCAD 2018 DXF saved again keeps 183 of 194 records unchanged (was 124), all 253 header variables (was 107) and every handle (tests: `kept_handles`, `header_kept_vars`, `kept_structure`, `field_roundtrip`, `record_fields`) |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |
