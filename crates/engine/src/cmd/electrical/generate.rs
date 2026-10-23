@@ -323,30 +323,32 @@ fn nets(netlist: &str, comps: &[Component], warnings: &mut Vec<String>) -> Resul
     };
     let mut out: BTreeMap<String, Vec<(usize, usize)>> = BTreeMap::new();
     for (i, r) in records(netlist)?.iter().enumerate() {
-        let mut add = |net: &str, tag: &str, pin: &str| match resolve(tag, pin) {
+        let mut problems: Vec<String> = Vec::new();
+        let mut add = |net: &str, tag: &str, pin: &str, problems: &mut Vec<String>| match resolve(tag, pin) {
             Some(cp) => {
                 let v = out.entry(net.to_string()).or_default();
                 if !v.contains(&cp) {
                     v.push(cp);
                 }
             }
-            None => warnings.push(format!("Netlist row {}: no pin {tag}:{pin} in the BOM.", i + 2)),
+            None => problems.push(format!("Netlist row {}: no pin {tag}:{pin} in the BOM.", i + 2)),
         };
         if let (Some(net), Some(dev), Some(pin)) =
             (field(r, &["net", "signal", "potential", "wire", "wireno"]), field(r, &["device", "tag", "component"]), field(r, &["pin", "terminal"]))
         {
-            add(net, dev, pin);
+            add(net, dev, pin, &mut problems);
         } else if let (Some(from), Some(to)) = (field(r, &["from", "source"]), field(r, &["to", "target", "destination"])) {
             let net = field(r, &["wire", "wireno", "net", "number"]).map(str::to_string).unwrap_or_else(|| format!("W{}", i + 1));
             for end in [from, to] {
                 match split(end) {
-                    Some((t, p)) => add(&net, &t, &p),
-                    None => warnings.push(format!("Netlist row {}: `{end}` is not tag:pin.", i + 2)),
+                    Some((t, p)) => add(&net, &t, &p, &mut problems),
+                    None => problems.push(format!("Netlist row {}: `{end}` is not tag:pin.", i + 2)),
                 }
             }
         } else {
-            warnings.push(format!("Netlist row {}: needs net, device and pin, or from and to.", i + 2));
+            problems.push(format!("Netlist row {}: needs net, device and pin, or from and to.", i + 2));
         }
+        warnings.extend(problems);
     }
     // Nets joined through a shared pin are one net (a `from,to` list chains them).
     let names: Vec<String> = out.keys().cloned().collect();
@@ -450,7 +452,11 @@ fn rungs(comps: &[Component], nets: &BTreeMap<String, Vec<(usize, usize)>>, t: &
         // Branches: components fed from a net between two placed components, again and again.
         loop {
             let mut grew = false;
-            for s in (0..comps.len()).filter(|i| comps[*i].is_power() == power && !placed.contains_key(i)) {
+            let pending: Vec<usize> = (0..comps.len()).filter(|i| comps[*i].is_power() == power && !placed.contains_key(i)).collect();
+            for s in pending {
+                if placed.contains_key(&s) {
+                    continue;
+                }
                 let Some(net) = comps[s].top_pins().first().and_then(|k| net_of.get(&(s, *k))) else { continue };
                 let parent = nets.get(*net).into_iter().flatten().find_map(|(j, kk)| {
                     let (r, k) = *placed.get(j)?;
@@ -811,8 +817,9 @@ mod tests {
         }
         let r = s.execute("egenerate", &json!({ "bom": BOM, "netlist": NETS })).unwrap();
         assert_eq!(r["warnings"], json!([]), "{r}");
-        let d = s.doc().unwrap();
-        let tags: Vec<String> = d
+        let tags: Vec<String> = s
+            .doc()
+            .unwrap()
             .model
             .iter()
             .filter_map(|e| match &e.kind {
@@ -828,7 +835,9 @@ mod tests {
             c.as_array().unwrap().iter().map(|w| (w["from"].as_str().unwrap().to_string(), w["to"].as_str().unwrap().to_string())).collect();
         assert!(pairs.iter().any(|(a, b)| (a == "-S2:14" && b == "-K1:A1") || (a == "-K1:A1" && b == "-S2:14")), "{pairs:?}");
         // The contact is cross-referenced to its coil.
-        let xref: Vec<String> = d
+        let xref: Vec<String> = s
+            .doc()
+            .unwrap()
             .model
             .iter()
             .filter_map(|e| match &e.kind {
