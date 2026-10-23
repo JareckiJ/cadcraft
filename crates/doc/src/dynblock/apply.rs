@@ -1632,7 +1632,7 @@ fn write_value(tags: &mut Vec<RawTag>, v: &Val) {
         }
     };
     for (i, p) in points.iter().enumerate() {
-        // The i-th point's groups, else new ones before any text.
+        // The i-th point's groups, else new ones before any text or a state after the points.
         let find = |tags: &[RawTag], code: i32, n: usize| tags.iter().enumerate().filter(|(_, t)| t.code == code).nth(n).map(|(j, _)| j);
         match (find(tags, 10, i), find(tags, 20, i)) {
             (Some(jx), Some(jy)) => {
@@ -1647,7 +1647,9 @@ fn write_value(tags: &mut Vec<RawTag>, v: &Val) {
                 }
             }
             _ => {
-                let at = tags.iter().position(|t| t.code == 1).unwrap_or(tags.len());
+                let first = tags.iter().position(|t| t.code == 10);
+                let at =
+                    tags.iter().enumerate().position(|(j, t)| t.code == 1 || (t.code == 70 && first.is_some_and(|f| j > f))).unwrap_or(tags.len());
                 tags.splice(at..at, [tag(10, p.x.to_string()), tag(20, p.y.to_string()), tag(30, p.z.to_string())]);
             }
         }
@@ -1822,5 +1824,18 @@ mod tests {
         anon.entities.push(tagged(6, None));
         assert_eq!(by_tag(&d, &def), vec![(10, Handle(1)), (20, Handle(2))]);
         assert_eq!(by_tag(&d, &anon), vec![(20, Handle(5)), (1_000_001, Handle(6))]);
+    }
+
+    #[test]
+    fn a_flip_value_s_state_follows_both_its_points() {
+        // A one-point record, with and without its state: the end point goes in before the state.
+        let one = || vec![tag(10, "0"), tag(20, "0"), tag(30, "0")];
+        let flip = Val::Flip(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), true);
+        for mut tags in [one(), [one(), vec![tag(70, "0")]].concat()] {
+            write_value(&mut tags, &flip);
+            let codes: Vec<i32> = tags.iter().map(|t| t.code).collect();
+            assert_eq!(codes, [10, 20, 30, 10, 20, 30, 70]);
+            assert_eq!(tags.last().map(|t| t.value.as_str()), Some("1"));
+        }
     }
 }
