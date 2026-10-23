@@ -194,3 +194,76 @@ fn interactive_stretch_at_the_command_line_refills() {
     assert!(hh.associative);
     assert!(close(area(&hh), 150.0), "area {}", area(&hh));
 }
+
+/// Issue #1964: a stretch window over any corner of a hatched rectangle — including the corner
+/// where the hatch's own grip sits — reshapes the rectangle and the hatch follows it, staying
+/// associative, instead of moving the hatch on its own.
+#[test]
+fn stretch_window_over_each_corner_of_a_hatched_rectangle_keeps_the_hatch_associative() {
+    for (win, delta) in [
+        ([[-1.0, -1.0], [2.0, 2.0]], [-2.0, 0.0]),
+        ([[8.0, -1.0], [12.0, 2.0]], [2.0, 0.0]),
+        ([[-1.0, -1.0], [2.0, 11.0]], [-5.0, 0.0]),
+        ([[-1.0, -1.0], [11.0, 2.0]], [0.0, -5.0]),
+        ([[8.0, 8.0], [12.0, 12.0]], [3.0, 3.0]),
+    ] {
+        let mut s = Session::new();
+        let rh = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap());
+        let h = handle(&s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap());
+        s.execute("stretch", &json!({ "window": win, "delta": delta })).unwrap();
+        let hh = hatch(&s, &h);
+        assert!(hh.associative, "window {win:?}");
+        // A corner stretch makes a quadrilateral; compare with the rectangle's own area.
+        let r = match &s.doc().unwrap().entity(Handle::parse_hex(&rh).unwrap()).unwrap().kind {
+            EntityKind::LwPolyline(p) => Some(shoelace(&p.vertices.iter().map(|v| v.p).collect::<Vec<_>>()).abs()),
+            _ => None,
+        };
+        assert!(close(area(&hh), r.unwrap()), "window {win:?}: hatch {} vs boundary {:?}", area(&hh), r);
+    }
+}
+
+/// Issue #1964: COPY a hatched rectangle together with its hatch; the copied hatch belongs to
+/// the copied rectangle, so stretching the copy reshapes its hatch too.
+#[test]
+fn copied_rectangle_and_hatch_stay_associative_through_stretch() {
+    let mut s = Session::new();
+    let rh = handle(&s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap());
+    let h = handle(&s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap());
+    let out = s.execute("copy", &json!({ "handles": [rh, h], "delta": [20, 0] })).unwrap();
+    let copies: Vec<String> = out["handles"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let ch =
+        copies.iter().find(|c| matches!(s.doc().unwrap().entity(Handle::parse_hex(c).unwrap()).unwrap().kind, EntityKind::Hatch(_))).unwrap().clone();
+    let cr = copies.iter().find(|c| **c != ch).unwrap().clone();
+    let hh = hatch(&s, &ch);
+    assert!(hh.associative, "the copy starts associative");
+    assert_eq!(hh.loops[0].sources.iter().map(|x| x.hex()).collect::<Vec<_>>(), vec![cr.clone()], "linked to the copied rectangle");
+    s.execute("stretch", &json!({ "window": [[28, -1], [32, 11]], "delta": [5, 0] })).unwrap();
+    let hh = hatch(&s, &ch);
+    assert!(hh.associative);
+    assert!(close(area(&hh), 150.0), "area {}", area(&hh));
+    assert!(close(area(&hatch(&s, &h)), 100.0), "the original is unchanged");
+}
+
+/// Issue #1964 at the command line: COPY by crossing window, then STRETCH the copy.
+#[test]
+fn copy_then_stretch_at_the_command_line_keeps_the_copied_hatch() {
+    let mut s = Session::new();
+    s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+    s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap();
+    s.script("COPY\nC\n12,12\n-1,-1\n\n0,0\n20,0\n\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    s.script("STRETCH\nC\n32,-1\n28,11\n\n0,0\n5,0\n").unwrap();
+    let doc = s.doc().unwrap();
+    let hatches: Vec<Hatch> = doc
+        .model
+        .handles()
+        .into_iter()
+        .filter_map(|h| match &doc.entity(h)?.kind {
+            EntityKind::Hatch(x) => Some(x.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hatches.len(), 2);
+    assert!(hatches.iter().all(|x| x.associative));
+    assert!(hatches.iter().any(|x| close(area(x), 150.0)), "{:?}", hatches.iter().map(area).collect::<Vec<_>>());
+}

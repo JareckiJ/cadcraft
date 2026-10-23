@@ -102,6 +102,7 @@ pub fn specs() -> Vec<CommandSpec> {
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    let mut copied: std::collections::HashMap<Handle, Handle> = std::collections::HashMap::new();
     for h in hs {
         let Some(sp) = d.space_of(*h) else { continue };
         if copy {
@@ -112,6 +113,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
+                copied.insert(*h, nh);
             }
         } else {
             let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -120,6 +122,28 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             }
             d.modify_entity(*h, |e| e.kind.transform(m))?;
             out.push(*h);
+        }
+    }
+    // A hatch copied together with its boundary objects belongs to the copies (#1964): its loops
+    // name the copied objects, so it stays associative and follows them.
+    if copied.len() > 1 {
+        for nh in copied.values() {
+            let relink = d.entity(*nh).is_some_and(|e| {
+                matches!(&e.kind, EntityKind::Hatch(x) if x.associative && x.loops.iter().any(|l| l.sources.iter().any(|h| copied.contains_key(h))))
+            });
+            if relink {
+                d.modify_entity(*nh, |e| {
+                    if let EntityKind::Hatch(x) = &mut e.kind {
+                        for l in &mut x.loops {
+                            for src in &mut l.sources {
+                                if let Some(n) = copied.get(src) {
+                                    *src = *n;
+                                }
+                            }
+                        }
+                    }
+                })?;
+            }
         }
     }
     Ok(out)
