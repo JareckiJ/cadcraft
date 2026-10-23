@@ -23,6 +23,7 @@ mod reports;
 mod symbols;
 mod sync;
 mod terminals;
+mod titleblock;
 mod wires;
 mod wiring;
 mod xref;
@@ -91,6 +92,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(plc::specs());
     v.extend(reports::specs());
     v.extend(conductors::specs());
+    v.extend(titleblock::specs());
     v.extend(project::specs());
     v.extend(sync::specs());
     v

@@ -259,6 +259,202 @@ fn ground() -> Vec<Prim> {
     vec![Prim::Line(0.0, 5.0, 0.0, 0.0), Prim::Line(-3.0, 0.0, 3.0, 0.0), Prim::Line(-2.0, -1.0, 2.0, -1.0), Prim::Line(-1.0, -2.0, 1.0, -2.0)]
 }
 
+/// An actuator drawn left of a contact blade: a dashed link from the blade at `blade_x`, then the
+/// actuator's own shape from `extra`.
+fn actuated(mut base: Vec<Prim>, blade_x: f64, extra: &[Prim]) -> Vec<Prim> {
+    base.extend([Prim::Line(blade_x, 0.0, blade_x - 1.0, 0.0), Prim::Line(blade_x - 2.0, 0.0, blade_x - 3.0, 0.0)]);
+    base.extend_from_slice(extra);
+    base
+}
+
+/// A delay marker (IEC 60617 "parachute"): an arc on the blade with two strokes to it.
+fn delay_marker(x: f64, open_up: bool) -> Vec<Prim> {
+    let (a0, a1) = if open_up { (0.0, 180.0) } else { (180.0, 360.0) };
+    vec![Prim::Arc(x - 2.5, 0.0, 1.2, a0, a1), Prim::Line(x - 1.3, 0.0, x - 0.8, 0.0), Prim::Line(x - 3.7, 0.0, x - 5.0, 0.0)]
+}
+
+fn timer_coil_on() -> Vec<Prim> {
+    let mut v = coil();
+    // On-delay: a second box beside the coil, crossed.
+    v.extend([
+        Prim::Line(-4.0, -3.0, -6.5, -3.0),
+        Prim::Line(-6.5, -3.0, -6.5, 3.0),
+        Prim::Line(-6.5, 3.0, -4.0, 3.0),
+        Prim::Line(-6.5, -3.0, -4.0, 3.0),
+        Prim::Line(-6.5, 3.0, -4.0, -3.0),
+    ]);
+    v
+}
+
+fn timer_coil_off() -> Vec<Prim> {
+    let mut v = coil();
+    // Off-delay: the second box, half filled (hatched).
+    v.extend([Prim::Line(-4.0, -3.0, -6.5, -3.0), Prim::Line(-6.5, -3.0, -6.5, 3.0), Prim::Line(-6.5, 3.0, -4.0, 3.0)]);
+    for i in 0..5 {
+        let y = -3.0 + 1.2 * i as f64;
+        v.push(Prim::Line(-6.5, y, -4.0, y + 1.2));
+    }
+    v
+}
+
+fn no_delayed_on() -> Vec<Prim> {
+    let mut v = no_contact();
+    v.extend(delay_marker(-1.0, true));
+    v
+}
+
+fn nc_delayed_off() -> Vec<Prim> {
+    let mut v = nc_contact();
+    v.extend(delay_marker(0.9, false));
+    v
+}
+
+fn limit_no() -> Vec<Prim> {
+    // Position switch: a triangle actuator.
+    actuated(no_contact(), -1.0, &[Prim::Line(-4.0, 0.0, -5.5, 1.5), Prim::Line(-5.5, 1.5, -5.5, -1.5), Prim::Line(-5.5, -1.5, -4.0, 0.0)])
+}
+
+fn limit_nc() -> Vec<Prim> {
+    actuated(nc_contact(), 0.9, &[Prim::Line(-4.0, 0.0, -5.5, 1.5), Prim::Line(-5.5, 1.5, -5.5, -1.5), Prim::Line(-5.5, -1.5, -4.0, 0.0)])
+}
+
+/// A sensor: a contact with a rhombus actuator (proximity), plus `inside` marks in it.
+fn sensor(inside: &[Prim]) -> Vec<Prim> {
+    let mut v = actuated(
+        no_contact(),
+        -1.0,
+        &[
+            Prim::Line(-4.0, 0.0, -5.75, 1.75),
+            Prim::Line(-5.75, 1.75, -7.5, 0.0),
+            Prim::Line(-7.5, 0.0, -5.75, -1.75),
+            Prim::Line(-5.75, -1.75, -4.0, 0.0),
+        ],
+    );
+    v.extend_from_slice(inside);
+    v
+}
+
+fn prox_inductive() -> Vec<Prim> {
+    // A small square (a ferrous target) in the rhombus.
+    sensor(&[
+        Prim::Line(-6.25, -0.5, -5.25, -0.5),
+        Prim::Line(-5.25, -0.5, -5.25, 0.5),
+        Prim::Line(-5.25, 0.5, -6.25, 0.5),
+        Prim::Line(-6.25, 0.5, -6.25, -0.5),
+    ])
+}
+
+fn prox_capacitive() -> Vec<Prim> {
+    // Two plates.
+    sensor(&[Prim::Line(-6.25, -0.8, -6.25, 0.8), Prim::Line(-5.25, -0.8, -5.25, 0.8)])
+}
+
+fn photo_sensor() -> Vec<Prim> {
+    // Light arrows into the rhombus.
+    sensor(&[Prim::Line(-9.5, 2.5, -7.8, 0.8), Prim::Line(-7.8, 0.8, -8.6, 0.9), Prim::Line(-7.8, 0.8, -7.9, 1.6)])
+}
+
+fn labelled_switch(label: &'static str) -> Vec<Prim> {
+    actuated(no_contact(), -1.0, &[Prim::Line(-4.0, -1.5, -4.0, 1.5), Prim::Label(-6.0, 0.0, 2.0, label)])
+}
+
+fn pressure_switch() -> Vec<Prim> {
+    labelled_switch("P")
+}
+
+fn temperature_switch() -> Vec<Prim> {
+    labelled_switch("θ")
+}
+
+fn level_switch() -> Vec<Prim> {
+    // A float.
+    actuated(no_contact(), -1.0, &[Prim::Line(-4.0, 0.0, -4.5, 0.0), Prim::Circle(-6.0, 0.0, 1.5)])
+}
+
+fn transformer() -> Vec<Prim> {
+    vec![
+        Prim::Line(-2.5, 5.0, -2.5, 3.5),
+        Prim::Line(2.5, 5.0, 2.5, 3.5),
+        Prim::Line(-2.5, -5.0, -2.5, -3.5),
+        Prim::Line(2.5, -5.0, 2.5, -3.5),
+        Prim::Circle(0.0, 1.4, 2.6),
+        Prim::Circle(0.0, -1.4, 2.6),
+    ]
+}
+
+fn vfd() -> Vec<Prim> {
+    let mut v = Vec::new();
+    for x in [-5.0, 0.0, 5.0] {
+        v.extend([Prim::Line(x, 5.0, x, 3.0), Prim::Line(x, -5.0, x, -3.0)]);
+    }
+    v.extend([
+        Prim::Line(-7.0, -3.0, 7.0, -3.0),
+        Prim::Line(7.0, -3.0, 7.0, 3.0),
+        Prim::Line(7.0, 3.0, -7.0, 3.0),
+        Prim::Line(-7.0, 3.0, -7.0, -3.0),
+        Prim::Line(-7.0, -3.0, 7.0, 3.0),
+        Prim::Label(-3.5, 1.2, 2.0, "~"),
+        Prim::Label(3.5, -1.5, 2.0, "~"),
+    ]);
+    v
+}
+
+fn motor_1ph() -> Vec<Prim> {
+    vec![
+        Prim::Line(0.0, 5.0, 0.0, 4.0),
+        Prim::Line(0.0, -5.0, 0.0, -4.0),
+        Prim::Circle(0.0, 0.0, 4.0),
+        Prim::Label(0.0, 0.8, 2.5, "M"),
+        Prim::Label(0.0, -1.8, 1.8, "1~"),
+    ]
+}
+
+fn socket() -> Vec<Prim> {
+    // A socket outlet: a half circle on a line.
+    vec![Prim::Line(0.0, 5.0, 0.0, 1.5), Prim::Line(0.0, -5.0, 0.0, -1.5), Prim::Arc(0.0, -1.5, 3.0, 0.0, 180.0), Prim::Line(-3.0, -1.5, 3.0, -1.5)]
+}
+
+fn buzzer() -> Vec<Prim> {
+    vec![Prim::Line(0.0, 5.0, 0.0, 2.0), Prim::Line(0.0, -5.0, 0.0, -2.0), Prim::Arc(0.0, -2.0, 3.0, 0.0, 180.0), Prim::Line(-3.0, -2.0, 3.0, -2.0)]
+}
+
+fn resistor() -> Vec<Prim> {
+    let mut v = leads(3.0);
+    v.extend([
+        Prim::Line(-1.25, -3.0, 1.25, -3.0),
+        Prim::Line(1.25, -3.0, 1.25, 3.0),
+        Prim::Line(1.25, 3.0, -1.25, 3.0),
+        Prim::Line(-1.25, 3.0, -1.25, -3.0),
+    ]);
+    v
+}
+
+fn heater() -> Vec<Prim> {
+    let mut v = leads(3.0);
+    v.extend([
+        Prim::Line(-3.0, -3.0, 3.0, -3.0),
+        Prim::Line(3.0, -3.0, 3.0, 3.0),
+        Prim::Line(3.0, 3.0, -3.0, 3.0),
+        Prim::Line(-3.0, 3.0, -3.0, -3.0),
+    ]);
+    for i in 0..3 {
+        let x = -1.5 + 1.5 * i as f64;
+        v.push(Prim::Line(x, -2.0, x, 2.0));
+    }
+    v
+}
+
+fn diode() -> Vec<Prim> {
+    let mut v = leads(1.5);
+    v.extend([
+        Prim::Line(-1.75, 1.5, 1.75, 1.5),
+        Prim::Line(1.75, 1.5, 0.0, -1.5),
+        Prim::Line(0.0, -1.5, -1.75, 1.5),
+        Prim::Line(-1.75, -1.5, 1.75, -1.5),
+    ]);
+    v
+}
+
 /// Every built-in symbol.
 pub(super) fn library() -> &'static [SymbolDef] {
     const L: &[SymbolDef] = &[
@@ -448,6 +644,182 @@ pub(super) fn library() -> &'static [SymbolDef] {
             prims: ground,
             pins: &[Pin { x: 0.0, y: 5.0, dir: 1, number: "PE" }],
         },
+        SymbolDef {
+            name: "IEC_TIMER_ON",
+            description: "Timer relay coil, on-delay",
+            class: "K",
+            family: "COIL",
+            child: false,
+            prims: timer_coil_on,
+            pins: pins2!("A1", "A2"),
+        },
+        SymbolDef {
+            name: "IEC_TIMER_OFF",
+            description: "Timer relay coil, off-delay",
+            class: "K",
+            family: "COIL",
+            child: false,
+            prims: timer_coil_off,
+            pins: pins2!("A1", "A2"),
+        },
+        SymbolDef {
+            name: "IEC_NO_TON",
+            description: "Timer contact, normally open, delayed on closing",
+            class: "K",
+            family: "NO",
+            child: true,
+            prims: no_delayed_on,
+            pins: pins2!("17", "18"),
+        },
+        SymbolDef {
+            name: "IEC_NC_TOF",
+            description: "Timer contact, normally closed, delayed on opening",
+            class: "K",
+            family: "NC",
+            child: true,
+            prims: nc_delayed_off,
+            pins: pins2!("15", "16"),
+        },
+        SymbolDef {
+            name: "IEC_LIMIT_NO",
+            description: "Limit switch, normally open",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: limit_no,
+            pins: pins2!("13", "14"),
+        },
+        SymbolDef {
+            name: "IEC_LIMIT_NC",
+            description: "Limit switch, normally closed",
+            class: "B",
+            family: "NC",
+            child: false,
+            prims: limit_nc,
+            pins: pins2!("11", "12"),
+        },
+        SymbolDef {
+            name: "IEC_PROX_IND",
+            description: "Inductive proximity sensor",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: prox_inductive,
+            pins: pins2!("BN", "BK"),
+        },
+        SymbolDef {
+            name: "IEC_PROX_CAP",
+            description: "Capacitive proximity sensor",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: prox_capacitive,
+            pins: pins2!("BN", "BK"),
+        },
+        SymbolDef {
+            name: "IEC_PHOTO",
+            description: "Photoelectric sensor",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: photo_sensor,
+            pins: pins2!("BN", "BK"),
+        },
+        SymbolDef {
+            name: "IEC_PRESSURE",
+            description: "Pressure switch, normally open",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: pressure_switch,
+            pins: pins2!("1", "2"),
+        },
+        SymbolDef {
+            name: "IEC_THERMOSTAT",
+            description: "Temperature switch, normally open",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: temperature_switch,
+            pins: pins2!("1", "2"),
+        },
+        SymbolDef {
+            name: "IEC_LEVEL",
+            description: "Level (float) switch, normally open",
+            class: "B",
+            family: "NO",
+            child: false,
+            prims: level_switch,
+            pins: pins2!("1", "2"),
+        },
+        SymbolDef {
+            name: "IEC_TRANSFORMER",
+            description: "Control transformer, single-phase",
+            class: "T",
+            family: "DEVICE",
+            child: false,
+            prims: transformer,
+            pins: &[
+                Pin { x: -2.5, y: 5.0, dir: 1, number: "1U1" },
+                Pin { x: 2.5, y: 5.0, dir: 1, number: "1U2" },
+                Pin { x: -2.5, y: -5.0, dir: 4, number: "2U1" },
+                Pin { x: 2.5, y: -5.0, dir: 4, number: "2U2" },
+            ],
+        },
+        SymbolDef {
+            name: "IEC_VFD",
+            description: "Variable frequency drive",
+            class: "T",
+            family: "DEVICE",
+            child: false,
+            prims: vfd,
+            pins: &[
+                Pin { x: -5.0, y: 5.0, dir: 1, number: "L1" },
+                Pin { x: 0.0, y: 5.0, dir: 1, number: "L2" },
+                Pin { x: 5.0, y: 5.0, dir: 1, number: "L3" },
+                Pin { x: -5.0, y: -5.0, dir: 4, number: "U" },
+                Pin { x: 0.0, y: -5.0, dir: 4, number: "V" },
+                Pin { x: 5.0, y: -5.0, dir: 4, number: "W" },
+            ],
+        },
+        SymbolDef {
+            name: "IEC_MOTOR_1PH",
+            description: "Single-phase motor",
+            class: "M",
+            family: "DEVICE",
+            child: false,
+            prims: motor_1ph,
+            pins: pins2!("L", "N"),
+        },
+        SymbolDef {
+            name: "IEC_SOCKET",
+            description: "Socket outlet",
+            class: "X",
+            family: "DEVICE",
+            child: false,
+            prims: socket,
+            pins: pins2!("L", "N"),
+        },
+        SymbolDef {
+            name: "IEC_BUZZER",
+            description: "Buzzer, horn",
+            class: "P",
+            family: "DEVICE",
+            child: false,
+            prims: buzzer,
+            pins: pins2!("1", "2"),
+        },
+        SymbolDef { name: "IEC_HEATER", description: "Heater", class: "E", family: "DEVICE", child: false, prims: heater, pins: pins2!("1", "2") },
+        SymbolDef {
+            name: "IEC_RESISTOR",
+            description: "Resistor",
+            class: "R",
+            family: "DEVICE",
+            child: false,
+            prims: resistor,
+            pins: pins2!("1", "2"),
+        },
+        SymbolDef { name: "IEC_DIODE", description: "Diode", class: "R", family: "DEVICE", child: false, prims: diode, pins: pins2!("A", "K") },
     ];
     L
 }

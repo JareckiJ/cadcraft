@@ -168,7 +168,7 @@ pub(super) fn for_each(
 }
 
 /// A new drawing for sheet `sheet`: a border, column numbers along the top and a title.
-pub(super) fn sheet_drawing(pr: &Project, sheet: u64) -> Drawing {
+pub(super) fn sheet_drawing(pr: &Project, sheet: u64, total: u64) -> Drawing {
     let mut d = Drawing::new_metric();
     let (w, h) = (pr.sheet_width, pr.sheet_width * 297.0 / 420.0);
     let cols = pr.columns.max(1);
@@ -206,25 +206,28 @@ pub(super) fn sheet_drawing(pr: &Project, sheet: u64) -> Drawing {
         }
         kinds.push(text(x + cw / 2.0, h - 5.0, 3.5, (c + 1).to_string(), HAlign::Center));
     }
-    kinds.push(pl(&[(w - 120.0, 0.0), (w - 120.0, 20.0), (w, 20.0)], false));
-    kinds.push(text(w - 115.0, 13.0, 3.5, pr.name.clone(), HAlign::Left));
-    kinds.push(text(w - 5.0, 6.0, 5.0, format!("Sheet {sheet}"), HAlign::Right));
     for k in kinds {
         let _ = d.add(&Space::Model, frame.clone(), k);
     }
+    // The title block, with the project's name and the sheet's number.
+    let mut values = serde_json::Map::new();
+    values.insert("PROJECT".into(), json!(pr.name));
+    values.insert("SHEET".into(), json!(sheet.to_string()));
+    values.insert("SHEETS".into(), json!(total.max(sheet).to_string()));
+    super::titleblock::add_to(&mut d, Vec2::new(w, 0.0), &values);
     d
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn create_drawing(path: &Path, pr: &Project, sheet: u64) -> Result<()> {
+fn create_drawing(path: &Path, pr: &Project, sheet: u64, total: u64) -> Result<()> {
     let hooks = crate::cmd::file::io().ok_or_else(|| EngineError::Other("file formats are not available in this build".into()))?;
-    let d = sheet_drawing(pr, sheet);
+    let d = sheet_drawing(pr, sheet, total);
     let bytes = (hooks.write)(&d, &path.to_string_lossy()).map_err(EngineError::Other)?;
     crate::atomic_write::write_atomic(path, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", path.display())))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_drawing(_path: &Path, _pr: &Project, _sheet: u64) -> Result<()> {
+fn create_drawing(_path: &Path, _pr: &Project, _sheet: u64, _total: u64) -> Result<()> {
     Err(EngineError::Other("Projects need files, which the web version cannot reach.".into()))
 }
 
@@ -311,7 +314,7 @@ fn run_new(s: &mut Session, p: &Value) -> Result<Value> {
         let file = format!("{stem}-{n:02}.dxf");
         let full = drawing_path(&path, &file);
         if !full.exists() {
-            create_drawing(&full, &pr, n)?;
+            create_drawing(&full, &pr, n, sheets)?;
         }
         pr.drawings.push(file);
     }
@@ -399,7 +402,7 @@ fn run_addsheet(s: &mut Session, p: &Value) -> Result<Value> {
     if full.exists() {
         return Err(EngineError::Other(format!("{} already exists.", full.display())));
     }
-    create_drawing(&full, &pr, sheet)?;
+    create_drawing(&full, &pr, sheet, sheet)?;
     pr.drawings.push(file.clone());
     write_project(&path, &pr)?;
     if p.get("open").and_then(Value::as_bool).unwrap_or(true) {
@@ -598,10 +601,13 @@ mod tests {
     #[test]
     fn sheet_drawing_has_a_frame() {
         let pr = Project { name: "Demo".into(), ..Project::default() };
-        let d = sheet_drawing(&pr, 3);
+        let d = sheet_drawing(&pr, 3, 5);
         let texts: Vec<String> =
             d.model.iter().filter_map(|e| if let EntityKind::Text(t) = &e.kind { Some(t.value.clone()) } else { None }).collect();
-        assert!(texts.contains(&"Sheet 3".to_string()) && texts.contains(&"10".to_string()) && texts.contains(&"Demo".to_string()));
+        assert!(texts.contains(&"10".to_string()), "column numbers");
+        let title = d.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i.clone()) } else { None }).unwrap();
+        let get = |t: &str| title.attribs.iter().find(|a| a.tag == t).map(|a| a.text.value.clone()).unwrap();
+        assert_eq!((get("PROJECT").as_str(), get("SHEET").as_str(), get("SHEETS").as_str()), ("Demo", "3", "5"));
     }
 
     #[test]

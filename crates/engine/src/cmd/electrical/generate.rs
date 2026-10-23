@@ -93,6 +93,33 @@ impl Default for Template {
                 ("psu", "IEC_PSU"),
                 ("powersupply", "IEC_PSU"),
                 ("pe", "IEC_PE"),
+                ("timer", "IEC_TIMER_ON"),
+                ("timeron", "IEC_TIMER_ON"),
+                ("timeroff", "IEC_TIMER_OFF"),
+                ("timercontact", "IEC_NO_TON"),
+                ("limitswitch", "IEC_LIMIT_NO"),
+                ("limit", "IEC_LIMIT_NO"),
+                ("proximity", "IEC_PROX_IND"),
+                ("sensor", "IEC_PROX_IND"),
+                ("inductive", "IEC_PROX_IND"),
+                ("capacitive", "IEC_PROX_CAP"),
+                ("photo", "IEC_PHOTO"),
+                ("photoelectric", "IEC_PHOTO"),
+                ("pressureswitch", "IEC_PRESSURE"),
+                ("thermostat", "IEC_THERMOSTAT"),
+                ("levelswitch", "IEC_LEVEL"),
+                ("float", "IEC_LEVEL"),
+                ("transformer", "IEC_TRANSFORMER"),
+                ("vfd", "IEC_VFD"),
+                ("drive", "IEC_VFD"),
+                ("inverter", "IEC_VFD"),
+                ("motor1ph", "IEC_MOTOR_1PH"),
+                ("socket", "IEC_SOCKET"),
+                ("buzzer", "IEC_BUZZER"),
+                ("horn", "IEC_BUZZER"),
+                ("heater", "IEC_HEATER"),
+                ("resistor", "IEC_RESISTOR"),
+                ("diode", "IEC_DIODE"),
             ]
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -683,7 +710,13 @@ fn run_generate(s: &mut Session, p: &Value) -> Result<Value> {
     let pr = super::project::Project { name: t.name.clone(), sheet_width: t.sheet_width, columns: t.columns as u64, ..Default::default() };
     let space = s.space();
     for n in 1..=plan.sheets {
-        let frame = super::project::sheet_drawing(&pr, n as u64);
+        let frame = super::project::sheet_drawing(&pr, n as u64, plan.sheets as u64);
+        // The title block's definition comes along with the frame.
+        for (name, b) in &frame.blocks {
+            if s.doc()?.block(name).is_none() {
+                s.doc_mut()?.blocks.insert(name.clone(), b.clone());
+            }
+        }
         let dx = (n - 1) as f64 * t.sheet_width;
         for e in frame.model.iter() {
             let mut k = e.kind.clone();
