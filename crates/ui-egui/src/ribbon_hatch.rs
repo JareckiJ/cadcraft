@@ -78,8 +78,8 @@ pub fn context(app: &mut CadApp, ctx: &egui::Context) -> Option<&'static str> {
     let was: bool = ctx.data(|d| d.get_temp(was_id)).unwrap_or(false);
     if shown && !was {
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("rb_hatch_before"), app.ui.ribbon_tab.clone()));
+        // A Ribbon the user reduced to its tabs stays so: the contextual tab opens in the tab row.
         app.ui.ribbon_tab = id.unwrap_or(TAB_ID).to_string();
-        app.ui.ribbon_minimized = false;
     } else if !shown && was {
         let before: String = ctx.data(|d| d.get_temp(egui::Id::new("rb_hatch_before"))).unwrap_or_else(|| "home".to_string());
         if app.ui.ribbon_tab == TAB_ID || app.ui.ribbon_tab == CREATE_ID {

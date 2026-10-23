@@ -196,3 +196,26 @@ fn hatch_creation_buttons_refuse_without_hatch_running() {
         assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("line"), "{id} leaves LINE alone");
     }
 }
+
+/// A Ribbon reduced to its tabs stays reduced when HATCH or a selected hatch opens a contextual
+/// tab: the tab shows in the tab row, its panels don't.
+#[test]
+fn a_reduced_ribbon_stays_reduced_for_the_hatch_tabs() {
+    let (mut h, hatch, _) = harness(false);
+    h.state_mut().ui.ribbon_minimized = true;
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    assert_eq!(h.state().ui.ribbon_tab, ribbon_hatch::TAB_ID);
+    assert!(h.state().ui.ribbon_minimized, "Hatch Editor");
+    assert!(h.query_by_label("Hatch Editor").is_some(), "the tab is in the tab row");
+    assert!(h.query_by_label("Close Hatch Editor").is_none(), "its panels are not shown");
+
+    h.state_mut().session.set_selection(Vec::new());
+    h.run_steps(3);
+    h.state_mut().cmd.buffer = "HATCH".into();
+    cadcraft_ui_egui::cmdline::submit(h.state_mut());
+    h.run_steps(3);
+    assert_eq!(h.state().ui.ribbon_tab, ribbon_hatch::CREATE_ID);
+    assert!(h.state().ui.ribbon_minimized, "Hatch Creation");
+    assert!(h.query_by_label("Close Hatch Creation").is_none());
+}
