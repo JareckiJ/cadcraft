@@ -85,7 +85,15 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     // Chord tolerance: a fifth of a pixel.
     let tolerance = (0.2 / (k * est)).max(1e-9);
     let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-    let ropts = cadcraft_render::Options { tolerance, lineweights, plot_style_table: table, transparency, ..cadcraft_render::Options::default() };
+    // Dash patterns shorter than the chord tolerance plot as continuous lines (#1068).
+    let ropts = cadcraft_render::Options {
+        tolerance,
+        min_dash: tolerance,
+        lineweights,
+        plot_style_table: table,
+        transparency,
+        ..cadcraft_render::Options::default()
+    };
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
     let half = Vec2::new(f64::from(width), f64::from(height)) / (2.0 * k);
     let b = window.unwrap_or(list.bounds);
@@ -111,7 +119,16 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let Space::Model = space else {
         let (sheet, page) = sheet(d, space, &o)?;
         let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-        return Ok(crate::svg::export_window_with(d, space, Some(sheet.bounds()), transparency).into_bytes());
+        // A layout is drawn at paper size: dash patterns that repeat in under 0.05 mm on paper
+        // plot as continuous lines, as in model space (#1068).
+        let min_dash = 0.05 / sheet.unit_mm;
+        let ropts = cadcraft_render::Options {
+            min_dash: if min_dash.is_finite() { min_dash } else { 0.0 },
+            transparency,
+            ..cadcraft_render::Options::default()
+        };
+        let list = cadcraft_render::build(d, space, &ropts);
+        return Ok(crate::svg::export_list(&list, Some(sheet.bounds())).into_bytes());
     };
     // Model space as plotted: the plot style table, lineweights, and the table's ends, joins and
     // fills at the scale that fits the window (or the extents) on the device's paper.
@@ -124,7 +141,15 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let tolerance = (0.05 / (sheet.unit_mm * est)).max(1e-9);
     let tolerance = if tolerance.is_finite() { tolerance } else { cadcraft_render::Options::default().tolerance };
     let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-    let ropts = cadcraft_render::Options { tolerance, lineweights, plot_style_table: table, transparency, ..cadcraft_render::Options::default() };
+    // Dash patterns shorter than the chord tolerance plot as continuous lines (#1068).
+    let ropts = cadcraft_render::Options {
+        tolerance,
+        min_dash: tolerance,
+        lineweights,
+        plot_style_table: table,
+        transparency,
+        ..cadcraft_render::Options::default()
+    };
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
     let s = fit_scale(&window.unwrap_or(list.bounds), &sheet, &o);
     cadcraft_render::pen::apply(&mut list, s * sheet.unit_mm);
