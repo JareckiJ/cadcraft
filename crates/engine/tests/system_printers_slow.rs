@@ -1,61 +1,33 @@
-//! A slow system printer listing (CUPS can take seconds, or hang) never blocks what draws the
-//! device list: it runs in the background, and commands that name a printer or report the
-//! devices wait for it.
+//! A printer listing that doesn't end within the wait: PLOT naming an unknown device waits for it
+//! once, not again for its fallback and its error message. Its own test binary: the system
+//! printers are set once per process.
 
-use std::time::{Duration, Instant};
-
-use cadcraft_doc::{DevicePaper, Drawing, PlotterConfig, Space};
+use cadcraft_doc::PlotterConfig;
 use cadcraft_engine::Session;
-use cadcraft_engine::cmd::file::{IoHooks, set_io};
-use cadcraft_engine::cmd::plotters::{
-    PlotterStore, PrintJob, SystemPrinters, devices, set_plotter_store, set_system_printers, system_printers_pending,
-};
-use serde_json::{Value, json};
+use cadcraft_engine::cmd::plotters::{PlotterStore, PrintJob, SystemPrinters, set_plotter_store, set_system_printers};
+use serde_json::json;
 
-const LISTING: Duration = Duration::from_millis(1500);
-
-fn slow_printers() -> Vec<PlotterConfig> {
-    std::thread::sleep(LISTING);
-    vec![PlotterConfig {
-        name: "Slow_Queue".into(),
-        default_paper: "Letter".into(),
-        papers: vec![DevicePaper { name: "Letter".into(), width: 215.9, height: 279.4, margins: [5.0; 4] }],
-        system: true,
-        ..PlotterConfig::default()
-    }]
+/// A listing that hangs far past the wait.
+fn printers() -> Vec<PlotterConfig> {
+    std::thread::sleep(std::time::Duration::from_secs(120));
+    Vec::new()
 }
 
-fn print(j: &PrintJob) -> Result<String, String> {
-    Ok(format!("{}-1", j.printer))
-}
-
-fn echo_plot(_: &Drawing, _: &Space, opts: &Value) -> Result<Vec<u8>, String> {
-    Ok(opts.to_string().into_bytes())
+fn print(_: &PrintJob) -> Result<String, String> {
+    Err("no printing in this test".into())
 }
 
 #[test]
-fn a_slow_listing_never_blocks_the_device_list() {
+fn an_unknown_device_waits_for_a_hung_listing_only_once() {
     set_plotter_store(PlotterStore::memory());
-    set_system_printers(SystemPrinters { list: slow_printers, print });
-    set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Err("no writer in this test".into()), plot: Some(echo_plot) });
-
-    // What a dialog asks every frame comes back at once, without the printer while it is listed.
-    let start = Instant::now();
-    for _ in 0..100 {
-        assert!(!devices().iter().any(|d| d.name == "Slow_Queue"));
-    }
-    assert!(start.elapsed() < LISTING / 3, "devices() waited {:?}", start.elapsed());
-    assert!(system_printers_pending());
-
-    // A plot naming the printer waits for the listing and prints.
+    set_system_printers(SystemPrinters { list: printers, print });
     let mut s = Session::new();
     s.cmdline("line 0,0 100,0").unwrap();
     s.cmdline("").unwrap();
-    let r = s.execute("plot", &json!({ "layout": "Model", "device": "Slow_Queue" })).unwrap();
-    assert_eq!(r["job"], "Slow_Queue-1");
-    assert!(!system_printers_pending());
-    // Then the device list has it, still without waiting.
-    let start = Instant::now();
-    assert!(devices().iter().any(|d| d.name == "Slow_Queue"));
-    assert!(start.elapsed() < LISTING / 3);
+    let start = std::time::Instant::now();
+    let r = s.execute("plot", &json!({ "layout": "Model", "device": "Nope" }));
+    let took = start.elapsed();
+    assert!(r.unwrap_err().to_string().contains("unknown plotter `Nope`"));
+    // One wait of PRINTERS_WAIT (10 s), not three.
+    assert!(took < std::time::Duration::from_secs(15), "{took:?}");
 }

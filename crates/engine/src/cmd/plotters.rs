@@ -265,7 +265,9 @@ fn named_device(name: &str) -> Option<PlotterConfig> {
     if !BUILTIN.iter().any(|(b, _, _)| b.eq_ignore_ascii_case(n.strip_suffix(cadcraft_doc::PLOTTER_FILE_EXT).unwrap_or(n))) {
         wait_for_printers();
     }
-    find_device(name).or_else(|| system_printer(name))
+    // One wait only: the printers as listed by now (a listing still under way after the wait
+    // isn't waited for again here, nor by the unknown-device error).
+    find_device(name)
 }
 
 /// Longest a plot waits for the system printers to be listed.
@@ -382,8 +384,11 @@ fn set_paper(page: &mut PageSetup, p: &DevicePaper) {
     page.margins_mm = p.margins;
 }
 
+/// The error for a device name not found, with the devices as listed now: it never waits for a
+/// printer listing (the lookup that failed already did).
 fn unknown_device(cmd: &str, name: &str) -> EngineError {
-    bad(cmd, format!("unknown plotter `{name}` (devices: {})", device_names().join(", ")))
+    let names: Vec<String> = devices().into_iter().map(|c| c.name).collect();
+    bad(cmd, format!("unknown plotter `{name}` (devices: {})", names.join(", ")))
 }
 
 /// PAGESETUP's `device` and the device's papers. Sets `page.device` from `device` (`"None"`:
