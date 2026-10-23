@@ -212,6 +212,7 @@ fn compareexport_produces_json_report() {
 #[test]
 fn compares_specified_layout_and_all_spaces() {
     let mut s = base();
+    // Add an entity to the default Layout1 paper space
     let paper = Space::Paper("Layout1".into());
     s.doc_mut().unwrap().add(&paper, Common::default(), line(0.0, 0.0, 50.0, 0.0)).unwrap();
 

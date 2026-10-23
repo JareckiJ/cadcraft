@@ -96,3 +96,57 @@ fn opening_binary_dxf_keeps_it_binary() {
     assert!(!s.state().unwrap().binary_dxf);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn interactive_saveas_prompts_for_format_and_path() {
+    install();
+    let dir = std::env::temp_dir().join(format!("cadcraft-save-version-interactive-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = |name: &str| dir.join(name).to_string_lossy().to_string();
+    let read = |name: &str| String::from_utf8(std::fs::read(dir.join(name)).unwrap()).unwrap();
+
+    let mut s = Session::new();
+    s.cmdline("circle 0,0 1").unwrap();
+
+    // 1. Direct path at first prompt
+    s.cmdline("saveas").unwrap();
+    assert!(s.prompting());
+    assert!(s.current_prompt().unwrap().message.contains("Enter file format or save path"));
+    s.cmdline(&path("direct.dxf")).unwrap();
+    assert!(!s.prompting());
+    assert_eq!(read("direct.dxf"), "plain");
+
+    // 2. Format selection (2010), then path
+    s.cmdline("saveas").unwrap();
+    assert!(s.prompting());
+    s.cmdline("2010").unwrap();
+    assert!(s.prompting());
+    assert!(s.current_prompt().unwrap().message.contains("Save drawing as"));
+    s.cmdline(&path("ver2010.dxf")).unwrap();
+    assert!(!s.prompting());
+    assert_eq!(read("ver2010.dxf"), "2010|false");
+
+    // 3. Format selection (DXF) -> binary DXF prompt (Yes) -> path
+    s.cmdline("saveas").unwrap();
+    assert!(s.prompting());
+    s.cmdline("dxf").unwrap();
+    assert!(s.prompting());
+    assert!(s.current_prompt().unwrap().message.contains("binary DXF"));
+    s.cmdline("yes").unwrap();
+    assert!(s.prompting());
+    assert!(s.current_prompt().unwrap().message.contains("Save drawing as"));
+    s.cmdline(&path("bin.dxf")).unwrap();
+    assert!(!s.prompting());
+    assert_eq!(read("bin.dxf"), "-|true");
+
+    // 4. "Formats" help inquiry keeps machine running
+    s.cmdline("saveas").unwrap();
+    assert!(s.prompting());
+    s.cmdline("formats").unwrap();
+    assert!(s.prompting(), "formats prints available formats and continues prompting");
+    assert!(s.log.iter().any(|l| l.contains("Available versions")));
+    s.cmdline("cancel").unwrap();
+    assert!(!s.prompting());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

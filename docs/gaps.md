@@ -69,7 +69,7 @@ Detail: [file-format-parity.md](file-format-parity.md).
 | # | Gap | User impact | Est. |
 | FF1 | **[alpha blocker]** Round-trip what we don't model. DXF and DWG foreign data preservation: unknown entities and objects (with their CLASS records) roundtrip through DXF and DWG (raw DWG stream cache bridge); foreign xdata (hyperlinks included), extension dictionaries, persistent reactors, DICTIONARYVAR and XRECORDs, layer states, colour book colours, references remapped on save; IMAGE, VIEW/UCS elevation, groups, block descriptions, true colours, transparency; WIPEOUT and gradients; MTEXT background colours; unknown entities follow all common property edits (color, linetype, lineweight, visibility, transparency, layer); renamed layers, blocks and named tables preserve their foreign records | Done | — |
 | FF2 | Multileader leftovers (native MULTILEADER read/write landed, #459): several landings per multileader (extra leader roots are folded into the lines), per-object overrides (leader colour and linetype, arrowhead symbol, text frame), annotative scale contexts; check the text placement of our MULTILEADER output in AutoCAD | Medium | 3–5 |
-| FF3 | Save-version leftovers (DXF/DWG 2000–2018, binary DXF, SAVEAS `version`/`binary` and the default save version landed, #421): no R14 DWG or R12 DXF output; the Save dialog can't pick the version per file (the file picker doesn't report the chosen type; File > Default Save Format sets it); no command-line SAVEAS format prompt | Low | 2–4 |
+| FF3 | Save-version leftovers (DXF/DWG 2000–2018, binary DXF, SAVEAS `version`/`binary` and the default save version landed, #421; command-line interactive SAVEAS format, version and binary DXF prompt machine landed): no R14 DWG or R12 DXF output; the Save dialog can't pick the version per file (the file picker doesn't report the chosen type; File > Default Save Format sets it) | Low | 1–2 |
 | FF4 | Code-page leftovers (pre-2007 DXF read in their `$DWGCODEPAGE` landed, #505): Johab (ANSI_1361) and DOS 855/857/860–865/869 read as ANSI_1252; saving declares `ANSI_1252` instead of the file's code page (the text is pure ASCII, so still correct); acadrust approximates DOS code pages in pre-2007 DWG (DOS437 as 866, DOS850 as 1252) | Low | 1–2 |
 | FF5 | **[alpha blocker]** Real-file corpus (`storytold/cadcraft-corpus`), open → save → reopen tests, black-box check in AutoCAD | High | 10–15 + human |
 | FF6 | **[alpha blocker]** DWG throughput: a 10 MB DWG took ~2 min to fail (#57) | High for real projects | 6–10 |
@@ -144,6 +144,7 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | Command-line interactive SAVEAS format, version and binary DXF prompt machine landed (FF3 narrowed) |
 | 2026-10-23 | minor | F22 closed: COMPARE supports space selection ("model", layout name, or "all" across spaces) with aggregated difference reporting; QuickCalc palette calculation history and user variables persist across restarts in user preferences |
 | 2026-10-19 | minor | CI workflow `.github/workflows/ci.yml` runs `cargo xtask ci` on PRs and pushes to main (S1 closed) |
 | 2026-10-19 | minor | In-place external reference (XREF) editing with write-back to source drawing file on save, nested reference hierarchy picking and cycling (F2 closed; remaining to alpha ≈ 65–100 h) |
