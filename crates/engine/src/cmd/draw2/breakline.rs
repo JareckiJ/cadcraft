@@ -2,8 +2,10 @@
 //! symbol at a location along it, the line optionally extended past both points.
 //!
 //! The symbol is a run of vertices between two attachment points. The built-in one is our own
-//! zigzag; the Block option takes a block of the drawing that marks its attachment points with
-//! two POINT objects on the Defpoints layer and draws the symbol with lines and polylines.
+//! zigzag; the Block option takes a block that marks its attachment points with two POINT objects
+//! on the Defpoints layer and draws the symbol with lines and polylines. The block is one of the
+//! drawing's, or a .dwg/.dxf file (as Express Tools' `brkline.dwg`): the file is defined as a
+//! block named after it, as INSERT does, and that block is used.
 
 use cadcraft_doc::{Drawing, EntityKind};
 use cadcraft_geom::{PolyVertex, Vec2};
@@ -22,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Tools", "Express Tools", "Break-line Symbol"])
             .params(
                 "{p1, p2, at?: [x,y] (symbol location; default the midpoint), size? (default 1, times DIMSCALE), \
-                 extension? (past both points; default 0), block? (a block with two points on Defpoints; default the built-in symbol)} → {handle}",
+                 extension? (past both points; default 0), block? (a block, or a .dwg/.dxf file path, with two points on Defpoints; default the built-in symbol)} → {handle}",
             )
             .interactive(|s| Ok(Box::new(BreaklineM::new(s)))),
     ]
@@ -147,6 +149,29 @@ fn symbol(s: &Session, block: &str) -> Result<Symbol> {
     if block.is_empty() { Ok(Symbol::built_in()) } else { Symbol::of_block(s.doc()?, block) }
 }
 
+/// The symbol block `t` names: "" for the built-in one, a block of the drawing, or a drawing file
+/// that is defined as a block first. The symbol is checked; when it is unusable the drawing is
+/// left as it was (a block defined from the file is taken back). Returns the block's name.
+fn choose_block(s: &mut Session, t: &str) -> Result<String> {
+    let t = t.trim();
+    if t.is_empty() || s.doc()?.block(t).is_some() {
+        symbol(s, t)?;
+        return Ok(t.to_string());
+    }
+    let before = s.doc()?.clone();
+    let Some(defined) = crate::cmd::blocks::define_block_from_file(s, t) else {
+        symbol(s, t)?;
+        return Ok(t.to_string());
+    };
+    match defined.and_then(|name| symbol(s, &name).map(|_| name)) {
+        Ok(name) => Ok(name),
+        Err(e) => {
+            *s.doc_mut()? = before;
+            Err(e)
+        }
+    }
+}
+
 /// The breakline's vertices: the extension, the line up to the symbol, the symbol and the rest of
 /// the line. The symbol is centred on `at` projected onto the line (the midpoint without it) and
 /// kept between the two points.
@@ -188,9 +213,16 @@ fn run_breakline(s: &mut Session, p: &Value) -> Result<Value> {
     let p2 = point_req("breakline", p, "p2")?;
     let size = size_param("breakline", p, "size", false)?.unwrap_or(1.0);
     let ext = size_param("breakline", p, "extension", true)?.unwrap_or(0.0);
-    let sym = symbol(s, str_param(p, "block").unwrap_or(""))?;
-    let vs = breakline_vertices(&sym, p1, p2, point_param(p, "at"), size * dimscale(s), ext)?;
-    added(s.add_entity(lwpoly(vs, false))?)
+    let before = s.doc()?.clone();
+    let block = choose_block(s, str_param(p, "block").unwrap_or(""))?;
+    let vs = breakline_vertices(&symbol(s, &block)?, p1, p2, point_param(p, "at"), size * dimscale(s), ext);
+    match vs {
+        Ok(vs) => added(s.add_entity(lwpoly(vs, false))?),
+        Err(e) => {
+            *s.doc_mut()? = before;
+            Err(e)
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -247,8 +279,7 @@ impl Interactive for BreaklineM {
         match (self.ask, i) {
             (Ask::Block, Input::Text(t) | Input::Keyword(t)) => {
                 let t = t.trim();
-                let name = if t == "." { String::new() } else { t.to_string() };
-                symbol(s, &name)?;
+                let name = if t == "." { String::new() } else { choose_block(s, t)? };
                 self.opts.block = name;
                 self.ask = Ask::Points;
             }
