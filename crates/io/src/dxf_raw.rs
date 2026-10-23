@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use cadcraft_doc::foreign::{Foreign, ForeignExtra, ForeignKey, ForeignObject};
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, RawTag, Unknown};
-use cadcraft_dxf::{Section, Tag};
+use cadcraft_dxf::{Section, Tag, Version};
 
 /// Named object dictionary entries CADCraft writes itself from its model (plus every key that
 /// starts with `CADCRAFT`): they are read into the model, not kept raw. A change that starts
@@ -754,6 +754,38 @@ fn entity_extra<'a>(f: &'a Foreign, xd: &XdataOf, h: Handle) -> Option<Cow<'a, F
 /// Every Unknown entity's handle (upper case).
 fn unknown_handles(d: &Drawing) -> HashSet<String> {
     all_entities(d).filter(|e| matches!(e.kind, EntityKind::Unknown(_))).map(|e| e.handle.hex()).collect()
+}
+
+/// Render settings (`RENDERSETTINGS`, `MENTALRAYRENDERSETTINGS`, `RAPIDRTRENDERSETTINGS`) store
+/// their `AcDbRenderSettings` class version (the first group 90 after that marker) in the form of
+/// the file's version: a 2013+ file stores it one higher, and a 2013 file stores a rapid RT one
+/// one lower, as acadrust reads and writes them. A kept object carries the form of the file it was
+/// read from; written into a file declaring another version, it takes that version's form.
+/// Without this, the DWG bridge (an R2000 DXF for a 2018 DWG) handed the 2018 form on as the 2000
+/// one, the DWG writer raised it once more, and BricsCAD refused the DWG for a render settings
+/// object of class version 3 (#907).
+pub(crate) fn render_settings_versions(tags: &mut [Tag], source: Option<Version>, declared: Version) {
+    let Some(source) = source.filter(|s| *s != declared) else { return };
+    let shift = |rapid: bool, v: Version| if rapid { -i64::from(v == Version::R2013) } else { i64::from(v >= Version::R2013) };
+    let (mut kind, mut in_base) = (String::new(), false);
+    for t in tags.iter_mut() {
+        match t.code {
+            0 => {
+                kind = up(&t.str());
+                in_base = false;
+            }
+            100 if matches!(kind.as_str(), "RENDERSETTINGS" | "MENTALRAYRENDERSETTINGS" | "RAPIDRTRENDERSETTINGS") => {
+                in_base = t.str().trim().eq_ignore_ascii_case("AcDbRenderSettings");
+            }
+            90 if in_base => {
+                let rapid = kind == "RAPIDRTRENDERSETTINGS";
+                let logical = t.i64().saturating_sub(shift(rapid, source));
+                *t = Tag::i(90, logical.saturating_add(shift(rapid, declared)));
+                in_base = false;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Put the drawing's foreign data back into a written file's tags (see the module comment).

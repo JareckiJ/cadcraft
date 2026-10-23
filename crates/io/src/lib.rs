@@ -40,7 +40,13 @@ pub struct SaveOptions {
 /// The version a drawing is saved in when none is asked for: the version of the file it was
 /// read from (`$ACADVER`, the nearest one CADCraft writes), and 2018 for a new drawing.
 pub fn save_version(d: &Drawing) -> Version {
-    d.header.get("ACADVER").and_then(cadcraft_doc::HVal::as_str).and_then(Version::for_acadver).unwrap_or_default()
+    save_version_of(d).unwrap_or_default()
+}
+
+/// The version of the file a drawing was read from (`$ACADVER`), if it declared one CADCraft
+/// knows; a new drawing has none.
+pub(crate) fn save_version_of(d: &Drawing) -> Option<Version> {
+    d.header.get("ACADVER").and_then(cadcraft_doc::HVal::as_str).and_then(Version::for_acadver)
 }
 
 #[derive(Debug, thiserror::Error)]
