@@ -44,8 +44,10 @@ fn frame(app: &mut CadApp, ctx: &egui::Context) {
 }
 
 /// Types `text` and presses each of `keys` (an egui key name, or `" "` for Space, which egui
-/// delivers as text), one frame each, then reports the command name the history recorded.
+/// delivers as text), one frame each, then reports the command name the history recorded,
+/// checking that the engine started that command (not only that the history shows it).
 fn press(app: &mut CadApp, ctx: &egui::Context, text: &str, keys: &[&str]) -> Option<String> {
+    app.session.last_command = None;
     app.synthetic.push(egui::Event::Text(text.into()));
     frame(app, ctx);
     for k in keys {
@@ -63,6 +65,11 @@ fn press(app: &mut CadApp, ctx: &egui::Context, text: &str, keys: &[&str]) -> Op
         frame(app, ctx);
     }
     let ran = app.cmd.history.last().cloned();
+    if let Some(name) = &ran {
+        let started = app.session.last_command.clone();
+        let id = cadcraft_engine::cmd::resolve_alias(&name.to_ascii_lowercase());
+        assert_eq!(started.as_deref(), Some(id.as_str()), "{name} is in the history, so it must have started");
+    }
     app.session.cancel();
     frame(app, ctx);
     ran
