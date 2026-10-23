@@ -702,7 +702,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             // Out to text outside the extension lines, from `from` along the line.
             let to_text = |g: &mut DimGeometry, from: Vec2| {
                 let to = text_mid - offset - u * (half + gap);
-                if text_outside && !moved && (to - from).dot(u) > 0.0 {
+                if text_outside && (to - from).dot(u) > 0.0 {
                     seg(g, from, from + u * (to - from).dot(u));
                 }
             };
@@ -1226,12 +1226,12 @@ mod tests {
         let d = lin((0.0, 0.0), (0.0, 0.5), (5.0, 0.0), std::f64::consts::FRAC_PI_2);
         let g = dimension_geometry(&d, &st_with(|s| s.text_move = 2), 1.0);
         assert!((g.text_pos.y - 0.25).abs() < 1e-9 && g.text_pos.x > 5.2, "{:?}", g.text_pos);
-        assert!(g.lines_of(LineRole::Dim).flatten().all(|p| p.y < 1.0 && p.x <= 5.0 + 1e-9), "no leader, no line out to the text");
+        assert!(g.lines_of(LineRole::Dim).flatten().all(|p| p.y <= 0.5 + 1e-9 && p.x <= 5.0 + 1e-9), "no leader, no line out to the text");
         // Horizontal, measured points above the line: below it.
         let d = lin((0.0, 10.0), (0.5, 10.0), (0.0, 5.0), 0.0);
         let g = dimension_geometry(&d, &st_with(|s| s.text_move = 2), 1.0);
         assert!((g.text_pos.x - 0.25).abs() < 1e-9 && g.text_pos.y < 4.8, "{:?}", g.text_pos);
-        assert!(g.lines_of(LineRole::Dim).flatten().all(|p| p.x < 1.0 && p.y >= 5.0 - 1e-9), "no leader, no line out to the text");
+        assert!(g.lines_of(LineRole::Dim).flatten().all(|p| p.x <= 0.5 + 1e-9 && p.y >= 5.0 - 1e-9), "no leader, no line out to the text");
     }
 
     #[test]
