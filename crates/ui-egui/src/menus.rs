@@ -89,6 +89,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if let Some(r) = crate::xrefs::route(app, id, params) {
         return Some(r);
     }
+    if let Some(r) = crate::lisp_ide::route(app, id, params) {
+        return Some(r);
+    }
     if let Some(r) = crate::bedit::route(app, id, params) {
         return Some(r);
     }
@@ -667,10 +670,14 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
         return;
     }
     // Cmd/Ctrl+C, X and V arrive as clipboard events, not key presses.
+    let had_paste_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
     let mut fire = crate::clipboard::shortcut_commands(app, ctx);
     ctx.input_mut(|i| {
         for (s, id) in pairs {
             if i.consume_shortcut(s) && !fire.contains(id) {
+                if had_paste_event && (*id == "pasteclip" || *id == "pasteblock") {
+                    continue;
+                }
                 fire.push(*id);
             }
         }

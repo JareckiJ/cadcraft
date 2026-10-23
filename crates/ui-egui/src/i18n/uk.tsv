@@ -1358,3 +1358,15 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+	3D Orbit	3D-орбіта
+	3D Views	3D-види
+	Top (2D Plan)	Зверху (2D-план)
+	Front	Спереду
+	Back	Ззаду
+	SW Isometric	ПдЗх ізометрія
+	SE Isometric	ПдСх ізометрія
+	NE Isometric	ПнСх ізометрія
+	NW Isometric	ПнЗх ізометрія
+	Load Application (NETLOAD)...	Завантажити застосунок (NETLOAD)...
+	Load LISP / Application (NETLOAD)...	Завантажити LISP / застосунок (NETLOAD)...
+	AutoLISP / VBA IDE...	Середовище AutoLISP / VBA IDE...
