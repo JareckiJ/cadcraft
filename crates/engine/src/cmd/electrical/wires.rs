@@ -200,6 +200,8 @@ pub(super) struct Network {
     /// (block reference, pin number, position) of every pin on the network.
     pub pins: Vec<(Handle, String, Vec2)>,
     pub number: Option<String>,
+    /// The wires (lines and polylines) of the network.
+    pub wire_handles: Vec<Handle>,
 }
 
 /// The wire networks of the current space (on the default wire and label layers), with the
@@ -221,7 +223,7 @@ pub(super) fn networks(s: &Session) -> Result<Vec<Network>> {
             .filter(|(d, _)| *d <= 6.0)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, v)| v.clone());
-        out.push(Network { pins, number });
+        out.push(Network { pins, number, wire_handles: g.iter().filter_map(|w| handles.get(*w)).copied().collect() });
     }
     Ok(out)
 }

@@ -14,11 +14,11 @@ const TEXT_HEIGHT: f64 = 2.5;
 const ROW: f64 = 6.0;
 /// Most rows drawn in one table.
 const MAX_DRAWN_ROWS: usize = 2_000;
-const KINDS: &[&str] = &["bom", "devices", "wirelist", "terminals", "plcio"];
+const KINDS: &[&str] = &["bom", "devices", "wirelist", "terminals", "plcio", "cables"];
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec::new("ereport", "Electrical Report", run_report).menu(&["Tools", "Electrical", "Reports", "Report..."]).params(
-        "{kind: bom | devices | wirelist | terminals | plcio, csv?: bool (return CSV text), path? (save CSV there), \
+        "{kind: bom | devices | wirelist | terminals | plcio | cables, csv?: bool (return CSV text), path? (save CSV there), \
                  draw?: {at: [x, y]} (draw it as a table)} → {kind, columns, rows, csv?}",
     )]
 }
@@ -179,6 +179,22 @@ pub(super) fn report(s: &mut Session, kind: &str) -> Result<(Vec<&'static str>, 
             }
             (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], rows)
         }
+        "cables" => {
+            let mut rows = Vec::new();
+            for c in super::conductors::cables(s)? {
+                for core in c["cores"].as_array().into_iter().flatten() {
+                    rows.push(vec![
+                        strs(&c["tag"]),
+                        strs(&c["type"]),
+                        strs(&core["core"]),
+                        strs(&core["wire"]),
+                        strs(&core["from"]),
+                        strs(&core["to"]),
+                    ]);
+                }
+            }
+            (vec!["Cable", "Type", "Core", "Wire", "From", "To"], rows)
+        }
         "plcio" => {
             let rows = super::plc::io_list(s)?
                 .into_iter()
@@ -216,6 +232,7 @@ fn run_report(s: &mut Session, p: &Value) -> Result<Value> {
             "devices" => "Device list",
             "wirelist" => "Wire list",
             "terminals" => "Terminal plan",
+            "cables" => "Cable list",
             _ => "PLC I/O list",
         };
         let h = draw_table(s, at, title, &headers, &rows)?;

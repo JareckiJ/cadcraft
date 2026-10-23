@@ -188,8 +188,11 @@ fn add_dot(s: &mut Session, p: Vec2) -> Result<()> {
     Ok(())
 }
 
-fn layer_param(cmd: &str, p: &Value) -> Result<String> {
-    let l = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).unwrap_or(WIRE_LAYER).to_string();
+/// The `layer` parameter, else the current layer when it is a wire type (EWIRETYPE), else WIRE.
+fn layer_param(s: &Session, cmd: &str, p: &Value) -> Result<String> {
+    let current = s.doc().map(|d| d.header.str("CLAYER", "0")).unwrap_or_default();
+    let default = if wire_layer_matches(WIRE_LAYERS, &current) { current } else { WIRE_LAYER.to_string() };
+    let l = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).unwrap_or(default);
     if l.chars().count() > 255 { Err(bad(cmd, "`layer` is too long")) } else { Ok(l) }
 }
 
@@ -208,7 +211,7 @@ fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
     if !(0.0..1e6).contains(&reach) {
         return Err(bad(CMD, "`snap` must be zero or more"));
     }
-    let layer = layer_param(CMD, p)?;
+    let layer = layer_param(s, CMD, p)?;
     let layers = format!("{WIRE_LAYERS},{layer}");
     let a = snap(s, from, reach, &layers);
     let b = snap(s, to, reach, &layers);
@@ -300,7 +303,7 @@ fn run_ladder_inner(s: &mut Session, p: &Value) -> Result<Value> {
     if x1 <= x0 || spacing <= 0.0 || (x1 - x0) / spacing > MAX_RUNGS as f64 {
         return Err(bad(CMD, format!("`to` must be right of `from`, `spacing` positive, and at most {MAX_RUNGS} rungs")));
     }
-    let layer = layer_param(CMD, p)?;
+    let layer = layer_param(s, CMD, p)?;
     let rails = vec![
         add_wire(s, &[Vec2::new(x0, top), Vec2::new(x1, top)], &layer)?.hex(),
         add_wire(s, &[Vec2::new(x0, bottom), Vec2::new(x1, bottom)], &layer)?.hex(),

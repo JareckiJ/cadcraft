@@ -309,12 +309,23 @@ fn sync_active(s: &mut Session, db: &EcadDb, place: &Place) -> Result<Value> {
             });
         }
     }
-    // Conductor data set in the database survives re-syncing.
+    // Conductor data: from the wire type (its layer, EWIRETYPE), else as set in the database.
+    let layers: HashMap<u64, String> =
+        s.doc()?.space(&s.space()).map(|st| st.iter().map(|e| (e.handle.0, e.common.layer.clone())).collect()).unwrap_or_default();
     for c in &mut connections {
         if let Ok(Some(old)) = db.connection(&c.id) {
             c.color = old.color;
             c.cross_section = old.cross_section;
             c.wire_type = old.wire_type;
+        }
+        if let Some(layer) = c.wires.first().and_then(|w| layers.get(w)) {
+            let (colour, size) = super::conductors::parse_wire_layer(layer);
+            if let Some(col) = colour {
+                c.color = col;
+            }
+            if size.is_some() {
+                c.cross_section = size;
+            }
         }
     }
     let removed = db.devices_on_page(&page.id).map_err(db_err)?.iter().filter(|o| !seen.contains(&o.id)).count();

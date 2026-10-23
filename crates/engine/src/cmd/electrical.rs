@@ -14,6 +14,7 @@
 
 mod builder;
 mod classes;
+mod conductors;
 pub mod generate;
 mod pins;
 mod plc;
@@ -89,6 +90,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(terminals::specs());
     v.extend(plc::specs());
     v.extend(reports::specs());
+    v.extend(conductors::specs());
     v.extend(project::specs());
     v.extend(sync::specs());
     v
