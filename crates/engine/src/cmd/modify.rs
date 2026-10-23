@@ -166,7 +166,10 @@ fn dz_of(cmd: &str, v: &Value) -> Result<f64> {
             None | Some(Value::Null) => 0.0,
             Some(z) => z.as_f64().ok_or_else(|| bad(cmd, "`delta` [dx, dy, dz] needs numbers"))?,
         },
-        Value::Object(_) => v.get("z").and_then(Value::as_f64).unwrap_or(0.0),
+        Value::Object(_) => match v.get("z") {
+            None | Some(Value::Null) => 0.0,
+            Some(z) => z.as_f64().ok_or_else(|| bad(cmd, "`delta` z needs a number"))?,
+        },
         _ => 0.0,
     };
     if z.is_finite() { Ok(z) } else { Err(bad(cmd, "the Z offset must be finite")) }

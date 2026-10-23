@@ -178,3 +178,37 @@ fn spline_is_planar_and_tangents_are_directions() {
     assert_eq!(moved.base, Vec3::new(1.0, 2.0, 7.0));
     assert_eq!(moved.dir.z, 0.0);
 }
+
+#[test]
+fn move_and_copy_translate_planar_entity_elevations() {
+    let mut s = Session::new();
+    let lw = s.add_entity(EntityKind::LwPolyline(serde_json::from_value(json!({"vertices": [], "closed": false, "elevation": 4})).unwrap())).unwrap();
+    let hatch = s
+        .add_entity(EntityKind::Hatch(serde_json::from_value(json!({"pattern": "SOLID", "solid": true, "loops": [], "elevation": 6})).unwrap()))
+        .unwrap();
+    s.execute("move", &json!({"handles": [lw.hex(), hatch.hex()], "delta": [0, 0, 3]})).unwrap();
+    let elevation = |s: &Session, h| match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::LwPolyline(p) => p.elevation,
+        EntityKind::Hatch(p) => p.elevation,
+        _ => panic!("not an elevated entity"),
+    };
+    assert_eq!(elevation(&s, lw), 7.0);
+    assert_eq!(elevation(&s, hatch), 9.0);
+    let copied = s.execute("copy", &json!({"handles": [lw.hex(), hatch.hex()], "delta": [0, 0, 2]})).unwrap();
+    assert_eq!(elevation(&s, lw), 7.0);
+    assert_eq!(elevation(&s, hatch), 9.0);
+    let elevations: Vec<_> =
+        copied["handles"].as_array().unwrap().iter().map(|h| elevation(&s, Handle::parse_hex(h.as_str().unwrap()).unwrap())).collect();
+    assert!(elevations.contains(&9.0) && elevations.contains(&11.0), "{elevations:?}");
+}
+
+#[test]
+fn object_displacements_reject_an_invalid_z_without_moving() {
+    for command in ["move", "copy"] {
+        let mut s = Session::new();
+        let text = mk_text(&mut s);
+        assert!(s.execute(command, &json!({"handles": [text.hex()], "delta": {"x": 1, "y": 2, "z": "x"}})).is_err());
+        let EntityKind::Text(t) = &s.doc().unwrap().entity(text).unwrap().kind else { panic!("not text") };
+        assert_eq!(t.insert, Vec3::new(1.0, 2.0, 4.0));
+    }
+}
