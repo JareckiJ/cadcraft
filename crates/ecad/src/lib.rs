@@ -25,9 +25,11 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 mod db;
+pub mod parts;
 pub mod store;
 
 pub use db::{EcadDb, GraphStats};
+pub use parts::{COMPONENT_TYPES, ManufacturerPart, PART_LICENSE, PartsCache, PinPoint, SymbolGeometry};
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::RedbStore;
 pub use store::{MemStore, Store};

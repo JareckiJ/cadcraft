@@ -545,7 +545,8 @@ mod tests {
 
     fn put(s: &mut Session, block: &str, at: [f64; 2], tag: &str) -> String {
         s.execute("insert", &json!({"name": block, "at": at, "attribs": {"TAG": tag}})).unwrap();
-        s.doc().unwrap().model.last().unwrap().handle.hex()
+        // The newest block reference (live cross-referencing may add texts after it).
+        s.doc().unwrap().model.iter().rev().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle.hex()
     }
 
     fn tag_of(s: &Session, h: &str) -> String {

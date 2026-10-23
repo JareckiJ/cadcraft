@@ -20,7 +20,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        run: cargo fmt -p cadcraft-engine -p cadcraft-ecad -p cadcraft-ui-egui -- --check
+        run: cargo fmt -p cadcraft-engine -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-ui-egui -- --check
       - name: Keep Cargo.lock in step with new dependencies
         shell: bash
         run: |
@@ -50,11 +50,11 @@ jobs:
             rm -f part_* rep.txt
           }
           status=0
-          { cargo test -p cadcraft-ecad && cargo test -p cadcraft-engine --lib electrical && cargo test -p cadcraft-ui-egui --lib -- i18n devices docking menus; } 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
+          { cargo test -p cadcraft-ecad -p cadcraft-ecad-cloud && cargo test -p cadcraft-engine --lib electrical && cargo test -p cadcraft-ui-egui --lib -- i18n devices docking menus; } 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
           if [ $status -eq 0 ]; then
             cargo test -p cadcraft-engine 2>&1 | tee t2.txt || { report t2.txt engine-tests; status=1; }
           fi
-          cargo clippy -p cadcraft-ecad -p cadcraft-engine -p cadcraft-ui-egui --all-targets -- -D warnings 2>&1 | tee t3.txt || { report t3.txt clippy; status=1; }
+          cargo clippy -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-engine -p cadcraft-ui-egui --all-targets -- -D warnings 2>&1 | tee t3.txt || { report t3.txt clippy; status=1; }
           # On success, show the test counts so a passing run proves the tests ran.
           if [ $status -eq 0 ]; then
             echo "::notice title=tests::$(grep -h 'test result' t1.txt t2.txt 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ')"

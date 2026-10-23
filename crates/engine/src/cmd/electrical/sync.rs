@@ -710,16 +710,18 @@ mod tests {
         let mut s = session("erase-copy");
         let (_, k, h) = circuit(&mut s);
         s.execute("edb.sync", &json!({})).unwrap();
-        // A copy carries the same EID: it becomes a device of its own.
+        // A copy carries the same EID: it becomes a device of its own, at once (every edit of a
+        // symbol syncs).
         s.execute("copy", &json!({ "handles": [k], "from": [0, 0], "to": [42, 0] })).unwrap();
+        let copy = s.doc().unwrap().model.iter().rev().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle.hex();
+        assert_ne!(copy, k);
+        assert!(!eid(&s, &copy).is_empty() && eid(&s, &copy) != eid(&s, &k));
         let r = s.execute("edb.sync", &json!({})).unwrap();
-        assert_eq!((r["devices"].as_u64(), r["newIds"].as_u64()), (Some(4), Some(1)), "{r}");
-        // Erasing a symbol removes its device and connections.
+        assert_eq!((r["devices"].as_u64(), r["newIds"].as_u64()), (Some(4), Some(0)), "{r}");
+        // Erasing a symbol removes its device and connections, also at once.
         s.execute("erase", &json!({ "handles": [h] })).unwrap();
         let r = s.execute("edb.sync", &json!({})).unwrap();
-        assert_eq!(r["removed"], 1);
-        let stats = s.execute("edb.query", &json!({ "what": "stats" })).unwrap();
-        assert!(stats["devices"].as_u64().unwrap() >= 3);
+        assert_eq!((r["devices"].as_u64(), r["removed"].as_u64()), (Some(3), Some(0)), "{r}");
         assert!(s.execute("edb.query", &json!({ "what": "nonsense" })).is_err());
         assert!(s.execute("edb.device", &json!({ "id": "D-missing" })).is_err());
         assert!(s.execute("edb.device", &json!({ "handle": k, "set": { "ratings": [{ "value": 1 }] } })).is_err());

@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use crate::{EcadError, Result};
 
 /// The tables the graph uses.
-pub const TABLES: &[&str] = &["meta", "pages", "devices", "connections", "by_entity"];
+pub const TABLES: &[&str] = &["meta", "pages", "devices", "connections", "by_entity", "parts"];
 
 /// One change in a [`Batch`].
 #[derive(Clone, Debug, PartialEq)]

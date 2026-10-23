@@ -1,0 +1,29 @@
+[package]
+name = "cadcraft-ecad-cloud"
+description = "Community parts database client: Supabase GitHub sign-in (PKCE), the OS keyring, part search and upload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cadcraft-ecad = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Desktop only: the web build has no sockets, keyring or browser to open.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# HTTPS client (blocking, rustls; MIT OR Apache-2.0).
+ureq = { version = "2", features = ["json"] }
+# The OS credential store: Windows Credential Manager, macOS Keychain, Linux kernel keyring.
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+# Open the sign-in page in the default browser.
+open = "5"
+# PKCE: random verifier, SHA-256 challenge, base64url.
+getrandom = "0.2"
+sha2 = "0.10"
+base64 = "0.22"
+dirs = "6"

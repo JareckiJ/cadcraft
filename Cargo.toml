@@ -15,6 +15,7 @@ repository = "https://github.com/storytold/cadcraft"
 cadcraft-geom = { path = "crates/geom" }
 cadcraft-dxf = { path = "crates/dxf" }
 cadcraft-ecad = { path = "crates/ecad" }
+cadcraft-ecad-cloud = { path = "crates/ecad-cloud" }
 cadcraft-dwg = { path = "crates/dwg" }
 cadcraft-color = { path = "crates/color" }
 cadcraft-doc = { path = "crates/doc" }
