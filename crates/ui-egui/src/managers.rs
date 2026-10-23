@@ -28,6 +28,7 @@ pub fn route(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value,
         "linetype" | "lt" | "ltype" => "linetype",
         "ddptype" | "ptype" => "ptype",
         "style" | "st" => "textstyle",
+        "dimstyle" | "d" | "dst" | "ddim" | "dimstyle.dimension" => "dimstyle",
         "tablestyle" | "ts" => "tablestyle",
         "mleaderstyle" | "mls" => "mleaderstyle",
         "pagesetup" => "pagesetup",
@@ -49,6 +50,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
         "linetype" => linetype(app, ctx, open),
         "ptype" => point_style(app, ctx, open),
         "textstyle" => text_style(app, ctx, open),
+        "dimstyle" => dim_style(app, ctx, open),
         "tablestyle" => table_style(app, ctx, open),
         "mleaderstyle" => mleader_style(app, ctx, open),
         "pagesetup" => page_setup(app, ctx, open),
@@ -329,6 +331,38 @@ fn text_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
     }
     let current = d.header.str("TEXTSTYLE", "Standard");
     style_manager(ctx, open, "Text Style", "style", &current, &styles)
+}
+
+fn dim_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
+    let Ok(d) = app.session.doc() else {
+        no_drawing(ctx, "Dimension Style", open);
+        return None;
+    };
+    let text_styles: Vec<String> = d.text_styles.iter().map(|s| s.name.clone()).collect();
+    let mut styles: Vec<Style> = d
+        .dim_styles
+        .iter()
+        .map(|s| Style {
+            name: s.name.clone(),
+            fields: vec![
+                Field::Num("scale", "Overall scale (DIMSCALE)", s.scale),
+                Field::Num("arrowSize", "Arrowhead size (DIMASZ)", s.arrow_size),
+                Field::Num("textHeight", "Text height (DIMTXT)", s.text_height),
+                Field::Num("textGap", "Text offset from dim line (DIMGAP)", s.text_gap),
+                Field::Num("extExtend", "Extend beyond dim lines (DIMEXE)", s.ext_extend),
+                Field::Num("extOffset", "Origin offset (DIMEXO)", s.ext_offset),
+                Field::Num("centerMark", "Center mark size (DIMCEN)", s.center_mark),
+                Field::Choice("textStyle", "Text style (DIMTXSTY)", s.text_style.clone(), text_styles.clone()),
+                Field::Bool("annotative", "Annotative", s.annotative),
+            ],
+        })
+        .collect();
+    if styles.is_empty() {
+        let s = cadcraft_doc::DimStyle::default();
+        styles.push(Style { name: s.name, fields: Vec::new() });
+    }
+    let current = d.header.str("DIMSTYLE", "Standard");
+    style_manager(ctx, open, "Dimension Style Manager", "dimstyle", &current, &styles)
 }
 
 fn table_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {

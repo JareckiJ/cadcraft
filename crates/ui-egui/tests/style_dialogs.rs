@@ -15,6 +15,8 @@ fn menu_items_open_their_dialogs() {
         ("style", "textstyle"),
         ("tablestyle", "tablestyle"),
         ("mleaderstyle", "mleaderstyle"),
+        ("dimstyle", "dimstyle"),
+        ("dimstyle.dimension", "dimstyle"),
         ("ddptype", "ptype"),
         ("constraintsettings", "csettings"),
         ("plot", "plot"),
@@ -32,6 +34,11 @@ fn menu_items_open_their_dialogs() {
     app.ui.dialog = None;
     assert!(app.cmdline("PTYPE").is_none(), "bare PTYPE is not an error");
     assert_eq!(app.ui.dialog.as_deref(), Some("ptype"), "PTYPE opens the Point Style dialog");
+    for typed in ["dimstyle", "D", "DST", "DDIM"] {
+        app.ui.dialog = None;
+        assert!(app.cmdline(typed).is_none(), "bare {typed} is not an error");
+        assert_eq!(app.ui.dialog.as_deref(), Some("dimstyle"), "{typed}");
+    }
     for typed in ["style", "ST"] {
         app.ui.dialog = None;
         assert!(app.cmdline(typed).is_none(), "bare {typed} is not an error");
