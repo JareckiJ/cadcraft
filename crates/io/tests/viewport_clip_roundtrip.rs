@@ -124,7 +124,9 @@ fn viewport_view_centre_is_relative_to_the_view_target() {
     let (d, v, _) = drawing(false, true);
     let text = cadcraft_io::write_dxf(&d);
     let mut gs = groups(&text);
-    let at = gs.iter().position(|(c, x)| c == "0" && x == "VIEWPORT").unwrap();
+    // The viewport under test, by its handle (the writer also emits the layout's own viewport).
+    let at =
+        (0..gs.len()).find(|&i| gs[i] == ("0".to_string(), "VIEWPORT".to_string()) && gs.get(i + 1) == Some(&("5".to_string(), v.hex()))).unwrap();
     let i = at + gs[at..].iter().position(|(c, _)| c == "12").unwrap();
     // Centre (50, 50) written as target (9500, -19600) + centre (-9450, 19650).
     gs[i].1 = "-9450.0".into();
