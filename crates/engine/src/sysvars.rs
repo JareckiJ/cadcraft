@@ -365,10 +365,8 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         "CONSTRAINTINFER" => s.doc_mut()?.parametric.settings.infer = as_bool(v).ok_or_else(bad)?,
         "CTAB" => {
             let tab = v.as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or_else(bad)?;
-            if let Some(c) = crate::cmd::find_command("layout.set") {
-                let _ = (c.run)(s, &json!({ "name": tab }));
-            }
-            return Ok(());
+            let Some(c) = crate::cmd::find_command("layout.set") else { return Err(bad()) };
+            return (c.run)(s, &json!({ "name": tab })).map(|_| ());
         }
         "CECOLOR" => {
             let c = v
@@ -391,33 +389,38 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         }
         "CVPORT" => {
             let id = as_i(v).filter(|i| *i >= 1).ok_or_else(bad)?;
-            s.doc_mut()?.header.set_i64("CVPORT", id);
-            if let cadcraft_doc::Space::Paper(layout_name) = s.layout_space()
-                && let Ok(d) = s.doc()
-                && let Some(store) = d.space(&cadcraft_doc::Space::Paper(layout_name))
-            {
-                let vp_h = store
-                    .iter()
-                    .find_map(|e| match &e.kind {
-                        cadcraft_doc::EntityKind::Viewport(vp) if i64::from(vp.id) == id => Some(e.handle),
-                        _ => None,
-                    })
-                    .or_else(|| {
-                        let idx = usize::try_from(id.saturating_sub(2)).ok()?;
-                        store
-                            .iter()
-                            .filter_map(|e| match &e.kind {
-                                cadcraft_doc::EntityKind::Viewport(vp) if vp.id != 1 => Some(e.handle),
-                                _ => None,
-                            })
-                            .nth(idx)
-                    });
-                if let Some(h) = vp_h
-                    && let Ok(st) = s.state_mut()
-                {
-                    st.mspace = Some(h);
+            if let cadcraft_doc::Space::Paper(layout_name) = s.layout_space() {
+                if id == 1 {
+                    if let Ok(st) = s.state_mut() {
+                        st.mspace = None;
+                    }
+                    s.doc_mut()?.header.set_i64("CVPORT", 1);
+                    return Ok(());
+                }
+                let vp_h = s.doc().ok().and_then(|d| {
+                    let store = d.space(&cadcraft_doc::Space::Paper(layout_name))?;
+                    store
+                        .iter()
+                        .find_map(|e| match &e.kind {
+                            cadcraft_doc::EntityKind::Viewport(vp) if i64::from(vp.id) == id => Some(e.handle),
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            let idx = usize::try_from(id.checked_sub(2)?).ok()?;
+                            store
+                                .iter()
+                                .filter_map(|e| match &e.kind {
+                                    cadcraft_doc::EntityKind::Viewport(vp) if vp.id != 1 => Some(e.handle),
+                                    _ => None,
+                                })
+                                .nth(idx)
+                        })
+                }).ok_or_else(bad)?;
+                if let Ok(st) = s.state_mut() {
+                    st.mspace = Some(vp_h);
                 }
             }
+            s.doc_mut()?.header.set_i64("CVPORT", id);
             return Ok(());
         }
         _ => {

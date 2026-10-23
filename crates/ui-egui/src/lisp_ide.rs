@@ -741,7 +741,10 @@ fn eval_quick_expr(app: &mut CadApp) {
         ide.output.push(format!("  {l}"));
     }
     match res {
-        Ok(Some(Err(e))) | Err(e) => {
+        Ok(Some(Err(e))) => {
+            ide.output.push(format!("  {}: {e}", t("Error")));
+        }
+        Err(e) => {
             ide.output.push(format!("  {}: {e}", t("Error")));
         }
         _ => {}

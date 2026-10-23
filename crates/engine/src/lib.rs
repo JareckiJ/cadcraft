@@ -1394,7 +1394,7 @@ impl Session {
             self.dotnet_pick.status = "cancel".into();
         }
         // Esc stops a LISP routine waiting for input, and the command it paused in.
-        if self.lisp_waiting() || self.lisp_running() {
+        if self.lisp_waiting() || (self.lisp_running() && !self.lisp.executing) {
             if self.running.is_some() {
                 let _ = self.feed(Some(Input::Cancel));
             }

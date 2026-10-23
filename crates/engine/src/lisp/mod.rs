@@ -107,6 +107,8 @@ pub struct LispState {
     run: Option<Box<Run>>,
     /// A routine runs, from its start to its end (also while its machine is out of `run`).
     active: bool,
+    /// True while `lisp_drive` has taken `run` out to step the VM.
+    pub(crate) executing: bool,
     /// Files loaded by APPLOAD, by name, for `(load name)` where there is no file system.
     files: HashMap<String, String>,
     /// Files explicitly loaded by the user via `Session::lisp_load`, replayed into newly opened drawings.
@@ -257,7 +259,7 @@ impl Session {
         inputs: Vec<Value>,
         label: String,
     ) -> crate::Result<Option<std::result::Result<Value, String>>> {
-        if self.lisp.active && self.lisp.run.is_none() {
+        if self.lisp.active && self.lisp.run.is_none() && !self.lisp.executing {
             self.lisp.active = false;
         }
         if self.lisp.active {
@@ -335,11 +337,13 @@ impl Session {
             let mut env = self.lisp_env_take();
             value::set_string_budget(run.string_bytes, self.lisp.limits.string_bytes);
             value::set_cell_limit(self.lisp.limits.cells.max(run.cells_at_start));
+            self.lisp.executing = true;
             let outcome = {
                 let machine = &mut run.machine;
                 let mut ctx = Ctx { s: self, env: &mut env, depth: 0 };
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| machine.run(&mut ctx, SLICE)))
             };
+            self.lisp.executing = false;
             run.string_bytes = value::string_bytes_used();
             let outcome = match outcome {
                 Ok(o) => o,
@@ -597,7 +601,7 @@ impl Session {
 
     /// A `c:` function for a command name typed at the command line.
     pub(crate) fn lisp_command(&self, name: &str) -> Option<Value> {
-        if self.lisp.active && self.lisp.run.is_some() {
+        if self.lisp.active && (self.lisp.run.is_some() || self.lisp.executing) {
             return None;
         }
         let cname = format!("C:{name}");
@@ -616,7 +620,7 @@ impl Session {
 
     /// Replay any LISP files loaded via [`Session::lisp_load`] into the active drawing if not yet loaded there.
     pub(crate) fn lisp_ensure_user_loaded(&mut self) {
-        if (self.lisp.active && self.lisp.run.is_some()) || self.lisp.user_loaded.is_empty() {
+        if (self.lisp.active && (self.lisp.run.is_some() || self.lisp.executing)) || self.lisp.user_loaded.is_empty() {
             return;
         }
         let Ok(uid) = self.state().map(|s| s.uid) else { return };

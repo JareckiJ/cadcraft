@@ -320,12 +320,12 @@ fn resolve_ole(secs: &[Section], d: &mut Drawing) {
             }
             let Some(h) = tags.iter().find(|t| t.code == 5).and_then(|t| Handle::parse_hex(&t.str())) else { return };
             let raw_bytes = decode_hex_tags(tags);
-            let Some((bytes, px)) = extract_ole_image(&raw_bytes) else { return };
             let asset_key = format!("__ole_{}__", h.hex());
-            d.image_assets.insert(asset_key.clone(), Arc::new(bytes));
             let name = tags.iter().find(|t| t.code == 3).map(Tag::str).unwrap_or_else(|| "Picture (Device Independent Bitmap)".to_string());
             let ole_type = tags.iter().find(|t| t.code == 71).map(|t| t.i64() as i32).unwrap_or(3);
-            d.store_ole_item(asset_key.clone(), name, ole_type, raw_bytes);
+            d.store_ole_item(asset_key.clone(), name, ole_type, raw_bytes.clone());
+            let Some((bytes, px)) = extract_ole_image(&raw_bytes) else { return };
+            d.image_assets.insert(asset_key, Arc::new(bytes));
 
             let update_store = |store: &mut EntityStore| {
                 if let Some(e) = store.get(h)
