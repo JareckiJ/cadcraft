@@ -174,7 +174,7 @@ fn embedded(path: &str) -> Option<Vec<u8>> {
         f.seek(SeekFrom::Start(at)).ok()?;
         let mut sec = Vec::new();
         f.take(MAX_PREVIEW_BYTES).read_to_end(&mut sec).ok()?;
-        return dwg_preview(&sec, at).and_then(|img| finish(img));
+        return dwg_preview(&sec, at).and_then(finish);
     }
     if lower.ends_with(".dxf") {
         let mut text = String::new();

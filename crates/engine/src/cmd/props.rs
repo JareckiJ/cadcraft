@@ -1161,29 +1161,6 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use crate::Session;
-
-    #[test]
-    fn properties_set_rejects_unloaded_linetype() {
-        let mut s = Session::new();
-        s.execute("linetype", &json!({ "load": "DASHED" })).unwrap();
-        s.execute("line", &json!({ "points": [[0, 0], [50, 0]] })).unwrap();
-        let h = s.doc().unwrap().model.last().unwrap().handle.hex();
-        s.execute("properties.set", &json!({ "handles": [h], "linetype": "DASHED" })).unwrap();
-        assert!(s.execute("properties.set", &json!({ "handles": [h], "linetype": "NOPE" })).is_err());
-        let lt = |s: &Session| s.doc().unwrap().model.last().unwrap().common.linetype.clone();
-        assert_eq!(lt(&s), "DASHED");
-        for ok in ["ByBlock", "ByLayer"] {
-            s.execute("properties.set", &json!({ "handles": [h], "linetype": ok })).unwrap();
-            assert_eq!(lt(&s), ok);
-        }
-    }
-}
-
 /// An MTEXT attachment (1..=9) from a justification code: TL TC TR ML MC MR BL BC BR (or 1..9).
 fn mtext_attach(j: &str) -> Option<u8> {
     let u = j.trim().to_ascii_uppercase();
@@ -1259,5 +1236,28 @@ fn rejustify_mtext(d: &cadcraft_doc::Drawing, t: &mut cadcraft_doc::MText, attac
     if shift.is_finite() {
         t.insert.x += shift.x;
         t.insert.y += shift.y;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn properties_set_rejects_unloaded_linetype() {
+        let mut s = Session::new();
+        s.execute("linetype", &json!({ "load": "DASHED" })).unwrap();
+        s.execute("line", &json!({ "points": [[0, 0], [50, 0]] })).unwrap();
+        let h = s.doc().unwrap().model.last().unwrap().handle.hex();
+        s.execute("properties.set", &json!({ "handles": [h], "linetype": "DASHED" })).unwrap();
+        assert!(s.execute("properties.set", &json!({ "handles": [h], "linetype": "NOPE" })).is_err());
+        let lt = |s: &Session| s.doc().unwrap().model.last().unwrap().common.linetype.clone();
+        assert_eq!(lt(&s), "DASHED");
+        for ok in ["ByBlock", "ByLayer"] {
+            s.execute("properties.set", &json!({ "handles": [h], "linetype": ok })).unwrap();
+            assert_eq!(lt(&s), ok);
+        }
     }
 }

@@ -318,7 +318,7 @@ fn backwards_and_upside_down_mirror_text() {
     // The text's own flags mirror it (as AutoCAD: the style's only seed new text).
     let flags = |d: &mut Drawing, b: bool, u: bool| {
         let h = d.model.iter().next().map(|e| e.handle).unwrap();
-        d.modify_entity(h, |e| {
+        let _ = d.modify_entity(h, |e| {
             if let EntityKind::Text(t) = &mut e.kind {
                 (t.backwards, t.upside_down) = (b, u);
             }
