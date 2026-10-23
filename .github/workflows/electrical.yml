@@ -20,7 +20,7 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Format
-        run: cargo fmt -p cadcraft-engine -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-ui-egui -- --check
+        run: cargo fmt -p cadcraft-engine -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-ui-egui -p cadcraft-cli -- --check
       - name: Keep Cargo.lock in step with new dependencies
         shell: bash
         run: |
@@ -54,7 +54,15 @@ jobs:
           if [ $status -eq 0 ]; then
             cargo test -p cadcraft-engine 2>&1 | tee t2.txt || { report t2.txt engine-tests; status=1; }
           fi
-          cargo clippy -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-engine -p cadcraft-ui-egui --all-targets -- -D warnings 2>&1 | tee t3.txt || { report t3.txt clippy; status=1; }
+          cargo clippy -p cadcraft-ecad -p cadcraft-ecad-cloud -p cadcraft-engine -p cadcraft-ui-egui -p cadcraft-cli --all-targets -- -D warnings 2>&1 | tee t3.txt || { report t3.txt clippy; status=1; }
+          # The generator end to end: a project from the example BOM and netlist.
+          if [ $status -eq 0 ]; then
+            cargo run -q -p cadcraft-cli -- generate --bom examples/electrical/generator/bom.csv \
+              --netlist examples/electrical/generator/netlist.csv --template examples/electrical/generator/template \
+              --out gen-out 2>&1 | tee t4.txt || { report t4.txt generate; status=1; }
+            ls gen-out/*.dxf > /dev/null 2>&1 || { echo "::error title=generate::no sheets written"; status=1; }
+            grep -q "warning\|failed" t4.txt && { report t4.txt generate-warnings; status=1; }
+          fi
           # On success, show the test counts so a passing run proves the tests ran.
           if [ $status -eq 0 ]; then
             echo "::notice title=tests::$(grep -h 'test result' t1.txt t2.txt 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ')"

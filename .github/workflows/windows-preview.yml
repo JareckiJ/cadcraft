@@ -28,6 +28,10 @@ jobs:
           mkdir -p preview
           cp target/release/cadcraft.exe target/release/cadcraft-cli.exe preview/
           bash examples/electrical/make-demo.sh target/release/cadcraft-cli.exe preview/demo
+          target/release/cadcraft-cli.exe generate --bom examples/electrical/generator/bom.csv \
+            --netlist examples/electrical/generator/netlist.csv --template examples/electrical/generator/template \
+            --out preview/generated --name "Pump starter"
+          cp -r examples/electrical/generator preview/generator-example
           cp examples/electrical/README.md preview/HOW-TO-TRY.md
       - uses: actions/upload-artifact@v4
         with:
