@@ -24,14 +24,31 @@ mod web {
     const LOADING_ID: &str = "cadcraft_loading";
 
     /// The app, the files File > Open… and drag and drop read for it in the background, the
-    /// page embedding it (`?host=parent`), and the browser's `prefers-reduced-motion` (it stays
-    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change).
-    struct Shell(CadApp, crate::upload::Inbox, Option<(crate::host::Bridge, crate::host::DirtyReport)>, Option<web_sys::MediaQueryList>);
+    /// page embedding it (`?host=parent`), the browser's `prefers-reduced-motion` (it stays
+    /// live, so View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting follows a change),
+    /// and the success replies still owed to that page.
+    struct Shell(
+        CadApp,
+        crate::upload::Inbox,
+        Option<(crate::host::Bridge, crate::host::DirtyReport)>,
+        Option<web_sys::MediaQueryList>,
+        crate::PendingOpens,
+    );
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             self.1.take_dropped(ctx);
-            self.1.drain(&mut self.0);
+            // A drawing the page embedding CADCraft sent opens here. Its success reply waits for
+            // the UI pass that shows it; failures can be answered at once (#1666).
+            let drained = self.1.drain(&mut self.0);
+            if let Some((bridge, _)) = &self.2 {
+                for reply in &drained.replies {
+                    bridge.post_open(reply);
+                }
+            }
+            for (name, uid) in drained.opened {
+                self.4.opened(&name, uid);
+            }
             self.0.system_animations = self.3.as_ref().map(|reduced| !reduced.matches());
             self.0.logic(ctx);
             if let Some((bridge, reported)) = &self.2 {
@@ -52,6 +69,17 @@ mod web {
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.0.ui(ui);
+            // The pass just showed a page: answer the upload that opened its drawing, and report
+            // an upload a later one superseded before this pass (#1666). The Start page displays
+            // no drawing, so replies stay queued until a drawing page is shown.
+            let shown = self.0.session.state().ok().map(|st| st.uid);
+            let page = if self.0.ui.start_tab { crate::ShownPage::Start } else { crate::ShownPage::Drawing(shown) };
+            let replies = self.4.presented(page);
+            if let Some((bridge, _)) = &self.2 {
+                for reply in &replies {
+                    bridge.post_open(reply);
+                }
+            }
             if let Some((bridge, reported)) = &self.2 {
                 bridge.report_dirty(&self.0, reported);
             }
@@ -152,7 +180,7 @@ mod web {
                             (bridge, crate::host::DirtyReport::default())
                         });
                         let reduced_motion = web_sys::window().and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten());
-                        Ok(Box::new(Shell(app, inbox, host, reduced_motion)))
+                        Ok(Box::new(Shell(app, inbox, host, reduced_motion, crate::PendingOpens::default())))
                     }),
                 )
                 .await;
@@ -177,6 +205,118 @@ fn wants_cpu(query: &str) -> bool {
     query.trim_start_matches('?').split('&').any(|p| p == "cpu" || p.starts_with("cpu="))
 }
 
+/// The answer owed to the page embedding CADCraft for a drawing it sent (`?host=parent`): the
+/// drawing opened, or it didn't and why (#1666). The hub waits for this instead of guessing.
+///
+/// The message shapes are pure so they can be tested without a browser; [`crate::host::Bridge`]
+/// turns the fields into a `postMessage`.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenReply {
+    /// The drawing's name, as the parent sent it (made safe to open).
+    name: String,
+    /// Why it couldn't be opened; `None` once it is loaded and showing.
+    error: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl OpenReply {
+    /// What to report for the drawing `name`: opened (`error` `None`) or failed with `error`.
+    pub fn new(name: &str, error: Option<&str>) -> Self {
+        Self { name: name.to_string(), error: error.map(str::to_string) }
+    }
+
+    /// The message's `type`: `cadcraft:opened`, or `cadcraft:open-failed` with a reason.
+    pub fn kind(&self) -> &'static str {
+        if self.error.is_some() { "cadcraft:open-failed" } else { "cadcraft:opened" }
+    }
+
+    /// The message's fields, in posting order: `type`, `name`, and `error` when it failed.
+    pub fn fields(&self) -> Vec<(&'static str, &str)> {
+        let mut fields = vec![("type", self.kind()), ("name", self.name.as_str())];
+        if let Some(error) = &self.error {
+            fields.push(("error", error.as_str()));
+        }
+        fields
+    }
+}
+
+/// Why an upload whose drawing never reached a UI pass is reported as not opened: another upload
+/// draining before that pass became the drawing shown (#1666).
+#[cfg(any(target_arch = "wasm32", test))]
+const SUPERSEDED_OPEN: &str = "Open: superseded by another drawing before it was shown";
+
+/// The page a UI pass displayed (#1666): host opens are answered only after the pass that showed
+/// their drawing. The Start page displays no drawing even while the session still holds an active
+/// one, so replies wait there for the pass that shows a drawing page.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShownPage {
+    /// The Start page: no drawing is displayed.
+    Start,
+    /// A drawing page, displaying the session's active drawing (its uid, when it has one).
+    Drawing(Option<u64>),
+}
+
+/// Success replies owed to the page embedding CADCraft for drawings it sent, each held until the
+/// UI pass that presents its drawing (#1666).
+///
+/// `logic` runs before `ui` and can run while the UI is hidden, and several uploads can drain
+/// before one UI pass. Only the last of those drawings is shown by that pass, so the others are
+/// answered as superseded instead of claiming to have opened.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Default)]
+pub struct PendingOpens {
+    /// `(name, document uid)` per successful host open not yet answered, in drain order.
+    waiting: Vec<(String, u64)>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl PendingOpens {
+    /// Hold the success reply for `name`, whose drawing is `uid`, until a UI pass shows it.
+    pub fn opened(&mut self, name: &str, uid: u64) {
+        self.waiting.push((name.to_string(), uid));
+    }
+
+    /// Whether a success reply is still owed (none has been shown yet).
+    pub fn is_empty(&self) -> bool {
+        self.waiting.is_empty()
+    }
+
+    /// Answer the held successes after a UI pass displayed `page`: `cadcraft:opened` for the
+    /// drawing the pass showed, `cadcraft:open-failed` for any earlier one it superseded. The
+    /// Start page shows no drawing, so it answers nothing and every reply stays queued.
+    pub fn presented(&mut self, page: ShownPage) -> Vec<OpenReply> {
+        match page {
+            ShownPage::Start => Vec::new(),
+            ShownPage::Drawing(shown) => self
+                .waiting
+                .drain(..)
+                .map(|(name, uid)| if shown == Some(uid) { OpenReply::new(&name, None) } else { OpenReply::new(&name, Some(SUPERSEDED_OPEN)) })
+                .collect(),
+        }
+    }
+}
+
+/// What one drain of the upload inbox produced: replies ready to post now (uploads that failed),
+/// and successful host opens whose reply waits for the UI pass that shows their drawings (#1666).
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Default)]
+pub struct Drain {
+    /// Failures to post at once: no drawing opened, so no UI pass is involved.
+    pub replies: Vec<OpenReply>,
+    /// `(name, drawing uid)` per host upload that opened a drawing, in drain order.
+    pub opened: Vec<(String, u64)>,
+}
+
+/// Why a drawing the page embedding CADCraft sent is refused before it reaches the app, if it is:
+/// that channel only opens drawings, while a picked or dropped `.lsp` loads as APPLOAD loads it
+/// (#1666).
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn host_open_error(name: &str) -> Option<String> {
+    cadcraft_ui_egui::is_lisp_file(name).then(|| format!("Open: {name} is a LISP file, not a drawing"))
+}
+
 #[cfg(target_arch = "wasm32")]
 mod upload;
 
@@ -192,7 +332,93 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::wants_cpu;
+    use super::{OpenReply, PendingOpens, SUPERSEDED_OPEN, ShownPage, host_open_error, wants_cpu};
+
+    /// #1666: the page embedding CADCraft hears `cadcraft:opened` once the drawing it sent is
+    /// loaded and showing, or `cadcraft:open-failed` with the reason.
+    #[test]
+    fn host_open_replies_name_the_drawing_and_the_failure() {
+        let opened = OpenReply::new("Bracket.dxf", None);
+        assert_eq!(opened.fields(), vec![("type", "cadcraft:opened"), ("name", "Bracket.dxf")]);
+
+        let failed = OpenReply::new("Bracket.dxf", Some("Open: not a drawing"));
+        assert_eq!(failed.fields(), vec![("type", "cadcraft:open-failed"), ("name", "Bracket.dxf"), ("error", "Open: not a drawing")]);
+    }
+
+    /// #1666: a drawing the parent sent is answered `cadcraft:opened` only once a UI pass has
+    /// shown it. `logic` can run with the UI hidden, so the success reply waits.
+    #[test]
+    fn a_host_drawing_is_answered_opened_once_a_ui_pass_shows_it() {
+        let mut pending = PendingOpens::default();
+        pending.opened("Bracket.dxf", 7);
+        assert!(!pending.is_empty(), "no UI pass yet: the reply is still owed");
+
+        let replies = pending.presented(ShownPage::Drawing(Some(7)));
+        assert_eq!(replies, vec![OpenReply::new("Bracket.dxf", None)]);
+        assert!(pending.is_empty());
+
+        // One reply per open, not one per UI pass.
+        assert!(pending.presented(ShownPage::Drawing(Some(7))).is_empty());
+    }
+
+    /// #1666: two uploads can drain before one UI pass. Only the last drawing is shown, so the
+    /// first must not claim `cadcraft:opened`; it reports why it was not shown instead.
+    #[test]
+    fn uploads_drained_before_one_ui_pass_report_only_the_shown_drawing_as_opened() {
+        let mut pending = PendingOpens::default();
+        pending.opened("First.dxf", 1);
+        pending.opened("Second.dxf", 2);
+
+        let replies = pending.presented(ShownPage::Drawing(Some(2)));
+        let fields: Vec<_> = replies.iter().map(OpenReply::fields).collect();
+        assert_eq!(
+            fields,
+            vec![
+                vec![("type", "cadcraft:open-failed"), ("name", "First.dxf"), ("error", SUPERSEDED_OPEN)],
+                vec![("type", "cadcraft:opened"), ("name", "Second.dxf")],
+            ]
+        );
+    }
+
+    /// #1666: the Start page displays no drawing although the session still holds the drawing an
+    /// upload opened, so the pass showing it answers nothing and the reply stays queued until the
+    /// drawing page is shown.
+    #[test]
+    fn a_pass_showing_the_start_page_leaves_a_host_open_unanswered() {
+        let mut pending = PendingOpens::default();
+        pending.opened("Bracket.dxf", 7);
+
+        assert!(pending.presented(ShownPage::Start).is_empty(), "the Start page shows no drawing");
+        assert!(!pending.is_empty(), "the reply stays queued for the drawing page");
+
+        assert_eq!(pending.presented(ShownPage::Drawing(Some(7))), vec![OpenReply::new("Bracket.dxf", None)]);
+        assert!(pending.is_empty());
+    }
+
+    /// #1666: each success stays associated with the upload that opened it, across drains and
+    /// UI passes; a drawing shown by its own pass is not reported again later.
+    #[test]
+    fn each_drained_upload_keeps_its_own_reply() {
+        let mut pending = PendingOpens::default();
+        pending.opened("First.dxf", 1);
+        assert_eq!(pending.presented(ShownPage::Drawing(Some(1))), vec![OpenReply::new("First.dxf", None)]);
+
+        pending.opened("Second.dxf", 2);
+        pending.opened("Third.dxf", 3);
+        let replies = pending.presented(ShownPage::Drawing(Some(3)));
+        assert_eq!(replies.first(), Some(&OpenReply::new("Second.dxf", Some(SUPERSEDED_OPEN))));
+        assert_eq!(replies.get(1), Some(&OpenReply::new("Third.dxf", None)));
+    }
+
+    /// #1666: the host channel opens drawings only. A `.lsp` name is refused like a failed open
+    /// instead of being loaded as LISP and answered `cadcraft:opened`.
+    #[test]
+    fn host_supplied_lisp_files_are_refused_as_drawings() {
+        assert_eq!(host_open_error("Bracket.dxf"), None);
+        assert_eq!(host_open_error("Bracket.DWG"), None);
+        assert_eq!(host_open_error("helpers.lsp"), Some("Open: helpers.lsp is a LISP file, not a drawing".into()));
+        assert_eq!(host_open_error("HELPERS.LSP"), Some("Open: HELPERS.LSP is a LISP file, not a drawing".into()));
+    }
 
     #[test]
     fn cpu_flag_is_detected() {

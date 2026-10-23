@@ -423,7 +423,9 @@ impl CadApp {
         // A LISP file (dropped on the window): loaded as APPLOAD loads it.
         if is_lisp_file(path) {
             match cadcraft_engine::lisp::builtins::read_text_file(path) {
-                Some(text) => self.load_lisp(path, &text),
+                Some(text) => {
+                    let _ = self.load_lisp(path, &text);
+                }
                 None => self.open_failed(format!("APPLOAD: can't read {path}")),
             }
             return;
@@ -435,7 +437,7 @@ impl CadApp {
         #[cfg(target_arch = "wasm32")]
         {
             let r = self.run("open", json!({ "path": path }));
-            self.opened(r);
+            let _ = self.opened(r);
         }
     }
 
@@ -450,15 +452,22 @@ impl CadApp {
             if let Err(e) = &r {
                 self.session.echo(e.clone());
             }
-            self.opened(r);
+            let _ = self.opened(r);
         }
     }
 
     /// Load a LISP file: its routine runs and may wait for the user (APPLOAD typed or from the
-    /// menu runs this way too).
-    fn load_lisp(&mut self, name: &str, text: &str) {
-        if let Err(e) = self.session.lisp_load(name, text, false) {
-            self.session.echo(e.to_string());
+    /// menu runs this way too). A load that fails is echoed and returned, for a caller that has
+    /// to report it (#1666); a routine that yields keeps running and is not a failure.
+    fn load_lisp(&mut self, name: &str, text: &str) -> Result<(), String> {
+        match self.session.lisp_load(name, text, false) {
+            Ok(Some(Err(e))) => Err(e),
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let e = e.to_string();
+                self.session.echo(e.clone());
+                Err(e)
+            }
         }
     }
 
@@ -479,18 +488,25 @@ impl CadApp {
     }
 
     /// Open a drawing from its contents where there is no path to open (on the web: the file
-    /// picker, a dropped file). Runs OPEN with `{data, name}` as [`Self::open_path`] runs it with
-    /// `{path}`; failures show on the command line and in the status bar.
-    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) {
+    /// picker, a dropped file, or one the page embedding CADCraft sent). Runs OPEN with
+    /// `{data, name}` as [`Self::open_path`] runs it with `{path}`; failures show on the command
+    /// line and in the status bar, and are returned for a caller that has to report them (the
+    /// page waiting on `cadcraft:opened`, #1666).
+    pub fn open_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         if let Some(e) = Self::open_size_error(name, bytes.len() as u64) {
-            return self.open_failed(e);
+            self.open_failed(e.clone());
+            return Err(e);
         }
         if is_lisp_file(name) {
-            return self.load_lisp(name, &String::from_utf8_lossy(bytes));
+            let r = self.load_lisp(name, &String::from_utf8_lossy(bytes));
+            if let Err(e) = &r {
+                self.set_status(e.clone());
+            }
+            return r;
         }
         let data = cadcraft_engine::cmd::file::base64_encode(bytes);
         let r = self.run("open", json!({ "data": data, "name": name }));
-        self.opened(r);
+        self.opened(r)
     }
 
     /// Report a file that could not be opened before OPEN ran (unreadable, too large) as a failed
@@ -501,9 +517,14 @@ impl CadApp {
         self.set_status(e);
     }
 
-    fn opened(&mut self, r: Result<Value, String>) {
+    /// Handle OPEN's outcome: show a failure, or the opened drawing and the warnings that came
+    /// with it. Returns the failure for a caller that must report it onward.
+    fn opened(&mut self, r: Result<Value, String>) -> Result<(), String> {
         match r {
-            Err(e) => self.set_status(e),
+            Err(e) => {
+                self.set_status(e.clone());
+                Err(e)
+            }
             Ok(v) => {
                 self.ui.start_tab = false;
                 self.canvas.zoom_pending = true;
@@ -520,6 +541,7 @@ impl CadApp {
                 if self.session.state().is_ok_and(|st| cadcraft_engine::blockedit::has_authoring_elements(&st.doc)) {
                     self.ui.dialog = Some("authoring".into());
                 }
+                Ok(())
             }
         }
     }
@@ -754,8 +776,8 @@ pub fn now_ms() -> f64 {
     }
 }
 
-/// A LISP source file, by its name.
-fn is_lisp_file(name: &str) -> bool {
+/// A LISP source file, by its name: loaded as APPLOAD loads it, never opened as a drawing.
+pub fn is_lisp_file(name: &str) -> bool {
     std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("lsp"))
 }
 

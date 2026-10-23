@@ -7,7 +7,7 @@ use cadcraft_ui_egui::{CadApp, Services};
 #[test]
 fn a_dropped_lisp_file_loads_and_defines_its_commands() {
     let mut app = CadApp::new(Session::new(), Services::default());
-    app.open_bytes("Hello.LSP", b"(defun c:hello () (princ \"hi from lisp\") (princ))");
+    app.open_bytes("Hello.LSP", b"(defun c:hello () (princ \"hi from lisp\") (princ))").ok();
     assert!(app.session.log.iter().any(|l| l == "Hello.LSP successfully loaded."), "{:?}", app.session.log);
     // Still the same drawing: a LISP file isn't opened as one.
     assert_eq!(app.session.docs.len(), 1);
@@ -15,10 +15,29 @@ fn a_dropped_lisp_file_loads_and_defines_its_commands() {
     assert_eq!(app.session.log.last().map(String::as_str), Some("hi from lisp"));
 }
 
+/// A LISP file that fails to load reports its error to the caller that opened it by contents (the
+/// web's inbox answers the page from that result), instead of being counted as opened (#1666).
+#[test]
+fn a_broken_lisp_file_reports_the_load_error() {
+    let mut app = CadApp::new(Session::new(), Services::default());
+    let docs = app.session.docs.len();
+
+    let e = app.open_bytes("broken.lsp", b"(defun c:broken (").err();
+    assert!(e.as_ref().is_some_and(|e| e.contains("malformed list")), "{e:?}");
+    assert_eq!(app.session.docs.len(), docs, "no drawing was opened");
+    assert!(app.status.as_ref().is_some_and(|(s, _)| s.contains("malformed list")), "{:?}", app.status);
+
+    // A runtime error in the file is a failed load too.
+    let e = app.open_bytes("fails.lsp", b"(missing-function)").err();
+    assert!(e.as_ref().is_some_and(|e| e.contains("no function definition")), "{e:?}");
+    assert_eq!(app.session.docs.len(), docs, "no drawing was opened");
+    assert!(app.status.as_ref().is_some_and(|(s, _)| s.contains("no function definition")), "{:?}", app.status);
+}
+
 #[test]
 fn a_long_routine_runs_across_frames() {
     let mut app = CadApp::new(Session::new(), Services::default());
-    app.open_bytes("loop.lsp", b"(setq i 0) (while (< i 2000000) (setq i (1+ i))) (princ \"done\")");
+    app.open_bytes("loop.lsp", b"(setq i 0) (while (< i 2000000) (setq i (1+ i))) (princ \"done\")").ok();
     assert!(app.session.lisp_busy(), "a slice per frame");
     let ctx = egui::Context::default();
     let mut frames = 0;
