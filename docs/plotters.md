@@ -97,10 +97,11 @@ In the file name, characters other than letters, digits, spaces and `-_()+,` bec
   margins become the layout's printable area. Without `paper`, a device change keeps the
   current paper if the device has it, else takes the device's default paper. A device change
   also takes the device's orientation unless `landscape` is given. `device: "None"` clears it.
-- `plot {device?, paper?, …}` plots with `device`, or with the layout's page setup device.
+- `plot {device?, paper?, …}` plots with `device`, or with the page setup's device.
   - The device sets the output and resolution.
   - `paper` (one of the device's papers) sets the size and margins for this plot.
-  - A model-space plot without `paper` uses the device's default paper and orientation.
+  - A model-space plot without `paper` on another device than its page setup's uses the
+    device's default paper and orientation.
   - For Model plots, `center` defaults to `true`, preserving the existing centered output. Set
     `center: false` with `offset: [x, y]` to place the plotted bounds' lower-left corner from the
     printable area's lower-left origin; offsets are millimetres, default to `[0, 0]`, and are
@@ -108,19 +109,36 @@ In the file name, characters other than letters, digits, spaces and `-_()+,` bec
     an active offset is rejected rather than ignored. Layout plots do not use model offsets.
   - `exportpdf` takes the same options and always writes PDF.
 
-Model-space PDF plots don't apply the paper's margins yet. They fit the drawing inside the
-default margins. PNG plots apply them. SVG plots show a layout's whole sheet, or the
-model-space extents.
+PDF and PNG plots apply the paper margins from the page setup or plot device for placement
+and clipping. SVG plots show a layout's whole sheet, or the model-space extents.
+
+## Model space page setup
+
+Model space has a page setup of its own, as each layout has.
+
+- `pagesetup {layout: "Model", …}` (or `pagesetup` without `layout` on the Model tab) stores
+  it, one undo step. It takes the layout options and a plot area of `extents`, `display` or
+  `limits`. Saving a model plot window through PAGESETUP or Apply to Layout is not available yet.
+- Without `layout`, PAGESETUP targets the displayed tab. Editing model space through a layout
+  viewport (MSPACE) still reads and updates that layout's page setup.
+- Until it is set, model space plots the drawing extents fitted and centred, on A4 in metric
+  drawings and ANSI A otherwise.
+- PLOT, EXPORTPDF and PREVIEW take its device, paper, orientation, margins, plot style
+  table, lineweights and transparency, as they take a layout's. Its plot area, scale and
+  centring are what the Plot dialog opens with; `plot` without them still plots the extents,
+  fitted and centred.
+- The Plot dialog's Apply to Layout saves the dialog's settings in the page setup of the
+  layout plotted, Model included, without plotting. The X and Y offsets are not kept.
+- DXF and DWG files keep it in the Model layout's plot settings.
 
 ## Plot transparency
 
 Objects plot with their transparency (their own, their layer's when ByLayer, the block
 reference's when ByBlock) only when asked, as in AutoCAD:
 
-- `pagesetup {layout, plotTransparency: bool}` stores the layout's "Plot transparency" (off by
-  default). The Page Setup Manager and the Plot dialog have the checkbox.
+- `pagesetup {layout, plotTransparency: bool}` stores the layout's (or Model's) "Plot
+  transparency" (off by default). The Page Setup Manager and the Plot dialog have the checkbox.
 - `plot {plotTransparency?: bool}` (and `exportpdf`, `preview`) overrides it for one plot.
-  Model-space plots have it off unless asked.
 - `PLOTTRANSPARENCYOVERRIDE` decides first: 0 never plots transparency, 1 (default) uses the
   setting above, 2 always plots it.
 

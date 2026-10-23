@@ -81,6 +81,32 @@ pub fn paper_unit_mm(d: &Drawing) -> f64 {
     if d.header.i64("MEASUREMENT", 0) == 1 { 1.0 } else { 25.4 }
 }
 
+/// The plot areas currently supported by model-space page setups.
+pub const MODEL_PAGE_AREAS: &[&str] = &["extents", "display", "limits"];
+
+/// Model space's page setup: the drawing's, else the default (the drawing extents fitted and
+/// centred on A4 in metric drawings, ANSI A otherwise).
+pub fn model_page(d: &Drawing) -> PageSetup {
+    let mut page = match &d.model_page {
+        Some(p) => p.clone(),
+        None => {
+            let mut p = PageSetup { plot_area: "extents".into(), scale_to_fit: true, center: true, ..PageSetup::default() };
+            if paper_unit_mm(d) == 1.0
+                && let Some(a4) = paper_size("A4")
+            {
+                p.paper = a4.name.into();
+                p.width_mm = a4.width_mm;
+                p.height_mm = a4.height_mm;
+            }
+            p
+        }
+    };
+    if !MODEL_PAGE_AREAS.contains(&page.plot_area.as_str()) {
+        page.plot_area = "extents".into();
+    }
+    page
+}
+
 /// Millimetres per paper-space unit on a layout with page setup `page`: millimetres when the
 /// page says so (plot paper units mm), else as the drawing's MEASUREMENT says. Drawings from
 /// AutoCAD often have MEASUREMENT 0 with layouts in millimetres (#1058).
@@ -153,5 +179,21 @@ mod tests {
         let hostile = PageSetup { width_mm: f64::NAN, height_mm: -1.0, margins_mm: [1e9; 4], ..PageSetup::default() };
         let s = Sheet::from_page(&hostile, 0.0);
         assert!(s.size.x > 0.0 && s.printable == s.bounds());
+    }
+
+    #[test]
+    fn model_page_default_and_stored() {
+        let mut d = Drawing::new_imperial();
+        let p = model_page(&d);
+        assert_eq!((p.paper.as_str(), p.plot_area.as_str(), p.scale_to_fit, p.center), ("ANSI A (8.50 x 11.00 Inches)", "extents", true, true));
+        d.header.set("MEASUREMENT", cadcraft_doc::HVal::Int(1));
+        assert_eq!(model_page(&d).width_mm, 210.0, "A4 in metric drawings");
+        d.model_page = Some(PageSetup { paper: "Mine".into(), plot_area: "display".into(), ..PageSetup::default() });
+        assert_eq!((model_page(&d).paper.as_str(), model_page(&d).plot_area.as_str()), ("Mine", "display"));
+        // Model page setups do not support layout and window plot areas.
+        for area in ["layout", "window", ""] {
+            d.model_page = Some(PageSetup { plot_area: area.into(), ..PageSetup::default() });
+            assert_eq!(model_page(&d).plot_area, "extents", "{area}");
+        }
     }
 }

@@ -277,24 +277,27 @@ pub fn page_device(cmd: &str, p: &Value, page: &mut PageSetup) -> Result<bool> {
 }
 
 /// The options PLOT / EXPORTPDF hand the plotter with `device` and the device's papers
-/// resolved: `device` (else the layout's page setup device) picks the output (`output`: pdf,
+/// resolved: `device` (else the page setup's device) picks the output (`output`: pdf,
 /// png or svg; EXPORTPDF always writes PDF) and `resolution`; a paper of the device becomes
 /// `width`/`height`/`margins` (mm) and, when not given, the device's orientation. Plots
 /// without a device are unchanged.
 pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     let given = str_param(p, "device").map(str::trim);
+    let space = s.space();
     let layout = match str_param(p, "layout") {
         Some(n) if n.eq_ignore_ascii_case("model") => None,
+        Some(n) => Some(n),
+        None => space.layout(),
+    };
+    let model = layout.is_none();
+    let page = match layout {
         Some(n) => s.doc()?.layout(n).map(|l| l.page.clone()),
-        None => match s.space().layout() {
-            Some(n) => s.doc()?.layout(n).map(|l| l.page.clone()),
-            None => None,
-        },
+        None => Some(cadcraft_render::paper::model_page(s.doc()?)),
     };
     let dev = match given {
         Some(n) if n.is_empty() || n.eq_ignore_ascii_case(NO_DEVICE) => None,
         Some(n) => Some(find_device(n).ok_or_else(|| unknown_device(cmd, n))?),
-        None => layout.as_ref().and_then(|pg| find_device(&pg.device)),
+        None => page.as_ref().and_then(|pg| find_device(&pg.device)),
     };
     let mut out = if p.is_object() { p.clone() } else { json!({}) };
     let (Some(dev), Some(o)) = (dev, out.as_object_mut()) else { return Ok(out) };
@@ -302,6 +305,9 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     let output = if cmd == "exportpdf" { PlotOutput::Pdf } else { dev.output };
     o.insert("output".into(), json!(output.as_str()));
     o.insert("resolution".into(), json!(dev.resolution));
+    // A page setup keeps its paper and orientation; model space on another device than its page
+    // setup's takes the device's.
+    let device_defaults = model && !page.as_ref().is_some_and(|pg| pg.device.eq_ignore_ascii_case(&dev.name));
     let paper = match str_param(p, "paper") {
         Some(name) => match device_paper(&dev, name) {
             Some(pp) => Some(pp),
@@ -310,8 +316,7 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
                 return Err(bad(cmd, format!("plotter `{}` has no paper `{name}` (papers: {})", dev.name, known.join(", "))));
             }
         },
-        // A layout keeps its page setup's paper; model space takes the device's default.
-        None if layout.is_none() => dev.default_paper(),
+        None if device_defaults => dev.default_paper(),
         None => None,
     };
     if let Some(pp) = paper {
@@ -319,7 +324,7 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         o.insert("width".into(), json!(pp.width));
         o.insert("height".into(), json!(pp.height));
         o.insert("margins".into(), json!(pp.margins));
-        if p.get("landscape").is_none() && layout.is_none() {
+        if p.get("landscape").is_none() && device_defaults {
             o.insert("landscape".into(), json!(dev.orientation == Orientation::Landscape));
         }
     }

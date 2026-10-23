@@ -76,7 +76,7 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     k *= shrink;
     let px = |v: f64| (v * k).round().clamp(1.0, 16384.0) as u32;
     let (width, height) = (px(sheet.size.x), px(sheet.size.y));
-    let lineweights = o.lineweights.unwrap_or(if space.is_paper() { page.lineweights } else { true });
+    let lineweights = o.lineweights.unwrap_or(page.lineweights);
     let table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(Arc::new);
     // Paper units per drawing unit: 1 for a layout at 1:1, the fitted scale for model space.
     let fit = matches!(space, Space::Model) || o.fit == Some(true);
@@ -118,7 +118,7 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let (sheet, page) = sheet(d, space, &o)?;
     let window = o.window.filter(|w| !w.is_empty());
     let table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(Arc::new);
-    let lineweights = o.lineweights.unwrap_or(true);
+    let lineweights = o.lineweights.unwrap_or(page.lineweights);
     let est = fit_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, &o);
     // Chord tolerance: about 0.05 mm on paper.
     let tolerance = (0.05 / (sheet.unit_mm * est)).max(1e-9);
@@ -166,6 +166,26 @@ mod tests {
         assert!(plot(&d, &layout, &json!({"output": "png", "resolution": f64::NAN, "margins": [1, 2, 3]})).is_ok());
         assert!(plot(&d, &Space::Model, &json!({"output": "dwf"})).is_err());
         assert!(plot(&d, &Space::Model, &json!({})).unwrap().starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn model_space_plots_on_its_page_setup() {
+        let mut d = drawing();
+        let png = json!({"output": "png", "resolution": 100});
+        assert_eq!(png_size(&plot(&d, &Space::Model, &png).unwrap()), (1169, 827), "A4 landscape by default");
+        let a3 = cadcraft_render::paper_size("A3").unwrap();
+        let page =
+            cadcraft_doc::PageSetup { paper: a3.name.into(), width_mm: a3.width_mm, height_mm: a3.height_mm, landscape: false, ..Default::default() };
+        d.model_page = Some(page.clone());
+        assert_eq!(png_size(&plot(&d, &Space::Model, &png).unwrap()), (1169, 1654), "A3 portrait from the page setup");
+        assert_eq!(pdf::page_for(&d, &Space::Model, &PdfOptions::default()).unwrap(), cadcraft_render::paper::model_page(&d));
+        // The plot's own options still win.
+        assert_eq!(png_size(&plot(&d, &Space::Model, &json!({"output": "png", "resolution": 100, "landscape": true})).unwrap()), (1654, 1169));
+        // Lineweights follow the page setup, as for a layout.
+        d.model_page = Some(cadcraft_doc::PageSetup { lineweights: false, ..page });
+        let thin = plot(&d, &Space::Model, &json!({})).unwrap();
+        assert_eq!(thin, plot(&d, &Space::Model, &json!({"lineweights": false})).unwrap());
+        assert_ne!(thin, plot(&d, &Space::Model, &json!({"lineweights": true})).unwrap());
     }
 
     #[test]

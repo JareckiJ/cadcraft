@@ -816,23 +816,48 @@ struct PlotState {
     offset_mm: [f64; 2],
 }
 
-/// The page setup a plot of `target` starts from: the layout's, or model-space defaults (fitted
-/// extents on A4 in metric drawings, ANSI A otherwise).
+/// The page setup a plot of `target` starts from: the layout's, or model space's.
 fn plot_page(d: &cadcraft_doc::Drawing, target: &str) -> cadcraft_doc::PageSetup {
     if let Some(l) = d.layouts.iter().find(|l| l.name == target) {
         let mut page = l.page.clone();
         page.plot_area = "layout".into();
         return page;
     }
-    let mut page = cadcraft_doc::PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..Default::default() };
-    if cadcraft_render::paper::paper_unit_mm(d) == 1.0
-        && let Some(a4) = cadcraft_render::paper_size("A4")
-    {
-        page.paper = a4.name.into();
-        page.width_mm = a4.width_mm;
-        page.height_mm = a4.height_mm;
+    cadcraft_render::paper::model_page(d)
+}
+
+/// The `pagesetup` parameters that save the dialog's settings in its layout's (or model space's)
+/// page setup: Apply to Layout. Model space also keeps its plot area, scale and centring.
+fn apply_params(st: &PlotState) -> Value {
+    let page = &st.page;
+    let mut p = json!({
+        "layout": st.target,
+        "device": device_label(page),
+        "landscape": page.landscape,
+        "scaleToFit": page.scale_to_fit,
+        "lineweights": page.lineweights,
+        "plotTransparency": page.plot_transparency,
+        "plotStyleTable": page.plot_style_table,
+    });
+    if let Some(o) = p.as_object_mut() {
+        if device_label(page) != "None" || cadcraft_render::paper_size(&page.paper).is_some() {
+            o.insert("paper".into(), json!(page.paper));
+        } else {
+            o.insert("width".into(), json!(page.width_mm));
+            o.insert("height".into(), json!(page.height_mm));
+        }
+        if page.margins_mm.iter().all(|m| m.is_finite() && (0.0..=1000.0).contains(m)) {
+            o.insert("margins".into(), json!(page.margins_mm));
+        }
+        if st.target == "Model" {
+            o.insert("plotArea".into(), json!(page.plot_area));
+            o.insert("center".into(), json!(st.center));
+            if page.scale.is_finite() && page.scale > 0.0 {
+                o.insert("scale".into(), json!(page.scale));
+            }
+        }
     }
-    page
+    p
 }
 
 /// The `plot` parameters for the dialog's settings (without the output path). `preview_dpi`
@@ -915,12 +940,13 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         if ext.is_empty() {
             ext = cadcraft_geom::Bounds2::new(cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(12.0, 9.0));
         }
+        let page = plot_page(d, &target);
         PlotState {
             generation,
-            page: plot_page(d, &target),
+            center: target != "Model" || page.center,
+            page,
             target,
             window: [ext.min.x, ext.min.y, ext.max.x, ext.max.y],
-            center: true,
             offset_mm: [0.0, 0.0],
         }
     });
@@ -941,6 +967,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                     if ui.selectable_label(*n == st.target, n).clicked() && *n != st.target {
                         st.page = plot_page(d, n);
                         st.target = n.clone();
+                        st.center = n != "Model" || st.page.center;
                     }
                 }
             });
@@ -983,19 +1010,15 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         });
         ui.separator();
         ui.horizontal(|ui| {
-            if !model && ui.button("Apply to Layout").on_hover_text("Save these settings in the layout's page setup").clicked() {
-                let page = &st.page;
-                action = Some((
-                    "pagesetup",
-                    json!({
-                        "layout": st.target,
-                        "paper": page.paper,
-                        "landscape": page.landscape,
-                        "scaleToFit": page.scale_to_fit,
-                        "lineweights": page.lineweights,
-                        "plotTransparency": page.plot_transparency,
-                    }),
-                ));
+            // Applying a model plot window is not supported yet.
+            let keepable = !model || st.page.plot_area != "window";
+            if ui
+                .add_enabled(keepable, egui::Button::new("Apply to Layout"))
+                .on_hover_text(format!("Save these settings in the page setup of {} without plotting", st.target))
+                .on_disabled_hover_text("A page setup can't keep a plot window; choose another plot area to apply")
+                .clicked()
+            {
+                action = Some(("pagesetup", apply_params(&st)));
             }
             preview = ui.button("Preview").on_hover_text("The sheet as these settings plot it").clicked();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1200,6 +1223,44 @@ mod plot_dialog_tests {
         assert!(page.plot_transparency);
         apply_page_change(&mut st.page, "plotTransparency", &json!(false));
         assert_eq!(plot_params(&st, None)["plotTransparency"], json!(false));
+    }
+
+    #[test]
+    fn apply_to_layout_saves_the_page_setup_the_dialog_opens_with() {
+        let mut s = Session::new();
+        let mut st = PlotState { page: plot_page(s.doc().unwrap(), "Model"), ..state("Model") };
+        assert_eq!(st.page, cadcraft_render::paper::model_page(s.doc().unwrap()), "the default until one is saved");
+        for (k, v) in [
+            ("paper", json!("A3")),
+            ("landscape", json!(false)),
+            ("plotArea", json!("limits")),
+            ("scaleToFit", json!(false)),
+            ("scale", json!(0.5)),
+            ("lineweights", json!(false)),
+            ("plotTransparency", json!(true)),
+            ("plotStyleTable", json!("monochrome.ctb")),
+        ] {
+            apply_page_change(&mut st.page, k, &v);
+        }
+        st.center = false;
+        s.execute("pagesetup", &apply_params(&st)).unwrap();
+        assert_eq!(plot_page(s.doc().unwrap(), "Model"), cadcraft_doc::PageSetup { center: false, ..st.page.clone() });
+        // A custom paper size goes as its size.
+        st.page.paper = "User (100.00 x 200.00 MM)".into();
+        (st.page.width_mm, st.page.height_mm) = (100.0, 200.0);
+        let p = apply_params(&st);
+        assert!(p.get("paper").is_none() && p["width"] == json!(100.0), "{p}");
+        s.execute("pagesetup", &p).unwrap();
+        assert_eq!(plot_page(s.doc().unwrap(), "Model").paper, "User (100.00 x 200.00 MM)");
+        // A layout keeps its device and plot style table too, but no plot area or placement.
+        let mut st = PlotState { target: "Layout1".into(), page: plot_page(s.doc().unwrap(), "Layout1"), ..state("Layout1") };
+        apply_page_change(&mut st.page, "device", &json!("CADCraft PNG"));
+        apply_page_change(&mut st.page, "plotStyleTable", &json!("grayscale.ctb"));
+        let p = apply_params(&st);
+        assert!(p.get("plotArea").is_none() && p.get("center").is_none() && p.get("scale").is_none(), "{p}");
+        s.execute("pagesetup", &p).unwrap();
+        let page = &s.doc().unwrap().layout("Layout1").unwrap().page;
+        assert_eq!((page.device.as_str(), page.plot_style_table.as_str(), page.plot_area.as_str()), ("CADCraft PNG", "grayscale.ctb", "layout"));
     }
 
     #[test]

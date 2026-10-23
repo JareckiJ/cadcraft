@@ -74,7 +74,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("pagesetup", "Page Setup Manager...", run_pagesetup)
             .menu(&["File", "Page Setup Manager..."])
             .params(
-                "{layout?: current, device?: plotter name (PLOTTERMANAGER) | \"None\", paper?: the device's paper | \"A4\"|\"A3\"|\"Letter\"|\"ANSI B\"|…, width?, height? (mm), landscape?, margins?: [l,b,r,t] mm, lineweights?, plotArea?, scale?, scaleToFit?, center?, plotStyleTable?: \"monochrome.ctb\"|\"grayscale.ctb\"|\"default.ctb\"|\"None\"|…, displayPlotStyles?: bool, plotTransparency?: bool}",
+                "{layout?: current | \"Model\", device?: plotter name (PLOTTERMANAGER) | \"None\", paper?: the device's paper | \"A4\"|\"A3\"|\"Letter\"|\"ANSI B\"|…, width?, height? (mm), landscape?, margins?: [l,b,r,t] mm, lineweights?, plotArea?: layout (layouts) | extents|display|limits (Model), scale?, scaleToFit?, center?, plotStyleTable?: \"monochrome.ctb\"|\"grayscale.ctb\"|\"default.ctb\"|\"None\"|…, displayPlotStyles?: bool, plotTransparency?: bool}",
             ),
         CommandSpec::new("plot", "Print...", |s, p| run_plot(s, &super::plotters::plot_options(s, p, "plot")?, "plot"))
             .menu(&["File", "Print..."])
@@ -639,24 +639,27 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         "plotTransparency",
     ];
     let changes = keys.iter().any(|k| p.get(k).is_some());
+    // The layout whose page setup this is; `None` for model space's.
     let name = match str_param(p, "layout") {
+        Some(n) if n.eq_ignore_ascii_case("model") => None,
         Some(n) => Some(layout_name(cmd, s.doc()?, n)?),
-        None => s.space().layout().map(str::to_string),
+        None => s.layout_space().layout().map(str::to_string),
     };
-    let Some(name) = name else {
-        if changes {
-            return Err(bad(cmd, "pass `layout` (model-space page setups are not stored yet)"));
-        }
-        // Report every layout's page setup.
+    if name.is_none() && str_param(p, "layout").is_none() && !changes {
+        // Report every page setup.
         let d = s.doc()?;
         return Ok(json!({
+            "model": serde_json::to_value(cadcraft_render::paper::model_page(d)).unwrap_or(Value::Null),
             "layouts": d.layouts.iter().map(|l| json!({"name": l.name, "page": serde_json::to_value(&l.page).unwrap_or(Value::Null)})).collect::<Vec<_>>(),
             "papers": cadcraft_render::PAPER_SIZES.iter().map(|p| p.name).collect::<Vec<_>>(),
             "plotStyleTables": cadcraft_doc::BUILTIN_PLOT_STYLE_TABLES,
             "devices": super::plotters::device_names(),
         }));
+    }
+    let mut page = match &name {
+        Some(n) => s.doc()?.layout(n).map(|l| l.page.clone()).unwrap_or_default(),
+        None => cadcraft_render::paper::model_page(s.doc()?),
     };
-    let mut page = s.doc()?.layout(&name).map(|l| l.page.clone()).unwrap_or_default();
     // A plotter's own papers (with their printable areas) come first.
     let device_paper = super::plotters::page_device(cmd, p, &mut page)?;
     if let Some(paper) = p.get("paper").filter(|_| !device_paper) {
@@ -706,9 +709,14 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         if !["layout", "extents", "display", "window", "limits"].contains(&v.as_str()) {
             return Err(bad(cmd, "`plotArea` must be layout, extents, display, window or limits"));
         }
-        // Layout plotting always prints the whole sheet; the other areas are only stored for DXF round trips.
-        if v != "layout" && v != page.plot_area {
-            return Err(bad(cmd, format!("plot area `{v}` is not available yet; layouts plot the whole sheet (`layout`)")));
+        match &name {
+            // Layout plotting always prints the whole sheet; the other areas are only stored for DXF round trips.
+            Some(_) if v != "layout" && v != page.plot_area => {
+                return Err(bad(cmd, format!("plot area `{v}` is not available yet; layouts plot the whole sheet (`layout`)")));
+            }
+            None if v == "layout" => return Err(bad(cmd, "model space has no sheet: `plotArea` must be extents, display or limits")),
+            None if v == "window" => return Err(bad(cmd, "a page setup can't keep a plot window yet; pass `window` to PLOT")),
+            _ => {}
         }
         page.plot_area = v;
     }
@@ -722,12 +730,18 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         page.plot_transparency = v;
     }
     if changes {
-        if let Some(l) = s.doc_mut()?.layouts.iter_mut().find(|l| l.name == name) {
-            l.page = page.clone();
+        let d = s.doc_mut()?;
+        match &name {
+            Some(n) => {
+                if let Some(l) = d.layouts.iter_mut().find(|l| &l.name == n) {
+                    l.page = page.clone();
+                }
+            }
+            None => d.model_page = Some(page.clone()),
         }
         s.touch();
     }
-    Ok(json!({ "layout": name, "page": serde_json::to_value(&page).unwrap_or(Value::Null) }))
+    Ok(json!({ "layout": name.as_deref().unwrap_or("Model"), "page": serde_json::to_value(&page).unwrap_or(Value::Null) }))
 }
 
 // ---------- plotting ----------
@@ -1050,7 +1064,6 @@ mod tests {
         assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "paper": "Z12"})).is_err());
         assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "margins": [1, 2]})).is_err());
         assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "width": 1e308, "height": 5})).is_err());
-        assert!(s.execute("pagesetup", &json!({"paper": "A4"})).is_err(), "model tab needs a layout");
         for area in ["extents", "display", "window", "limits"] {
             let e = s.execute("pagesetup", &json!({"layout": "Layout1", "plotArea": area})).unwrap_err();
             assert!(e.to_string().contains("not available yet"), "{area}: {e}");
@@ -1062,6 +1075,84 @@ mod tests {
         s.execute("pagesetup", &json!({"layout": "Layout2", "width": 500, "height": 300})).unwrap();
         let p = &s.doc().unwrap().layout("Layout2").unwrap().page;
         assert_eq!((p.width_mm, p.height_mm), (300.0, 500.0));
+    }
+
+    #[test]
+    fn pagesetup_targets_the_layout_tab_while_in_mspace() {
+        let mut s = session_with_model();
+        s.execute("layout.set", &json!({"name": "Layout1"})).unwrap();
+        s.execute("mview", &json!({"p1": [1, 1], "p2": [5, 4]})).unwrap();
+        s.execute("mspace", &json!({})).unwrap();
+        assert_eq!(s.space(), Space::Model);
+        assert_eq!(s.layout_space(), Space::Paper("Layout1".into()));
+        let before = s.doc().unwrap().layout("Layout1").unwrap().page.clone();
+        let other = s.doc().unwrap().layout("Layout2").unwrap().page.clone();
+
+        let report = s.execute("pagesetup", &json!({})).unwrap();
+        assert_eq!(report["layout"], "Layout1");
+        let changed = s.execute("pagesetup", &json!({"paper": "A3"})).unwrap();
+        assert_eq!(changed["layout"], "Layout1");
+        assert_eq!(s.doc().unwrap().layout("Layout1").unwrap().page.width_mm, 297.0);
+        assert_eq!(s.doc().unwrap().layout("Layout2").unwrap().page, other);
+        assert_eq!(s.doc().unwrap().model_page, None);
+
+        s.undo().unwrap();
+        assert_eq!(s.doc().unwrap().layout("Layout1").unwrap().page, before);
+        assert_eq!(s.doc().unwrap().model_page, None);
+        s.execute("pagesetup", &json!({"layout": "Model", "paper": "A3"})).unwrap();
+        assert_eq!(s.doc().unwrap().model_page.as_ref().unwrap().width_mm, 297.0);
+        assert_eq!(s.doc().unwrap().layout("Layout1").unwrap().page, before);
+    }
+
+    #[test]
+    fn pagesetup_keeps_a_model_space_page_setup() {
+        let mut s = session_with_model();
+        let model_page = |s: &Session| s.doc().unwrap().model_page.clone();
+        assert_eq!(model_page(&s), None, "not set until asked");
+        let r = s
+            .execute(
+                "pagesetup",
+                &json!({"layout": "Model", "paper": "A3", "landscape": true, "plotArea": "display", "scaleToFit": false, "scale": "1:50",
+                    "center": false, "lineweights": false, "plotStyleTable": "monochrome.ctb", "plotTransparency": true}),
+            )
+            .unwrap();
+        assert_eq!(r["layout"], "Model");
+        let p = model_page(&s).unwrap();
+        assert_eq!((p.paper.as_str(), p.width_mm, p.height_mm, p.landscape), ("ISO A3 (297.00 x 420.00 MM)", 297.0, 420.0, true));
+        assert_eq!((p.plot_area.as_str(), p.scale_to_fit, p.scale, p.center), ("display", false, 0.02, false));
+        assert_eq!((p.lineweights, p.plot_style_table.as_str(), p.plot_transparency), (false, "monochrome.ctb", true));
+        assert!(s.doc().unwrap().layouts.iter().all(|l| l.page == cadcraft_doc::PageSetup::default()), "layouts untouched");
+        // Any case; from the Model tab `layout` can be left out.
+        s.execute("pagesetup", &json!({"layout": "MODEL", "landscape": false})).unwrap();
+        assert!(!model_page(&s).unwrap().landscape);
+        s.execute("pagesetup", &json!({"paper": "A4"})).unwrap();
+        assert_eq!(model_page(&s).unwrap().width_mm, 210.0);
+        // Reading it changes nothing.
+        let r = s.execute("pagesetup", &json!({"layout": "Model"})).unwrap();
+        assert_eq!((r["layout"].as_str(), r["page"]["widthMm"].as_f64()), (Some("Model"), Some(210.0)));
+        assert_eq!(s.execute("pagesetup", &Value::Null).unwrap()["model"]["widthMm"], 210.0);
+        // One undo step each, back to no model page setup.
+        s.undo().unwrap();
+        assert_eq!(model_page(&s).unwrap().width_mm, 297.0);
+        s.undo().unwrap();
+        assert!(model_page(&s).unwrap().landscape);
+        s.undo().unwrap();
+        assert_eq!(model_page(&s), None);
+        // Bad input is refused and keeps nothing.
+        for (bad, says) in [
+            (json!({"layout": "Model", "plotArea": "layout"}), "no sheet"),
+            (json!({"layout": "Model", "plotArea": "window"}), "window"),
+            (json!({"layout": "Model", "plotArea": "everything"}), "must be"),
+            (json!({"layout": "Model", "paper": "Z12"}), "unknown paper"),
+            (json!({"layout": "Model", "margins": [1, 2]}), "margins"),
+            (json!({"layout": "Model", "width": 1e308, "height": 5}), "width"),
+            (json!({"layout": "Model", "scale": -1}), "scale"),
+            (json!({"layout": "Model", "device": "Nope"}), "Nope"),
+        ] {
+            let e = s.execute("pagesetup", &bad).unwrap_err();
+            assert!(e.to_string().contains(says), "{bad}: {e}");
+        }
+        assert_eq!(model_page(&s), None);
     }
 
     fn fake_plot(d: &Drawing, space: &Space, opts: &Value) -> std::result::Result<Vec<u8>, String> {

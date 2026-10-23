@@ -272,17 +272,7 @@ fn links_json(v: Option<&Value>) -> Vec<(Handle, String)> {
 pub fn page_for(d: &Drawing, space: &Space, o: &PdfOptions) -> Result<PageSetup> {
     let mut page = match space.layout() {
         Some(n) => d.layout(n).map(|l| l.page.clone()).ok_or_else(|| IoError::Format(format!("no layout `{n}`")))?,
-        None => {
-            let mut p = PageSetup::default();
-            if paper::paper_unit_mm(d) == 1.0
-                && let Some(a4) = paper::paper_size("A4")
-            {
-                p.paper = a4.name.into();
-                p.width_mm = a4.width_mm;
-                p.height_mm = a4.height_mm;
-            }
-            p
-        }
+        None => paper::model_page(d),
     };
     if let Some(name) = &o.paper {
         let ps = paper::paper_size(name).ok_or_else(|| IoError::Format(format!("unknown paper size `{name}`")))?;
@@ -396,7 +386,7 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
     let page = page_for(d, space, o)?;
     let unit_mm = paper::page_unit_mm(d, &page);
     let sheet = Sheet::from_page(&page, unit_mm);
-    let lineweights = o.lineweights.unwrap_or(if space.is_paper() { page.lineweights } else { true });
+    let lineweights = o.lineweights.unwrap_or(page.lineweights);
     let plot_style_table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(std::sync::Arc::new);
     let ropts = cadcraft_render::Options {
         transparency: o.plot_transparency.unwrap_or(page.plot_transparency),

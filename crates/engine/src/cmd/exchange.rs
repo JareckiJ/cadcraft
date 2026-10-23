@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use cadcraft_color::Rgb;
-use cadcraft_doc::{Drawing, Entity, EntityKind, PageSetup, Space};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Space};
 use cadcraft_geom::{Bounds2, Mat3, Vec2};
 use cadcraft_render::paper::{self, Sheet};
 use cadcraft_render::raster::{RasterOptions, View};
@@ -293,18 +293,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc()?;
     let mut page = match space.layout() {
         Some(n) => d.layout(n).map(|l| l.page.clone()).unwrap_or_default(),
-        None => {
-            // Model space plots on A4 (metric) or ANSI A, like the PDF plotter.
-            let mut page = PageSetup::default();
-            if paper::paper_unit_mm(d) == 1.0
-                && let Some(a4) = paper::paper_size("A4")
-            {
-                page.paper = a4.name.into();
-                page.width_mm = a4.width_mm;
-                page.height_mm = a4.height_mm;
-            }
-            page
-        }
+        None => paper::model_page(d),
     };
     if let Some(name) = str_param(p, "paper") {
         let ps = paper::paper_size(name).ok_or_else(|| bad("preview", format!("unknown paper size `{name}`")))?;
@@ -316,7 +305,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
         page.landscape = l;
     }
     let sheet = Sheet::from_page(&page, paper::page_unit_mm(d, &page));
-    let lineweights = p.get("lineweights").and_then(Value::as_bool).unwrap_or(if space.is_paper() { page.lineweights } else { true });
+    let lineweights = p.get("lineweights").and_then(Value::as_bool).unwrap_or(page.lineweights);
     let transparency = super::plotters::plot_transparency(s, p).unwrap_or(page.plot_transparency);
     let fit = p.get("fit").and_then(Value::as_bool).unwrap_or(matches!(space, Space::Model));
     let scale = p.get("scale").and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0);
@@ -334,6 +323,7 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
         fill: true,
         lineweights,
         transparency,
+        plot_style_table: cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(std::sync::Arc::new),
         ..Default::default()
     };
     let list = cadcraft_render::build_plot(d, &space, &ropts);
@@ -685,6 +675,13 @@ mod tests {
         let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "A4", "landscape": true, "width": 600 })).unwrap();
         assert_eq!((r["layout"].as_str(), r["width"].as_u64(), r["height"].as_u64()), (Some("Layout1"), Some(600), Some(424)));
         assert_eq!(r["paper"], "ISO A4 (210.00 x 297.00 MM)");
+        // Model space's own page setup, once it has one.
+        s.execute("pagesetup", &json!({ "layout": "Model", "paper": "A3", "landscape": false })).unwrap();
+        let r = s.execute("preview", &json!({ "width": 297 })).unwrap();
+        assert_eq!(
+            (r["paper"].as_str(), r["landscape"].as_bool(), r["height"].as_u64()),
+            (Some("ISO A3 (297.00 x 420.00 MM)"), Some(false), Some(420))
+        );
         assert!(s.execute("preview", &json!({ "layout": "Nope" })).is_err());
         assert!(s.execute("preview", &json!({ "paper": "Nope" })).is_err());
         for p in [json!({ "scale": -1, "fit": false }), json!({ "scale": 1e-300, "fit": false }), json!({ "width": -5 }), json!({ "width": 1e30 })] {

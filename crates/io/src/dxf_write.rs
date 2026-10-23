@@ -2612,11 +2612,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.s(1002, "}");
         }
     };
-    // Model space has no page setup of its own: write what PLOT does for it, the drawing extents
-    // fitted to the paper (plot type 1, scaled to fit). The default page's "layout" area is
-    // plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group 74), which means
-    // nothing for model space: another program's Plot dialog then shows no plot area or scale.
-    let model_page = PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() };
+    let model_page = if d.model_page.is_some() { cadcraft_render::paper::model_page(d) } else { unset_model_page() };
     layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None);
     for (i, (_, brh, l)) in ps_brs.iter().enumerate() {
         let h = layout_handles.get(i).cloned().unwrap_or_default();
@@ -2635,6 +2631,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     add_class_instance_counts(&mut w.t);
     mark_xrefs(&mut w.t, d);
     w.t
+}
+
+/// The Model LAYOUT's plot settings when the drawing has no model page setup: what PLOT does for
+/// model space, the drawing extents fitted to the paper (plot type 1, scaled to fit). The default
+/// page's "layout" area is plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group
+/// 74), which means nothing for model space: another program's Plot dialog then shows no plot
+/// area or scale. The reader takes these settings back as no model page setup.
+pub(crate) fn unset_model_page() -> PageSetup {
+    PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() }
 }
 
 /// Write DXF Reference group 91 on every CLASS record. Count records after `dxf_raw::finish`

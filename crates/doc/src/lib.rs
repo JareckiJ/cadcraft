@@ -98,6 +98,9 @@ pub struct Drawing {
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
     pub layouts: Vec<Layout>,
+    /// Model space's page setup (PAGESETUP on the Model tab); `None` until set, when model space
+    /// plots with the default for the drawing's units.
+    pub model_page: Option<PageSetup>,
     pub views: Vec<NamedView>,
     /// Model space viewport configurations (VPORTS): the tiles shown and named ones.
     pub vports: Vec<VportConfig>,
@@ -171,6 +174,7 @@ impl Drawing {
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],
+            model_page: None,
             views: Vec::new(),
             vports: Vec::new(),
             ucss: Vec::new(),

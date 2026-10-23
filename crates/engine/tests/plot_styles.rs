@@ -20,6 +20,22 @@ fn pagesetup_sets_table_and_display_flag() {
 }
 
 #[test]
+fn preview_uses_the_saved_page_plot_style_table() {
+    for layout in ["Model", "Layout1"] {
+        let mut s = Session::new();
+        s.execute("layout.set", &json!({"name": layout})).unwrap();
+        s.execute("layer.set", &json!({"name": "0", "color": 1})).unwrap();
+        s.execute("line", &json!({"points": [[0, 0], [100, 100]]})).unwrap();
+        let preview = |s: &mut Session| s.execute("preview", &json!({"layout": layout, "width": 200, "fit": true})).unwrap()["data"].clone();
+        let color = preview(&mut s);
+        s.execute("pagesetup", &json!({"layout": layout, "plotStyleTable": "monochrome.ctb"})).unwrap();
+        assert!(preview(&mut s) != color, "{layout} preview must apply its saved table");
+        s.execute("pagesetup", &json!({"layout": layout, "plotStyleTable": "missing.ctb"})).unwrap();
+        assert!(preview(&mut s) == color, "an unresolved table keeps normal colors");
+    }
+}
+
+#[test]
 fn plotstyle_sets_objects_and_the_current_style() {
     let mut s = Session::new();
     s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();

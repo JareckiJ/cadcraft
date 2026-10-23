@@ -136,6 +136,28 @@ fn plot_uses_the_device() {
 }
 
 #[test]
+fn model_space_plots_with_its_page_setup_device() {
+    let mut s = session();
+    s.execute("plottermanager", &json!({"action": "new", "name": "Sketch PNG", "output": "png", "resolution": 96})).unwrap();
+    // Without a model page setup, a device brings its default paper and orientation.
+    let o = plotted(s.execute("plot", &json!({"layout": "Model", "device": "Sketch PNG"})).unwrap());
+    assert_eq!((o["output"].as_str(), o["width"].as_f64(), o["landscape"].as_bool()), (Some("png"), Some(210.0), Some(true)));
+    s.execute("pagesetup", &json!({"layout": "Model", "device": "Sketch PNG", "paper": "A3", "landscape": false})).unwrap();
+    // As a layout does, model space plots with its page setup's device and keeps its paper.
+    for p in [json!({"layout": "Model"}), json!({}), json!({"layout": "Model", "device": "sketch png"})] {
+        let o = plotted(s.execute("plot", &p).unwrap());
+        assert_eq!(o["output"], "png", "{p}");
+        assert!(o.get("width").is_none() && o.get("landscape").is_none(), "the page setup already holds the paper: {p} {o}");
+    }
+    // Another device still brings its own default paper.
+    let o = plotted(s.execute("plot", &json!({"layout": "Model", "device": "CADCraft PDF"})).unwrap());
+    assert_eq!((o["output"].as_str(), o["width"].as_f64()), (Some("pdf"), Some(210.0)));
+    // `device: "None"` plots without one.
+    let o = plotted(s.execute("plot", &json!({"layout": "Model", "device": "None"})).unwrap());
+    assert!(o.get("output").is_none());
+}
+
+#[test]
 fn typed_plotter_manager() {
     let mut s = session();
     for line in ["-plottermanager", "New", "Typed Plotter", "Svg"] {

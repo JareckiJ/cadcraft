@@ -1784,6 +1784,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     layout_objs.sort_by_key(|l| l.1);
     for (name, order, br, page) in &layout_objs {
         if name.eq_ignore_ascii_case("Model") {
+            d.model_page = model_page(page, d.header.i64("MEASUREMENT", 0) == 1);
             continue;
         }
         d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
@@ -2285,6 +2286,26 @@ fn page_setup(t: &T) -> PageSetup {
     p.plot_window = [t.fd(48, 0.0), t.fd(49, 0.0), t.fd(140, 0.0), t.fd(141, 0.0)].map(|v| if v.is_finite() { v } else { 0.0 });
     p.plot_style_table = t.s(7).unwrap_or_default();
     p
+}
+
+/// Model space's page setup from the Model LAYOUT's plot settings. The settings CADCraft writes
+/// for a drawing without one, and the default page older versions wrote, give none. Plot areas
+/// model space can't keep become the extents.
+fn model_page(page: &PageSetup, metric: bool) -> Option<PageSetup> {
+    // Metric drawings write an explicit millimetre flag even when no setup was saved.
+    // Ignore that flag when recognising our unset and legacy defaults.
+    let mut default_check = page.clone();
+    if metric {
+        default_check.paper_mm = false;
+    }
+    if default_check == crate::dxf_write::unset_model_page() || default_check == PageSetup::default() {
+        return None;
+    }
+    let mut page = page.clone();
+    if !cadcraft_render::paper::MODEL_PAGE_AREAS.contains(&page.plot_area.as_str()) {
+        page.plot_area = "extents".into();
+    }
+    Some(page)
 }
 
 /// A layout's saved paper-space view (centre, height) from CADCraft xdata.
