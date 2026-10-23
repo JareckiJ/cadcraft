@@ -100,10 +100,28 @@ fn tiled_viewports_and_saved_configurations_round_trip() {
     assert_eq!(r.vports, d.vports);
     // The first *ACTIVE record still carries the snap base.
     assert_eq!(r.header.point("SNAPBASE").map(|p| p.xy()), Some(Vec2::new(1.0, 2.0)));
-    // No tiling: one *ACTIVE record, read back as no configuration.
+    // No tiling: one *ACTIVE record is the saved model view, not a configuration.
     let mut single = Drawing::new_imperial();
-    single.vports = vec![VportConfig { name: VportConfig::ACTIVE.into(), tiles: vec![tile((0.0, 0.0), (1.0, 1.0), (0.0, 0.0), 1.0)] }];
-    assert!(round_trip(&single).vports.is_empty());
+    single.model_view = Some(tile((0.0, 0.0), (1.0, 1.0), (7.0, 9.0), 3.0));
+    let reopened = round_trip(&single);
+    assert_eq!(reopened.model_view, single.model_view);
+    assert!(reopened.vports.is_empty());
+    assert_eq!(round_trip(&reopened).model_view, single.model_view);
+}
+
+#[test]
+fn legacy_header_model_view_is_written_and_becomes_the_active_view() {
+    let mut d = Drawing::new_imperial();
+    d.header.set("VIEWCTR", cadcraft_doc::HVal::Point(cadcraft_doc::geom::Vec3::new(50.0, 60.0, 0.0)));
+    d.header.set_f64("VIEWSIZE", 20.0);
+    d.header.set_i64("TILEMODE", 1);
+
+    let reopened = round_trip(&d);
+    let view = reopened.saved_model_view().expect("saved model view");
+    assert_eq!((view.center, view.height), (Vec2::new(50.0, 60.0), 20.0));
+    assert_eq!(reopened.header.point("VIEWCTR").map(|p| p.xy()), Some(Vec2::new(50.0, 60.0)));
+    assert_eq!(reopened.header.f64("VIEWSIZE", 0.0), 20.0);
+    assert_eq!(reopened.header.i64("TILEMODE", 0), 1);
 }
 
 /// VPORT records with corners outside 0..1, no area (or turned around), or an unusable view

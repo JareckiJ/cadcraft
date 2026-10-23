@@ -847,6 +847,14 @@ pub struct VportTile {
     pub aspect: f64,
 }
 
+impl VportTile {
+    /// Whether this tile carries a view that can be shown. Its rectangle and saved screen aspect
+    /// are irrelevant when it is used as the drawing's single model-space view.
+    pub fn has_usable_view(&self) -> bool {
+        self.center.is_finite() && self.height.is_finite() && self.height > 0.0
+    }
+}
+
 /// A model space viewport configuration (VPORTS): `*Active` is the one shown, other names are
 /// saved configurations. The first tile is the current one.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -860,6 +868,26 @@ impl VportConfig {
     pub const ACTIVE: &'static str = "*Active";
     pub fn is_active(&self) -> bool {
         self.name.eq_ignore_ascii_case(Self::ACTIVE)
+    }
+}
+
+impl crate::Drawing {
+    /// The model-space view stored in the active VPORT configuration, its single VPORT record, or
+    /// the legacy HEADER variables, in that order.
+    pub fn saved_model_view(&self) -> Option<VportTile> {
+        self.vports
+            .iter()
+            .find(|c| c.is_active())
+            .and_then(|c| c.tiles.first())
+            .copied()
+            .filter(VportTile::has_usable_view)
+            .or_else(|| self.model_view.filter(VportTile::has_usable_view))
+            .or_else(|| {
+                let center = self.header.point("VIEWCTR")?.xy();
+                let height = self.header.get("VIEWSIZE")?.as_f64()?;
+                let tile = VportTile { min: Vec2::ZERO, max: Vec2::new(1.0, 1.0), center, height, aspect: 0.0 };
+                tile.has_usable_view().then_some(tile)
+            })
     }
 }
 

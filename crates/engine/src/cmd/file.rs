@@ -396,6 +396,9 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
     if s.doc()?.refedit.is_some() {
         return Err(bad(cmd, "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
     }
+    if is_drawing_file(path) {
+        keep_model_view(s)?;
+    }
     let bytes = write_bytes(s, cmd, path, opts)?;
     let n = commit_save(s, path, &bytes, store)?;
     if is_drawing_file(path) {
@@ -409,6 +412,50 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
         }
     }
     Ok(n)
+}
+
+/// The model-space view as it is on screen goes into the drawing, so it opens there again (the
+/// `*Active` VPORT record). Tiled model viewports (VPORTS) keep their own views. A view is no
+/// change: a drawing without changes stays without changes.
+fn keep_model_view(s: &mut Session) -> Result<()> {
+    let (w, h) = s.viewport_px;
+    let st = s.state_mut()?;
+    // In the Block Editor the view on screen is the editor's, not the drawing's.
+    if st.block_edit.is_some() {
+        return Ok(());
+    }
+    let Some(view) = st.views.iter().find(|(sp, _)| *sp == cadcraft_doc::Space::Model).map(|(_, v)| *v) else { return Ok(()) };
+    let d = st.drawing();
+    if d.vports.iter().any(|c| c.is_active() && c.tiles.len() > 1) || !(view.height.is_finite() && view.height > 0.0) {
+        return Ok(());
+    }
+    let tile = cadcraft_doc::VportTile {
+        min: cadcraft_geom::Vec2::ZERO,
+        max: cadcraft_geom::Vec2::new(1.0, 1.0),
+        center: view.center,
+        height: view.height,
+        aspect: if h > 0.0 { w / h } else { 0.0 },
+    };
+    // Nothing to do only when the view and the header's view are both as on screen already.
+    let header = d.header.point("VIEWCTR").is_some_and(|c| c.xy() == tile.center) && d.header.f64("VIEWSIZE", f64::NAN) == tile.height;
+    if d.saved_model_view() == Some(tile) && header {
+        return Ok(());
+    }
+    let clean = !st.is_dirty();
+    let d = std::sync::Arc::make_mut(st.drawing_arc_mut());
+    d.model_view = Some(tile);
+    // The header's view too, for readers that go by $VIEWCTR / $VIEWSIZE.
+    d.header.set("VIEWCTR", cadcraft_doc::HVal::Point(tile.center.to3(0.0)));
+    d.header.set_f64("VIEWSIZE", tile.height);
+    // A lone active configuration would be read first: it gets the same view.
+    if let Some(t) = d.vports.iter_mut().find(|c| c.is_active()).and_then(|c| c.tiles.first_mut()) {
+        t.center = tile.center;
+        t.height = tile.height;
+    }
+    if clean {
+        st.saved = st.drawing().clone();
+    }
+    Ok(())
 }
 
 /// Put saved bytes where the user gets them: natively the file at `path` (written atomically); on

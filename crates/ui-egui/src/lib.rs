@@ -506,8 +506,10 @@ impl CadApp {
             Err(e) => self.set_status(e),
             Ok(v) => {
                 self.ui.start_tab = false;
-                self.canvas.zoom_pending = true;
                 let doc = v.get("index").and_then(Value::as_u64).and_then(|i| self.session.docs.get(usize::try_from(i).ok()?));
+                // A drawing saved with a view opens there; only one without is fitted to the
+                // drawing area once it has its size.
+                self.canvas.zoom_pending = doc.is_none_or(|d| d.drawing().saved_model_view().is_none());
                 if let Some(path) = doc.and_then(|d| d.path.clone()) {
                     self.remember_recent(path);
                 }

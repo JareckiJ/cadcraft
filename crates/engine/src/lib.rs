@@ -760,13 +760,19 @@ impl Session {
         self.active
     }
     pub fn open_drawing(&mut self, d: Drawing, title: &str, path: Option<String>) -> usize {
+        let saved_view = d.saved_model_view().map(|v| View { center: v.center, height: v.height });
         let mut st = DocState::new(d, title, path);
-        let ext = st.doc.extents(&Space::Model);
-        if !ext.is_empty() {
-            st.set_view_quiet(View {
-                center: ext.center(),
-                height: (ext.height().max(ext.width() * self.viewport_px.1 / self.viewport_px.0.max(1.0)) * 1.1).max(1e-6),
-            });
+        match saved_view {
+            Some(view) => st.set_view_quiet(view),
+            None => {
+                let ext = st.doc.extents(&Space::Model);
+                if !ext.is_empty() {
+                    st.set_view_quiet(View {
+                        center: ext.center(),
+                        height: (ext.height().max(ext.width() * self.viewport_px.1 / self.viewport_px.0.max(1.0)) * 1.1).max(1e-6),
+                    });
+                }
+            }
         }
         self.end_running();
         self.docs.push(st);

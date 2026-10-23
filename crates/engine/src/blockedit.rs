@@ -148,6 +148,7 @@ impl BlockEdit {
         d.layouts = host.layouts.clone();
         d.groups = host.groups.clone();
         d.constraints = host.constraints.clone();
+        d.model_view = host.model_view;
         d.vports = host.vports.clone();
         d.hidden_objects = host.hidden_objects.clone();
         let entities = self.block_objects(editor);
