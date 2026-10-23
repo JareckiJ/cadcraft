@@ -208,3 +208,35 @@ fn compareexport_produces_json_report() {
     assert_eq!(rep["counts"]["common"], 1);
     assert!(rep["message"].as_str().unwrap().contains("Comparison report with"));
 }
+
+#[test]
+fn compares_specified_layout_and_all_spaces() {
+    let mut s = base();
+    let paper = Space::Paper("Layout1".into());
+    s.doc_mut().unwrap().add(&paper, Common::default(), line(0.0, 0.0, 50.0, 0.0)).unwrap();
+
+    let mut other = s.doc().unwrap().clone();
+    // In other's layout, modify the line
+    let h = other.space(&paper).unwrap().iter().next().unwrap().handle;
+    other.modify_entity(h, |e| e.kind = line(0.0, 0.0, 100.0, 0.0)).unwrap();
+    s.open_drawing(other, "B", None);
+
+    // Default compare (in model space) sees 0 changes because model space is identical
+    let r_model = s.execute("compare", &json!({"document": 0})).unwrap();
+    assert_eq!(counts(&r_model), (0, 0, 0, 3));
+    assert_eq!(r_model["space"], "Model");
+
+    // Compare with layout space specified
+    let r_layout = s.execute("compare", &json!({"document": 0, "space": "Layout1"})).unwrap();
+    assert_eq!(counts(&r_layout), (0, 0, 1, 0));
+    assert_eq!(r_layout["space"], "Layout1");
+
+    // Compare with "all" spaces: includes both model and layout differences
+    let r_all = s.execute("compare", &json!({"document": 0, "space": "all"})).unwrap();
+    assert_eq!(counts(&r_all), (0, 0, 1, 3));
+    assert_eq!(r_all["space"], "all spaces");
+    assert!(r_all["message"].as_str().unwrap().contains("all spaces"));
+
+    // Invalid space name returns error
+    assert!(s.execute("compare", &json!({"document": 0, "space": "NoSuchLayout"})).is_err());
+}

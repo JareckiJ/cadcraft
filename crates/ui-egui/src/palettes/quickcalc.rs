@@ -8,13 +8,26 @@ use serde_json::{Value, json};
 use crate::CadApp;
 use crate::theme::Tokens;
 
+use serde::{Deserialize, Serialize};
+
 /// What `quickcalc.pick` writes to the command history before the value it read.
 const PICKED: &str = "QuickCalc: ";
 /// History entries kept.
-const MAX_HISTORY: usize = 100;
+pub const MAX_HISTORY: usize = 100;
 /// Variables kept.
-const MAX_VARS: usize = 50;
+pub const MAX_VARS: usize = 50;
 const KINDS: [(&str, &str); 4] = [("length", "Length"), ("area", "Area"), ("volume", "Volume"), ("angle", "Angle")];
+
+/// QuickCalc history and custom variables kept across restarts.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct QuickCalcState {
+    /// (expression, result) newest last.
+    #[serde(default)]
+    pub history: Vec<(String, String)>,
+    /// Custom variables: name and value (a number or `[x, y]`).
+    #[serde(default)]
+    pub vars: Vec<(String, Value)>,
+}
 
 #[derive(Clone, Default)]
 struct State {
@@ -199,7 +212,9 @@ pub fn open(app: &mut CadApp) -> Result<Value, String> {
 
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    let mut st: State = ui.ctx().data_mut(|d| d.get_temp(id())).unwrap_or_default();
+    let mut st: State = ui.ctx().data_mut(|d| {
+        d.get_temp(id()).unwrap_or_else(|| State { history: app.quickcalc.history.clone(), vars: app.quickcalc.vars.clone(), ..Default::default() })
+    });
     st.collect(app);
     egui::ScrollArea::vertical().id_salt("dock-quickcalc").auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(6.0);
@@ -352,5 +367,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             });
         });
     });
+    app.quickcalc.history = st.history.clone();
+    app.quickcalc.vars = st.vars.clone();
     ui.ctx().data_mut(|d| d.insert_temp(id(), st));
 }
