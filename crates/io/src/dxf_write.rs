@@ -204,9 +204,26 @@ fn annotative_xdata(w: &mut W) {
 
 /// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
 fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
+    dstyle_xdata(w, &dm.overrides, cx);
+    let mut ours = Vec::new();
+    if matches!(dm.kind, DimKind::ArcLength) {
+        ours.extend(dxf_ext::arclen_xdata(dm.p15));
+    }
+    if !dm.assoc.is_empty() {
+        ours.extend(dxf_ext::assoc_xdata(&dm.assoc));
+    }
+    ours.extend(dxf_ext::marks_xdata(&dm.marks));
+    if !ours.is_empty() {
+        w.s(1001, dxf_ext::APP);
+        w.xdata(ours);
+    }
+}
+
+/// Dimension style overrides as `ACAD` DSTYLE xdata (dimensions and leaders).
+fn dstyle_xdata(w: &mut W, overrides: &serde_json::Map<String, serde_json::Value>, cx: &Ctx) {
     let mut ov = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
     let mut sah = false;
-    for (k, v) in &dm.overrides {
+    for (k, v) in overrides {
         let Some(field) = DimStyle::field_name(k) else { continue };
         let Some((code, kind)) = dxf_ext::dim_code(field) else { continue };
         let Some(val) = dxf_ext::canonical(field, v) else { continue };
@@ -225,18 +242,6 @@ fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
         w.s(1002, "{");
         w.xdata(ov.t);
         w.s(1002, "}");
-    }
-    let mut ours = Vec::new();
-    if matches!(dm.kind, DimKind::ArcLength) {
-        ours.extend(dxf_ext::arclen_xdata(dm.p15));
-    }
-    if !dm.assoc.is_empty() {
-        ours.extend(dxf_ext::assoc_xdata(&dm.assoc));
-    }
-    ours.extend(dxf_ext::marks_xdata(&dm.marks));
-    if !ours.is_empty() {
-        w.s(1001, dxf_ext::APP);
-        w.xdata(ours);
     }
 }
 
@@ -1058,6 +1063,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             for v in &l.vertices {
                 w.p(10, *v);
             }
+            dstyle_xdata(w, &l.overrides, cx);
         }
         EntityKind::Image(i) => {
             // Every image has its IMAGEDEF (planned in `write`); the fallback never happens.
@@ -1251,7 +1257,7 @@ fn mleader_fallback(w: &mut W, d: &Drawing, e: &Entity, m: &MLeader, owner: &str
     for arm in m.leaders.iter().take(64) {
         let mut vertices = arm.clone();
         vertices.push(m.landing);
-        let le = part(w, EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone() }));
+        let le = part(w, EntityKind::Leader(Leader { vertices, arrow: true, spline: m.spline, style: style.clone(), overrides: Default::default() }));
         entity(w, d, &le, owner, paper, cx);
     }
     if let Some(t) = &m.text {
