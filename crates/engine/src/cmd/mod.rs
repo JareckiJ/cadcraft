@@ -12,6 +12,7 @@ mod draw;
 mod draw2;
 mod draworder;
 mod edit;
+mod electrical;
 mod exchange;
 pub mod file;
 mod gripcmds;
@@ -206,6 +207,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(txt2mtxt::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
+        v.extend(electrical::specs());
         v
     })
 }
