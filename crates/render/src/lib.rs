@@ -1121,7 +1121,8 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
         }
         EntityKind::Insert(ins) => insert(b, ctx, e, ins, rgb),
         EntityKind::Dimension(dm) => {
-            if let Some(blk) = dm.block.as_ref().and_then(|n| ctx.d.block(n))
+            let fresh_block = dm.block.as_ref().and_then(|n| ctx.d.block(n)).filter(|blk| cadcraft_doc::dim_block_fresh(ctx.d, blk, dm));
+            if let Some(blk) = fresh_block
                 && ctx.depth < cadcraft_doc::MAX_BLOCK_DEPTH
             {
                 let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, Mat3::IDENTITY) };

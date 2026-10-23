@@ -26,9 +26,11 @@ fn dimensions_snap_to_their_lines_and_definition_points() {
     assert_eq!(snap_at(&s, Vec2::new(0.0, 0.0), mode::NOD), Some((Vec2::new(0.0, 0.0), mode::NOD)));
     assert_eq!(snap_at(&s, Vec2::new(10.0, 0.0), mode::NOD), Some((Vec2::new(10.0, 0.0), mode::NOD)));
 
-    // A dimension with a block (as read from a file) snaps to the block's objects.
-    let l = handle(&mut s, "line", json!({ "points": [[0, 7], [10, 7]] }));
-    s.execute("block", &json!({ "name": "DIMGEOM", "base": [0, 0], "handles": [l], "keep": "delete" })).unwrap();
+    // A dimension with a block (as read from a file) snaps to the block's objects. A saved *D
+    // picture spans the defpoints (here the dimension line at y=3) plus any moved parts (y=7).
+    let l1 = handle(&mut s, "line", json!({ "points": [[0, 7], [10, 7]] }));
+    let l2 = handle(&mut s, "line", json!({ "points": [[0, 3], [10, 3]] }));
+    s.execute("block", &json!({ "name": "DIMGEOM", "base": [0, 0], "handles": [l1, l2], "keep": "delete" })).unwrap();
     let d = s.doc_mut().unwrap();
     let dim = d.model.iter().find(|e| matches!(e.kind, EntityKind::Dimension(_))).unwrap().handle;
     d.model.modify(dim, |e| {
