@@ -10,6 +10,7 @@ use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 
 /// The QuickCalc palette.
+pub mod community;
 pub mod devices;
 #[cfg(test)]
 mod layer_menu_tests;

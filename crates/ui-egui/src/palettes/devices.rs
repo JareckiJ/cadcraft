@@ -295,9 +295,25 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         st.edit = Some(e);
         ui.add_space(4.0);
-        if ui.button(crate::tl!("Apply")).clicked() {
-            st.apply(app);
-        }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(crate::tl!("Apply")).clicked() {
+                st.apply(app);
+            }
+            // Sharing goes through the Community Hub (sign-in, licence); this selects the symbol
+            // and opens it.
+            let can = super::community::signed_in();
+            let b = ui.add_enabled(can, egui::Button::new(crate::tl!("Share Part with Community")));
+            let b = if can { b } else { b.on_disabled_hover_text(crate::tl!("Sign in with GitHub to share parts.")) };
+            if b.clicked() {
+                let id = st.edit.as_ref().map(|e| e.id.clone()).unwrap_or_default();
+                if let Some(d) = st.devices.iter().find(|d| d["id"].as_str() == Some(id.as_str())).cloned() {
+                    st.show_in_drawing(app, &d);
+                }
+                if let Err(e) = super::community::open(app) {
+                    st.message = Some(e);
+                }
+            }
+        });
         if let Some(m) = &st.message {
             ui.label(RichText::new(m).color(t.text_dim));
         }

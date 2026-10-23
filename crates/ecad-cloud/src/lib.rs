@@ -26,7 +26,7 @@ pub use cadcraft_ecad::ManufacturerPart;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{current_session, search, sign_in, sign_out, submit};
+pub use native::{current_session, open_in_browser, search, sign_in, sign_out, submit};
 
 /// Where CADCraft waits for the sign-in result. Add it to Supabase's allowed redirect URLs.
 pub const REDIRECT_PORT: u16 = 53682;
@@ -203,10 +203,13 @@ mod web {
     pub fn submit(_c: &CloudConfig, _p: &ManufacturerPart) -> Result<ManufacturerPart> {
         Err(CloudError::Unavailable)
     }
+    pub fn open_in_browser(_url: &str) -> Result<()> {
+        Err(CloudError::Unavailable)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use web::{current_session, search, sign_in, sign_out, submit};
+pub use web::{current_session, open_in_browser, search, sign_in, sign_out, submit};
 
 #[cfg(test)]
 mod tests {

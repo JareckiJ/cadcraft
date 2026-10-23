@@ -239,6 +239,11 @@ impl<R: BufRead> TakeLine for R {
     }
 }
 
+/// Open `url` in the default browser.
+pub fn open_in_browser(url: &str) -> Result<()> {
+    open::that_detached(url).map_err(|e| CloudError::Network(format!("could not open the browser: {e}")))
+}
+
 /// Sign in with GitHub through Supabase. `open` shows the sign-in page (the app opens the
 /// browser; it receives the URL so it can also show it); `cancel` stops waiting. Blocks until
 /// the browser comes back, so call it from a background thread.

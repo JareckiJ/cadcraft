@@ -1416,3 +1416,37 @@
 	Unit	Одиниця
 	Wired to	З'єднано з
 	Electrical projects (ECPROJ)	Електричні проєкти (ECPROJ)
+# ECAD Community Hub (community parts database).
+	Applied	Застосовано
+	Apply to the selected symbol	Застосувати до вибраного символу
+	Community Hub	Спільнота
+	Community parts	Деталі спільноти
+	Database settings	Налаштування бази даних
+	ECAD Community Hub	Спільнота ECAD
+	I drew this symbol myself and share it under CC BY 4.0.	Я накреслив цей символ сам і поширюю його за ліцензією CC BY 4.0.
+	If no browser opened, open this address:	Якщо браузер не відкрився, відкрийте цю адресу:
+	Link GitHub Account	Під'єднати обліковий запис GitHub
+	Log in to contribute parts to the community database.	Увійдіть, щоб додавати деталі до бази даних спільноти.
+	Logged in as	Ви увійшли як
+	Part number, maker or type	Номер, виробник або тип
+	Public (anon) key	Публічний (anon) ключ
+	Search	Пошук
+	Select one symbol in the drawing first.	Спершу виберіть один символ на кресленні.
+	Select one symbol in the drawing to share its part.	Виберіть один символ на кресленні, щоб поширити його деталь.
+	Select one symbol.	Виберіть один символ.
+	Set the database address and public key below first.	Спершу вкажіть нижче адресу бази даних і публічний ключ.
+	Set the manufacturer and catalogue number in the Electrical Devices palette first.	Спершу вкажіть виробника й номер за каталогом у палітрі «Електричні пристрої».
+	Settings saved.	Налаштування збережено.
+	Share Part with Community	Поширити деталь у спільноті
+	Share a part	Поширити деталь
+	Shared:	Поширено:
+	Shares the selected symbol: its drawing, pins, maker, number and ratings.	Поширює вибраний символ: його креслення, виводи, виробника, номер і параметри.
+	Sign in with GitHub to share parts.	Увійдіть через GitHub, щоб поширювати деталі.
+	Sign out	Вийти
+	Signed in as	Ви увійшли як
+	Supabase project URL	URL проєкту Supabase
+	The symbol's block is missing.	Блок символу відсутній.
+	Use	Використати
+	Waiting for GitHub in your browser…	Очікування GitHub у браузері…
+	is now searchable by everyone.	тепер доступна для пошуку всім.
+	parts found.	деталей знайдено.
