@@ -22,7 +22,7 @@ use crate::cmd::qselect::wildcard;
 use crate::cmd::{CommandSpec, bad, bool_or, f64_or, str_param};
 use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
-const WIRE_LAYERS: &str = "WIRE*";
+pub(super) const WIRE_LAYERS: &str = "WIRE*";
 const LABEL_LAYER: &str = "WIRENO";
 const FORMAT: &str = "{sheet}{col2}";
 /// Most wire segments handled at once.
@@ -93,6 +93,11 @@ impl Sets {
     }
 }
 
+/// Whether `layer` is one of the wire layers `layers` (comma-separated wildcards).
+pub(super) fn wire_layer_matches(layers: &str, layer: &str) -> bool {
+    layers.split(',').any(|p| wildcard(p.trim(), layer))
+}
+
 /// The wires on layers matching `layers` in the current space, as segments.
 fn wire_segments(s: &Session, layers: &str) -> Result<(Vec<Handle>, Vec<Seg>)> {
     let d = s.doc()?;
@@ -100,7 +105,7 @@ fn wire_segments(s: &Session, layers: &str) -> Result<(Vec<Handle>, Vec<Seg>)> {
     let mut handles = Vec::new();
     let mut segs = Vec::new();
     for e in store.iter() {
-        if !layers.split(',').any(|p| wildcard(p.trim(), &e.common.layer)) {
+        if !wire_layer_matches(layers, &e.common.layer) {
             continue;
         }
         let pts: Vec<Vec2> = match &e.kind {

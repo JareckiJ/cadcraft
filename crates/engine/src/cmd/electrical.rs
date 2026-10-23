@@ -13,6 +13,7 @@
 //! (`RELAY_24V` → `K`, see [`classes`]).
 
 mod classes;
+mod symbols;
 mod wires;
 mod xref;
 
@@ -66,6 +67,7 @@ pub fn specs() -> Vec<CommandSpec> {
     ];
     v.extend(wires::specs());
     v.extend(xref::specs());
+    v.extend(symbols::specs());
     v
 }
 
@@ -125,6 +127,9 @@ struct Device {
     /// The attribute holding the tag (`TAG1`, `TAG2`, …) and its value.
     attr: String,
     tag: String,
+    /// Class letters and family from the symbol's `ECLASS` / `EFAMILY` attributes.
+    eclass: Option<String>,
+    family: Option<String>,
     x: f64,
     y: f64,
 }
@@ -142,6 +147,11 @@ fn tag_attrib<'a>(ins: &'a cadcraft_doc::Insert, attribute: Option<&str>) -> Opt
         Some(a) => ins.attribs.iter().find(|x| x.tag.eq_ignore_ascii_case(a)),
         None => TAG_ATTRIBUTES.iter().find_map(|t| ins.attribs.iter().find(|x| x.tag.eq_ignore_ascii_case(t))),
     }
+}
+
+/// The non-empty value of attribute `tag` of `ins`.
+fn attr_value(ins: &cadcraft_doc::Insert, tag: &str) -> Option<String> {
+    ins.attribs.iter().find(|a| a.tag.eq_ignore_ascii_case(tag)).map(|a| a.text.value.trim().to_string()).filter(|v| !v.is_empty())
 }
 
 fn devices(s: &Session, attribute: Option<&str>, handles: Option<&[Handle]>) -> Result<Vec<Device>> {
@@ -163,6 +173,8 @@ fn devices(s: &Session, attribute: Option<&str>, handles: Option<&[Handle]>) -> 
             block: ins.block.clone(),
             attr: a.tag.clone(),
             tag: a.text.value.trim().to_string(),
+            eclass: attr_value(ins, "ECLASS").map(|c| c.to_ascii_uppercase()).filter(|c| valid_class(c)),
+            family: attr_value(ins, "EFAMILY").map(|f| f.to_ascii_uppercase()),
             x: ins.insert.x,
             y: ins.insert.y,
         });
@@ -200,6 +212,7 @@ fn class_of(dev: &Device, overrides: &HashMap<String, String>) -> Option<String>
     overrides
         .get(&dev.block.to_ascii_lowercase())
         .cloned()
+        .or_else(|| dev.eclass.clone())
         .or_else(|| class_from_tag(&dev.tag))
         .or_else(|| class_from_block_name(&dev.block).map(str::to_string))
 }
@@ -272,6 +285,15 @@ fn handle_list(cmd: &str, p: &Value) -> Result<Option<Vec<Handle>>> {
 /// attribute, or its block's name says so and no class override makes it a main device.
 fn is_child(d: &Device, overrides: &HashMap<String, String>) -> bool {
     d.attr.eq_ignore_ascii_case(CHILD_ATTRIBUTE) || (is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase()))
+}
+
+/// `NO` or `NC` for a contact: its `EFAMILY`, else what its block's name says.
+fn kind_of(d: &Device) -> &'static str {
+    match d.family.as_deref() {
+        Some("NC") => "NC",
+        Some("NO") => "NO",
+        _ => contact_kind(&d.block),
+    }
 }
 
 /// Set the `attribute` value of block reference `h` to `tag`.

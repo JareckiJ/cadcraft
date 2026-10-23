@@ -12,7 +12,7 @@ use cadcraft_doc::{EntityKind, HAlign, Handle, Text, VAlign, entity_bounds};
 use cadcraft_geom::{Vec2, Vec3};
 use serde_json::{Value, json};
 
-use super::{Grid, attribute_param, class_overrides, contact_kind, devices, handle_list, is_child, is_numbered, set_tag};
+use super::{Grid, attribute_param, class_overrides, devices, handle_list, is_child, is_numbered, kind_of, set_tag};
 use crate::cmd::machines::{SelOutcome, SelectPhase};
 use crate::cmd::{CommandSpec, bad, f64_or, str_param};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
@@ -112,8 +112,7 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
             let (pa, pb) = (grid.locate(a.x), grid.locate(b.x));
             pa.cmp(&pb).then(b.y.total_cmp(&a.y))
         });
-        let lines: Vec<String> =
-            contacts.iter().filter_map(|c| place(c).map(|at| format!("{} {at}", contact_kind(&c.block)))).take(MAX_LINES).collect();
+        let lines: Vec<String> = contacts.iter().filter_map(|c| place(c).map(|at| format!("{} {at}", kind_of(c)))).take(MAX_LINES).collect();
         if !lines.is_empty() {
             texts.push((main.handle, lines));
         }
@@ -130,7 +129,7 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
             "column": at.map(|a| a.1),
             "contacts": contacts.iter().map(|c| {
                 let at = grid.locate(c.x);
-                json!({ "handle": c.handle.hex(), "kind": contact_kind(&c.block), "sheet": at.map(|a| a.0), "column": at.map(|a| a.1) })
+                json!({ "handle": c.handle.hex(), "kind": kind_of(c), "sheet": at.map(|a| a.0), "column": at.map(|a| a.1) })
             }).collect::<Vec<_>>(),
         }));
     }
@@ -138,6 +137,25 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
         if mains.get(d.tag.as_str()).is_none_or(|m| m.len() != 1) {
             orphans.push(d.handle.hex());
         }
+    }
+
+    // Symbols with an XREF attribute show their references in it (cleared first, as the texts
+    // are); the others get texts on the layer.
+    let has_xref = |s: &Session, h: Handle| matches!(s.doc().ok().and_then(|d| d.entity(h)).map(|e| &e.kind), Some(EntityKind::Insert(i)) if i.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("XREF")));
+    let mut in_attr: Vec<(Handle, String)> = devs.iter().filter(|d| has_xref(s, d.handle)).map(|d| (d.handle, String::new())).collect();
+    let mut as_text = Vec::new();
+    for (h, lines) in texts {
+        if let Some(slot) = in_attr.iter_mut().find(|(x, _)| *x == h) {
+            slot.1 = lines.join("  ");
+        } else {
+            as_text.push((h, lines));
+        }
+    }
+    let texts = as_text;
+    let mut in_attributes = 0usize;
+    for (h, value) in &in_attr {
+        set_tag(s, *h, "XREF", value)?;
+        in_attributes += usize::from(!value.is_empty());
     }
 
     // Rebuild the layer's texts in the current space.
@@ -183,7 +201,7 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
         report.len(),
         if orphans.is_empty() { String::new() } else { format!(", {} contact(s) without a single main device", orphans.len()) }
     ));
-    Ok(json!({ "devices": report, "orphans": orphans, "written": written }))
+    Ok(json!({ "devices": report, "orphans": orphans, "written": written, "inAttributes": in_attributes }))
 }
 
 /// ELINK at the command line: pick the coil, then its contacts.
@@ -307,6 +325,24 @@ mod tests {
         assert_eq!(xref_texts(&s).len(), 4);
         s.execute("undo", &json!({})).unwrap();
         assert_eq!(xref_texts(&s).len(), 4);
+    }
+
+    #[test]
+    fn library_symbols_show_references_in_their_xref_attribute() {
+        let mut s = Session::new();
+        let k = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [63, 100]})).unwrap();
+        let c = s.execute("esymbol", &json!({"name": "IEC_NO", "at": [200, 150]})).unwrap();
+        let (k, c) = (k["handle"].as_str().unwrap().to_string(), c["handle"].as_str().unwrap().to_string());
+        s.execute("elink", &json!({"main": k, "handles": [c]})).unwrap();
+        let r = s.execute("exref", &json!({})).unwrap();
+        assert_eq!(r["inAttributes"], 2);
+        assert!(xref_texts(&s).is_empty());
+        let xref = |h: &str| match &s.doc().unwrap().entity(Handle::parse_hex(h).unwrap()).unwrap().kind {
+            EntityKind::Insert(i) => i.attribs.iter().find(|a| a.tag == "XREF").unwrap().text.value.clone(),
+            _ => panic!(),
+        };
+        assert_eq!(xref(&k), "NO 105");
+        assert_eq!(xref(&c), "/102");
     }
 
     #[test]
