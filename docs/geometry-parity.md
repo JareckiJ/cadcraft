@@ -1,6 +1,6 @@
 # Geometry parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** trivial (JOIN Close on a single arc or elliptical arc) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** trivial (EXPLODE preserves block and array elevations with independent Z scales) · **Target:** Autodesk AutoCAD 2027
 
 CAD users trust numbers: a trimmed endpoint, an offset, an intersection or an area is either right
 to the last displayed digit or the tool is unusable for production drawings. This document
@@ -38,6 +38,10 @@ constraints 10%.
 | Large coordinates (UTM, 1e6–1e7) | Works | untested; absolute tolerances will misjudge tangency and coincidence, and absolute tessellation steps create huge sample counts that hit caps | — |
 | Point merging (JOIN, PEDIT Join fuzz, region) | Fuzz distance per command | JOIN 1e-9 absolute; PEDIT has a fuzz; region grid-key rounding at `tol` | `modify.rs:419`, `region.rs:42` |
 | Display precision (LUPREC, AUPREC, units) | Decimal, Engineering, Architectural, Fractional, Scientific; 5 angle formats | units formatting and parsing of all of them | `engine/src/units.rs` |
+
+EXPLODE preserves block point elevations, array levels and row elevations. Nested references
+and helix heights use the parent's Z scale independently of its XY scale, including negative
+Z scales and zero XY scales.
 
 ## Curves (≈ 60%)
 
@@ -157,6 +161,7 @@ Total ≈ 90–140 h; items 1–6 parallelise across two or three agents.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | trivial | EXPLODE keeps block and array elevations and composes nested Z scales independently of XY; helix heights follow the Z scale (#917, #1185) |
 | 2026-10-14 | trivial | JOIN Close: a single arc becomes its circle, a single elliptical arc its full ellipse (#1175) |
 | 2026-10-12 | trivial | TRIM on a closed polyline keeps only the complementary run when the pick lies past the last cut (#726) |
 | 2026-10-12 | minor | Property-based and hostile-input tests for geometry numerics landed (`crates/geom/src/property_tests.rs`): intersections, closest points, three-point arcs, bounds, vector identities; hostile f64s never panic; known answers at 1e6–1e7 |

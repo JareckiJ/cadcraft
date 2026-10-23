@@ -6,6 +6,29 @@ fn line(a: (f64, f64), b: (f64, f64)) -> EntityKind {
 }
 
 #[test]
+fn block_transform_keeps_helix_height_independent_of_xy_scale() {
+    for (xy, sz) in [(2.0, 3.0), (2.0, -3.0), (0.0, 3.0)] {
+        let helix = Helix {
+            center: Vec3::new(1.0, 2.0, 5.0),
+            base_radius: 2.0,
+            top_radius: 1.0,
+            height: 4.0,
+            turns: 2.0,
+            start_angle: 0.0,
+            ccw: true,
+            constrain: HelixConstrain::Height,
+        };
+        let mut kind = EntityKind::Helix(helix);
+        kind.transform_with_z(&Mat3::scale(xy, xy), sz, 7.0);
+        let EntityKind::Helix(h) = kind else { panic!("expected a helix") };
+        assert_eq!(h.center, Vec3::new(xy, 2.0 * xy, 7.0 + sz * 5.0));
+        assert_eq!(h.height, sz * 4.0);
+        assert_eq!(h.end_point().z, 7.0 + sz * 9.0);
+        assert_eq!(h.base_radius, xy * 2.0);
+    }
+}
+
+#[test]
 fn new_drawing_has_standard_tables() {
     let d = Drawing::new_imperial();
     assert!(d.layer("0").is_some());
