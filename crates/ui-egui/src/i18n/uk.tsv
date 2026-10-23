@@ -44,6 +44,7 @@
 	3 Viewports	3 видові екрани
 	3D Face	3D-грань
 	3D Operations	3D-операції
+	3D Modeling	3D-моделювання
 	3D Polyline	3D-полілінія
 	4 Viewports	4 видові екрани
 	< Less than	< Менше ніж
@@ -527,6 +528,7 @@
 	Measure Geometry	Виміряти геометрію
 	Merge Cells	Об'єднати комірки
 	Merged PRs	Об'єднані PR
+	Meshes	Сітки
 	Mid Between 2 Points	Середина між 2 точками
 	Midpoint	Середина
 	Mirror	Дзеркальне відображення
@@ -1185,6 +1187,7 @@
 	Viewports	Видові екрани
 	W	Зх
 	WCS	ССК
+	Wedge	Клин
 	White	Білий
 	Width factor	Коефіцієнт ширини
 	Window	Вікно
