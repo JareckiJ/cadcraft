@@ -553,18 +553,39 @@ fn run_query(s: &mut Session, p: &Value) -> Result<Value> {
     let place = place_of_active(s)?;
     let db = open_db(place.project.as_ref().map(|(p, _)| p.as_str()))?;
     let what = str_param(p, "what").unwrap_or("stats").to_ascii_lowercase();
+    // Outside a project the session's database holds every drawing synchronised so far: answer
+    // for this drawing only. In a project, for the whole project.
+    let page = place.project.is_none().then(|| place.page.id.clone());
+    let all_devices = db.devices().map_err(db_err)?;
+    let devices: Vec<EcadDevice> =
+        all_devices.iter().filter(|d| page.as_ref().is_none_or(|g| d.graphic.as_ref().is_some_and(|x| &x.page == g))).cloned().collect();
+    let connections: Vec<EcadConnection> =
+        db.connections().map_err(db_err)?.into_iter().filter(|c| page.as_ref().is_none_or(|g| &c.page == g)).collect();
     Ok(match what.as_str() {
         "project" => to_json(&db.project().map_err(db_err)?),
-        "devices" => to_json(&db.devices().map_err(db_err)?),
-        "connections" => to_json(&db.connections().map_err(db_err)?),
+        "devices" => to_json(&devices),
+        "connections" => to_json(&connections),
         "wirelist" => {
-            let list: Vec<Value> = db.wire_list().map_err(db_err)?.into_iter().map(|(n, a, b)| json!({ "wire": n, "from": a, "to": b })).collect();
+            let tag = |id: &DeviceId| all_devices.iter().find(|d| &d.id == id).map(|d| d.tag.clone()).unwrap_or_else(|| "?".into());
+            let mut rows: Vec<(String, String, String)> = connections
+                .iter()
+                .map(|c| {
+                    (
+                        c.wire_number.clone().unwrap_or_default(),
+                        format!("{}:{}", tag(&c.from.device), c.from.pin),
+                        format!("{}:{}", tag(&c.to.device), c.to.pin),
+                    )
+                })
+                .collect();
+            rows.sort();
+            let list: Vec<Value> = rows.into_iter().map(|(n, a, b)| json!({ "wire": n, "from": a, "to": b })).collect();
             json!(list)
         }
         "bom" => {
             // Parts list: main devices grouped by part.
             let mut rows: BTreeMap<(String, String), (Vec<String>, String)> = BTreeMap::new();
-            for d in db.devices().map_err(db_err)?.into_iter().filter(|d| !d.child) {
+            // Main devices, not terminals (listed by strip in the terminal plan).
+            for d in devices.iter().cloned().filter(|d| !d.child && d.family != DeviceFamily::Terminal) {
                 let r =
                     rows.entry((d.part.manufacturer.clone(), d.part.catalog.clone())).or_insert_with(|| (Vec::new(), d.part.description.join(" ")));
                 r.0.push(d.tag);
@@ -578,7 +599,13 @@ fn run_query(s: &mut Session, p: &Value) -> Result<Value> {
                 .collect();
             json!(list)
         }
-        "stats" => to_json(&db.stats().map_err(db_err)?),
+        "stats" => match &page {
+            None => to_json(&db.stats().map_err(db_err)?),
+            Some(_) => {
+                let networks: HashSet<&str> = connections.iter().filter_map(|c| c.network.as_deref()).collect();
+                json!({ "pages": 1, "devices": devices.len(), "connections": connections.len(), "networks": networks.len() })
+            }
+        },
         "conductor" | "neighbours" => {
             let dev = str_param(p, "device").ok_or_else(|| bad(CMD, "`device` (id) is required"))?;
             let id = DeviceId::from(dev);

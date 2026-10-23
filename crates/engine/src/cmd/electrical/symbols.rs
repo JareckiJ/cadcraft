@@ -422,7 +422,8 @@ pub(super) fn library() -> &'static [SymbolDef] {
             family: "TERMINAL",
             child: false,
             prims: terminal,
-            pins: pins2!("1", "1"),
+            // Numbered when placed, as the next terminal of its strip.
+            pins: pins2!("", ""),
         },
         SymbolDef {
             name: "IEC_PSU",

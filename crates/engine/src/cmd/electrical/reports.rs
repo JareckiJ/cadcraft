@@ -61,7 +61,7 @@ pub(super) fn draw_table(s: &mut Session, at: Vec2, title: &str, headers: &[&str
     let mut common = s.current_common();
     common.layer = REPORT_LAYER.to_string();
     let space = s.space();
-    let mut add = |s: &mut Session, k: EntityKind| -> Result<()> {
+    let add = |s: &mut Session, k: EntityKind| -> Result<()> {
         s.doc_mut()?.add(&space, common.clone(), k)?;
         Ok(())
     };

@@ -95,6 +95,8 @@ pub(super) fn number(s: &mut Session, strip: Option<&str>, all: bool) -> Result<
         let mut next = 1u64;
         for t in &ts {
             if keep(t) {
+                // Kept, but in its strip by name.
+                write_terminal(s, t, &t.number)?;
                 continue;
             }
             while used.contains(&next) {
