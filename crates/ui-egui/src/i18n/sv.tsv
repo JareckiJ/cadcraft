@@ -1245,6 +1245,8 @@ menu	View	Visa
 menu	Draw	Rita
 menu	Dimension	Måttsättning
 menu	Modify	Ändra
+	Ignore hatch objects	Ignorera skrafferingsobjekt
+	Ignore dimension extension-line endpoints	Ignorera ändpunkter på måtthjälplinjer
 
 # Strings added upstream after the first Swedish catalog (Ukrainian reference order, then menus).
 	Hatch and Gradient	Skraffering och toning

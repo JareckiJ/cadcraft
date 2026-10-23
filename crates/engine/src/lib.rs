@@ -353,6 +353,8 @@ pub struct Settings {
     pub snapunit: Vec2,
     /// OSNAPHATCH: object snaps find hatch objects (off by default, as in AutoCAD).
     pub osnaphatch: bool,
+    /// OSOPTIONS; bit 1 is mirrored by the inverse of the legacy OSNAPHATCH setting.
+    pub osoptions: u8,
     /// GRIDUNIT in a drafting settings snapshot; zero components follow SNAPUNIT.
     pub gridunit: Vec2,
     /// Major grid line every N minor lines (GRIDMAJOR).
@@ -470,6 +472,7 @@ impl Default for Settings {
             snapmode: false,
             snapunit: Vec2::new(0.5, 0.5),
             osnaphatch: false,
+            osoptions: snap::options::DEFAULT,
             gridunit: Vec2::new(0.5, 0.5),
             gridmajor: 5,
             zoomfactor: 60,
@@ -519,6 +522,21 @@ impl Default for Settings {
             polardist: 0.0,
             auditctl: false,
         }
+    }
+}
+
+impl Settings {
+    /// OSOPTIONS with the legacy hatch preference reflected in bit 1. This also keeps callers
+    /// that edit the public OSNAPHATCH field compatible with the bitcode.
+    pub fn object_snap_options(&self) -> u8 {
+        (self.osoptions & !snap::options::IGNORE_HATCH) | if self.osnaphatch { 0 } else { snap::options::IGNORE_HATCH }
+    }
+
+    /// Running or override modes plus the shared object-snap filters (not OSMODE bits).
+    pub fn object_snap_modes(&self, modes: u32) -> u32 {
+        modes
+            | if self.osnaphatch { snap::mode::HATCH } else { 0 }
+            | if self.object_snap_options() & snap::options::IGNORE_DIM_ENDS != 0 { snap::mode::IGNORE_DIM_ENDS } else { 0 }
     }
 }
 
