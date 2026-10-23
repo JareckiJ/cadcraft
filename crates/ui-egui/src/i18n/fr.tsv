@@ -1008,3 +1008,5 @@
 	Not a number or distance: {text}	Ni un nombre ni une distance : {text}
 	Query Texts	Interroger les textes
 	Analyze Shapes	Analyser les formes
+	Objects on locked layers can't be selected	Les objets sur des calques verrouillés ne peuvent pas être sélectionnés
+	They are still shown and snapped to, like a blueprint.	Ils restent affichés et accrochables, comme un plan de fond.

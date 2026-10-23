@@ -1259,3 +1259,5 @@ menu	Modify	Edita
 	Discard	Scarta
 	Customize	Personalizza
 	Edit Command Aliases (PGP)...	Modifica alias dei comandi (PGP)...
+	Objects on locked layers can't be selected	Gli oggetti sui layer bloccati non possono essere selezionati
+	They are still shown and snapped to, like a blueprint.	Restano visibili e agganciabili, come una base di riferimento.

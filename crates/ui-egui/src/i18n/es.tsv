@@ -1247,3 +1247,5 @@
 	Not a number or distance: {text}	No es un número ni una distancia: {text}
 	Query Texts	Consultar textos
 	Analyze Shapes	Analizar formas
+	Objects on locked layers can't be selected	Los objetos en capas bloqueadas no se pueden seleccionar
+	They are still shown and snapped to, like a blueprint.	Se siguen mostrando y se pueden referenciar, como un plano base.

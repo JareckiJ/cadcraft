@@ -627,6 +627,7 @@ pub fn run_transparent(app: &mut CadApp, id: &str) {
 
 /// Keyboard shortcuts and function keys.
 pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
+    crate::options::sync_view(app);
     use egui::{Key, KeyboardShortcut, Modifiers};
     let sc = |m: Modifiers, k: Key| KeyboardShortcut::new(m, k);
     let cmd = Modifiers::COMMAND;

@@ -1344,3 +1344,5 @@ menu	Dimension	Ölçülendirme
 menu	Draw	Çiz
 menu	Modify	Değiştir
 menu	View	Görünüm
+	Objects on locked layers can't be selected	Kilitli katmanlardaki nesneler seçilemez
+	They are still shown and snapped to, like a blueprint.	Bir altlık gibi hâlâ gösterilir ve yakalanır.

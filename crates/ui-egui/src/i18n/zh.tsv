@@ -1146,3 +1146,5 @@
 	First corner	第一角点
 	Opposite corner	对角点
 	Window <	窗口 <
+	Objects on locked layers can't be selected	无法选择已锁定图层上的对象
+	They are still shown and snapped to, like a blueprint.	它们仍会显示并可捕捉，就像底图一样。

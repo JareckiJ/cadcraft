@@ -1358,3 +1358,5 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+	Objects on locked layers can't be selected	Об'єкти на заблокованих шарах не можна вибрати
+	They are still shown and snapped to, like a blueprint.	Вони й далі показуються, і до них працює прив'язка, як до підкладки.

@@ -1218,3 +1218,5 @@ menu	Modify	Modifikace
 	Not a number or distance: {text}	Není číslo ani vzdálenost: {text}
 	Query Texts	Dotaz na texty
 	Analyze Shapes	Analyzovat tvary
+	Objects on locked layers can't be selected	Objekty na zamčených hladinách nelze vybrat
+	They are still shown and snapped to, like a blueprint.	Stále se zobrazují a lze k nim přichytávat, jako k podkladu.

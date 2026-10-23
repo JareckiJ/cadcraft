@@ -1009,3 +1009,5 @@
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
 	Analyze Shapes	Анализ фигур
+	Objects on locked layers can't be selected	Объекты на заблокированных слоях нельзя выбрать
+	They are still shown and snapped to, like a blueprint.	Они по-прежнему показываются и к ним работает привязка, как к подложке.

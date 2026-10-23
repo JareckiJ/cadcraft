@@ -1238,3 +1238,5 @@ menu	View	보기
 menu	Draw	그리기
 menu	Dimension	치수
 menu	Modify	수정
+	Objects on locked layers can't be selected	잠긴 도면층의 객체는 선택할 수 없습니다
+	They are still shown and snapped to, like a blueprint.	밑그림처럼 계속 표시되며 스냅도 적용됩니다.

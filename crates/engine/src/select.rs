@@ -141,8 +141,10 @@ fn in_box(pts: impl Iterator<Item = Vec2>, angle: f64, p: Vec2) -> bool {
     !b.is_empty() && b.contains(turn(p))
 }
 
-fn selectable(d: &Drawing, e: &Entity) -> bool {
-    d.is_visible(e)
+/// Whether `e` can be picked or selected: shown, on the current storey, and not on a locked layer
+/// when [`Drawing::locked_unselectable`] says so (snapping doesn't ask this).
+pub fn selectable(d: &Drawing, e: &Entity) -> bool {
+    d.is_visible(e) && !(d.locked_unselectable && d.layer(&e.common.layer).is_some_and(|l| l.locked))
 }
 
 /// Entities to test, in the order to test them, each with its bounds when already known.

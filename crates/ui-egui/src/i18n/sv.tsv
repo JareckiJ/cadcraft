@@ -1342,3 +1342,5 @@ menu	Modify	Ändra
 	Groups	Grupper
 	Multiline text	Flerradstext
 	Hatches	Skrafferingar
+	Objects on locked layers can't be selected	Objekt på låsta lager kan inte markeras
+	They are still shown and snapped to, like a blueprint.	De visas och snappas fortfarande till, som ett underlägg.

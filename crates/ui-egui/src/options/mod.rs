@@ -22,6 +22,7 @@
 //! | `selectionColor` | the colour selected objects are highlighted in: `"#rrggbb"`, or `null` for the theme's |
 //! | `snapMarkerSize` | object snap marker size in points, 5–31 |
 //! | `interfaceScale` | the interface's size, 0.5–3 (1: the system's own) |
+//! | `lockedLayersUnselectable` | objects on locked layers can't be picked or selected, only snapped to (default `false`) |
 //!
 //! SAVETIME and SAVEFILEPATH are the engine's autosave settings, kept with the autosave state
 //! rather than in the profile.
@@ -72,6 +73,8 @@ pub struct UiOptions {
     pub time_sensitive_right_click: bool,
     /// The size of every menu, palette, dialog and the command line (1: the system's own).
     pub interface_scale: f32,
+    /// Objects on locked layers can't be picked or selected; they are still snapped to.
+    pub locked_unselectable: bool,
 }
 
 impl Default for UiOptions {
@@ -83,6 +86,7 @@ impl Default for UiOptions {
             selection_color: None,
             time_sensitive_right_click: true,
             interface_scale: 1.0,
+            locked_unselectable: false,
         }
     }
 }
@@ -149,6 +153,7 @@ struct UiChanges {
     savefilepath: Option<String>,
     time_sensitive_right_click: Option<bool>,
     interface_scale: Option<f32>,
+    locked_unselectable: Option<bool>,
 }
 
 fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
@@ -191,6 +196,7 @@ fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
             c.save_version = Some(crate::SaveVersion::parse(name.trim()).ok_or("saveVersion must be 2000, 2004, 2007, 2010, 2013 or 2018")?);
         }
         "timeSensitiveRightClick" => c.time_sensitive_right_click = Some(v.as_bool().ok_or("timeSensitiveRightClick must be true or false")?),
+        "lockedLayersUnselectable" => c.locked_unselectable = Some(v.as_bool().ok_or("lockedLayersUnselectable must be true or false")?),
         k if k.eq_ignore_ascii_case("SAVETIME") => {
             let max = cadcraft_engine::autosave::MAX_SAVETIME;
             let n = v
@@ -227,6 +233,7 @@ fn ui_json(app: &CadApp) -> Map<String, Value> {
     m.insert("SAVETIME".into(), json!(cadcraft_engine::autosave::savetime()));
     m.insert("SAVEFILEPATH".into(), json!(cadcraft_engine::autosave::savefilepath()));
     m.insert("timeSensitiveRightClick".into(), json!(o.time_sensitive_right_click));
+    m.insert("lockedLayersUnselectable".into(), json!(o.locked_unselectable));
     m
 }
 
@@ -300,6 +307,9 @@ fn run_json(app: &mut CadApp, params: &Value) -> Result<Value, String> {
     if let Some(b) = ui.time_sensitive_right_click {
         app.options.time_sensitive_right_click = b;
     }
+    if let Some(b) = ui.locked_unselectable {
+        app.options.locked_unselectable = b;
+    }
     Ok(report(app))
 }
 
@@ -331,6 +341,7 @@ impl CadApp {
             "snapMarkerSize": self.options.snap_marker_size,
             "timeSensitiveRightClick": self.options.time_sensitive_right_click,
             "interfaceScale": self.options.interface_scale,
+            "lockedLayersUnselectable": self.options.locked_unselectable,
         })
         .to_string()
     }
@@ -346,9 +357,16 @@ impl CadApp {
             cadcraft_engine::cmd::options::restore(&mut self.session, vars);
         }
         let mut c = UiChanges::default();
-        for key in
-            ["systemCursor", "modelBackground", "paperBackground", "selectionColor", "snapMarkerSize", "timeSensitiveRightClick", "interfaceScale"]
-        {
+        for key in [
+            "systemCursor",
+            "modelBackground",
+            "paperBackground",
+            "selectionColor",
+            "snapMarkerSize",
+            "timeSensitiveRightClick",
+            "interfaceScale",
+            "lockedLayersUnselectable",
+        ] {
             if let Some(value) = v.get(key) {
                 let _ = parse_ui(key, value, &mut c);
             }
@@ -366,6 +384,9 @@ impl CadApp {
         if let Some(sel) = c.selection_color {
             self.options.selection_color = sel;
         }
+        if let Some(b) = c.locked_unselectable {
+            self.options.locked_unselectable = b;
+        }
         if let Some(n) = c.snap_marker_size {
             self.options.snap_marker_size = n;
         }
@@ -374,6 +395,27 @@ impl CadApp {
         }
         if let Some(n) = c.interface_scale {
             self.options.interface_scale = n;
+        }
+    }
+}
+
+/// Hand the drawing the preferences it needs as a view (not an edit: a drawing without changes
+/// stays without changes): objects on locked layers selectable or not.
+pub fn sync_view(app: &mut CadApp) {
+    let want = app.options.locked_unselectable;
+    let Ok(st) = app.session.state_mut() else { return };
+    if st.doc.locked_unselectable == want {
+        return;
+    }
+    // In the Block Editor `doc` is the editor's drawing: it follows too, and its own record of
+    // unsaved changes stays as it was (the drawing itself follows once the editor closes).
+    let clean = if st.block_edit.is_some() { !st.block_unsaved() } else { !st.is_dirty() };
+    std::sync::Arc::make_mut(&mut st.doc).locked_unselectable = want;
+    if clean {
+        let doc = st.doc.clone();
+        match st.block_edit.as_mut() {
+            Some(b) => b.saved = doc,
+            None => st.saved = doc,
         }
     }
 }
