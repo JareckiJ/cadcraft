@@ -8,6 +8,70 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 23.10.2026 (0.9.0-b16)
+
+### Русский
+
+**Окно редактирования текста**
+- Когда открываете существующий текст, весь текст сразу выделен: можно сразу печатать новый.
+- Отмена и возврат: кнопки со стрелками рядом с «ОК» и «Отмена», а также Ctrl+Z (отменить), Ctrl+Y и Ctrl+Shift+Z (вернуть). Текст, набранный без пауз, отменяется одним шагом, а не по одной букве.
+- Над текстом курсор мыши становится текстовым (I-образным).
+
+**Формулы в размерах, выносках и многострочном тексте**
+- Формулы теперь работают и при редактировании: в многострочном тексте, в тексте размера и в тексте выноски, а не только при создании нового текста.
+- Формула работает, только если весь текст — одна строка, начинающаяся с «=».
+- В размере знак <> в формуле означает сам измеренный размер. Например, =<>/2 у размера 1250 покажет 625, а =ROUND(<>/1000;2) покажет метры. При изменении геометрии значение пересчитывается.
+
+**Обрезать и Удлинить: подсветка того, что произойдёт**
+- Во время команд «Обрезать» (TRIM) и «Удлинить» (EXTEND) наведите курсор на объект. Часть, которая будет удалена, светится красным. Часть, которая будет добавлена, светится голубым. Так видно заранее, что сделает щелчок.
+- В быстром режиме объект, который ничто не пересекает, удаляется целиком. В этом случае светится весь объект.
+
+**Обрезка штриховки**
+- «Обрезать» теперь работает и со штриховкой. Линии, пересекающие штриховку, делят её на части. Щелчок по части удаляет её из штриховки, остальное остаётся. Как и в AutoCAD, после обрезки штриховка перестаёт быть ассоциативной.
+- При наведении удаляемая часть штриховки подсвечивается красной заливкой.
+- Дуги в контуре обрезанной штриховки заменяются короткими отрезками.
+
+**Командная строка**
+- Последние команды над командной строкой показываются только при наведении мыши на командную строку. Раньше они были видны всегда.
+
+**Подсказки к инструментам**
+- В подсказке у каждой кнопки инструмента теперь есть короткое описание того, что делает команда (на русском, английском и украинском).
+
+**Диспетчер размерных стилей: правильный предпросмотр**
+- Предпросмотр берёт из чертежа пользовательские стрелки (блоки), текстовые стили со шрифтами и типы линий. Раньше пользовательские стрелки (например, засечки в стилях «1-50», «1-100» чертежа «אריה צוק») в предпросмотре заменялись обычными стрелками.
+
+### English
+
+**Text editing window**
+- Editing existing text opens it fully selected, so you can type over it right away.
+- Undo and redo: arrow buttons next to OK and Cancel, plus Ctrl+Z (undo) and Ctrl+Y or Ctrl+Shift+Z (redo). Text typed without a pause is undone in one step, not letter by letter.
+- The mouse pointer becomes a text (I-beam) cursor over the text.
+
+**Formulas in dimensions, leaders and multiline text**
+- Formulas now also work when editing multiline text, dimension text and leader text, not only when creating new text.
+- A formula works only if the whole text is one line starting with "=".
+- In a dimension, <> in a formula stands for the measured value. For example, =<>/2 on a 1250 dimension shows 625, and =ROUND(<>/1000;2) shows meters. The value updates when the geometry changes.
+
+**Trim and Extend: see what will happen**
+- During TRIM and EXTEND, hover over an object. The part that will be removed glows red. The part that will be added glows blue. You see the result before you click.
+- In Quick mode an object that nothing crosses is erased entirely. In that case the whole object glows.
+
+**Trimming hatches**
+- TRIM now works on hatches. Lines crossing a hatch split it into parts. Clicking a part removes it from the hatch, and the rest stays. As in AutoCAD, the trimmed hatch is no longer associative.
+- On hover, the part to be removed is highlighted with a red fill.
+- Arcs in a trimmed hatch's boundary are replaced by short straight segments.
+
+**Command line**
+- Recent commands above the command line now appear only while the mouse is over the command line. Before, they were always visible.
+
+**Tool tooltips**
+- Each tool button's tooltip now includes a short description of what the command does (in Russian, English and Ukrainian).
+
+**Dimension Style Manager: correct preview**
+- The preview now uses the drawing's own user arrowheads (blocks), text styles with their fonts, and linetypes. Before, user arrowheads (for example, the ticks in the "1-50" and "1-100" styles of the "אריה צוק" drawing) were replaced with plain arrows in the preview.
+
+---
+
 ## 23.10.2026 (0.9.0-b15)
 
 ### Русский

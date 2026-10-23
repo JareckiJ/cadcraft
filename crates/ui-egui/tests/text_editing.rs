@@ -56,6 +56,8 @@ fn one_line_of_text_is_edited_in_place_and_enter_finishes() {
         app.session.input(Input::Point(cadcraft_geom::Vec2::new(0.5, 0.5))).unwrap();
     });
     assert_eq!(h.state().session.text_editor().map(|e| e.kind), Some(EditorKind::Line));
+    // The text opens selected: End goes past it, then the typing adds to it.
+    key(&mut h, Key::End, Modifiers::NONE);
     type_text(&mut h, " B");
     key(&mut h, Key::Enter, Modifiers::NONE);
     assert!(h.state().session.running.is_none(), "{}", h.state().session.prompt_text());
