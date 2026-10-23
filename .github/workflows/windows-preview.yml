@@ -3,8 +3,6 @@
 name: Windows preview
 
 on:
-  push:
-    branches: ["feature/**"]
   workflow_dispatch:
 
 permissions:
