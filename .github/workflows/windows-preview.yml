@@ -1,0 +1,38 @@
+# Builds a Windows preview of the app (with the electrical commands) to download from the run's
+# Artifacts. Unsigned: Windows SmartScreen may ask to confirm ("More info" → "Run anyway").
+name: Windows preview
+
+on:
+  push:
+    branches: ["feature/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: 3d9ab3a132ed0eff457e424226a435a901da30d3
+          path: craft-fonts
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        shell: bash
+        run: |
+          export CRAFT_FONTS_DIR="$GITHUB_WORKSPACE/craft-fonts"
+          cargo build --release -p cadcraft -p cadcraft-cli
+          mkdir -p preview
+          cp target/release/cadcraft.exe target/release/cadcraft-cli.exe preview/
+          bash examples/electrical/make-demo.sh target/release/cadcraft-cli.exe preview/demo-schematic.dxf
+          cp examples/electrical/README.md preview/HOW-TO-TRY.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cadcraft-windows-preview
+          path: preview
+          retention-days: 30
