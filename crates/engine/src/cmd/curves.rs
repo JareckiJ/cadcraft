@@ -259,11 +259,16 @@ fn score(c: &Circle, objs: &[(TanObj, Vec2)]) -> f64 {
 
 /// Circle of radius `r` tangent to two objects, nearest the pick points.
 pub fn ttr(o1: TanObj, p1: Vec2, o2: TanObj, p2: Vec2, r: f64) -> Option<Circle> {
+    ttr_all(o1, p1, o2, p2, r).into_iter().next()
+}
+
+/// Every circle of radius `r` tangent to two objects, nearest the pick points first.
+pub fn ttr_all(o1: TanObj, p1: Vec2, o2: TanObj, p2: Vec2, r: f64) -> Vec<Circle> {
     if !(r.is_finite() && r > EPS) {
-        return None;
+        return Vec::new();
     }
     let objs = [(o1, p1), (o2, p2)];
-    let mut best: Option<(f64, Circle)> = None;
+    let mut found: Vec<(f64, Circle)> = Vec::new();
     for a in o1.offsets(r) {
         for b in o2.offsets(r) {
             for c in intersect_tan(&a, &b) {
@@ -271,14 +276,13 @@ pub fn ttr(o1: TanObj, p1: Vec2, o2: TanObj, p2: Vec2, r: f64) -> Option<Circle>
                 if !c.is_finite() || o1.residual(c, r).abs() > 1e-6 * r.max(1.0) || o2.residual(c, r).abs() > 1e-6 * r.max(1.0) {
                     continue;
                 }
-                let sc = score(&ci, &objs);
-                if best.is_none_or(|(b, _)| sc < b) {
-                    best = Some((sc, ci));
-                }
+                found.push((score(&ci, &objs), ci));
             }
         }
     }
-    best.map(|(_, c)| c)
+    // A stable sort keeps the first of equally near circles first.
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.into_iter().map(|(_, c)| c).collect()
 }
 
 /// Solve a 3×3 linear system (Cramer's rule).
