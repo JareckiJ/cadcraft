@@ -335,6 +335,64 @@ fn canvas_reset_during_splitter_drag_discards_old_resize_and_ends_gesture() {
     assert_eq!(h.state().session.doc().unwrap(), &drawing);
 }
 
+/// Guard that every closable panel header offers a visible close button: a docked tab group,
+/// the default accordion stack, and a floating group. Each click must remove the panel, the
+/// button must not cover the title, and the tab context menu must still close the same panel.
+#[test]
+fn every_panel_header_has_a_close_button_that_closes_like_the_context_menu() {
+    let mut h = harness(None, 1280.0, 1.0);
+    assert!(h.query_by_label("Close Tool Sets").is_some(), "docked tab headers show a close button");
+    assert!(h.query_by_label("Close Drawing").is_none(), "the drawing view is not a closable panel");
+    // External References opens as a tabbed pane; its button sits beside the title, not over it.
+    h.state_mut().run("ui.dock", json!({"operation":"open","panel":"externalReferences"})).unwrap();
+    h.run_steps(4);
+    assert!(h.state().ui.docking.layout.contains(&Panel::ExternalRefs));
+    let close = h.get_by_label("Close External References").rect();
+    let title = h.get_by_role_and_label(egui::accesskit::Role::Tab, "External References").rect();
+    assert!(!close.intersects(title), "the close button does not cover the panel title");
+    h.get_by_label("Close External References").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::ExternalRefs));
+
+    // Accordion headers (the default Layers/Properties stack) get one too.
+    assert!(h.state().ui.docking.layout.contains(&Panel::Layers));
+    h.get_by_label("Close Layers").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Layers));
+
+    // The context menu still closes the same panel after it is reopened.
+    h.state_mut().run("ui.dock", json!({"operation":"open","panel":"layers"})).unwrap();
+    h.run_steps(4);
+    assert!(h.state().ui.docking.layout.contains(&Panel::Layers));
+    h.get_by_role_and_label(egui::accesskit::Role::Tab, "Layers").click_button(PointerButton::Secondary);
+    h.run_steps(3);
+    h.get_by_label("Close panel").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Layers));
+
+    // Floating panels get the same button in their group header.
+    h.state_mut().run("ui.dock", json!({"operation":"float","panel":"properties","rect":[400,250,300,350]})).unwrap();
+    h.run_steps(4);
+    h.get_by_label("Close Properties").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Properties));
+}
+
+/// The accessible name is one translated string, not an English verb glued to a translated
+/// panel label: Spanish readers must hear "Cerrar Capas", never "Close Capas".
+#[test]
+fn spanish_close_button_accessible_name_is_localized_as_a_whole() {
+    let mut h = harness(None, 1280.0, 1.0);
+    h.state_mut().run("ui.language", json!({"lang": "es"})).unwrap();
+    h.run_steps(4);
+    assert!(h.query_by_label("Cerrar Capas").is_some(), "the accordion close button is named in Spanish");
+    assert!(h.query_by_label("Cerrar Propiedades").is_some(), "every panel's close button follows the language");
+    assert!(h.query_by_label("Close Capas").is_none(), "no English verb survives the translation");
+    h.get_by_label("Cerrar Capas").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Layers), "the localized name still closes its panel");
+}
+
 #[test]
 fn collapsed_tool_sets_leave_a_visible_control_that_expands_them() {
     let mut h = harness(None, 1280.0, 1.0);
