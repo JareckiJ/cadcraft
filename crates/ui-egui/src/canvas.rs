@@ -1736,9 +1736,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             // a click-click window, instead of closing a tiny window that selects nothing.
             app.session.pending_window = None;
             let at = xf.to_world(origin);
-            let done = if app.session.prompting() { app.session.input(Input::Point(at)) } else { app.session.idle_click(at, mods.shift) };
-            if let Err(e) = done {
-                app.session.echo(e.to_string());
+            // Over overlapping objects it offers selection cycling's list, as a still click does.
+            if !cycle_click(app, &xf, Some(origin), Some(at), mods.shift) {
+                let done = if app.session.prompting() { app.session.input(Input::Point(at)) } else { app.session.idle_click(at, mods.shift) };
+                if let Err(e) = done {
+                    app.session.echo(e.to_string());
+                }
             }
         } else if app.session.pending_window.is_some()
             && let Some(end) = ui.input(|i| i.pointer.interact_pos())

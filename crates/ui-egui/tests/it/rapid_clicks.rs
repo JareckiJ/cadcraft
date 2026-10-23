@@ -204,3 +204,17 @@ fn a_click_made_while_moving_trims_in_trim() {
         "the right part of the horizontal line was trimmed: {got:?}"
     );
 }
+
+/// With SELECTIONCYCLING 2, a click made while moving over overlapping objects opens selection
+/// cycling's list, as a still click does, instead of picking one of them.
+#[test]
+fn a_click_made_while_moving_over_overlapping_objects_lists_them() {
+    let mut h = select_harness();
+    h.state_mut().session.execute("line", &json!({"points": [[20, 50], [60, 50]]})).unwrap();
+    h.state_mut().session.execute("setvar", &json!({ "name": "SELECTIONCYCLING", "value": 2 })).unwrap();
+    h.state_mut().session.set_selection(Vec::new());
+    h.run_steps(2);
+    press_moving(&mut h, Vec2::new(30.0, 50.0), Vec2::new(32.0, 54.0), 4);
+    assert_eq!(h.state().canvas.cycle_rows().len(), 2, "both lines are listed");
+    assert!(h.state().session.selection().is_empty(), "nothing is picked until a row is chosen");
+}
