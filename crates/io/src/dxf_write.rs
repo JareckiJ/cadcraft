@@ -254,6 +254,9 @@ const HEADER_VARS: &[(&str, i32)] = &[
     ("INSBASE", -3),
     ("LIMMIN", -2),
     ("LIMMAX", -2),
+    ("VIEWCTR", -2),
+    ("VIEWSIZE", 40),
+    ("TILEMODE", 70),
     ("SNAPUNIT", -2),
     ("GRIDUNIT", -2),
     ("ORTHOMODE", 70),
@@ -1646,18 +1649,20 @@ fn paper_view(w: &mut W, d: &Drawing, e: &Entity, owner: &str, cx: &Ctx) {
     w.s(1000, dxf_ext::PAPER_VIEW);
 }
 
-/// The VPORT table: the `*Active` model space tiles (one viewport on the extents when there is no
-/// tiled configuration) and the saved configurations, each tile a record, the current one first.
+/// The VPORT table: the `*Active` model space tiles (the saved single view, or a viewport on the
+/// extents when the file has no saved view) and the saved configurations, each tile a record, the
+/// current one first.
 fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
-    let single = VportTile {
+    let fallback = VportTile {
         min: Vec2::ZERO,
         max: Vec2::new(1.0, 1.0),
         center: if ext.is_empty() { Vec2::new(6.0, 4.5) } else { ext.center() },
         height: if ext.is_empty() { 9.0 } else { (ext.height() * 1.1).max(1e-6) },
         aspect: 1.6,
     };
-    let tiled = d.vports.iter().find(|c| c.is_active() && c.tiles.len() > 1);
-    let mut records: Vec<(&str, &VportTile)> = match tiled {
+    let single = d.saved_model_view().unwrap_or(fallback);
+    let active = d.vports.iter().find(|c| c.is_active() && !c.tiles.is_empty());
+    let mut records: Vec<(&str, &VportTile)> = match active {
         Some(c) => c.tiles.iter().map(|t| (VportConfig::ACTIVE, t)).collect(),
         None => vec![(VportConfig::ACTIVE, &single)],
     };

@@ -1605,8 +1605,11 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
             _ => {}
         }
     }
-    // One *Active viewport is no tiling: the view is the editor's (it zooms to the extents).
-    d.vports.retain(|c| c.tiles.len() > usize::from(c.is_active()));
+    // A lone *Active record is the drawing's saved model view, not a tiled configuration.
+    if let Some(i) = d.vports.iter().position(|c| c.is_active() && c.tiles.len() == 1) {
+        d.model_view = d.vports.get(i).and_then(|c| c.tiles.first()).copied();
+        d.vports.remove(i);
+    }
 }
 
 /// Most tiles a viewport configuration keeps.

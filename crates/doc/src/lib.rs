@@ -99,6 +99,9 @@ pub struct Drawing {
     pub model: EntityStore,
     pub layouts: Vec<Layout>,
     pub views: Vec<NamedView>,
+    /// The single model-space view stored by the file's `*Active` VPORT record. Tiled active
+    /// configurations remain in [`Drawing::vports`].
+    pub model_view: Option<VportTile>,
     /// Model space viewport configurations (VPORTS): the tiles shown and named ones.
     pub vports: Vec<VportConfig>,
     pub ucss: Vec<Ucs>,
@@ -172,6 +175,7 @@ impl Drawing {
             model: EntityStore::new(),
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],
             views: Vec::new(),
+            model_view: None,
             vports: Vec::new(),
             ucss: Vec::new(),
             layer_states: Vec::new(),
