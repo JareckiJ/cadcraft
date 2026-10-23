@@ -1,7 +1,7 @@
 //! Cross-references between a main device (a relay or contactor coil) and its contacts.
 //!
 //! Contacts are drawn apart from their coil and carry the coil's tag (see
-//! [`super::is_auxiliary`]). ELINK gives picked contacts the tag of a picked coil. EXREF writes, on
+//! [`super::is_child`]). ELINK gives picked contacts the tag of a picked coil. EXREF writes, on
 //! the `EXREF` layer, under each coil the contacts it drives (`NO 1.5`: a normally open contact in
 //! column 5 of sheet 1) and under each contact where its coil is (`/1.2`). The texts are rebuilt
 //! from scratch on every run.
@@ -12,7 +12,7 @@ use cadcraft_doc::{EntityKind, HAlign, Handle, Text, VAlign, entity_bounds};
 use cadcraft_geom::{Vec2, Vec3};
 use serde_json::{Value, json};
 
-use super::{Grid, TAG_ATTRIBUTE, class_overrides, contact_kind, devices, handle_list, is_auxiliary, is_numbered, set_tag};
+use super::{Grid, attribute_param, class_overrides, contact_kind, devices, handle_list, is_child, is_numbered, set_tag};
 use crate::cmd::machines::{SelOutcome, SelectPhase};
 use crate::cmd::{CommandSpec, bad, f64_or, str_param};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
@@ -25,10 +25,10 @@ pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("elink", "Link Contacts to Device", run_elink)
             .menu(&["Tools", "Electrical", "Link Contacts"])
-            .params("{main: handle (the coil), handles: [handle] (its contacts), attribute? (default \"TAG\")} → {tag, linked}")
+            .params("{main: handle (the coil), handles: [handle] (its contacts), attribute? (default: TAG1, TAG2 or TAG)} → {tag, linked}")
             .interactive(|_| Ok(Box::new(ElinkM::default()))),
         CommandSpec::new("exref", "Cross-References", run_exref).menu(&["Tools", "Electrical", "Cross-References"]).params(
-            "{attribute? (default \"TAG\"), layer? (default \"EXREF\"), height? (default 2.5), origin?, sheetWidth?, columns?, firstSheet?} \
+            "{attribute? (default: TAG1, TAG2 or TAG), layer? (default \"EXREF\"), height? (default 2.5), origin?, sheetWidth?, columns?, firstSheet?} \
                  → {devices: [{tag, handle, sheet, column, contacts: [{handle, kind, sheet, column}]}], orphans: [handle]}",
         ),
     ]
@@ -36,25 +36,23 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 
 fn run_elink(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "elink";
-    let attribute = str_param(p, "attribute").map(str::trim).filter(|a| !a.is_empty()).unwrap_or(TAG_ATTRIBUTE).to_string();
+    let attribute = attribute_param(p);
     let main = p
         .get("main")
         .and_then(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle)))
         .ok_or_else(|| bad(CMD, "`main` (the handle of the coil) is required"))?;
     let contacts = handle_list(CMD, p)?.ok_or_else(|| bad(CMD, "`handles` (the contacts) is required"))?;
-    let all = devices(s, &attribute, None)?;
-    let main_dev = all
-        .iter()
-        .find(|d| d.handle == main)
-        .ok_or_else(|| EngineError::Other(format!("{} is not a device with a {attribute} attribute.", main.hex())))?;
+    let all = devices(s, attribute.as_deref(), None)?;
+    let main_dev =
+        all.iter().find(|d| d.handle == main).ok_or_else(|| EngineError::Other(format!("{} is not a device with a tag attribute.", main.hex())))?;
     if !is_numbered(&main_dev.tag) {
         return Err(EngineError::Other(format!("The main device has no tag yet ({:?}); run Tag Devices first.", main_dev.tag)));
     }
     let tag = main_dev.tag.clone();
     let mut linked = 0usize;
     for h in contacts.iter().filter(|h| **h != main) {
-        if all.iter().any(|d| d.handle == *h) {
-            set_tag(s, *h, &attribute, &tag)?;
+        if let Some(d) = all.iter().find(|d| d.handle == *h) {
+            set_tag(s, *h, &d.attr, &tag)?;
             linked += 1;
         }
     }
@@ -81,7 +79,7 @@ fn xref_text(value: &str, at: Vec2, height: f64) -> Text {
 
 fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "exref";
-    let attribute = str_param(p, "attribute").map(str::trim).filter(|a| !a.is_empty()).unwrap_or(TAG_ATTRIBUTE).to_string();
+    let attribute = attribute_param(p);
     let layer = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).unwrap_or(XREF_LAYER).to_string();
     if layer.chars().count() > 255 {
         return Err(bad(CMD, "`layer` is too long"));
@@ -92,8 +90,8 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let grid = Grid::from_params(CMD, p)?;
     let overrides = class_overrides(CMD, p)?;
-    let devs = devices(s, &attribute, None)?;
-    let aux = |d: &super::Device| is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase());
+    let devs = devices(s, attribute.as_deref(), None)?;
+    let aux = |d: &super::Device| is_child(d, &overrides);
 
     // Mains with a numbered tag, by tag (a duplicated tag has no single main: its contacts are
     // orphans until the duplicate is resolved).
@@ -101,7 +99,7 @@ fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
     for d in devs.iter().filter(|d| !aux(d) && is_numbered(&d.tag)) {
         mains.entry(d.tag.as_str()).or_default().push(d);
     }
-    let place = |d: &super::Device| grid.locate(d.x).map(|(sh, c)| format!("{sh}.{c}"));
+    let place = |d: &super::Device| grid.locate(d.x).map(|(sh, c)| format!("{sh}{c:02}"));
 
     // Texts to write: (anchor below the symbol, lines).
     let mut texts: Vec<(Handle, Vec<String>)> = Vec::new();
@@ -276,17 +274,17 @@ mod tests {
         let c = put(&mut s, "CONTACT_NO", [200.0, 100.0], "");
         let r = s.execute("etag", &json!({})).unwrap();
         assert_eq!(r["auxiliary"], 1);
-        assert_eq!(tag_of(&s, &k), "-K1.2");
+        assert_eq!(tag_of(&s, &k), "-K102");
         assert_eq!(tag_of(&s, &c), "", "a contact gets no tag of its own");
         s.execute("elink", &json!({"main": k, "handles": [c]})).unwrap();
-        assert_eq!(tag_of(&s, &c), "-K1.2");
+        assert_eq!(tag_of(&s, &c), "-K102");
         // A new coil above it in the same column takes -K1.2 when renumbering everything; the
         // contact follows its own coil to the new tag.
         let k2 = put(&mut s, "RELAY_COIL", [50.0, 150.0], "");
         let r = s.execute("etag", &json!({"mode": "all"})).unwrap();
-        assert_eq!(tag_of(&s, &k2), "-K1.2");
-        assert_eq!(tag_of(&s, &k), "-K1.2.2");
-        assert_eq!(tag_of(&s, &c), "-K1.2.2");
+        assert_eq!(tag_of(&s, &k2), "-K102");
+        assert_eq!(tag_of(&s, &k), "-K102A");
+        assert_eq!(tag_of(&s, &c), "-K102A");
         assert_eq!(r["contactsFollowed"], 1);
         // Shared tags of contacts are not duplicates.
         let r = s.execute("edevices", &json!({})).unwrap();
@@ -302,7 +300,7 @@ mod tests {
         let orphan = put(&mut s, "CONTACT_NO", [300.0, 50.0], "-K9.9");
         put(&mut s, "MOTOR", [100.0, 20.0], "-M1.3");
         let r = s.execute("exref", &json!({})).unwrap();
-        assert_eq!(xref_texts(&s), vec!["/1.2", "/1.2", "NC 2.2", "NO 1.5"]);
+        assert_eq!(xref_texts(&s), vec!["/102", "/102", "NC 202", "NO 105"]);
         assert_eq!(r["orphans"], json!([orphan]));
         // Running again rebuilds rather than piling up.
         s.execute("exref", &json!({})).unwrap();

@@ -27,10 +27,13 @@ use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 use classes::{class_from_block_name, class_from_tag, contact_kind, is_auxiliary, is_numbered};
 
-/// Default attribute that holds a device's tag.
-const TAG_ATTRIBUTE: &str = "TAG";
+/// Attributes that hold a device's tag, AutoCAD Electrical style: `TAG1` on a main device (a
+/// coil, a motor), `TAG2` on a child (a contact, carrying its main device's tag), plain `TAG` too.
+const TAG_ATTRIBUTES: &[&str] = &["TAG1", "TAG2", "TAG"];
+/// The attribute of a child component.
+const CHILD_ATTRIBUTE: &str = "TAG2";
 /// Default tag format.
-const FORMAT: &str = "-{class}{sheet}.{column}";
+const FORMAT: &str = "-{class}{sheet}{col2}";
 /// Longest tag format and resulting tag accepted (characters).
 const MAX_FORMAT: usize = 64;
 const MAX_TAG: usize = 255;
@@ -46,17 +49,17 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["Tools", "Electrical", "Tag Devices"])
             .params(
                 "{mode?: \"new\" (default: only devices without a numbered tag) | \"all\" (renumber every device), \
-                 handles? (default: every device in the current space), format? (default \"-{class}{sheet}.{column}\"; \
-                 placeholders {class} {sheet} {column} {count}), origin? [x, y] (default [0, 0]), sheetWidth? (default 420), \
+                 handles? (default: every device in the current space), format? (default \"-{class}{sheet}{col2}\", e.g. -K105; \
+                 placeholders {class} {sheet} {column} {col2} (two digits) {count}), origin? [x, y] (default [0, 0]), sheetWidth? (default 420), \
                  columns? (default 10), firstSheet? (default 1), function? (\"=\" aspect), location? (\"+\" aspect), \
-                 attribute? (default \"TAG\"), classes? {blockName: \"K\"}, dryRun? bool} \
+                 attribute? (default: TAG1, TAG2 or TAG), classes? {blockName: \"K\"}, dryRun? bool} \
                  → {tagged, kept, devices: [{handle, block, old, tag}], unclassified: [handle], outside: [handle]}",
             )
             .interactive(|_| Ok(Box::new(EtagM))),
         CommandSpec::new("edevices", "List Devices (IEC 81346)", run_edevices)
             .menu(&["Tools", "Electrical", "List Devices"])
             .params(
-                "{attribute? (default \"TAG\"), origin?, sheetWidth?, columns?, firstSheet?} \
+                "{attribute? (default: TAG1, TAG2 or TAG), origin?, sheetWidth?, columns?, firstSheet?} \
                  → {devices: [{handle, block, tag, class, sheet, column}], duplicates: {tag: [handle]}, untagged}",
             )
             .noundo(),
@@ -119,13 +122,29 @@ impl Grid {
 struct Device {
     handle: Handle,
     block: String,
+    /// The attribute holding the tag (`TAG1`, `TAG2`, …) and its value.
+    attr: String,
     tag: String,
     x: f64,
     y: f64,
 }
 
 /// The devices among `handles` (every object in the current space when `None`).
-fn devices(s: &Session, attribute: &str, handles: Option<&[Handle]>) -> Result<Vec<Device>> {
+/// The tag attribute named in the `attribute` parameter, if any.
+fn attribute_param(p: &Value) -> Option<String> {
+    str_param(p, "attribute").map(str::trim).filter(|a| !a.is_empty()).map(str::to_string)
+}
+
+/// The attribute of `ins` holding its tag: `attribute` when given, else the first of
+/// [`TAG_ATTRIBUTES`] it has.
+fn tag_attrib<'a>(ins: &'a cadcraft_doc::Insert, attribute: Option<&str>) -> Option<&'a cadcraft_doc::Attrib> {
+    match attribute {
+        Some(a) => ins.attribs.iter().find(|x| x.tag.eq_ignore_ascii_case(a)),
+        None => TAG_ATTRIBUTES.iter().find_map(|t| ins.attribs.iter().find(|x| x.tag.eq_ignore_ascii_case(t))),
+    }
+}
+
+fn devices(s: &Session, attribute: Option<&str>, handles: Option<&[Handle]>) -> Result<Vec<Device>> {
     let d = s.doc()?;
     let Some(store) = d.space(&s.space()) else { return Ok(Vec::new()) };
     let wanted: Option<HashSet<Handle>> = handles.map(|h| h.iter().copied().collect());
@@ -135,11 +154,18 @@ fn devices(s: &Session, attribute: &str, handles: Option<&[Handle]>) -> Result<V
             continue;
         }
         let EntityKind::Insert(ins) = &e.kind else { continue };
-        let Some(a) = ins.attribs.iter().find(|a| a.tag.eq_ignore_ascii_case(attribute)) else { continue };
+        let Some(a) = tag_attrib(ins, attribute) else { continue };
         if out.len() >= MAX_DEVICES {
             return Err(EngineError::Other(format!("More than {MAX_DEVICES} devices; tag a selection at a time.")));
         }
-        out.push(Device { handle: e.handle, block: ins.block.clone(), tag: a.text.value.trim().to_string(), x: ins.insert.x, y: ins.insert.y });
+        out.push(Device {
+            handle: e.handle,
+            block: ins.block.clone(),
+            attr: a.tag.clone(),
+            tag: a.text.value.trim().to_string(),
+            x: ins.insert.x,
+            y: ins.insert.y,
+        });
     }
     Ok(out)
 }
@@ -180,7 +206,11 @@ fn class_of(dev: &Device, overrides: &HashMap<String, String>) -> Option<String>
 
 /// `format` with its placeholders filled.
 fn render(format: &str, class: &str, sheet: u64, column: u64, count: Option<u64>) -> String {
-    let mut t = format.replace("{class}", class).replace("{sheet}", &sheet.to_string()).replace("{column}", &column.to_string());
+    let mut t = format
+        .replace("{class}", class)
+        .replace("{sheet}", &sheet.to_string())
+        .replace("{col2}", &format!("{column:02}"))
+        .replace("{column}", &column.to_string());
     if let Some(n) = count {
         t = t.replace("{count}", &n.to_string());
     }
@@ -206,7 +236,19 @@ fn unique(base: &str, used: &HashSet<String>) -> Option<String> {
     if !used.contains(base) {
         return Some(base.to_string());
     }
-    (2..MAX_DEVICES as u64 + 2).map(|n| format!("{base}.{n}")).find(|t| !used.contains(t))
+    (1..MAX_DEVICES as u64 + 1).map(|n| format!("{base}{}", letters(n))).find(|t| !used.contains(t))
+}
+
+/// Suffix `n` (from 1) in letters, as AutoCAD Electrical marks a second reference in a column:
+/// A, B, … Z, AA, AB, …
+fn letters(mut n: u64) -> String {
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push(char::from(b'A' + (n % 26) as u8));
+        n /= 26;
+    }
+    out.iter().rev().collect()
 }
 
 fn handle_list(cmd: &str, p: &Value) -> Result<Option<Vec<Handle>>> {
@@ -224,6 +266,12 @@ fn handle_list(cmd: &str, p: &Value) -> Result<Option<Vec<Handle>>> {
             .map(Some),
         Some(_) => Err(bad(cmd, "`handles` must be an array of object handles")),
     }
+}
+
+/// Whether `d` is a child component (a contact) carrying its main device's tag: it has a `TAG2`
+/// attribute, or its block's name says so and no class override makes it a main device.
+fn is_child(d: &Device, overrides: &HashMap<String, String>) -> bool {
+    d.attr.eq_ignore_ascii_case(CHILD_ATTRIBUTE) || (is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase()))
 }
 
 /// Set the `attribute` value of block reference `h` to `tag`.
@@ -251,7 +299,7 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
         Some("all") => true,
         Some(m) => return Err(bad(CMD, format!("`mode` must be \"new\" or \"all\", not \"{m}\""))),
     };
-    let attribute = str_param(p, "attribute").map(str::trim).filter(|a| !a.is_empty()).unwrap_or(TAG_ATTRIBUTE).to_string();
+    let attribute = attribute_param(p);
     let format = str_param(p, "format").unwrap_or(FORMAT);
     if format.chars().count() > MAX_FORMAT || !format.contains("{class}") {
         return Err(bad(CMD, format!("`format` must contain {{class}} and be at most {MAX_FORMAT} characters")));
@@ -269,8 +317,7 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
     // Every device in the space; those outside `handles` keep their tags and reserve them.
     // Auxiliary parts (contacts) carry their main device's tag: never tagged on their own, they
     // follow a renamed main device.
-    let (aux, all): (Vec<Device>, Vec<Device>) =
-        devices(s, &attribute, None)?.into_iter().partition(|d| is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase()));
+    let (aux, all): (Vec<Device>, Vec<Device>) = devices(s, attribute.as_deref(), None)?.into_iter().partition(|d| is_child(d, &overrides));
     let mut main_tags: HashMap<String, usize> = HashMap::new();
     for d in all.iter().filter(|d| is_numbered(&d.tag)) {
         *main_tags.entry(d.tag.clone()).or_insert(0) += 1;
@@ -338,7 +385,7 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
             let mut changed = false;
             s.doc_mut()?.modify_entity(pl.dev.handle, |e| {
                 if let EntityKind::Insert(ins) = &mut e.kind
-                    && let Some(a) = ins.attribs.iter_mut().find(|a| a.tag.eq_ignore_ascii_case(&attribute))
+                    && let Some(a) = ins.attribs.iter_mut().find(|a| a.tag.eq_ignore_ascii_case(&pl.dev.attr))
                 {
                     a.text.value = pl.tag.clone();
                     changed = true;
@@ -348,7 +395,7 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
         }
         for pl in planned.iter().filter(|pl| pl.tag != pl.dev.tag && is_numbered(&pl.dev.tag) && main_tags.get(&pl.dev.tag) == Some(&1)) {
             for a in aux.iter().filter(|a| a.tag == pl.dev.tag) {
-                set_tag(s, a.handle, &attribute, &pl.tag)?;
+                set_tag(s, a.handle, &a.attr, &pl.tag)?;
                 followed += 1;
             }
         }
@@ -367,16 +414,16 @@ fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn run_edevices(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "edevices";
-    let attribute = str_param(p, "attribute").map(str::trim).filter(|a| !a.is_empty()).unwrap_or(TAG_ATTRIBUTE).to_string();
+    let attribute = attribute_param(p);
     let grid = Grid::from_params(CMD, p)?;
     let overrides = class_overrides(CMD, p)?;
-    let devs = devices(s, &attribute, None)?;
+    let devs = devices(s, attribute.as_deref(), None)?;
     let mut by_tag: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut untagged = 0usize;
     let list: Vec<Value> = devs
         .iter()
         .map(|d| {
-            let auxiliary = is_auxiliary(&d.block) && !overrides.contains_key(&d.block.to_ascii_lowercase());
+            let auxiliary = is_child(d, &overrides);
             // A contact shares its coil's tag: neither a duplicate nor untagged.
             if !auxiliary && is_numbered(&d.tag) {
                 by_tag.entry(d.tag.clone()).or_default().push(d.handle.hex());
@@ -465,25 +512,25 @@ mod tests {
         let sb = put(&mut s, "PUSHBUTTON", [5.0, 0.0], "");
         let r = s.execute("etag", &json!({})).unwrap();
         assert_eq!(r["tagged"], 4);
-        assert_eq!(tag_of(&s, &k1), "-K1.3");
-        assert_eq!(tag_of(&s, &k2), "-K1.3.2");
-        assert_eq!(tag_of(&s, &m), "-M2.1");
-        assert_eq!(tag_of(&s, &sb), "-S1.1");
+        assert_eq!(tag_of(&s, &k1), "-K103");
+        assert_eq!(tag_of(&s, &k2), "-K103A");
+        assert_eq!(tag_of(&s, &m), "-M201");
+        assert_eq!(tag_of(&s, &sb), "-S101");
     }
 
     #[test]
     fn new_mode_keeps_numbered_tags_and_avoids_them() {
         let mut s = session();
-        let kept = put(&mut s, "RELAY", [300.0, 0.0], "-K1.3");
+        let kept = put(&mut s, "RELAY", [300.0, 0.0], "-K103");
         let fresh = put(&mut s, "RELAY", [100.0, 0.0], "-K?");
         let r = s.execute("etag", &json!({})).unwrap();
         assert_eq!(r["kept"], 1);
-        assert_eq!(tag_of(&s, &kept), "-K1.3");
-        assert_eq!(tag_of(&s, &fresh), "-K1.3.2", "no duplicate of a kept tag");
+        assert_eq!(tag_of(&s, &kept), "-K103");
+        assert_eq!(tag_of(&s, &fresh), "-K103A", "no duplicate of a kept tag");
         // Renumbering everything sorts by place again.
         s.execute("etag", &json!({"mode": "all"})).unwrap();
-        assert_eq!(tag_of(&s, &fresh), "-K1.3");
-        assert_eq!(tag_of(&s, &kept), "-K1.8");
+        assert_eq!(tag_of(&s, &fresh), "-K103");
+        assert_eq!(tag_of(&s, &kept), "-K108");
     }
 
     #[test]
@@ -497,7 +544,7 @@ mod tests {
         assert_eq!(tag_of(&s, &b), "=A1+M2-K2");
         assert_eq!(r["unclassified"], json!([w]));
         s.execute("etag", &json!({"classes": {"widget": "KF"}})).unwrap();
-        assert_eq!(tag_of(&s, &w), "-KF1.1");
+        assert_eq!(tag_of(&s, &w), "-KF101");
     }
 
     #[test]
@@ -505,7 +552,7 @@ mod tests {
         let mut s = session();
         let h = put(&mut s, "RELAY", [10.0, 0.0], "-Q");
         s.execute("etag", &json!({})).unwrap();
-        assert_eq!(tag_of(&s, &h), "-Q1.1");
+        assert_eq!(tag_of(&s, &h), "-Q101");
     }
 
     #[test]
@@ -519,7 +566,7 @@ mod tests {
         assert_eq!(r["outside"], json!([b]));
         assert_eq!(tag_of(&s, &a), "");
         s.execute("etag", &json!({"handles": [c]})).unwrap();
-        assert_eq!(tag_of(&s, &c), "-M1.1");
+        assert_eq!(tag_of(&s, &c), "-M101");
         assert_eq!(tag_of(&s, &a), "");
     }
 
@@ -540,7 +587,7 @@ mod tests {
         let mut s = session();
         let a = put(&mut s, "RELAY", [10.0, 0.0], "");
         s.execute("etag", &json!({})).unwrap();
-        assert_eq!(tag_of(&s, &a), "-K1.1");
+        assert_eq!(tag_of(&s, &a), "-K101");
         s.execute("undo", &json!({})).unwrap();
         assert_eq!(tag_of(&s, &a), "");
     }
@@ -552,7 +599,7 @@ mod tests {
         s.cmdline("etag").unwrap();
         s.cmdline("all").unwrap();
         assert!(s.running.is_none());
-        assert_eq!(tag_of(&s, &a), "-K1.1");
+        assert_eq!(tag_of(&s, &a), "-K101");
     }
 
     #[test]

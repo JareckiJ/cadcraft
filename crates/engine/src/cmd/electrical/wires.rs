@@ -5,9 +5,9 @@
 //! stay apart, as on a schematic. Symbols (block references) break potentials: a relay coil's two
 //! sides are two potentials.
 //!
-//! Each potential gets one number from the sheet and column of its longest wire (`1.4`, then
-//! `1.4.2` for a second potential in the same column), written as a text on the label layer
-//! (`WIRENO`) above (or, for a vertical wire, left of) that wire's middle. Numbers already on the
+//! Each network gets one number from the sheet and column where it starts, its leftmost end
+//! (`105`, then `105A` for a second network starting in the same column, AutoCAD Electrical
+//! style), written as a text on the label layer (`WIRENO`) next to that start. Numbers already on the
 //! drawing are kept unless every wire is renumbered.
 
 use std::collections::{HashMap, HashSet};
@@ -24,7 +24,7 @@ use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 const WIRE_LAYERS: &str = "WIRE*";
 const LABEL_LAYER: &str = "WIRENO";
-const FORMAT: &str = "{sheet}.{column}";
+const FORMAT: &str = "{sheet}{col2}";
 /// Most wire segments handled at once.
 const MAX_SEGMENTS: usize = 200_000;
 /// Most grid cells one segment is filed under; longer segments are checked against everything.
@@ -37,7 +37,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .params(
                 "{mode?: \"new\" (default: only potentials without a number) | \"all\" (renumber every potential), \
                  layers? (wire layers, wildcards, default \"WIRE*\"), labelLayer? (default \"WIRENO\"), \
-                 format? (default \"{sheet}.{column}\"; placeholders {sheet} {column} {count}), height? (default 2.5), \
+                 format? (default \"{sheet}{col2}\", e.g. 105; placeholders {sheet} {column} {col2} {count}), height? (default 2.5), \
                  tolerance? (default 0.01), origin?, sheetWidth?, columns?, firstSheet?, dryRun? bool} \
                  → {potentials, numbered, kept, wires: [{number, handles: [handle], at: [x, y]}], orphanLabels: [handle]}",
             )
@@ -203,12 +203,21 @@ fn labels(s: &Session, layer: &str) -> Result<Vec<(Handle, Vec2, String)>> {
         .collect())
 }
 
-/// Where a potential's number goes: the middle of its longest segment, and whether that segment
-/// is vertical.
-fn anchor(segs: &[&Seg]) -> Option<(Vec2, bool)> {
-    let s = segs.iter().max_by(|a, b| a.len().total_cmp(&b.len()).then(b.a.x.total_cmp(&a.a.x)))?;
-    let d = s.b - s.a;
-    Some((s.a.lerp(s.b, 0.5), d.y.abs() > d.x.abs()))
+/// Where a network starts and where its number goes: its leftmost end (the topmost of equals),
+/// the label point a little along the wire from there, and whether that wire is vertical.
+fn anchor(segs: &[&Seg], height: f64) -> Option<(Vec2, Vec2, bool)> {
+    let start = segs.iter().flat_map(|s| [s.a, s.b]).min_by(|p, q| p.x.total_cmp(&q.x).then(q.y.total_cmp(&p.y)))?;
+    // The wire leaving the start: horizontal ones first (numbers read along them), then longest.
+    let seg = segs.iter().filter(|s| s.a.near(start, 1e-9) || s.b.near(start, 1e-9)).max_by(|a, b| {
+        let flat = |s: &Seg| (s.b.x - s.a.x).abs() >= (s.b.y - s.a.y).abs();
+        flat(a).cmp(&flat(b)).then(a.len().total_cmp(&b.len()))
+    })?;
+    let other = if seg.a.near(start, 1e-9) { seg.b } else { seg.a };
+    let len = seg.len();
+    let along = (len * 0.5).min(height * 3.0);
+    let at = if len > 0.0 { start.lerp(other, along / len) } else { start };
+    let d = other - start;
+    Some((start, at, d.y.abs() > d.x.abs()))
 }
 
 /// The text for number `value` of a potential anchored at `at`.
@@ -233,6 +242,8 @@ fn label_text(value: &str, at: Vec2, vertical: bool, height: f64) -> Text {
 struct Potential {
     wires: Vec<usize>,
     at: Vec2,
+    /// Where its number goes.
+    label_at: Vec2,
     vertical: bool,
     sheet: u64,
     column: u64,
@@ -253,8 +264,8 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "`layers` or `labelLayer` is too long"));
     }
     let format = str_param(p, "format").unwrap_or(FORMAT);
-    if format.chars().count() > MAX_FORMAT || !["{sheet}", "{column}", "{count}"].iter().any(|k| format.contains(k)) {
-        return Err(bad(CMD, format!("`format` must contain {{sheet}}, {{column}} or {{count}} and be at most {MAX_FORMAT} characters")));
+    if format.chars().count() > MAX_FORMAT || !["{sheet}", "{column}", "{col2}", "{count}"].iter().any(|k| format.contains(k)) {
+        return Err(bad(CMD, format!("`format` must contain {{sheet}}, {{column}}, {{col2}} or {{count}} and be at most {MAX_FORMAT} characters")));
     }
     let counted = format.contains("{count}");
     let height = f64_or(p, "height", 2.5);
@@ -294,7 +305,7 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
     let mut outside = 0usize;
     for (gi, g) in groups.iter().enumerate() {
         let gsegs: Vec<&Seg> = g.iter().flat_map(|w| by_wire.get(*w).into_iter().flatten().copied()).collect();
-        let Some((at, vertical)) = anchor(&gsegs) else { continue };
+        let Some((at, label_at, vertical)) = anchor(&gsegs, height) else { continue };
         let Some((sheet, column)) = grid.locate(at.x) else {
             outside += 1;
             continue;
@@ -305,7 +316,7 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
             .filter_map(|(li, _)| existing.get(*li))
             .min_by_key(|(h, ..)| *h)
             .map(|(h, _, v)| (*h, v.clone()));
-        pots.push(Potential { wires: g.clone(), at, vertical, sheet, column, label });
+        pots.push(Potential { wires: g.clone(), at, label_at, vertical, sheet, column, label });
     }
     pots.sort_by(|a, b| (a.sheet, a.column).cmp(&(b.sheet, b.column)).then(b.at.y.total_cmp(&a.at.y)).then(a.at.x.total_cmp(&b.at.x)));
 
@@ -367,7 +378,7 @@ fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
                     })?;
                 }
                 _ => {
-                    let t = label_text(number, pt.at, pt.vertical, height);
+                    let t = label_text(number, pt.label_at, pt.vertical, height);
                     s.doc_mut()?.add(&space, common.clone(), EntityKind::Text(t))?;
                 }
             }
@@ -479,9 +490,9 @@ mod tests {
         let r = s.execute("ewire", &json!({})).unwrap();
         assert_eq!(r["potentials"], 3, "{r}");
         assert_eq!(r["numbered"], 3);
-        assert_eq!(numbers(&s), vec!["1.1", "1.1.2", "2.2"]);
+        assert_eq!(numbers(&s), vec!["101", "101A", "201"]);
         let first = r["wires"].as_array().unwrap().iter().find(|w| w["handles"].as_array().unwrap().len() == 3).unwrap();
-        assert_eq!(first["number"], "1.1", "the higher potential comes first");
+        assert_eq!(first["number"], "101", "the higher potential comes first");
     }
 
     #[test]
@@ -489,19 +500,19 @@ mod tests {
         let mut s = session();
         wire(&mut s, &[[0.0, 0.0], [30.0, 0.0]]);
         s.execute("ewire", &json!({})).unwrap();
-        assert_eq!(numbers(&s), vec!["1.1"]);
+        assert_eq!(numbers(&s), vec!["101"]);
         // A second run adds nothing; a new wire gets the next number.
         wire(&mut s, &[[5.0, 50.0], [35.0, 50.0]]);
         let r = s.execute("ewire", &json!({})).unwrap();
         assert_eq!(r["kept"], 1);
         assert_eq!(r["numbered"], 1);
-        assert_eq!(numbers(&s), vec!["1.1", "1.1.2"]);
+        assert_eq!(numbers(&s), vec!["101", "101A"]);
         // Renumbering everything puts the upper wire first.
         let r = s.execute("ewire", &json!({ "mode": "all" })).unwrap();
         assert_eq!(r["numbered"], 2);
-        assert_eq!(numbers(&s), vec!["1.1", "1.1.2"]);
+        assert_eq!(numbers(&s), vec!["101", "101A"]);
         let upper = r["wires"].as_array().unwrap().iter().find(|w| w["at"][1].as_f64().unwrap() > 40.0).unwrap();
-        assert_eq!(upper["number"], "1.1");
+        assert_eq!(upper["number"], "101");
     }
 
     #[test]
@@ -537,7 +548,7 @@ mod tests {
         s.cmdline("ewire").unwrap();
         s.cmdline("").unwrap();
         assert!(s.running.is_none());
-        assert_eq!(numbers(&s), vec!["1.1"]);
+        assert_eq!(numbers(&s), vec!["101"]);
     }
 
     #[test]
