@@ -681,7 +681,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-fn run_esymbol(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn run_esymbol(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "esymbol";
     if bool_or(p, "list", false) {
         let list: Vec<Value> = library()

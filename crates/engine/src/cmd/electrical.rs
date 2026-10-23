@@ -12,6 +12,7 @@
 //! the letters of the tag it already has (`-K`, `-K?`, `-QA3`), or a word in its block's name
 //! (`RELAY_24V` → `K`, see [`classes`]).
 
+mod builder;
 mod classes;
 mod symbols;
 mod wires;
@@ -70,6 +71,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(xref::specs());
     v.extend(symbols::specs());
     v.extend(wiring::specs());
+    v.extend(builder::specs());
     v
 }
 
