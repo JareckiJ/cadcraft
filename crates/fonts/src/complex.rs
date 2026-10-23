@@ -182,28 +182,29 @@ struct Glyph {
 /// Shape characters `r` of `cs` (one direction, one face) into glyphs in display order.
 fn shape_run(face: &Face, cs: &[char], r: Range<usize>, rtl: bool) -> Vec<Glyph> {
     let run = cs.get(r.clone()).unwrap_or_default();
-    let Ok(font) = harfrust::FontRef::from_index(&face.bytes, face.index) else { return Vec::new() };
-    let data = harfrust::ShaperData::new(&font);
-    let shaper = data.shaper(&font).build();
-    let mut buf = harfrust::UnicodeBuffer::new();
+    let bytes: std::sync::Arc<dyn AsRef<[u8]> + Send + Sync> = face.bytes.clone();
+    let Some(font) = harfrust::Font::new(bytes, face.index) else { return Vec::new() };
+    let shaper = harfrust::ShaperFont::new(&font);
+    let mut buf = harfrust::Buffer::new();
     let arabic = run.iter().any(|c| matches!(*c, '\u{0600}'..='\u{08FF}'));
     if arabic && !face.has_joining_features() {
         for (c, i) in bidi::presentation_forms(run, |p| face.has_glyph(p)) {
-            buf.add(c, u32::try_from(r.start + i).unwrap_or(u32::MAX));
+            buf.push(u32::from(c), u32::try_from(r.start + i).unwrap_or(u32::MAX));
         }
     } else {
         for (i, c) in run.iter().enumerate() {
-            buf.add(*c, u32::try_from(r.start + i).unwrap_or(u32::MAX));
+            buf.push(u32::from(*c), u32::try_from(r.start + i).unwrap_or(u32::MAX));
         }
     }
     buf.set_direction(if rtl { harfrust::Direction::RightToLeft } else { harfrust::Direction::LeftToRight });
     buf.guess_segment_properties();
-    let shaped = shaper.shape(buf, harfrust::ShapeOptions::new());
-    let k = 1000.0 / f64::from(shaper.units_per_em().max(1));
-    shaped
-        .glyph_infos()
+    if harfrust::shape(&shaper, &mut buf, harfrust::ShapeOptions::new()).is_err() {
+        return Vec::new();
+    }
+    let k = 1000.0 / f64::from(u32::from(font.units_per_em().max(1)));
+    buf.glyph_infos()
         .iter()
-        .zip(shaped.glyph_positions())
+        .zip(buf.glyph_positions())
         .map(|(gi, gp)| Glyph {
             gid: gi.glyph_id,
             cluster: usize::try_from(gi.cluster).unwrap_or(usize::MAX),

@@ -43,26 +43,26 @@ const MAX_ARC_CHORDS: usize = 10_000;
 const MAX_TOTAL_VERTS: usize = 8_000_000;
 
 /// Elements whose whole subtree is skipped (paint servers, text, raster images, metadata).
-const SKIP: &[&[u8]] = &[
-    b"defs",
-    b"symbol",
-    b"clipPath",
-    b"mask",
-    b"pattern",
-    b"marker",
-    b"linearGradient",
-    b"radialGradient",
-    b"filter",
-    b"style",
-    b"text",
-    b"image",
-    b"title",
-    b"desc",
-    b"metadata",
+const SKIP: &[&str] = &[
+    "defs",
+    "symbol",
+    "clipPath",
+    "mask",
+    "pattern",
+    "marker",
+    "linearGradient",
+    "radialGradient",
+    "filter",
+    "style",
+    "text",
+    "image",
+    "title",
+    "desc",
+    "metadata",
 ];
 
 /// Elements that hold children and push a transform stack frame.
-const CONTAINERS: &[&[u8]] = &[b"g", b"svg", b"a", b"switch"];
+const CONTAINERS: &[&str] = &["g", "svg", "a", "switch"];
 
 /// Read an SVG document, or a gzip-compressed one (`.svgz`, Inkscape's "Compressed SVG").
 pub fn read(bytes: &[u8]) -> Result<Drawing> {
@@ -151,10 +151,10 @@ enum LeftOut {
 
 impl LeftOut {
     /// The kind of a skipped element ([`SKIP`]) that the drawing shows.
-    fn of(name: &[u8]) -> Option<Self> {
+    fn of(name: &str) -> Option<Self> {
         match name {
-            b"text" => Some(Self::Text),
-            b"image" => Some(Self::Image),
+            "text" => Some(Self::Text),
+            "image" => Some(Self::Image),
             _ => None,
         }
     }
@@ -227,9 +227,9 @@ impl Parser {
 
     /// A start tag: open a transform frame, descend into a skipped subtree, or treat a
     /// shape written as start+end the same as a self-closed one.
-    fn on_start(&mut self, name: &[u8], e: &BytesStart) -> Result<()> {
+    fn on_start(&mut self, name: &str, e: &BytesStart) -> Result<()> {
         // A style sheet applies wherever it is (Inkscape keeps it in `<defs>`).
-        if name == b"style" {
+        if name == "style" {
             self.left_out(LeftOut::Style);
         }
         if self.skip > 0 {
@@ -250,7 +250,7 @@ impl Parser {
         if CONTAINERS.contains(&name) { self.enter_group(name, e) } else { self.on_element(name, e) }
     }
 
-    fn on_element(&mut self, name: &[u8], e: &BytesStart) -> Result<()> {
+    fn on_element(&mut self, name: &str, e: &BytesStart) -> Result<()> {
         if self.skip > 0 {
             return Ok(());
         }
@@ -263,22 +263,22 @@ impl Parser {
             return Ok(());
         }
         match name {
-            b"use" => {
+            "use" => {
                 self.left_out(LeftOut::Use);
                 Ok(())
             }
-            b"rect" => self.rect(e),
-            b"circle" => self.circle(e),
-            b"ellipse" => self.ellipse(e),
-            b"line" => self.line(e),
-            b"polyline" => self.poly_points(e, false),
-            b"polygon" => self.poly_points(e, true),
-            b"path" => self.path(e),
+            "rect" => self.rect(e),
+            "circle" => self.circle(e),
+            "ellipse" => self.ellipse(e),
+            "line" => self.line(e),
+            "polyline" => self.poly_points(e, false),
+            "polygon" => self.poly_points(e, true),
+            "path" => self.path(e),
             _ => Ok(()),
         }
     }
 
-    fn on_end(&mut self, name: &[u8]) {
+    fn on_end(&mut self, name: &str) {
         if self.skip > 0 {
             self.skip -= 1;
         } else if CONTAINERS.contains(&name) && self.stack.len() > 1 {
@@ -286,12 +286,12 @@ impl Parser {
         }
     }
 
-    fn enter_group(&mut self, name: &[u8], e: &BytesStart) -> Result<()> {
-        if name == b"svg" && self.stack.len() == 1 {
+    fn enter_group(&mut self, name: &str, e: &BytesStart) -> Result<()> {
+        if name == "svg" && self.stack.len() == 1 {
             self.stack[0] = viewport(e)?;
         }
-        if name == b"g" && attr(e, b"inkscape:groupmode").as_deref() == Some("layer") {
-            let raw = attr(e, b"inkscape:label").or_else(|| attr(e, b"id"));
+        if name == "g" && attr(e, "inkscape:groupmode").as_deref() == Some("layer") {
+            let raw = attr(e, "inkscape:label").or_else(|| attr(e, "id"));
             if let Some(raw) = raw {
                 self.set_layer(&raw);
             }
@@ -300,7 +300,7 @@ impl Parser {
             return Err(IoError::Format(format!("SVG: more than {MAX_TRANSFORM_DEPTH} nested groups")));
         }
         let current = *self.stack.last().unwrap_or(&Mat3::IDENTITY);
-        let next = match attr(e, b"transform").as_deref().and_then(parse_transform) {
+        let next = match attr(e, "transform").as_deref().and_then(parse_transform) {
             Some(local) => current.then_before(local),
             None => current,
         };
@@ -356,14 +356,14 @@ impl Parser {
     // --- shapes -------------------------------------------------------------
 
     fn rect(&mut self, e: &BytesStart) -> Result<()> {
-        let x = num(e, b"x", 0.0);
-        let y = num(e, b"y", 0.0);
-        let w = num(e, b"width", 0.0);
-        let h = num(e, b"height", 0.0);
+        let x = num(e, "x", 0.0);
+        let y = num(e, "y", 0.0);
+        let w = num(e, "width", 0.0);
+        let h = num(e, "height", 0.0);
         if w <= 0.0 || h <= 0.0 {
             return Ok(());
         }
-        if num(e, b"rx", 0.0) > 0.0 || num(e, b"ry", 0.0) > 0.0 {
+        if num(e, "rx", 0.0) > 0.0 || num(e, "ry", 0.0) > 0.0 {
             self.left_out(LeftOut::RoundedCorners);
         }
         let pts = [Vec2::new(x, y), Vec2::new(x + w, y), Vec2::new(x + w, y + h), Vec2::new(x, y + h)];
@@ -371,20 +371,20 @@ impl Parser {
     }
 
     fn circle(&mut self, e: &BytesStart) -> Result<()> {
-        let r = num(e, b"r", 0.0);
+        let r = num(e, "r", 0.0);
         if r <= 0.0 {
             return Ok(());
         }
-        self.add_rounded(Vec2::new(num(e, b"cx", 0.0), num(e, b"cy", 0.0)), r, r)
+        self.add_rounded(Vec2::new(num(e, "cx", 0.0), num(e, "cy", 0.0)), r, r)
     }
 
     fn ellipse(&mut self, e: &BytesStart) -> Result<()> {
-        let rx = num(e, b"rx", 0.0);
-        let ry = num(e, b"ry", 0.0);
+        let rx = num(e, "rx", 0.0);
+        let ry = num(e, "ry", 0.0);
         if rx <= 0.0 || ry <= 0.0 {
             return Ok(());
         }
-        self.add_rounded(Vec2::new(num(e, b"cx", 0.0), num(e, b"cy", 0.0)), rx, ry)
+        self.add_rounded(Vec2::new(num(e, "cx", 0.0), num(e, "cy", 0.0)), rx, ry)
     }
 
     /// A circle or ellipse through a transform. A circle stays a `CIRCLE` under rotations,
@@ -427,13 +427,13 @@ impl Parser {
     }
 
     fn line(&mut self, e: &BytesStart) -> Result<()> {
-        let a = Vec2::new(num(e, b"x1", 0.0), num(e, b"y1", 0.0));
-        let b = Vec2::new(num(e, b"x2", 0.0), num(e, b"y2", 0.0));
+        let a = Vec2::new(num(e, "x1", 0.0), num(e, "y1", 0.0));
+        let b = Vec2::new(num(e, "x2", 0.0), num(e, "y2", 0.0));
         self.add(EntityKind::Line(Line { a: v3(self.map(a)), b: v3(self.map(b)) }))
     }
 
     fn poly_points(&mut self, e: &BytesStart, closed: bool) -> Result<()> {
-        let Some(raw) = attr(e, b"points") else {
+        let Some(raw) = attr(e, "points") else {
             return Ok(());
         };
         let nums: Vec<f64> = Numbers::new(&raw).collect();
@@ -455,7 +455,7 @@ impl Parser {
     // --- path data ----------------------------------------------------------
 
     fn path(&mut self, e: &BytesStart) -> Result<()> {
-        let Some(d) = attr(e, b"d") else {
+        let Some(d) = attr(e, "d") else {
             return Ok(());
         };
         for sp in parse_path(&d)? {
@@ -570,13 +570,13 @@ impl Parser {
 
 /// The element is not rendered (`display="none"`, or a style that says so).
 fn hidden(e: &BytesStart) -> bool {
-    if attr(e, b"display").as_deref() == Some("none") {
+    if attr(e, "display").as_deref() == Some("none") {
         return true;
     }
-    attr(e, b"style").is_some_and(|s| s.replace(' ', "").contains("display:none"))
+    attr(e, "style").is_some_and(|s| s.replace(' ', "").contains("display:none"))
 }
 
-fn attr(e: &BytesStart, name: &[u8]) -> Option<String> {
+fn attr(e: &BytesStart, name: &str) -> Option<String> {
     for a in e.attributes().flatten() {
         if a.key.as_ref() == name {
             return a.normalized_value(XmlVersion::Explicit1_0).ok().map(|v| v.into_owned());
@@ -585,7 +585,7 @@ fn attr(e: &BytesStart, name: &[u8]) -> Option<String> {
     None
 }
 
-fn num(e: &BytesStart, name: &[u8], fallback: f64) -> f64 {
+fn num(e: &BytesStart, name: &str, fallback: f64) -> f64 {
     attr(e, name).as_deref().and_then(parse_length_mm).unwrap_or(fallback)
 }
 
@@ -613,15 +613,15 @@ fn parse_length_mm(s: &str) -> Option<f64> {
 /// The root mapping: `viewBox` and unit-bearing `width`/`height` become millimetres per user
 /// unit, and the page's Y axis is flipped so the drawing keeps its appearance with Y up.
 fn viewport(e: &BytesStart) -> Result<Mat3> {
-    let vb = attr(e, b"viewBox").and_then(|raw| {
+    let vb = attr(e, "viewBox").and_then(|raw| {
         let nums: Vec<f64> = Numbers::new(&raw).collect();
         match nums.as_slice() {
             [x, y, w, h] if w.is_finite() && h.is_finite() && *w > 0.0 && *h > 0.0 => Some((*x, *y, *w, *h)),
             _ => None,
         }
     });
-    let w_mm = attr(e, b"width").as_deref().and_then(parse_length_mm);
-    let h_mm = attr(e, b"height").as_deref().and_then(parse_length_mm);
+    let w_mm = attr(e, "width").as_deref().and_then(parse_length_mm);
+    let h_mm = attr(e, "height").as_deref().and_then(parse_length_mm);
     let unit = match (vb, w_mm, h_mm) {
         (Some((_, _, vw, _)), Some(w), _) if w > 0.0 => w / vw,
         (Some((_, _, _, vh)), _, Some(h)) if h > 0.0 => h / vh,
