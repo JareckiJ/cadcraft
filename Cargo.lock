@@ -674,6 +674,7 @@ dependencies = [
  "cadcraft-fonts",
  "cadcraft-geom",
  "cadcraft-render",
+ "image",
  "miniz_oxide 0.8.9",
  "quick-xml",
  "serde",
