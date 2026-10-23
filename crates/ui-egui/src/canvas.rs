@@ -1347,6 +1347,9 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// Draw the drawing canvas for one frame and handle its input: navigation (zoom, pan), picks,
+/// grips, snaps, selection windows and double-clicks (text, hatch, viewport, block reference for
+/// REFEDIT). The UI stays thin: every action goes through `app.run` / `app.session`.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
@@ -1485,9 +1488,28 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     };
     // A clipped active viewport's outline (picks and its heavy border follow it).
     let active_clip = app.session.state().ok().and_then(|st| st.active_viewport().and_then(|(h, v)| cadcraft_render::viewport_clip(&st.doc, h, &v)));
+    // Double-click a block reference (no command running) to edit that reference in place with
+    // REFEDIT, as AutoCAD's default DBLCLKEDIT does: its objects become ordinary objects with the
+    // rest of the block faded and the drawing still visible. The Block Editor, which hides the
+    // drawing, stays on the context menu and the menu bar. The click is used up, and it comes
+    // before the viewport case so a reference on a paper-space sheet is edited, not MSPACE'd.
+    let mut refedit_dbl = false;
+    if inside
+        && dbl_primary
+        && app.session.running.is_none()
+        && let Some(hp) = hover_pos
+        && let Some(h) = insert_at(app, xf.to_world(hp))
+    {
+        app.session.set_selection(vec![h]);
+        // REFEDIT reports why it refuses a reference (unequal scale, an xref, generated geometry)
+        // through the command line; `run` echoes the error and nothing panics.
+        let _ = app.run("refedit", serde_json::json!({ "handle": h.hex() }));
+        refedit_dbl = true;
+    }
     // Double-click a viewport to work inside it; double-click the sheet outside it to return.
     if inside
         && dbl_primary
+        && !refedit_dbl
         && !app.session.prompting()
         && matches!(app.session.layout_space(), cadcraft_doc::Space::Paper(_))
         && let Some(hp) = hover_pos
@@ -1511,6 +1533,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Double-click text to edit it, as in AutoCAD: TEXTEDIT with that object already picked.
     if inside
         && dbl_primary
+        && !refedit_dbl
         && app.session.running.is_none()
         && let Some(hp) = hover_pos
         && edit_text_at(app, xf.to_world(hp))
@@ -1523,6 +1546,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut hatch_dialog = false;
     if inside
         && dbl_primary
+        && !refedit_dbl
         && app.session.running.is_none()
         && let Some(hp) = hover_pos
         && let Some(h) = hatch_at(app, xf.to_world(hp), scale)
@@ -1622,7 +1646,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.pending_window = None;
         app.canvas.drag_window = false;
     }
-    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
+    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !refedit_dbl && !idle_dbl;
     let key: CycleKey = (
         app.session.running.as_ref().map(|r| r.id.clone()),
         app.session.current_prompt().map(|p| p.message),
@@ -2206,6 +2230,14 @@ fn tooltip(p: &egui::Painter, at: Pos2, text: &str) {
     let r = Rect::from_min_size(at, galley.size() + vec2(8.0, 4.0));
     p.rect_filled(r, 2.0, Color32::from_rgb(0xf4, 0xf4, 0xf4));
     p.galley(r.min + vec2(4.0, 2.0), galley, Color32::BLACK);
+}
+
+/// The block reference under world point `w` in the current space, when the top object the pick
+/// box finds is one (the aperture is the command line's, as `pick_at` uses).
+fn insert_at(app: &CadApp, w: Vec2) -> Option<Handle> {
+    let h = cadcraft_engine::cmd::curves::pick_at(&app.session, w)?;
+    let d = app.session.doc().ok()?;
+    matches!(d.entity(h)?.kind, cadcraft_doc::EntityKind::Insert(_)).then_some(h)
 }
 
 /// The hatch under world point `w` within the pick aperture (PICKBOX × 1.5 pixels at `scale`
