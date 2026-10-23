@@ -780,8 +780,24 @@ thread_local! {
 
 /// The preview drawing of `st`: a part with linear, aligned, radius and angular dimensions in
 /// that style, sized to its text height.
-fn build_preview(st: &DimStyle) -> Option<DisplayList> {
+fn build_preview(st: &DimStyle, src: Option<&cadcraft_doc::Drawing>) -> Option<DisplayList> {
     let mut s = cadcraft_engine::Session::new();
+    // The drawing's own blocks (user arrowheads), text styles (fonts), linetypes and layers, so
+    // the preview draws the style as the drawing's dimensions are drawn.
+    if let Some(src) = src
+        && let Ok(d) = s.doc_mut()
+    {
+        d.blocks = src.blocks.clone();
+        d.text_styles = src.text_styles.clone();
+        d.linetypes = src.linetypes.clone();
+        d.layers = src.layers.iter().map(|l| cadcraft_doc::Layer { frozen: false, on: true, ..l.clone() }).collect();
+        d.handseed = d.handseed.max(src.handseed);
+        for k in ["LTSCALE", "PSLTSCALE", "MEASUREMENT", "INSUNITS", "DIMASSOC"] {
+            if let Some(v) = src.header.get(k) {
+                d.header.set(k, v.clone());
+            }
+        }
+    }
     let mut fields = style_map(st);
     fields.insert("name".into(), json!("Preview"));
     fields.insert("current".into(), json!(true));
@@ -790,11 +806,11 @@ fn build_preview(st: &DimStyle) -> Option<DisplayList> {
     let th = st.text_height * if st.scale > 0.0 { st.scale } else { 1.0 };
     let f = if th.is_finite() && th > 0.0 { th / 0.18 } else { 1.0 };
     let p = |x: f64, y: f64| json!([x * f, y * f]);
-    let _ = s.execute("layer.new", &json!({ "name": "Part", "color": 40, "current": true }));
+    let _ = s.execute("layer.new", &json!({ "name": "CADCraft preview part", "color": 40, "current": true }));
     let outline = [(0.0, 0.0), (3.0, 0.0), (2.0, 1.7), (1.0, 1.7), (1.0, 2.2), (0.0, 2.2), (0.0, 0.0)];
     s.execute("line", &json!({ "points": outline.iter().map(|(x, y)| p(*x, *y)).collect::<Vec<_>>() })).ok()?;
     let circle = s.execute("circle", &json!({ "center": p(0.55, 0.85), "radius": 0.4 * f })).ok()?;
-    let _ = s.execute("layer.new", &json!({ "name": "Dims", "color": 7, "current": true }));
+    let _ = s.execute("layer.new", &json!({ "name": "CADCraft preview dims", "color": 7, "current": true }));
     let _ = s.execute("dimlinear", &json!({ "p1": p(0.0, 2.2), "p2": p(1.0, 2.2), "at": p(0.5, 2.75) }));
     let _ = s.execute("dimlinear", &json!({ "p1": p(0.0, 0.0), "p2": p(0.0, 2.2), "at": p(-0.55, 1.1) }));
     let _ = s.execute("dimaligned", &json!({ "p1": p(3.0, 0.0), "p2": p(2.0, 1.7), "at": p(3.05, 1.2) }));
@@ -807,18 +823,18 @@ fn build_preview(st: &DimStyle) -> Option<DisplayList> {
 }
 
 /// Draw the preview of `st` in a `size` box.
-pub fn preview(ui: &mut egui::Ui, st: &DimStyle, size: egui::Vec2) {
+pub fn preview(ui: &mut egui::Ui, st: &DimStyle, size: egui::Vec2, src: Option<&cadcraft_doc::Drawing>) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let p = ui.painter_at(rect);
     p.rect_filled(rect, 2.0, t.canvas);
-    let key = serde_json::to_string(st).unwrap_or_default();
+    let key = format!("{:p}{}", src.map_or(std::ptr::null(), |d| d as *const _), serde_json::to_string(st).unwrap_or_default());
     let list = PREVIEWS.with(|c| {
         let mut c = c.borrow_mut();
         if c.len() > 64 {
             c.clear();
         }
-        c.entry(key).or_insert_with(|| build_preview(st)).clone()
+        c.entry(key).or_insert_with(|| build_preview(st, src)).clone()
     });
     let Some(list) = list else { return };
     let b = list.bounds;
@@ -913,6 +929,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         *open = false;
         return;
     };
+    // The drawing the previews take user arrowheads, text styles and linetypes from.
+    let src = app.session.state().ok().map(|s| s.doc.clone());
+    let src = src.as_deref();
     let mut st: State = ctx.data(|m| m.get_temp(state_id())).unwrap_or_default();
     let current = d.header.str("DIMSTYLE", "Standard");
     let used = styles_in_use(d);
@@ -1013,7 +1032,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     // Preview and description.
                     ui.vertical(|ui| {
                         ui.label(format!("{} {sel}", crate::tl!("Preview of:")));
-                        preview(ui, &sel_style, vec2(320.0, 230.0));
+                        preview(ui, &sel_style, vec2(320.0, 230.0), src);
                         ui.add_space(4.0);
                         ui.label(crate::tl!("Description"));
                         egui::Frame::NONE.stroke(Stroke::new(1.0, t.border)).inner_margin(6.0).show(ui, |ui| {
@@ -1185,7 +1204,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                         );
                     });
                     ui.vertical(|ui| {
-                        preview(ui, &map_style(&ed.style), vec2(300.0, 240.0));
+                        preview(ui, &map_style(&ed.style), vec2(300.0, 240.0), src);
                         if ed.mode == Mode::Override {
                             ui.label(RichText::new(crate::tl!("Overrides apply to new dimensions in the current style.")).small().color(t.text_dim));
                         }
@@ -1310,5 +1329,29 @@ fn show_value(v: Option<&Value>) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Object(_)) => v.map(color_label).unwrap_or_default(),
         Some(v) => v.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A user arrowhead (a block of the drawing) shows in the preview: a big square block as
+    /// both arrows adds geometry the built-in arrowheads don't have.
+    #[test]
+    fn the_preview_draws_the_drawings_user_arrowheads() {
+        let mut s = cadcraft_engine::Session::new();
+        let r = s.execute("rectang", &json!({ "p1": [-0.5, -0.5], "p2": [0.5, 0.5] })).unwrap();
+        let h = r["handle"].as_str().unwrap().to_string();
+        s.execute("block", &json!({ "name": "MYARROW", "base": [0, 0], "handles": [h], "keep": "delete" })).unwrap();
+        let mut st = s.doc().unwrap().dim_style("Standard").cloned().unwrap();
+        st.apply_fields(&serde_json::Map::from_iter([("arrowBlock".to_string(), json!("MYARROW"))]));
+        let plain = build_preview(&st, None).unwrap();
+        let with = build_preview(&st, Some(s.doc().unwrap())).unwrap();
+        // The square arrows: closed polylines of five points in the preview drawn with the
+        // drawing's blocks, none without them.
+        let squares =
+            |l: &DisplayList| l.prims.iter().filter(|p| matches!(p.kind, cadcraft_render::Kind::Polyline) && l.points(p).len() == 5).count();
+        assert!(squares(&with) > squares(&plain), "{} {}", squares(&with), squares(&plain));
     }
 }
