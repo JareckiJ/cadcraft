@@ -160,8 +160,13 @@ pub(super) fn report(s: &mut Session, kind: &str) -> Result<(Vec<&'static str>, 
         }
         "wirelist" => {
             let v = q(s, "wirelist")?;
-            let rows = v.as_array().into_iter().flatten().map(|w| vec![strs(&w["wire"]), strs(&w["from"]), strs(&w["to"])]).collect();
-            (vec!["Wire", "From", "To"], rows)
+            let rows = v
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|w| vec![strs(&w["wire"]), strs(&w["from"]), strs(&w["to"]), strs(&w["colour"]), strs(&w["size"])])
+                .collect();
+            (vec!["Wire", "From", "To", "Colour", "mm²"], rows)
         }
         "terminals" => {
             let mut rows = Vec::new();

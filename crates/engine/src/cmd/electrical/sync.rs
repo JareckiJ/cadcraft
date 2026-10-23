@@ -578,18 +578,21 @@ fn run_query(s: &mut Session, p: &Value) -> Result<Value> {
         "connections" => to_json(&connections),
         "wirelist" => {
             let tag = |id: &DeviceId| all_devices.iter().find(|d| &d.id == id).map(|d| d.tag.clone()).unwrap_or_else(|| "?".into());
-            let mut rows: Vec<(String, String, String)> = connections
+            let mut rows: Vec<(String, String, String, String, Option<f64>)> = connections
                 .iter()
                 .map(|c| {
                     (
                         c.wire_number.clone().unwrap_or_default(),
                         format!("{}:{}", tag(&c.from.device), c.from.pin),
                         format!("{}:{}", tag(&c.to.device), c.to.pin),
+                        c.color.clone(),
+                        c.cross_section,
                     )
                 })
                 .collect();
-            rows.sort();
-            let list: Vec<Value> = rows.into_iter().map(|(n, a, b)| json!({ "wire": n, "from": a, "to": b })).collect();
+            rows.sort_by(|a, b| (&a.0, &a.1, &a.2).cmp(&(&b.0, &b.1, &b.2)));
+            let list: Vec<Value> =
+                rows.into_iter().map(|(n, a, b, col, size)| json!({ "wire": n, "from": a, "to": b, "colour": col, "size": size })).collect();
             json!(list)
         }
         "bom" => {
