@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (acadrust 0.6.5: DWGs with dynamic block scale actions open in AutoCAD) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (acadrust 0.6.6: DWGs with dynamic block scale actions open in AutoCAD, multi-layout DWGs in other readers) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -31,7 +31,7 @@ below, and ≈ 20–40 h for 3D exchange formats that wait for 3D modelling.
 
 AutoCAD 2027 opens every DWG version from R2.0 onward and saves 2018 (AC1032, still the current
 DWG format), 2013, 2010, 2007, 2004, 2000 and R14. CADCraft reads DWG by converting it to DXF
-with the `acadrust` 0.6.5 crate and reading that DXF; it saves by writing its own R2000 DXF and
+with the `acadrust` 0.6.6 crate and reading that DXF; it saves by writing its own R2000 DXF and
 converting it to a DWG of the chosen version (#421): SAVEAS `version`, else the drawing's own
 version (the file's `$ACADVER`, 2018 for a new drawing), at least 2004 unless 2000 is asked for.
 The bridge repairs two acadrust 0.6.3 gaps in 2010+ DWG: merged table cells and table-style
@@ -140,7 +140,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-20 | minor | acadrust 0.6.5: a dynamic block scale action keeps the DWG-only byte after its connections, so AutoCAD opens CADCraft's DWG of a drawing with one and its references still scale; dimension text-position flags now mapped by acadrust itself |
+| 2026-10-23 | minor | acadrust 0.6.6: a DWG with more than one layout gets unique `*Paper_SpaceN` names, so ACadSharp opens it (hakanaktt/acadrust#143); a dynamic block scale action keeps the DWG-only byte after its connections, so AutoCAD opens CADCraft's DWG of a drawing with one and its references still scale; dimension text-position flags now mapped by acadrust itself |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |
