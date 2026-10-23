@@ -10,6 +10,7 @@
 
 pub mod aliasdlg;
 pub mod animation;
+pub mod attdefdlg;
 pub mod autosave;
 pub mod bedit;
 pub mod canvas;
@@ -248,6 +249,8 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// The Attribute Definition dialog ([`attdefdlg`]).
+    pub attdef: attdefdlg::State,
 }
 
 impl CadApp {
@@ -288,6 +291,7 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            attdef: attdefdlg::State::default(),
         }
     }
 

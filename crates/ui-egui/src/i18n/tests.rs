@@ -20,7 +20,7 @@ fn catalog_is_valid_and_preserves_placeholders_and_ellipses() {
         let (catalog, errors) = parse(language.source);
         assert!(errors.is_empty(), "{}: {errors:?}", language.code);
         for ((context, key), value) in catalog {
-            assert!(["", "menu", "@plural"].contains(&context), "unknown context: {context}");
+            assert!(["", "menu", "justify", "@plural"].contains(&context), "unknown context: {context}");
             let forms: Vec<_> = if context == "@plural" { value.split('|').collect() } else { vec![value] };
             if context == "@plural" {
                 assert_eq!(forms.len(), language.plural_forms, "{}: {key}", language.code);
@@ -94,6 +94,7 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
         include_str!("../dialogs.rs"),
         include_str!("../hatchdlg.rs"),
         include_str!("../aliasdlg.rs"),
+        include_str!("../attdefdlg.rs"),
         include_str!("../mtext_editor.rs"),
         include_str!("../layers.rs"),
         include_str!("../canvas/compare.rs"),
