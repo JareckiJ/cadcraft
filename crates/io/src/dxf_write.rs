@@ -1382,7 +1382,7 @@ fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<Entity> {
                 kind: EntityKind::MText(MText {
                     insert: cell.at.to3(0.0),
                     height: cell.height,
-                    width: 0.0,
+                    width: cell.width,
                     attach: cell.attach,
                     rotation: 0.0,
                     style,

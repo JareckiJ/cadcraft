@@ -38,6 +38,8 @@ pub struct TableText {
     /// MTEXT attachment (1 top left … 9 bottom right).
     pub attach: u8,
     pub height: f64,
+    /// Available cell width inside margins for wrapping (0 = no wrap).
+    pub width: f64,
     pub color: Color,
     pub style: String,
     pub text: String,
@@ -309,12 +311,14 @@ fn layout(d: &Drawing, t: &Table) -> TableGeom {
             1 => (y0 + y1) / 2.0,
             _ => y1 - cs.margin_v,
         };
+        let w_avail = ((x1 - x0) - 2.0 * cs.margin_h).max(0.0);
         g.texts.push(TableText {
             row: a.row,
             col: a.col,
             at: p(x, y),
             attach,
             height: cell.text_height.filter(|h| h.is_finite() && *h > 0.0).map_or(cs.text_height, |h| h * k),
+            width: w_avail,
             color: cs.text_color,
             style: cs.text_style.clone(),
             text: cell.text.clone(),
@@ -355,9 +359,10 @@ pub(crate) fn draw(b: &mut Builder, ctx: &Ctx, t: &Table, rgb: Ink, lw: f32) {
         let ts = crate::text_style(ctx.d, &tx.style);
         let font = cadcraft_fonts::TextFont::resolve(&ts.font);
         // Cell content is MTEXT (`\P`, `{\Q15;…}`, `\F…;`): laid out as such, at the cell's
-        // alignment point (its numbering is MTEXT's attachment).
+        // alignment point (its numbering is MTEXT's attachment), wrapped to the cell width.
         let mp = cadcraft_fonts::MTextParams {
             attach: tx.attach,
+            width: tx.width,
             font,
             width_factor: ts.width_factor,
             oblique: ts.oblique,

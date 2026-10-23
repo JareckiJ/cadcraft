@@ -366,29 +366,195 @@ fn dim_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
 }
 
 fn table_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
+    let t = Tokens::get();
     let Ok(d) = app.session.doc() else {
         no_drawing(ctx, "Table Style", open);
         return None;
     };
-    let mut styles: Vec<Style> = d
-        .table_styles
-        .iter()
-        .map(|s| Style {
-            name: s.name.clone(),
-            fields: vec![
-                Field::Num("textHeight", "Text height", s.text_height),
-                Field::Num("margin", "Cell margin", s.margin),
-                Field::Bool("title", "Title row", s.title),
-                Field::Bool("header", "Header row", s.header),
-            ],
-        })
-        .collect();
-    if styles.is_empty() {
-        let s = cadcraft_doc::TableStyle::default();
-        styles.push(Style { name: s.name, fields: Vec::new() });
-    }
     let current = d.header.str("CTABLESTYLE", "Standard");
-    style_manager(ctx, open, "Table Style", "tablestyle", &current, &styles)
+    let table_styles = if d.table_styles.is_empty() { vec![cadcraft_doc::TableStyle::default()] } else { d.table_styles.clone() };
+    let text_styles: Vec<String> = d.text_styles.iter().map(|s| s.name.clone()).collect();
+    let mut sel = temp::<String>(ctx, "tablestyle_sel").filter(|s| table_styles.iter().any(|x| x.name == *s)).unwrap_or_else(|| current.clone());
+    let mut new_name = temp::<String>(ctx, "tablestyle_new").unwrap_or_default();
+    let mut tab = temp::<usize>(ctx, "tablestyle_tab").unwrap_or(0);
+    let mut cs_sel = temp::<String>(ctx, "tablestyle_cs_sel").unwrap_or_else(|| "Data".to_string());
+    let mut action = None;
+
+    egui::Window::new("Table Style").open(open).default_size(vec2(580.0, 360.0)).resizable(true).show(ctx, |ui| {
+        ui.label(RichText::new(format!("Current table style: {current}")).color(t.text_dim));
+        ui.separator();
+        ui.columns(2, |cols| {
+            let [left, right] = cols else { return };
+            left.label(RichText::new("Styles").strong());
+            egui::ScrollArea::vertical().id_salt("tablestyle_list").max_height(200.0).auto_shrink([false, true]).show(left, |ui| {
+                for s in &table_styles {
+                    let mut label = RichText::new(&s.name);
+                    if s.name.eq_ignore_ascii_case(&current) {
+                        label = label.strong();
+                    }
+                    if ui.selectable_label(s.name == sel, label).clicked() {
+                        sel = s.name.clone();
+                    }
+                }
+            });
+            if left.add_enabled(!sel.eq_ignore_ascii_case(&current), egui::Button::new("Set Current")).clicked() {
+                action = Some(("tablestyle", json!({ "name": sel })));
+            }
+            left.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut new_name).hint_text("New style name").desired_width(120.0));
+                let name = new_name.trim().to_string();
+                let ok = !name.is_empty() && !table_styles.iter().any(|s| s.name.eq_ignore_ascii_case(&name));
+                if ui.add_enabled(ok, egui::Button::new("New")).clicked() {
+                    action = Some(("tablestyle", json!({ "name": name, "current": false })));
+                    sel = name;
+                    new_name.clear();
+                }
+            });
+
+            let Some(st) = table_styles.iter().find(|s| s.name == sel) else { return };
+            right.label(RichText::new(format!("Properties of {sel}")).strong());
+            right.horizontal(|ui| {
+                if ui.selectable_label(tab == 0, "General").clicked() {
+                    tab = 0;
+                }
+                if ui.selectable_label(tab == 1, "Cell Styles").clicked() {
+                    tab = 1;
+                }
+            });
+            right.separator();
+
+            if tab == 0 {
+                egui::Grid::new("tablestyle_gen_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
+                    ui.label("Text height");
+                    if let Some(v) = num_field(ui, ("tablestyle", &st.name, "textHeight"), st.text_height).filter(|v| *v > 0.0) {
+                        action = Some(("tablestyle", json!({ "name": st.name, "textHeight": v, "current": false })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Cell margin");
+                    if let Some(v) = num_field(ui, ("tablestyle", &st.name, "margin"), st.margin).filter(|v| *v >= 0.0) {
+                        action = Some(("tablestyle", json!({ "name": st.name, "margin": v, "current": false })));
+                    }
+                    ui.end_row();
+
+                    ui.label("");
+                    let mut title = st.title;
+                    if ui.checkbox(&mut title, "Title row").changed() {
+                        action = Some(("tablestyle", json!({ "name": st.name, "title": title, "current": false })));
+                    }
+                    ui.end_row();
+
+                    ui.label("");
+                    let mut header = st.header;
+                    if ui.checkbox(&mut header, "Header row").changed() {
+                        action = Some(("tablestyle", json!({ "name": st.name, "header": header, "current": false })));
+                    }
+                    ui.end_row();
+                });
+            } else {
+                let cs_names = st.cell_style_names();
+                if !cs_names.iter().any(|n| n.eq_ignore_ascii_case(&cs_sel)) {
+                    cs_sel = cs_names.first().cloned().unwrap_or_else(|| "Data".into());
+                }
+                right.horizontal(|ui| {
+                    ui.label("Cell style:");
+                    egui::ComboBox::from_id_salt("tablestyle_cs_picker").selected_text(&cs_sel).show_ui(ui, |ui| {
+                        for n in &cs_names {
+                            if ui.selectable_label(n.eq_ignore_ascii_case(&cs_sel), n).clicked() {
+                                cs_sel = n.clone();
+                            }
+                        }
+                    });
+                });
+                let cs = st.cell_style(&cs_sel);
+                egui::Grid::new("tablestyle_cs_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
+                    ui.label("Text style");
+                    let mut picked_ts = None;
+                    egui::ComboBox::from_id_salt(("tablestyle", "cs_ts", &cs_sel)).selected_text(&cs.text_style).show_ui(ui, |ui| {
+                        for ts in &text_styles {
+                            if ui.selectable_label(ts == &cs.text_style, ts).clicked() && ts != &cs.text_style {
+                                picked_ts = Some(ts.clone());
+                            }
+                        }
+                    });
+                    if let Some(ts) = picked_ts {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "textStyle": ts })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Text height");
+                    if let Some(v) = num_field(ui, ("tablestyle", &st.name, &cs.name, "textHeight"), cs.text_height).filter(|v| *v > 0.0) {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "textHeight": v })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Horiz margin");
+                    if let Some(v) = num_field(ui, ("tablestyle", &st.name, &cs.name, "marginH"), cs.margin_h).filter(|v| *v >= 0.0) {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "marginH": v })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Vert margin");
+                    if let Some(v) = num_field(ui, ("tablestyle", &st.name, &cs.name, "marginV"), cs.margin_v).filter(|v| *v >= 0.0) {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "marginV": v })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Alignment");
+                    let align_labels = ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"];
+                    let cur_align_idx = (cs.align.clamp(1, 9) - 1) as usize;
+                    let cur_align_str = align_labels.get(cur_align_idx).copied().unwrap_or("ML");
+                    let mut picked_align = None;
+                    egui::ComboBox::from_id_salt(("tablestyle", "cs_align", &cs_sel)).selected_text(cur_align_str).show_ui(ui, |ui| {
+                        for (i, al) in align_labels.iter().enumerate() {
+                            let val = (i + 1) as u8;
+                            if ui.selectable_label(val == cs.align, *al).clicked() && val != cs.align {
+                                picked_align = Some(val);
+                            }
+                        }
+                    });
+                    if let Some(al) = picked_align {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "align": al })));
+                    }
+                    ui.end_row();
+
+                    ui.label("Number format");
+                    let formats = ["General", "Decimal", "Percent", "Text"];
+                    let cur_fmt = match cs.format {
+                        cadcraft_doc::CellFormat::General => "General",
+                        cadcraft_doc::CellFormat::Decimal => "Decimal",
+                        cadcraft_doc::CellFormat::Percent => "Percent",
+                        cadcraft_doc::CellFormat::Text => "Text",
+                    };
+                    let mut picked_fmt = None;
+                    egui::ComboBox::from_id_salt(("tablestyle", "cs_fmt", &cs_sel)).selected_text(cur_fmt).show_ui(ui, |ui| {
+                        for f in &formats {
+                            if ui.selectable_label(*f == cur_fmt, *f).clicked() && *f != cur_fmt {
+                                picked_fmt = Some(*f);
+                            }
+                        }
+                    });
+                    if let Some(f) = picked_fmt {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "format": f.to_ascii_lowercase() })));
+                    }
+                    ui.end_row();
+
+                    ui.label("");
+                    let mut merge = cs.merge;
+                    if ui.checkbox(&mut merge, "Merge across table").changed() {
+                        action = Some(("tablestyle.cellstyle", json!({ "style": st.name, "name": cs.name, "merge": merge })));
+                    }
+                    ui.end_row();
+                });
+            }
+        });
+    });
+
+    set_temp(ctx, "tablestyle_sel", sel);
+    set_temp(ctx, "tablestyle_new", new_name);
+    set_temp(ctx, "tablestyle_tab", tab);
+    set_temp(ctx, "tablestyle_cs_sel", cs_sel);
+    action
 }
 
 fn mleader_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
