@@ -369,10 +369,57 @@ pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> 
         d
     };
     let links = all_links(d, o);
-    let pages = items.iter().map(|(s, po)| sheet(drawn, s, po, &links)).collect::<Result<Vec<_>>>()?;
-    let title = if o.title.is_empty() { pages.first().map(|p| p.label.clone()).unwrap_or_default() } else { o.title.clone() };
-    let fonts = if o.text_as_geometry { fonts::Fonts::default() } else { fonts::Fonts::collect(pages.iter().map(|p| &p.list)) };
-    Ok(assemble(d, &pages, &fonts, o, &title))
+    write_items(d, drawn, items, o, &links, fonts::MAX_FONT_BYTES)
+}
+
+/// Write the pages of `items`, plotted from `drawn`, each as soon as its sheet is plotted, so
+/// only one display list is held at a time (#1068); `max_font_bytes` caps the embedded font
+/// data.
+fn write_items(
+    d: &Drawing,
+    drawn: &Drawing,
+    items: &[(Space, PdfOptions)],
+    o: &PdfOptions,
+    links: &[(Handle, String)],
+    max_font_bytes: usize,
+) -> Result<Vec<u8>> {
+    let mut w = Writer::new(d, o);
+    let mut gather = fonts::Gather::new(max_font_bytes);
+    let geometry = fonts::Fonts::default();
+    let mut first_label = None;
+    for (s, po) in items {
+        let p = sheet(drawn, s, po, links)?;
+        first_label.get_or_insert_with(|| p.label.clone());
+        w.page(&p, if o.text_as_geometry { &geometry } else { gather.add(&p.list) });
+    }
+    let title = if o.title.is_empty() { first_label.unwrap_or_default() } else { o.title.clone() };
+    if o.text_as_geometry {
+        return Ok(w.finish(&geometry, &title));
+    }
+    match gather.finish() {
+        Some(fonts) => Ok(w.finish(&fonts, &title)),
+        // A cap on fonts was reached, so some text planned as text must be drawn as outlines:
+        // plot again, holding every sheet until the fonts are known.
+        None => {
+            drop(w);
+            write_held(d, drawn, items, o, links, &title, max_font_bytes)
+        }
+    }
+}
+
+/// Write the pages of `items` holding every plotted sheet until the fonts are known.
+fn write_held(
+    d: &Drawing,
+    drawn: &Drawing,
+    items: &[(Space, PdfOptions)],
+    o: &PdfOptions,
+    links: &[(Handle, String)],
+    title: &str,
+    max_font_bytes: usize,
+) -> Result<Vec<u8>> {
+    let pages = items.iter().map(|(s, po)| sheet(drawn, s, po, links)).collect::<Result<Vec<_>>>()?;
+    let fonts = fonts::Fonts::collect(pages.iter().map(|p| &p.list), max_font_bytes);
+    Ok(assemble(d, &pages, &fonts, o, title))
 }
 
 /// One plotted sheet, ready to be written as a page.
@@ -891,32 +938,68 @@ fn refs(ids: impl IntoIterator<Item = usize>) -> String {
 /// annotations, the PDF layers (one optional content group per drawing layer used, named
 /// like it), page labels, document information, cross-reference table and trailer.
 fn assemble(d: &Drawing, pages: &[SheetPage], fonts: &fonts::Fonts, o: &PdfOptions, title: &str) -> Vec<u8> {
-    let mut objs = Objects::default();
-    let catalog = objs.reserve();
-    let tree = objs.reserve();
-    // Optional content groups shared by all pages, by layer index: (layer, object).
-    let mut ocg_ids: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-    let mut ocgs: Vec<(u32, usize)> = Vec::new();
-    let mut kids = Vec::new();
-    // Page dictionaries are completed once the fonts are written: (page, its fonts, the rest).
-    let mut page_dicts: Vec<(usize, Vec<usize>, String, String, String)> = Vec::new();
+    let mut w = Writer::new(d, o);
     for p in pages {
+        w.page(p, fonts);
+    }
+    w.finish(fonts, title)
+}
+
+/// A PDF file being written page by page (see [`assemble`]): a page's content stream is
+/// written when the page is added, so its display list need not be kept.
+struct Writer<'a> {
+    d: &'a Drawing,
+    o: &'a PdfOptions,
+    objs: Objects,
+    catalog: usize,
+    tree: usize,
+    /// Optional content groups shared by all pages, by layer index: (layer, object).
+    ocg_ids: std::collections::HashMap<u32, usize>,
+    ocgs: Vec<(u32, usize)>,
+    kids: Vec<usize>,
+    /// Page dictionaries are completed once the fonts are written: (page, its fonts, the rest).
+    page_dicts: Vec<(usize, Vec<usize>, String, String, String)>,
+    labels: Vec<String>,
+}
+
+impl<'a> Writer<'a> {
+    fn new(d: &'a Drawing, o: &'a PdfOptions) -> Writer<'a> {
+        let mut objs = Objects::default();
+        let catalog = objs.reserve();
+        let tree = objs.reserve();
+        Writer {
+            d,
+            o,
+            objs,
+            catalog,
+            tree,
+            ocg_ids: std::collections::HashMap::new(),
+            ocgs: Vec::new(),
+            kids: Vec::new(),
+            page_dicts: Vec::new(),
+            labels: Vec::new(),
+        }
+    }
+
+    /// Write a page; its text is set in `fonts` (font indices as they will be written).
+    fn page(&mut self, p: &SheetPage, fonts: &fonts::Fonts) {
+        let objs = &mut self.objs;
         let page = objs.reserve();
         let texts = fonts.texts(&p.list);
         let (marks, alphas) = content_stream(&p.list, &p.map, &p.clip_pt, &p.layers, &texts);
-        let content = objs.add(stream(marks.as_bytes(), o.compress, ""));
+        let content = objs.add(stream(marks.as_bytes(), self.o.compress, ""));
         let mut used: Vec<usize> = texts.values().map(|(f, _)| *f).collect();
         used.sort_unstable();
         used.dedup();
         let mut props = String::new();
         for l in &p.layers {
-            let Some(layer) = d.layers.get(*l as usize) else { continue };
-            let id = match ocg_ids.get(l) {
+            let Some(layer) = self.d.layers.get(*l as usize) else { continue };
+            let id = match self.ocg_ids.get(l) {
                 Some(id) => *id,
                 None => {
                     let id = objs.add(format!("<< /Type /OCG /Name {} >>", pdf_string(&layer.name)));
-                    ocg_ids.insert(*l, id);
-                    ocgs.push((*l, id));
+                    self.ocg_ids.insert(*l, id);
+                    self.ocgs.push((*l, id));
                     id
                 }
             };
@@ -934,53 +1017,177 @@ fn assemble(d: &Drawing, pages: &[SheetPage], fonts: &fonts::Fonts, o: &PdfOptio
         let mut mb = String::new();
         pt(&mut mb, p.media);
         let annots = if annots.is_empty() { String::new() } else { format!(" /Annots [{}]", refs(annots)) };
-        page_dicts.push((page, used, props, ext_gstates(&alphas), format!("/MediaBox [0 0 {mb}] /Contents {content} 0 R{annots}")));
-        kids.push(page);
+        self.page_dicts.push((page, used, props, ext_gstates(&alphas), format!("/MediaBox [0 0 {mb}] /Contents {content} 0 R{annots}")));
+        self.kids.push(page);
+        self.labels.push(format!("{} << /P {} >>", self.labels.len(), pdf_string(&p.label)));
     }
-    let font_ids = if fonts.is_empty() { Vec::new() } else { fonts.write(&mut objs, o.compress) };
-    for (page, used, props, gstates, rest) in page_dicts {
-        let mut res = String::new();
-        if !props.is_empty() {
-            let _ = write!(res, " /Properties <<{props} >>");
+
+    /// Write the fonts, the page dictionaries and the rest of the file.
+    fn finish(self, fonts: &fonts::Fonts, title: &str) -> Vec<u8> {
+        let Writer { d, o, mut objs, catalog, tree, ocgs, kids, page_dicts, labels, .. } = self;
+        let font_ids = if fonts.is_empty() { Vec::new() } else { fonts.write(&mut objs, o.compress) };
+        for (page, used, props, gstates, rest) in page_dicts {
+            let mut res = String::new();
+            if !props.is_empty() {
+                let _ = write!(res, " /Properties <<{props} >>");
+            }
+            res.push_str(&gstates);
+            let f: Vec<String> = used.iter().filter_map(|i| Some(format!("/F{i} {} 0 R", font_ids.get(*i)?))).collect();
+            if !f.is_empty() {
+                let _ = write!(res, " /Font << {} >>", f.join(" "));
+            }
+            objs.set(page, format!("<< /Type /Page /Parent {tree} 0 R /Resources <<{res} >> {rest} >>"));
         }
-        res.push_str(&gstates);
-        let f: Vec<String> = used.iter().filter_map(|i| Some(format!("/F{i} {} 0 R", font_ids.get(*i)?))).collect();
-        if !f.is_empty() {
-            let _ = write!(res, " /Font << {} >>", f.join(" "));
+        objs.set(tree, format!("<< /Type /Pages /Kids [{}] /Count {} >>", refs(kids.iter().copied()), kids.len()));
+        let mut cat = format!("<< /Type /Catalog /Pages {tree} 0 R");
+        if !ocgs.is_empty() {
+            // Optional content needs PDF 1.5; the catalog's version overrides the header's.
+            let off: Vec<usize> = ocgs.iter().filter(|(l, _)| d.layers.get(*l as usize).is_some_and(|l| !l.on)).map(|(_, id)| *id).collect();
+            let all = refs(ocgs.iter().map(|(_, id)| *id));
+            let _ = write!(cat, " /Version /1.5 /OCProperties << /OCGs [{all}] /D << /Name (Layers) /Order [{all}] /OFF [{}] >> >>", refs(off));
+            if kids.len() == 1 {
+                cat.push_str(" /PageMode /UseOC");
+            }
         }
-        objs.set(page, format!("<< /Type /Page /Parent {tree} 0 R /Resources <<{res} >> {rest} >>"));
-    }
-    objs.set(tree, format!("<< /Type /Pages /Kids [{}] /Count {} >>", refs(kids.iter().copied()), kids.len()));
-    let mut cat = format!("<< /Type /Catalog /Pages {tree} 0 R");
-    if !ocgs.is_empty() {
-        // Optional content needs PDF 1.5; the catalog's version overrides the header's.
-        let off: Vec<usize> = ocgs.iter().filter(|(l, _)| d.layers.get(*l as usize).is_some_and(|l| !l.on)).map(|(_, id)| *id).collect();
-        let all = refs(ocgs.iter().map(|(_, id)| *id));
-        let _ = write!(cat, " /Version /1.5 /OCProperties << /OCGs [{all}] /D << /Name (Layers) /Order [{all}] /OFF [{}] >> >>", refs(off));
-        if pages.len() == 1 {
-            cat.push_str(" /PageMode /UseOC");
+        let _ = write!(cat, " /PageLabels << /Nums [{}] >> >>", labels.join(" "));
+        objs.set(catalog, cat);
+        let info = objs.add(format!("<< /Producer (CADCraft) /Creator (CADCraft) /Title {} >>", pdf_string(title)));
+        let size: usize = objs.bodies.iter().map(Vec::len).sum();
+        let mut out: Vec<u8> = Vec::with_capacity(size + 64 * objs.bodies.len() + 256);
+        out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+        let mut offsets = Vec::with_capacity(objs.bodies.len());
+        for (i, body) in objs.bodies.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\nendobj\n");
         }
+        let xref = out.len();
+        let mut x = format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1);
+        for o in &offsets {
+            let _ = writeln!(x, "{o:010} 00000 n ");
+        }
+        let _ = write!(x, "trailer\n<< /Size {} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1);
+        out.extend_from_slice(x.as_bytes());
+        out
     }
-    let labels: Vec<String> = pages.iter().enumerate().map(|(i, p)| format!("{i} << /P {} >>", pdf_string(&p.label))).collect();
-    let _ = write!(cat, " /PageLabels << /Nums [{}] >> >>", labels.join(" "));
-    objs.set(catalog, cat);
-    let info = objs.add(format!("<< /Producer (CADCraft) /Creator (CADCraft) /Title {} >>", pdf_string(title)));
-    let size: usize = objs.bodies.iter().map(Vec::len).sum();
-    let mut out: Vec<u8> = Vec::with_capacity(size + 64 * objs.bodies.len() + 256);
-    out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-    let mut offsets = Vec::with_capacity(objs.bodies.len());
-    for (i, body) in objs.bodies.iter().enumerate() {
-        offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
-        out.extend_from_slice(body);
-        out.extend_from_slice(b"\nendobj\n");
+}
+
+#[cfg(test)]
+#[path = "../tests/support/ttf.rs"]
+mod ttf;
+
+#[cfg(test)]
+mod tests {
+    use cadcraft_doc::{Common, EntityKind, Line, Text, TextStyle};
+    use cadcraft_geom::Vec3;
+
+    use super::*;
+
+    fn text(d: &mut Drawing, space: &Space, layer: &str, at: (f64, f64), value: &str) -> Handle {
+        let t = Text {
+            insert: Vec3::new(at.0, at.1, 0.0),
+            align_pt: None,
+            height: 10.0,
+            value: value.into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Real".into(),
+            halign: Default::default(),
+            valign: Default::default(),
+        };
+        d.add(space, Common { layer: layer.into(), ..Default::default() }, EntityKind::Text(t)).unwrap()
     }
-    let xref = out.len();
-    let mut x = format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1);
-    for o in &offsets {
-        let _ = writeln!(x, "{o:010} 00000 n ");
+
+    fn line(d: &mut Drawing, space: &Space, layer: &str, a: (f64, f64), b: (f64, f64)) -> Handle {
+        let l = EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
+        d.add(space, Common { layer: layer.into(), ..Default::default() }, l).unwrap()
     }
-    let _ = write!(x, "trailer\n<< /Size {} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1);
-    out.extend_from_slice(x.as_bytes());
-    out
+
+    /// Text in an embeddable font on two sheets, lines on layers (one shared by both sheets,
+    /// one off) and link annotations on each sheet.
+    fn sheets() -> (Drawing, Vec<(Space, PdfOptions)>, PdfOptions) {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| cadcraft_fonts::ttf::register("cadcraft-pdf-unit.ttf", ttf::test_font(0)));
+        let mut d = Drawing::new_metric();
+        d.text_styles.push(TextStyle { name: "Real".into(), font: "cadcraft-pdf-unit.ttf".into(), ..TextStyle::default() });
+        let paper = Space::Paper("Layout1".into());
+        text(&mut d, &Space::Model, "Notes", (0.0, 0.0), "AB");
+        let wall = line(&mut d, &Space::Model, "Walls", (0.0, -20.0), (100.0, -20.0));
+        line(&mut d, &Space::Model, "Off", (0.0, -40.0), (100.0, -40.0));
+        text(&mut d, &paper, "Notes", (20.0, 40.0), "BA");
+        let frame = line(&mut d, &paper, "Walls", (10.0, 10.0), (150.0, 10.0));
+        if let Some(l) = d.layers.iter_mut().find(|l| l.name == "Off") {
+            l.on = false;
+        }
+        let o = PdfOptions {
+            compress: false,
+            layers: true,
+            include_off_layers: true,
+            links: vec![(wall, "https://example.com/wall".into()), (frame, "https://example.com/frame".into())],
+            ..PdfOptions::default()
+        };
+        let items = vec![(Space::Model, o.clone()), (paper, PdfOptions { landscape: Some(true), ..o.clone() })];
+        (d, items, o)
+    }
+
+    /// The drawing plotted from (layers that are off turned on, as `pdf_items` does).
+    fn drawn(d: &Drawing) -> Drawing {
+        let mut c = d.clone();
+        for l in c.layers.iter_mut().filter(|l| !l.frozen) {
+            l.on = true;
+        }
+        c
+    }
+
+    fn ascii(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| if b.is_ascii() { char::from(*b) } else { '?' }).collect()
+    }
+
+    #[test]
+    fn pages_written_as_plotted_match_the_file_assembled_from_every_sheet() {
+        let (d, items, o) = sheets();
+        let drawn = drawn(&d);
+        let links = all_links(&d, &o);
+        for compress in [false, true] {
+            let o = PdfOptions { compress, ..o.clone() };
+            let streamed = write_items(&d, &drawn, &items, &o, &links, fonts::MAX_FONT_BYTES).unwrap();
+            let held = write_held(&d, &drawn, &items, &o, &links, "Model", fonts::MAX_FONT_BYTES).unwrap();
+            assert_eq!(streamed, held, "compress: {compress}");
+            assert_eq!(streamed, pdf_items(&d, &items, &o).unwrap());
+        }
+        // What the comparison covers: both pages, real text, layers shared across pages (the
+        // one that is off starts hidden), page labels and one link annotation per page.
+        let p = ascii(&write_items(&d, &drawn, &items, &o, &links, fonts::MAX_FONT_BYTES).unwrap());
+        assert!(p.contains("/Count 2"));
+        assert_eq!(p.matches("/FontFile2").count(), 1);
+        assert_eq!(p.lines().filter(|l| l.ends_with(" Tj")).count(), 4);
+        assert_eq!(p.matches("/Type /OCG").count(), 3, "Notes, Walls and Off, once each");
+        assert!(p.contains("/OFF [") && !p.contains("/OFF []"));
+        assert!(p.contains("/PageLabels << /Nums [0 << /P (Model) >> 1 << /P (Layout1) >> ] >>"), "{p}");
+        assert_eq!(p.matches("/Subtype /Link").count(), 2);
+    }
+
+    #[test]
+    fn fonts_over_the_data_cap_are_planned_as_text_then_plotted_again_as_outlines() {
+        // The plan made while the pages are written cannot see the cap on font data, so the
+        // writer must start again holding every sheet: the result is the held file, with the
+        // text that did not fit drawn as outlines.
+        let (d, items, o) = sheets();
+        let drawn = drawn(&d);
+        let links = all_links(&d, &o);
+        let mut planned = fonts::Gather::new(1);
+        for (s, po) in &items {
+            let page = sheet(&drawn, s, po, &links).unwrap();
+            assert!(!planned.add(&page.list).texts(&page.list).is_empty(), "planned as text");
+        }
+        assert!(planned.finish().is_none(), "the plan does not hold");
+        let capped = write_items(&d, &drawn, &items, &o, &links, 1).unwrap();
+        assert_eq!(capped, write_held(&d, &drawn, &items, &o, &links, "Model", 1).unwrap());
+        let p = ascii(&capped);
+        assert!(!p.contains("/FontFile2") && !p.contains(" Tf"), "no font, no text operators");
+        assert!(p.contains("h\nf\n"), "the glyphs are outlines");
+        assert_eq!(p.matches("/Subtype /Link").count(), 2);
+    }
 }
