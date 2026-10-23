@@ -448,6 +448,12 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         None => layout.as_ref().and_then(|pg| find_device(&pg.device)),
     };
     let mut out = if p.is_object() { p.clone() } else { json!({}) };
+    // Only a system printer chosen as the device prints (below): a `printer` passed with the
+    // call is dropped, so EXPORTPDF always writes the PDF and PLOT without one writes its file.
+    if let Some(o) = out.as_object_mut() {
+        o.remove("printer");
+        o.remove("printerPaper");
+    }
     let (Some(dev), Some(o)) = (dev, out.as_object_mut()) else { return Ok(out) };
     o.remove("device");
     let output = if cmd == "exportpdf" { PlotOutput::Pdf } else { dev.output };
@@ -578,12 +584,19 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// A system printer is the system's: PLOTTERMANAGER doesn't change or delete it (a user file
+/// by its name would only be hidden behind it). A copy made with action `new` can be edited.
+fn system_read_only(cmd: &str, name: &str) -> EngineError {
+    bad(cmd, format!("`{name}` is a system printer: make a copy with action new, from `{name}`"))
+}
+
 fn summary(c: &PlotterConfig) -> Value {
     json!({
         "name": c.name,
         "description": c.description,
         "output": c.output.as_str(),
         "builtin": is_builtin(&c.name),
+        "system": c.system,
         "papers": c.papers.len(),
         "defaultPaper": c.default_paper,
     })
@@ -687,6 +700,7 @@ fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
             let mut v = serde_json::to_value(&c).unwrap_or(Value::Null);
             if let Some(o) = v.as_object_mut() {
                 o.insert("builtin".into(), json!(is_builtin(&c.name)));
+                o.insert("system".into(), json!(c.system));
             }
             Ok(v)
         }
@@ -724,6 +738,9 @@ fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("`{name}` is built in: make a copy with action new, from `{name}`")));
             }
             let mut c = find_device(&name).ok_or_else(|| unknown_device(cmd, &name))?;
+            if c.system {
+                return Err(system_read_only(cmd, &c.name));
+            }
             edit_device(cmd, &mut c, p)?;
             if c.papers.is_empty() {
                 return Err(bad(cmd, "a plotter needs at least one paper"));
@@ -738,6 +755,9 @@ fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("`{name}` is built in and can't be deleted")));
             }
             let c = find_device(&name).ok_or_else(|| unknown_device(cmd, &name))?;
+            if c.system {
+                return Err(system_read_only(cmd, &c.name));
+            }
             let file = cadcraft_doc::plotter_file_name(&c.name).ok_or_else(|| bad(cmd, "the plotter has no name"))?;
             (store().delete)(&file).map_err(|e| bad(cmd, e))?;
             Ok(json!({ "deleted": c.name }))
@@ -850,7 +870,13 @@ impl Interactive for PlotterManagerM {
                     "Paper" => Stage::PaperDevice,
                     _ => {
                         for c in listed_devices() {
-                            let kind = if is_builtin(&c.name) { "built-in" } else { "user" };
+                            let kind = if is_builtin(&c.name) {
+                                "built-in"
+                            } else if c.system {
+                                "system printer"
+                            } else {
+                                "user"
+                            };
                             s.echo(format!("{} ({}, {kind}, {} paper sizes)", c.name, c.output.as_str().to_uppercase(), c.papers.len()));
                         }
                         return Ok(Step::Done);
@@ -883,6 +909,9 @@ impl Interactive for PlotterManagerM {
                 let c = find_device(&n).ok_or_else(|| EngineError::Other(format!("Plotter \"{n}\" not found.")))?;
                 if is_builtin(&c.name) {
                     return Err(EngineError::Other(format!("\"{}\" is built in; create a new plotter first.", c.name)));
+                }
+                if c.system {
+                    return Err(system_read_only("plottermanager", &c.name));
                 }
                 self.stage = Stage::PaperName(c.name);
                 Ok(Step::Continue)

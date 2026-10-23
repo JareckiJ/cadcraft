@@ -69,9 +69,25 @@ fn system_printers_are_devices_and_plot_prints_on_them() {
     assert!(r.get("data").is_some() && r.get("job").is_none());
     assert!(JOBS.lock().unwrap().is_empty());
 
+    // A `printer` passed with the call never prints: EXPORTPDF and PLOT without a printer
+    // device write their file.
+    let r = s.execute("exportpdf", &json!({ "layout": "Model", "printer": "Office_T120" })).unwrap();
+    assert!(r.get("data").is_some() && r.get("job").is_none());
+    let r = s.execute("plot", &json!({ "layout": "Model", "device": "CADCraft PDF", "printer": "Office_T120" })).unwrap();
+    assert!(r.get("job").is_none(), "{r}");
+    assert!(JOBS.lock().unwrap().is_empty());
+
     // An unknown printer is refused, and copies are bounded.
-    assert!(s.execute("plot", &json!({ "layout": "Model", "printer": "Nope" })).is_err());
+    assert!(s.execute("plot", &json!({ "layout": "Model", "device": "Nope" })).is_err());
     let r = s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "copies": 100000 })).unwrap();
     assert_eq!(r["copies"], 999);
     assert_eq!(JOBS.lock().unwrap().pop().unwrap().2, 999);
+
+    // A system printer is listed as one, and PLOTTERMANAGER neither edits nor deletes it.
+    let list = s.execute("plottermanager", &json!({ "action": "list" })).unwrap();
+    let t120 = list["devices"].as_array().unwrap().iter().find(|d| d["name"] == "Office_T120").cloned().unwrap();
+    assert_eq!(t120["system"], true);
+    let set = s.execute("plottermanager", &json!({ "action": "set", "name": "Office_T120", "description": "x" }));
+    assert!(set.unwrap_err().to_string().contains("system printer"));
+    assert!(s.execute("plottermanager", &json!({ "action": "delete", "name": "Office_T120" })).is_err());
 }
