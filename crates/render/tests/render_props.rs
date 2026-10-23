@@ -99,6 +99,7 @@ fn leader_arrows_use_their_style_dimscale() {
 
 fn text(x: f64, value: &str) -> Text {
     Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::new(x, 0.0, 0.0),

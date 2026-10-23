@@ -86,6 +86,7 @@ fn visible_attributes_of_a_missing_block_still_count() {
     let attrib = |invisible: bool| Attrib {
         tag: "TAG".into(),
         text: Text {
+            formula: None,
             backwards: false,
             upside_down: false,
             insert: Vec3::new(1000.0, 1000.0, 0.0),
@@ -426,6 +427,7 @@ fn attdef_in_block_is_ignored_in_insert_extents() {
         EntityKind::AttDef(Attrib {
             tag: "TAG".into(),
             text: Text {
+                formula: None,
                 backwards: false,
                 upside_down: false,
                 insert: Vec3::new(5000.0, 5000.0, 0.0),
@@ -453,6 +455,7 @@ fn attdef_in_block_is_ignored_in_insert_extents() {
 
 fn text_kind(value: &str) -> EntityKind {
     EntityKind::Text(Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::new(10.0, 10.0, 0.0),
@@ -470,6 +473,7 @@ fn text_kind(value: &str) -> EntityKind {
 
 fn mtext_kind(contents: &str) -> EntityKind {
     EntityKind::MText(MText {
+        formula: None,
         frame: false,
         insert: Vec3::new(10.0, 10.0, 0.0),
         height: 2.0,

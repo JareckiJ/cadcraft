@@ -27,6 +27,7 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::Text(Text {
+            formula: None,
             backwards: false,
             upside_down: false,
             insert: Vec3::new(1.0, 1.0, 0.0),
@@ -46,6 +47,7 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::MText(MText {
+            formula: None,
             frame: false,
             insert: Vec3::new(5.0, 5.0, 0.0),
             height: 0.2,
@@ -258,6 +260,7 @@ fn block_definition_properties_and_constant_attdefs_roundtrip() {
     let mut b = Block::new("Title");
     (b.description, b.units, b.explodable) = ("Drawing title block".into(), 4, false);
     let text = Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::ZERO,
@@ -1274,6 +1277,7 @@ const INTL: &str = "图号 Ä°ø Ø 😀";
 
 fn intl_text(value: &str) -> Text {
     Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::new(1.0, 1.0, 0.0),
@@ -1300,6 +1304,7 @@ fn intl_sample() -> Drawing {
         &Space::Model,
         on.clone(),
         EntityKind::MText(MText {
+            formula: None,
             frame: false,
             insert: Vec3::new(5.0, 5.0, 0.0),
             height: 2.5,
@@ -1542,6 +1547,7 @@ fn dwg_roundtrip_keeps_extension_data() {
 fn mleader_is_written_as_multileader() {
     let mut d = Drawing::new_metric();
     let text = cadcraft_doc::MText {
+        formula: None,
         frame: false,
         insert: Vec3::new(12.0, 5.0, 0.0),
         height: 2.5,
@@ -1579,6 +1585,7 @@ fn mleader_is_written_as_multileader() {
 fn attdef_prompt_survives_dxf_roundtrip() {
     let mut d = Drawing::new_metric();
     let text = Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::ZERO,

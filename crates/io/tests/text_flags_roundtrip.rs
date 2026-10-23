@@ -8,6 +8,7 @@ use cadcraft_geom::Vec3;
 fn text_flags_and_mtext_frame_roundtrip() {
     let mut d = Drawing::new_metric();
     let t = Text {
+        formula: None,
         insert: Vec3::new(1.0, 2.0, 0.0),
         align_pt: None,
         height: 2.5,
@@ -23,6 +24,7 @@ fn text_flags_and_mtext_frame_roundtrip() {
     };
     d.add(&Space::Model, Common::default(), EntityKind::Text(t)).unwrap();
     let m = MText {
+        formula: None,
         frame: true,
         insert: Vec3::new(0.0, 10.0, 0.0),
         height: 2.5,

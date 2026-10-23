@@ -22,6 +22,7 @@ fn text_mleader() -> MLeader {
         landing: Vec3::new(5.0, 4.0, 0.0),
         dogleg: 0.75,
         text: Some(MText {
+            formula: None,
             frame: false,
             insert: Vec3::new(5.9, 4.0, 0.0),
             height: 0.4,
@@ -81,6 +82,7 @@ fn spline_leader_with_block_content_and_attributes() {
     let mut blk = Block::new("BUBBLE");
     blk.entities.push(Entity::new(Handle(0x200), EntityKind::Circle(Circle { center: Vec3::ZERO, radius: 1.0 })));
     let tag_text = Text {
+        formula: None,
         backwards: false,
         upside_down: false,
         insert: Vec3::new(-0.2, -0.1, 0.0),
