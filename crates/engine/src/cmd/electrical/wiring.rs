@@ -351,7 +351,9 @@ fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
     for w in pts.windows(2) {
         let [a0, b0] = w else { continue };
         for d in ix.crossed(*a0, *b0) {
-            if !crossed.contains(&d.insert) {
+            // A wire that starts or ends on one of the symbol's pins only reaches it.
+            let ends_on_it = d.pins.iter().filter_map(|i| ix.pins.get(*i)).any(|p| p.at.near(pa, 1e-6) || p.at.near(pb, 1e-6));
+            if !ends_on_it && !crossed.contains(&d.insert) {
                 crossed.push(d.insert);
                 per_symbol.push(d.pins.iter().filter_map(|i| ix.pins.get(*i)).map(|p| p.at).collect());
             }
@@ -485,6 +487,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_wire_ending_on_a_card_pin_does_not_cross_the_card() {
+        let mut s = Session::new();
+        s.execute("eplc", &json!({ "kind": "DI", "points": 4, "at": [60, 60] })).unwrap();
+        s.execute("ewire", &json!({ "from": [60, 230], "to": [60, 65] })).unwrap();
+        let r = s.execute("ewire", &json!({ "from": [70, 230], "to": [70, 65] })).unwrap();
+        assert_eq!(r["symbolsCrossed"], 0, "{r}");
+        assert_eq!(r["pins"].as_array().unwrap().len(), 1, "{r}");
+    }
 
     #[test]
     fn rails_keep_their_potential_names() {
