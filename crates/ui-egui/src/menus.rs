@@ -271,6 +271,18 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         // Hatch Creation's buttons answer the running HATCH; Close ends it and makes the hatch.
+        // Called by name with no HATCH running, they would answer another command, and Close
+        // would repeat the last one.
+        "ui.hatchcreate.points"
+        | "ui.hatchcreate.select"
+        | "ui.hatchcreate.remove"
+        | "ui.hatchcreate.origin"
+        | "ui.hatchcreate.match"
+        | "ui.hatchcreate.close"
+            if !crate::ribbon_hatch::creating(app) =>
+        {
+            Err("HATCH or GRADIENT is not running".into())
+        }
         "ui.hatchcreate.points" | "ui.hatchcreate.select" | "ui.hatchcreate.remove" | "ui.hatchcreate.origin" | "ui.hatchcreate.match" => {
             let k = match id {
                 "ui.hatchcreate.points" => "picK internal point",

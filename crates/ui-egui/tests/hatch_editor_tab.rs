@@ -171,3 +171,28 @@ fn french_pictures_of_hatch_creation_and_lists() {
     h.run_steps(3);
     h.render().unwrap().save(format!("{directory}/hatch-creation.png")).unwrap();
 }
+
+/// Hatch Creation's buttons called by name with no HATCH running do nothing: Close does not
+/// repeat the last command, and the others send no keyword to another command.
+#[test]
+fn hatch_creation_buttons_refuse_without_hatch_running() {
+    let mut app = CadApp::new(Session::default(), Services::default());
+    app.run("new", json!({})).unwrap();
+    app.cmdline("circle 0,0 5");
+    assert!(app.session.running.is_none());
+    assert!(app.run("ui.hatchcreate.close", json!({})).is_err());
+    assert!(app.session.running.is_none(), "CIRCLE is not repeated");
+
+    app.start("line");
+    for id in [
+        "ui.hatchcreate.points",
+        "ui.hatchcreate.select",
+        "ui.hatchcreate.remove",
+        "ui.hatchcreate.origin",
+        "ui.hatchcreate.match",
+        "ui.hatchcreate.close",
+    ] {
+        assert!(app.run(id, json!({})).is_err(), "{id}");
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("line"), "{id} leaves LINE alone");
+    }
+}
