@@ -268,6 +268,7 @@ fn sync_active(s: &mut Session, db: &EcadDb, place: &Place) -> Result<Value> {
     let (wire_handles, segs) = wire_segments(s, WIRE_LAYERS)?;
     let groups = potentials(wire_handles.len(), &segs, 0.01);
     let numbers = labels(s, LABEL_LAYER)?;
+    let fixed = labels(s, super::wires::POTENTIAL_LAYER)?;
     let mut connections: Vec<EcadConnection> = Vec::new();
     for (n, g) in groups.iter().enumerate() {
         let gsegs: Vec<_> = segs.iter().filter(|sg| g.contains(&sg.wire)).collect();
@@ -283,14 +284,8 @@ fn sync_active(s: &mut Session, db: &EcadDb, place: &Place) -> Result<Value> {
         if on.len() < 2 {
             continue;
         }
-        // The network's number: the label nearest one of its wires.
-        let number = numbers
-            .iter()
-            .filter(|(_, _, v)| !v.is_empty())
-            .map(|(_, at, v)| (gsegs.iter().map(|sg| sg.dist_to(*at)).fold(f64::INFINITY, f64::min), v))
-            .filter(|(dist, _)| *dist <= 6.0)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, v)| v.clone());
+        // The network's number: its potential name, else the label nearest one of its wires.
+        let number = super::wires::network_number(&gsegs, &numbers, &fixed);
         let network = format!("{}#{}", page.id, number.clone().unwrap_or_else(|| format!("n{n}")));
         let wires: Vec<u64> = g.iter().filter_map(|w| wire_handles.get(*w)).map(|h| h.0).collect();
         // Pins in reading order, chained: the from–to list a wiring person follows.

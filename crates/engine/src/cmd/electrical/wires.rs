@@ -221,20 +221,24 @@ pub(super) fn networks(s: &Session) -> Result<Vec<Network>> {
         let gsegs: Vec<&Seg> = segs.iter().filter(|sg| g.contains(&sg.wire)).collect();
         let pins: Vec<(Handle, String, Vec2)> =
             ix.pins.iter().filter(|p| gsegs.iter().any(|sg| sg.dist_to(p.at) <= 0.01)).map(|p| (p.insert, p.number.clone(), p.at)).collect();
-        let number = fixed
-            .iter()
-            .chain(numbers.iter())
+        let number = network_number(&gsegs, &numbers, &fixed);
+        out.push(Network { pins, number, wire_handles: g.iter().filter_map(|w| handles.get(*w)).copied().collect() });
+    }
+    Ok(out)
+}
+
+/// A network's number: the fixed potential name on it, else the wire number label nearest one
+/// of its wires (within reach).
+pub(super) fn network_number(gsegs: &[&Seg], numbers: &[(Handle, Vec2, String)], fixed: &[(Handle, Vec2, String)]) -> Option<String> {
+    let near = |list: &[(Handle, Vec2, String)]| {
+        list.iter()
             .filter(|(_, _, v)| !v.is_empty())
             .map(|(_, at, v)| (gsegs.iter().map(|sg| sg.dist_to(*at)).fold(f64::INFINITY, f64::min), v))
             .filter(|(d, _)| *d <= 6.0)
             .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, v)| v.clone());
-        let named =
-            fixed.iter().filter(|(_, at, v)| !v.is_empty() && gsegs.iter().any(|sg| sg.dist_to(*at) <= 6.0)).map(|(_, _, v)| v.clone()).next();
-        let number = named.or(number);
-        out.push(Network { pins, number, wire_handles: g.iter().filter_map(|w| handles.get(*w)).copied().collect() });
-    }
-    Ok(out)
+            .map(|(_, v)| v.clone())
+    };
+    near(fixed).or_else(|| near(numbers))
 }
 
 /// Texts on the label layer in the current space: handle, insertion point, value.
