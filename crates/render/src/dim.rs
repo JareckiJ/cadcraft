@@ -417,7 +417,20 @@ fn post(template: &str, meas: &str) -> String {
     if template.contains("<>") { template.replace("<>", meas) } else { format!("{meas}{template}") }
 }
 
+/// The first number in a formatted measurement (`R12.5` → 12.5, `1 250,5` → 1250.5).
+fn measured_number(base: &str) -> Option<f64> {
+    let s: String = base.chars().skip_while(|c| !c.is_ascii_digit() && *c != '-' && *c != '.').take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | ' ')).collect();
+    s.replace(' ', "").replace(',', ".").parse().ok()
+}
+
 fn apply_override(base: &str, d: &Dimension) -> String {
+    // A formula: worked out with `<>` as the measurement (shown as the dimension shows it).
+    if let Some(f) = d.marks.formula.as_deref().filter(|f| crate::textformula::is_formula(f)) {
+        let env = crate::textformula::Env { measured: measured_number(base), now: crate::textformula::local_now(), ..Default::default() };
+        if let Some(v) = crate::textformula::evaluate(f, &env) {
+            return v;
+        }
+    }
     if d.text.is_empty() {
         base.to_string()
     } else if d.text.trim().is_empty() {

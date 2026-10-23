@@ -45,6 +45,10 @@ impl EditState {
     pub fn at(i: usize) -> Self {
         EditState { cursor: i, anchor: i, ..Default::default() }
     }
+    /// Everything selected, the caret at the end.
+    pub fn all(len: usize) -> Self {
+        EditState { cursor: len, anchor: 0, ..Default::default() }
+    }
     /// The selection, low to high.
     pub fn range(&self) -> (usize, usize) {
         (self.cursor.min(self.anchor), self.cursor.max(self.anchor))
@@ -328,6 +332,10 @@ pub fn show(
     let response = ui.interact(rect, id, Sense::click_and_drag());
     if response.clicked() || response.drag_started() {
         ui.memory_mut(|m| m.request_focus(id));
+    }
+    // The text cursor (I-beam) over the text, as in any text box.
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
     }
     if focused {
         ui.memory_mut(|m| {

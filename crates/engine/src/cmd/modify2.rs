@@ -2222,7 +2222,12 @@ pub(crate) fn editor_for(s: &Session, h: Handle) -> Option<crate::TextEditor> {
             }
             Some(TextEditor { mtext: m, kind: EditorKind::MText, key })
         }
-        EntityKind::MLeader(m) => m.text.clone().map(|mtext| TextEditor { mtext, kind: EditorKind::MText, key }),
+        EntityKind::MLeader(m) => m.text.clone().map(|mut mtext| {
+            if let Some(f) = mtext.formula.clone().filter(|f| crate::textformula::is_formula(f)) {
+                mtext.contents = f;
+            }
+            TextEditor { mtext, kind: EditorKind::MText, key }
+        }),
         EntityKind::Text(t) => {
             let mut b = line_box(t);
             if let Some(f) = t.formula.as_ref().filter(|f| crate::textformula::is_formula(f)) {
@@ -2243,7 +2248,11 @@ pub(crate) fn editor_for(s: &Session, h: Handle) -> Option<crate::TextEditor> {
                 attach: 5,
                 rotation: g.text_angle,
                 style: d.dim_style(&dm.style).map(|st| st.text_style.clone()).unwrap_or_else(|| dm.style.clone()),
-                contents: if dm.text.is_empty() { "<>".into() } else { dm.text.clone() },
+                contents: match dm.marks.formula.clone().filter(|f| crate::textformula::is_formula(f)) {
+                    Some(f) => f,
+                    None if dm.text.is_empty() => "<>".into(),
+                    None => dm.text.clone(),
+                },
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
@@ -2261,10 +2270,13 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
     let mut k = curves::entity(s, h)?.kind;
     // The text as the editor showed it (a formula, else the value): unchanged, it keeps its
     // formula or AutoCAD field.
+    let f = |x: &Option<String>| x.clone().filter(|f| crate::textformula::is_formula(f));
     let shown = match &k {
-        EntityKind::Text(t) => t.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| t.value.clone()),
-        EntityKind::AttDef(a) => a.text.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| a.text.value.clone()),
-        EntityKind::MText(t) => t.formula.clone().filter(|f| crate::textformula::is_formula(f)).unwrap_or_else(|| t.contents.clone()),
+        EntityKind::Text(t) => f(&t.formula).unwrap_or_else(|| t.value.clone()),
+        EntityKind::AttDef(a) => f(&a.text.formula).unwrap_or_else(|| a.text.value.clone()),
+        EntityKind::MText(t) => f(&t.formula).unwrap_or_else(|| t.contents.clone()),
+        EntityKind::MLeader(m) => m.text.as_ref().map(|t| f(&t.formula).unwrap_or_else(|| t.contents.clone())).unwrap_or_default(),
+        EntityKind::Dimension(d) => f(&d.marks.formula).unwrap_or_else(|| d.text.clone()),
         _ => String::new(),
     };
     let unchanged = shown == text || shown == text.replace('\n', "\\P");
@@ -2282,7 +2294,10 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
         },
         _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
     }
-    let env = crate::textformula::env(s);
+    let mut env = crate::textformula::env(s);
+    if let EntityKind::Dimension(dm) = &k {
+        env.measured = crate::textformula::measured(s.doc()?, dm);
+    }
     crate::textformula::apply(&mut k, &env, !unchanged);
     set_kind(s, h, k)
 }

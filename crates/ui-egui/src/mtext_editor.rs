@@ -53,6 +53,11 @@ struct State {
     fx_closed: Option<String>,
     /// Where the completion list goes (the caret's bottom, last frame).
     fx_at: egui::Pos2,
+    /// Undo and redo steps of the whole editor (text and formatting), with the selection then.
+    undo: Vec<(Formatted, usize, usize)>,
+    redo: Vec<(Formatted, usize, usize)>,
+    /// When the last undo step was recorded (typing within a second makes one step).
+    undo_at: f64,
 }
 
 fn state_id() -> egui::Id {
@@ -106,20 +111,25 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             .map(|s| crate::editor_glyphs::EditorFont { font: s.font, big_font: s.big_font, width_factor: s.width_factor, oblique: s.oblique })
             .unwrap_or_else(|| crate::editor_glyphs::EditorFont { width_factor: 1.0, ..Default::default() });
         let end = fmt.len();
+        // Existing text opens selected as a whole: typing replaces it, an arrow key keeps it.
+        let existing = !matches!(kind, EditorKind::NewMText) && end > 0;
         State {
             fmt,
             typing: CharFmt::default(),
             typing_at: end,
             top: 70.0,
-            sel: (end, end),
-            caret: Some(end),
+            sel: if existing { (end, 0) } else { (end, end) },
+            caret: (!existing).then_some(end),
             key: editor.key.clone(),
             focus: true,
             font,
-            edit: crate::bidi_edit::EditState::at(end),
+            edit: if existing { crate::bidi_edit::EditState::all(end) } else { crate::bidi_edit::EditState::at(end) },
             fx_index: 0,
             fx_closed: None,
             fx_at: pos2(0.0, 0.0),
+            undo: Vec::new(),
+            redo: Vec::new(),
+            undo_at: 0.0,
         }
     });
     let line = kind == EditorKind::Line;
@@ -141,6 +151,16 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             }
         });
     }
+    // Undo and redo (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z, ⌘ on a Mac), taken before the text box.
+    let before = (st.fmt.clone(), st.edit.cursor, st.edit.anchor);
+    let mut undo_redo: Option<bool> = None;
+    ctx.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y) {
+            undo_redo = Some(false);
+        } else if i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z) {
+            undo_redo = Some(true);
+        }
+    });
     // Formula completion: the arrows choose a function, Tab or Enter puts it in, Escape closes
     // the list (taken before the text box and before Enter finishes one line of text).
     let fx = completion(&st);
@@ -217,6 +237,27 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
                 if ui.button(crate::tl!("Cancel")).clicked() {
                     done = Done::Cancel;
                 }
+                ui.add_space(6.0);
+                let mac = ui.ctx().os().is_mac();
+                let tip = |undo: bool| {
+                    match (undo, mac) {
+                        (true, true) => crate::tl!("Undo (⌘Z)"),
+                        (true, false) => crate::tl!("Undo (Ctrl+Z)"),
+                        (false, true) => crate::tl!("Redo (⇧⌘Z)"),
+                        (false, false) => crate::tl!("Redo (Ctrl+Y)"),
+                    }
+                };
+                for (undo, icon) in [(true, crate::icons::Icon::Undo), (false, crate::icons::Icon::Redo)] {
+                    let any = if undo { !st.undo.is_empty() } else { !st.redo.is_empty() };
+                    let (r, resp) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::click());
+                    if resp.hovered() && any {
+                        ui.painter().rect_filled(r, 3.0, t.control_hover);
+                    }
+                    crate::icons::paint(ui.painter(), r.shrink(3.0), icon, !any);
+                    if resp.on_hover_text(tip(undo)).clicked() && any {
+                        undo_redo = Some(undo);
+                    }
+                }
                 if cell {
                     if icon_button(ui, false, crate::tl!("Previous cell (Shift+Tab)"), |p, r, c| paint_triangle(p, r, c, -1.0)).clicked() {
                         done = Done::Move("Previous");
@@ -234,6 +275,33 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             });
         });
     });
+    let now = ctx.input(|i| i.time);
+    match undo_redo {
+        Some(undo) => {
+            let (from, to) = if undo { (&mut st.undo, &mut st.redo) } else { (&mut st.redo, &mut st.undo) };
+            if let Some((f, c, a)) = from.pop() {
+                to.push((st.fmt.clone(), st.edit.cursor, st.edit.anchor));
+                st.fmt = f;
+                st.edit.cursor = c.min(st.fmt.len());
+                st.edit.anchor = a.min(st.fmt.len());
+                st.sel = (st.edit.cursor, st.edit.anchor);
+                st.typing_at = st.edit.cursor;
+                st.undo_at = 0.0;
+            }
+        }
+        None if st.fmt != before.0 => {
+            // Typing within a second of the last change is one step.
+            if now - st.undo_at > 1.0 || st.undo.is_empty() {
+                st.undo.push(before);
+                if st.undo.len() > 200 {
+                    st.undo.remove(0);
+                }
+            }
+            st.undo_at = now;
+            st.redo.clear();
+        }
+        None => {}
+    }
     if let Some((_, list)) = completion(&st) {
         let mut clicked = None;
         egui::Area::new(egui::Id::new("mtext_formula_list")).order(egui::Order::Tooltip).fixed_pos(st.fx_at + vec2(0.0, 4.0)).show(ctx, |ui| {

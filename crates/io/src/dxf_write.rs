@@ -886,6 +886,7 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 }
             }
             dim_xdata(w, dm, cx);
+            formula_xdata(w, dm.marks.formula.as_deref());
         }
         EntityKind::Table(t) => {
             // Tables without a generated block (none expected) are not written.

@@ -81,3 +81,43 @@ fn text_formulas_show_their_result_and_edit_as_formulas() {
     assert!(year.len() == 4 && year.starts_with("20"), "{year}");
     assert_eq!(s.execute("updatefield", &json!({})).unwrap()["updated"], 1);
 }
+
+#[test]
+fn formulas_work_when_editing_multiline_text_dimensions_and_leaders() {
+    let mut s = Session::new();
+    let r = s.execute("mtext", &json!({ "at": [0, 10], "height": 1, "width": 20, "text": "abc" })).unwrap();
+    let m = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("textedit", &json!({ "handle": m, "text": "{\\fArial|b0;=1200+350*2}" })).unwrap();
+    let mt = s.doc().unwrap().model.iter().find_map(|e| match &e.kind {
+        EntityKind::MText(t) => Some(t.clone()),
+        _ => None,
+    });
+    let mt = mt.unwrap();
+    assert!(cadcraft_fonts::plain_mtext(&mt.contents).contains("1900"), "{}", mt.contents);
+    // Two lines: not a formula.
+    s.execute("textedit", &json!({ "handle": m, "text": "=1+1\\Psecond" })).unwrap();
+    let mt = s.doc().unwrap().model.iter().find_map(|e| match &e.kind {
+        EntityKind::MText(t) => Some(t.clone()),
+        _ => None,
+    });
+    assert!(mt.unwrap().formula.is_none());
+}
+
+#[test]
+fn dimension_and_leader_text_take_formulas() {
+    let mut s = Session::new();
+    let r = s.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [1250, 0], "at": [600, 100] })).unwrap();
+    let h = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+    s.execute("textedit", &json!({ "handle": h, "text": "=<>/2" })).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::Dimension(dm) = &d.model.iter().find(|e| e.handle.hex() == h).unwrap().kind else { panic!() };
+    assert_eq!(dm.marks.formula.as_deref(), Some("=<>/2"));
+    assert_eq!(dm.text, "625");
+    assert_eq!(cadcraft_render::dimension_in(d, dm).value, "625");
+    let r = s.execute("mleader", &json!({ "points": [[0, 0], [5, 5]], "text": "A" })).unwrap();
+    let m = r["handle"].as_str().unwrap().to_string();
+    s.execute("textedit", &json!({ "handle": m, "text": "=2*21" })).unwrap();
+    let d = s.doc().unwrap();
+    let EntityKind::MLeader(ml) = &d.model.iter().find(|e| e.handle.hex() == m).unwrap().kind else { panic!() };
+    assert_eq!(ml.text.as_ref().unwrap().contents, "42");
+}
