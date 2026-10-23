@@ -1315,6 +1315,9 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                         handle: Handle(0),
                         common: e.common.clone(),
                         kind: EntityKind::Text(cadcraft_doc::Text {
+                            formula: None,
+                            backwards: false,
+                            upside_down: false,
                             insert: v3(at),
                             align_pt: None,
                             height: m.height,
@@ -1376,6 +1379,8 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                     handle: Handle(0),
                     common: e.common.clone(),
                     kind: EntityKind::MText(cadcraft_doc::MText {
+                        formula: None,
+                        frame: false,
                         insert: v3(g.text_pos),
                         height: g.text_height,
                         width: 0.0,

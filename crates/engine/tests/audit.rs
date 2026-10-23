@@ -57,6 +57,8 @@ fn corrupt(d: &mut Drawing) -> (Handle, Handle) {
         &Space::Model,
         on("0"),
         EntityKind::Text(Text {
+            backwards: false,
+            upside_down: false,
             insert: Vec3::ZERO,
             align_pt: None,
             height: 1.0,

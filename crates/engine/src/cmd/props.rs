@@ -16,7 +16,7 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("properties", "Properties", run_get).menu(&["Modify", "Properties"]).alias(&["pr", "props", "ch"]).params("{handles?} → properties of the selection").noundo(),
-        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; textStyle (text, multiline text, multileaders); hatches: pattern, scale, angle, background (colour | \"None\"); multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
+        CommandSpec::new("properties.set", "Set Properties", run_set).params("{handles?, layer?, color?, linetype?, lineweight?, ltscale?, transparency?: \"ByLayer\" | \"ByBlock\" | 0..90, visible?, <geometry fields: radius, center, start, end, text, height, rotation…>; textStyle (text, multiline text, multileaders); text: justify (L C R A M F TL TC TR ML MC MR BL BC BR; the letters stay in place), backwards, upsideDown; multiline text: justify (TL..BR), frame; hatches: pattern, scale, angle, background (colour | \"None\"); multileaders: mleaderStyle, arrow (arrowhead name or block; \"\" = the style's), arrowSize, leaderType: straight|spline|none, dogleg (landing distance; 0 = no landing), textHeight}"),
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
@@ -225,6 +225,23 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let text_style = str_param(p, "textStyle")
         .map(|n| d.text_style(n).map(|st| st.name.clone()).ok_or_else(|| bad("properties.set", format!("text style `{n}` not found"))))
         .transpose()?;
+    // Justification (text: L C R A M F TL..BR; multiline text: TL..BR), and the text styles it
+    // lays text out with to keep the letters in place.
+    let justify = str_param(p, "justify");
+    let text_justify = justify.and_then(super::draw::justify);
+    let mtext_justify = justify.and_then(mtext_attach);
+    if let Some(j) = justify
+        && text_justify.is_none()
+        && mtext_justify.is_none()
+    {
+        return Err(bad("properties.set", format!("unknown justification `{j}`")));
+    }
+    let style_doc = justify.map(|_| {
+        let mut x = cadcraft_doc::Drawing::default();
+        x.text_styles = d.text_styles.clone();
+        x.header = d.header.clone();
+        x
+    });
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {
@@ -332,6 +349,15 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     if let Some(x) = num("widthFactor").filter(|x| *x > 0.0) {
                         t.width_factor = x;
                     }
+                    if let Some(f) = p.get("backwards").and_then(Value::as_bool) {
+                        t.backwards = f;
+                    }
+                    if let Some(f) = p.get("upsideDown").and_then(Value::as_bool) {
+                        t.upside_down = f;
+                    }
+                    if let (Some((h, v)), Some(sd)) = (text_justify, &style_doc) {
+                        rejustify_text(sd, t, h, v);
+                    }
                     // The position is the point the text is placed by: moving it moves the text.
                     if let Some(to) = p.get("position").and_then(point_value) {
                         let d = to - t.justify_point();
@@ -353,6 +379,12 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                     if let Some(x) = num("rotation") {
                         t.rotation = x.to_radians();
+                    }
+                    if let Some(f) = p.get("frame").and_then(Value::as_bool) {
+                        t.frame = f;
+                    }
+                    if let (Some(a), Some(sd)) = (mtext_justify, &style_doc) {
+                        rejustify_mtext(sd, t, a);
                     }
                 }
                 EntityKind::LwPolyline(pl) => {
@@ -1154,5 +1186,83 @@ mod tests {
             s.execute("properties.set", &json!({ "handles": [h], "linetype": ok })).unwrap();
             assert_eq!(lt(&s), ok);
         }
+    }
+}
+
+/// An MTEXT attachment (1..=9) from a justification code: TL TC TR ML MC MR BL BC BR (or 1..9).
+fn mtext_attach(j: &str) -> Option<u8> {
+    let u = j.trim().to_ascii_uppercase();
+    ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"]
+        .iter()
+        .position(|c| *c == u)
+        .and_then(|i| u8::try_from(i + 1).ok())
+        .or_else(|| u.parse::<u8>().ok().filter(|a| (1..=9).contains(a)))
+}
+
+/// Give text another justification without moving it: the point it is placed by moves so the
+/// letters stay where they are (aligned and fit text span the text's own width).
+fn rejustify_text(d: &cadcraft_doc::Drawing, t: &mut cadcraft_doc::Text, h: cadcraft_doc::HAlign, v: cadcraft_doc::VAlign) {
+    use cadcraft_doc::{HAlign, VAlign};
+    let before = cadcraft_render::place_text_entity(d, t, &t.value).1;
+    // The baseline's start: where left-baseline text at the same spot would begin.
+    let mut left = t.clone();
+    (left.halign, left.valign, left.align_pt) = (HAlign::Left, VAlign::Baseline, None);
+    let at = t.justify_point();
+    left.insert = cadcraft_geom::Vec3::new(at.x, at.y, t.insert.z);
+    let lb = cadcraft_render::place_text_entity(d, &left, &t.value).1;
+    let start = if before.is_empty() || lb.is_empty() { t.insert.xy() } else { at + (before.min - lb.min) };
+    let width = match t.halign {
+        HAlign::Aligned | HAlign::Fit => t.align_pt.map_or(0.0, |a| a.xy().dist(t.insert.xy())),
+        _ => {
+            let font = d.text_style(&t.style).map(|st| cadcraft_fonts::TextFont::resolve_style(&st.font, &st.big_font)).unwrap_or_default();
+            cadcraft_fonts::text_width(&font, &t.value, t.height, t.width_factor)
+        }
+    };
+    let z = t.insert.z;
+    let v3 = |p: Vec2| cadcraft_geom::Vec3::new(p.x, p.y, z);
+    t.halign = h;
+    t.valign = v;
+    t.insert = v3(start);
+    match (h, v) {
+        (HAlign::Left, VAlign::Baseline) => t.align_pt = None,
+        (HAlign::Aligned | HAlign::Fit, _) => {
+            t.valign = VAlign::Baseline;
+            t.align_pt = Some(v3(start + Vec2::from_angle(t.rotation) * width.max(t.height * 0.1)));
+        }
+        _ => {
+            // Place by the start, then shift by how far the letters moved.
+            t.align_pt = Some(v3(start));
+            let after = cadcraft_render::place_text_entity(d, t, &t.value).1;
+            if !before.is_empty() && !after.is_empty() {
+                let shift = before.min - after.min;
+                if shift.is_finite() {
+                    for q in std::iter::once(&mut t.insert).chain(t.align_pt.as_mut()) {
+                        q.x += shift.x;
+                        q.y += shift.y;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Give multiline text another attachment without moving it: the insertion point moves to the
+/// matching point of the text's box.
+fn rejustify_mtext(d: &cadcraft_doc::Drawing, t: &mut cadcraft_doc::MText, attach: u8) {
+    // Laid out unrotated, at the same insertion point: the letters' shift between the two
+    // attachments, turned back by the rotation.
+    let mut flat = t.clone();
+    flat.rotation = 0.0;
+    let before = cadcraft_render::layout_mtext_entity(d, &flat).bounds;
+    flat.attach = attach;
+    let after = cadcraft_render::layout_mtext_entity(d, &flat).bounds;
+    t.attach = attach;
+    if before.is_empty() || after.is_empty() {
+        return;
+    }
+    let shift = (before.min - after.min).rotate(t.rotation);
+    if shift.is_finite() {
+        t.insert.x += shift.x;
+        t.insert.y += shift.y;
     }
 }

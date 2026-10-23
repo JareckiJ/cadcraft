@@ -10,12 +10,9 @@
 //! the measured value) or a table cell (Tab and Shift+Tab move to the next and previous cell,
 //! Alt+↑ and Alt+↓ to the cell above and below).
 
-use std::sync::Arc;
-
 use cadcraft_engine::EditorKind;
 use cadcraft_engine::mtext_edit::{CharFmt, Flag, Formatted, ListStyle, MTextColor, ParaAlign, TabKind};
-use egui::text::{CCursor, CCursorRange, LayoutJob};
-use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Shape, Stroke, TextFormat, pos2, vec2};
+use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
 
 use crate::CadApp;
 use crate::theme::Tokens;
@@ -49,6 +46,8 @@ struct State {
     focus: bool,
     /// The text style's font: the text box shows the text in it.
     font: crate::editor_glyphs::EditorFont,
+    /// The text box's caret and selection.
+    edit: crate::bidi_edit::EditState,
 }
 
 fn state_id() -> egui::Id {
@@ -112,6 +111,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
             key: editor.key.clone(),
             focus: true,
             font,
+            edit: crate::bidi_edit::EditState::at(end),
         }
     });
     let line = kind == EditorKind::Line;
@@ -697,85 +697,63 @@ fn ruler(ui: &mut egui::Ui, st: &mut State, px: f32, width: f32, base_h: f64) {
 
 fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32, t: &Tokens, line: bool) {
     let id = edit_id();
-    if let Some(at) = st.caret.take()
-        && let Some(mut s) = egui::TextEdit::load_state(ui.ctx(), id)
-    {
-        s.cursor.set_char_range(Some(CCursorRange::one(CCursor::new(at))));
-        s.store(ui.ctx(), id);
+    if let Some(at) = st.caret.take() {
+        st.edit.cursor = at;
+        st.edit.anchor = at;
     }
     let fmt = st.fmt.clone();
     let default_color = t.text;
     let base = st.font.clone();
     // The font each character is drawn in: an inline family (`\f`) or the style's.
-    let font_of = move |f: &CharFmt| match &f.font {
+    let font_of = |f: &CharFmt| match &f.font {
         Some(fam) if !fam.trim().is_empty() && !fam.eq_ignore_ascii_case(&fmt_base(&base)) => {
             crate::editor_glyphs::EditorFont { font: fam.clone(), big_font: String::new(), ..base.clone() }
         }
         _ => base.clone(),
     };
-    let size_of = move |f: &CharFmt| f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
-    let fmt_l = fmt.clone();
-    let font_l = font_of.clone();
-    let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| -> Arc<egui::Galley> {
-        let mut job = LayoutJob::default();
-        job.wrap.max_width = wrap;
-        // One section per character, its advance set to the drawing font's (the difference is
-        // its leading space, so the caret after it lands where the drawing's would), the egui
-        // glyph itself invisible: the drawing font is painted over it (see `paint_glyphs`).
-        for (i, c) in text.as_str().chars().enumerate() {
-            let f = fmt_l.fmt_at(i);
-            let size = size_of(&f);
-            let color = f.color.map_or(default_color, color32);
-            let font_id = FontId::proportional(size);
-            let spacing = if c == '\n' {
-                0.0
-            } else {
-                let real = crate::editor_glyphs::advance(&font_l(&f), f.italic, c, size);
-                let shown = ui.fonts_mut(|fs| fs.glyph_width(&font_id, c));
-                real - shown
-            };
-            job.append(
-                &c.to_string(),
-                spacing,
-                TextFormat {
-                    font_id,
-                    color: Color32::TRANSPARENT,
-                    underline: if f.underline { Stroke::new(1.0, color) } else { Stroke::NONE },
-                    ..TextFormat::default()
-                },
-            );
+    let size_of = |f: &CharFmt| f.height.map_or(px, |h| (px * (h / base_h) as f32).clamp(6.0, 120.0));
+    let look = |i: usize| {
+        let f = fmt.fmt_at(i);
+        crate::bidi_edit::Look {
+            font: font_of(&f),
+            italic: f.italic,
+            bold: f.bold,
+            underline: f.underline,
+            size: size_of(&f),
+            color: f.color.map_or(default_color, color32),
         }
-        ui.fonts_mut(|f| f.layout_job(job))
     };
     let mut buf = st.fmt.text().to_string();
-    let edit = if line { egui::TextEdit::singleline(&mut buf) } else { egui::TextEdit::multiline(&mut buf).desired_rows(5).lock_focus(true) };
-    let out = edit
-        .id(id)
-        .desired_width(width)
-        .margin(egui::Margin::symmetric(4, 4))
-        .char_limit(cadcraft_engine::mtext_edit::MAX_CHARS)
-        .layouter(&mut layouter)
-        .show(ui);
-    if !out.response.has_focus() && (st.focus || (buf.is_empty() && st.fmt.is_empty())) {
-        out.response.request_focus();
+    let out = crate::bidi_edit::show(
+        ui,
+        id,
+        &mut buf,
+        &mut st.edit,
+        line,
+        width,
+        if line { 1 } else { 5 },
+        &look,
+        px,
+        cadcraft_engine::mtext_edit::MAX_CHARS,
+    );
+    let focused = ui.memory(|m| m.has_focus(id));
+    if !focused && (st.focus || (buf.is_empty() && st.fmt.is_empty())) {
+        ui.memory_mut(|m| m.request_focus(id));
     }
     st.focus = false;
-    paint_glyphs(ui, &out, &fmt, &font_of, &size_of, default_color);
-    if out.response.changed() {
+    if out.changed {
         let typing = st.typing.clone();
         st.fmt.set_text(&buf, &typing);
     }
-    if let Some(r) = out.cursor_range {
-        let (a, b) = (r.primary.index.0, r.secondary.index.0);
-        st.sel = (a, b);
-        if a == b {
-            if out.response.changed() {
-                st.typing_at = a;
-            } else if a != st.typing_at {
-                // The caret moved: typing continues the formatting of the character before it.
-                st.typing = st.fmt.fmt_at(a.saturating_sub(1));
-                st.typing_at = a;
-            }
+    let (a, b) = (st.edit.cursor, st.edit.anchor);
+    st.sel = (a, b);
+    if a == b {
+        if out.changed {
+            st.typing_at = a;
+        } else if a != st.typing_at {
+            // The caret moved: typing continues the formatting of the character before it.
+            st.typing = st.fmt.fmt_at(a.saturating_sub(1));
+            st.typing_at = a;
         }
     }
 }
@@ -784,36 +762,6 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
 fn fmt_base(f: &crate::editor_glyphs::EditorFont) -> String {
     let n = f.font.trim();
     n.rsplit(['\\', '/']).next().unwrap_or(n).split('.').next().unwrap_or("").to_string()
-}
-
-/// Draw the text box's characters in the drawing's fonts, where the box laid them out.
-fn paint_glyphs(
-    ui: &egui::Ui,
-    out: &egui::text_edit::TextEditOutput,
-    fmt: &Formatted,
-    font_of: &impl Fn(&CharFmt) -> crate::editor_glyphs::EditorFont,
-    size_of: &impl Fn(&CharFmt) -> f32,
-    default_color: Color32,
-) {
-    let painter = ui.painter().with_clip_rect(out.text_clip_rect);
-    let mut i = 0usize;
-    for row in &out.galley.rows {
-        for g in &row.row.glyphs {
-            let f = fmt.fmt_at(i);
-            // The glyph ends at its laid-out right edge (its leading space made up the width).
-            let font = font_of(&f);
-            let size = size_of(&f);
-            let real = crate::editor_glyphs::advance(&font, f.italic, g.chr, size);
-            let at = out.galley_pos + row.pos.to_vec2() + g.pos.to_vec2() + egui::vec2(g.advance_width - real, 0.0);
-            let color = f.color.map_or(default_color, color32);
-            crate::editor_glyphs::paint(&painter, &font, f.italic, f.bold, g.chr, at, size, color);
-            i += 1;
-        }
-        // The line break that ends a paragraph is a character of the text, not a glyph.
-        if row.ends_with_newline {
-            i += 1;
-        }
-    }
 }
 
 #[cfg(test)]

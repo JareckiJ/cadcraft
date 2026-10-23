@@ -398,6 +398,9 @@ fn synthetic(n: usize, side: f64) -> Result<cadcraft_engine::doc::Drawing, Strin
                 plinegen: false,
             }),
             _ => EntityKind::Text(d::Text {
+                formula: None,
+                backwards: false,
+                upside_down: false,
                 insert: v3(x, y),
                 align_pt: None,
                 height: s * 0.2,

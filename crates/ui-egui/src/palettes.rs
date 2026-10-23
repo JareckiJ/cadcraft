@@ -487,7 +487,7 @@ pub(crate) fn layers_section(app: &mut CadApp, ui: &mut egui::Ui) {
         }
         icons::paint(p, Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(12.0, 12.0)), Icon::ChevronDown, false);
         egui::Popup::from_toggle_button_response(&resp).width(w).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-            layer_list(ui, &layers, &cur, &mut set_current, &mut toggle);
+            scroll_list(ui, "cc_props_layers", |ui| layer_list(ui, &layers, &cur, &mut set_current, &mut toggle));
         });
     });
     ui.add_space(4.0);
@@ -624,12 +624,76 @@ fn report_bad(app: &mut CadApp, bad: Option<String>) {
     }
 }
 
+/// Text justifications: (code, horizontal, vertical, name).
+const TEXT_JUSTIFY: [(&str, cadcraft_doc::HAlign, cadcraft_doc::VAlign, &str); 15] = {
+    use cadcraft_doc::{HAlign as H, VAlign as V};
+    [
+        ("L", H::Left, V::Baseline, "Left"),
+        ("C", H::Center, V::Baseline, "Center"),
+        ("R", H::Right, V::Baseline, "Right"),
+        ("A", H::Aligned, V::Baseline, "Aligned"),
+        ("M", H::Middle, V::Baseline, "Middle"),
+        ("F", H::Fit, V::Baseline, "Fit"),
+        ("TL", H::Left, V::Top, "Top left"),
+        ("TC", H::Center, V::Top, "Top center"),
+        ("TR", H::Right, V::Top, "Top right"),
+        ("ML", H::Left, V::Middle, "Middle left"),
+        ("MC", H::Center, V::Middle, "Middle center"),
+        ("MR", H::Right, V::Middle, "Middle right"),
+        ("BL", H::Left, V::Bottom, "Bottom left"),
+        ("BC", H::Center, V::Bottom, "Bottom center"),
+        ("BR", H::Right, V::Bottom, "Bottom right"),
+    ]
+};
+
+/// Multiline text attachments 1..=9: (code, name).
+const MTEXT_JUSTIFY: [(&str, &str); 9] = [
+    ("TL", "Top left"),
+    ("TC", "Top center"),
+    ("TR", "Top right"),
+    ("ML", "Middle left"),
+    ("MC", "Middle center"),
+    ("MR", "Middle right"),
+    ("BL", "Bottom left"),
+    ("BC", "Bottom center"),
+    ("BR", "Bottom right"),
+];
+
+/// A Yes / No property row setting `key`.
+fn yes_no(ui: &mut egui::Ui, label: &str, key: &str, on: bool, ids: &[String], set: &mut Option<Value>) {
+    prop_row(ui, label, |ui| {
+        let cur = if on { crate::tl!("Yes") } else { crate::tl!("No") };
+        if let Some(n) = pick_menu(ui, cur, [crate::tl!("Yes").to_string(), crate::tl!("No").to_string()]) {
+            *set = Some(json!({ "handles": ids, key: n == crate::tl!("Yes") }));
+        }
+    });
+}
+
+/// Most height a drop-down list of the palettes takes before it scrolls.
+const LIST_H: f32 = 360.0;
+
+/// A list in a drop-down: it scrolls, with a scroll bar always shown, once it is taller than
+/// [`LIST_H`].
+pub(crate) fn scroll_list<R>(ui: &mut egui::Ui, salt: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+    egui::ScrollArea::vertical().id_salt(salt).max_height(LIST_H).auto_shrink([true, true]).show(ui, add).inner
+}
+
+/// A menu button whose list scrolls when it is long (layers, linetypes, styles...).
+pub(crate) fn menu_list<R>(
+    ui: &mut egui::Ui,
+    text: impl Into<egui::WidgetText>,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    ui.menu_button(text, |ui| scroll_list(ui, "cc_menu_list", add))
+}
+
 /// A drop-down of `items` showing `current`; returns the item clicked.
 fn pick_menu(ui: &mut egui::Ui, current: &str, items: impl IntoIterator<Item = String>) -> Option<String> {
     // Names are the drawing's own; only the ByLayer/ByBlock keywords are translated.
     let shown = |s: &str| if ["ByLayer", "ByBlock"].contains(&s) { crate::i18n::t(s).to_string() } else { s.to_string() };
     let mut out = None;
-    ui.menu_button(shown(current), |ui| {
+    menu_list(ui, shown(current), |ui| {
         for it in items {
             if ui.button(shown(&it)).clicked() {
                 out = Some(it);
@@ -710,11 +774,13 @@ fn properties_header(app: &mut CadApp, ui: &mut egui::Ui) {
         if count > 0 {
             // Narrow the selection to one object type.
             egui::Popup::from_toggle_button_response(&resp).width(w - 10.0).close_behavior(egui::PopupCloseBehavior::CloseOnClick).show(|ui| {
-                for (ty, hs) in &types {
-                    if ui.button(format!("{} ({})", crate::i18n::t(ty), hs.len())).clicked() {
-                        run = Some(("select", json!({ "handles": hs })));
+                scroll_list(ui, "cc_props_types", |ui| {
+                    for (ty, hs) in &types {
+                        if ui.button(format!("{} ({})", crate::i18n::t(ty), hs.len())).clicked() {
+                            run = Some(("select", json!({ "handles": hs })));
+                        }
                     }
-                }
+                });
             });
         }
         let tip = if pickadd {
@@ -762,7 +828,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         let mut action: Option<(&str, Value)> = None;
         let mut act = |c: &'static str, p: Value| action = Some((c, p));
         prop_row(ui, "Color", |ui| {
-            ui.menu_button(format!("■ {}", crate::i18n::t(&Color::from_aci(h.i64("CECOLOR", 256) as i16).name())), |ui| {
+            menu_list(ui, format!("■ {}", crate::i18n::t(&Color::from_aci(h.i64("CECOLOR", 256) as i16).name())), |ui| {
                 for (n, c) in [
                     ("ByLayer", 256),
                     ("ByBlock", 0),
@@ -801,7 +867,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         });
         prop_row(ui, "Lineweight", |ui| {
-            ui.menu_button(crate::i18n::t(&cadcraft_doc::Lineweight::from_dxf(h.i64("CELWEIGHT", -1) as i16).name()), |ui| {
+            menu_list(ui, crate::i18n::t(&cadcraft_doc::Lineweight::from_dxf(h.i64("CELWEIGHT", -1) as i16).name()), |ui| {
                 for n in ["ByLayer", "ByBlock", "Default"] {
                     if ui.button(crate::i18n::t(n)).clicked() {
                         act("lweight", json!({ "lineweight": n }));
@@ -914,7 +980,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     };
     group(ui, "General");
     prop_row(ui, "Color", |ui| {
-        ui.menu_button(format!("■ {}", crate::i18n::t(&color)), |ui| {
+        menu_list(ui, format!("■ {}", crate::i18n::t(&color)), |ui| {
             for (n, c) in [
                 ("ByLayer", 256),
                 ("ByBlock", 0),
@@ -936,7 +1002,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         });
     });
     prop_row(ui, "Layer", |ui| {
-        ui.menu_button(layer.clone(), |ui| {
+        menu_list(ui, layer.clone(), |ui| {
             for l in &layers {
                 if ui.button(l).clicked() {
                     set = Some(json!({ "handles": ids, "layer": l }));
@@ -946,7 +1012,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         });
     });
     prop_row(ui, "Linetype", |ui| {
-        ui.menu_button(if ["ByLayer", "ByBlock", "*VARIES*"].contains(&linetype.as_str()) { crate::i18n::t(&linetype) } else { &linetype }, |ui| {
+        menu_list(ui, if ["ByLayer", "ByBlock", "*VARIES*"].contains(&linetype.as_str()) { crate::i18n::t(&linetype) } else { &linetype }, |ui| {
             for l in std::iter::once("ByLayer".to_string())
                 .chain(std::iter::once("ByBlock".to_string()))
                 .chain(linetypes.iter().filter(|l| !["ByLayer", "ByBlock"].contains(&l.as_str())).cloned())
@@ -964,7 +1030,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     });
     prop_row(ui, "Lineweight", |ui| {
-        ui.menu_button(crate::i18n::t(&lw), |ui| {
+        menu_list(ui, crate::i18n::t(&lw), |ui| {
             for n in ["ByLayer", "ByBlock", "Default"] {
                 if ui.button(crate::i18n::t(n)).clicked() {
                     set = Some(json!({ "handles": ids, "lineweight": n }));
@@ -980,7 +1046,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         });
     });
     prop_row(ui, "Transparency", |ui| {
-        ui.menu_button(crate::i18n::t(&tr), |ui| {
+        menu_list(ui, crate::i18n::t(&tr), |ui| {
             for v in ["ByLayer", "ByBlock"] {
                 if ui.button(crate::i18n::t(v)).clicked() {
                     set = Some(json!({ "handles": ids, "transparency": v }));
@@ -1101,6 +1167,16 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 num(ui, "Height", "height", len(tx.height), &mut set, &mut bad, &ids);
                 num(ui, "Rotation", "rotation", real(tx.rotation.to_degrees()), &mut set, &mut bad, &ids);
                 num(ui, "Width factor", "widthFactor", real(tx.width_factor), &mut set, &mut bad, &ids);
+                prop_row(ui, "Justify", |ui| {
+                    let cur = TEXT_JUSTIFY.iter().find(|(_, h, v, _)| *h == tx.halign && *v == tx.valign).map_or("Left", |j| j.3);
+                    if let Some(n) = pick_menu(ui, crate::i18n::t(cur), TEXT_JUSTIFY.iter().map(|j| crate::i18n::t(j.3).to_string()))
+                        && let Some(j) = TEXT_JUSTIFY.iter().find(|j| crate::i18n::t(j.3) == n)
+                    {
+                        set = Some(json!({ "handles": ids, "justify": j.0 }));
+                    }
+                });
+                yes_no(ui, "Backwards", "backwards", tx.backwards, &ids, &mut set);
+                yes_no(ui, "Upside down", "upsideDown", tx.upside_down, &ids, &mut set);
             }
             EntityKind::MText(tx) => {
                 prop_row(ui, "Contents", |ui| {
@@ -1110,6 +1186,16 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
                 });
                 num(ui, "Text height", "height", len(tx.height), &mut set, &mut bad, &ids);
                 num(ui, "Defined width", "width", len(tx.width), &mut set, &mut bad, &ids);
+                num(ui, "Rotation", "rotation", real(tx.rotation.to_degrees()), &mut set, &mut bad, &ids);
+                prop_row(ui, "Justify", |ui| {
+                    let cur = MTEXT_JUSTIFY.get(usize::from(tx.attach.clamp(1, 9) - 1)).map_or("Top left", |j| j.1);
+                    if let Some(n) = pick_menu(ui, crate::i18n::t(cur), MTEXT_JUSTIFY.iter().map(|j| crate::i18n::t(j.1).to_string()))
+                        && let Some(j) = MTEXT_JUSTIFY.iter().find(|j| crate::i18n::t(j.1) == n)
+                    {
+                        set = Some(json!({ "handles": ids, "justify": j.0 }));
+                    }
+                });
+                yes_no(ui, "Text frame", "frame", tx.frame, &ids, &mut set);
             }
             EntityKind::LwPolyline(pl) => {
                 num(ui, "Global width", "width", len(pl.const_width), &mut set, &mut bad, &ids);
@@ -1128,7 +1214,7 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
             }
             EntityKind::Hatch(hh) => {
                 prop_row(ui, "Pattern", |ui| {
-                    ui.menu_button(hh.pattern.clone(), |ui| {
+                    menu_list(ui, hh.pattern.clone(), |ui| {
                         if let Some(name) = patterns::menu(ui, &hh.pattern) {
                             set = Some(json!({ "handles": ids, "pattern": name }));
                             ui.close();

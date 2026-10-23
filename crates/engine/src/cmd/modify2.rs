@@ -2189,6 +2189,8 @@ pub(crate) fn line_box(t: &cadcraft_doc::Text) -> cadcraft_doc::MText {
     let left_baseline = t.halign == HAlign::Left && t.valign == VAlign::Baseline;
     let at = if left_baseline { t.insert } else { t.align_pt.unwrap_or(t.insert) };
     cadcraft_doc::MText {
+        formula: None,
+        frame: false,
         insert: at,
         height: t.height,
         width: 0.0,
@@ -2217,6 +2219,8 @@ pub(crate) fn editor_for(s: &Session, h: Handle) -> Option<crate::TextEditor> {
             let g = cadcraft_render::dimension_in(d, dm);
             let measured = cadcraft_render::dimension_in(d, &cadcraft_doc::Dimension { text: String::new(), block: None, ..dm.clone() }).value;
             let mtext = cadcraft_doc::MText {
+                formula: None,
+                frame: false,
                 insert: g.text_pos.to3(0.0),
                 height: if g.text_height > 0.0 && g.text_height.is_finite() { g.text_height } else { 0.18 },
                 width: 0.0,

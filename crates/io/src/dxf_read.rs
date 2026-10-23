@@ -162,6 +162,9 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         };
     }
     MText {
+        formula: None,
+        // Background flags (90): 16 = a frame around the text.
+        frame: own.i(90).is_some_and(|f| f & 16 != 0),
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
         width: match &columns {
@@ -194,7 +197,11 @@ fn text_from(t: &T) -> Text {
         _ => VAlign::Baseline,
     };
     let align = if t.f(11).is_some() { Some(t.p(11)) } else { None };
+    // Text generation flags (71: 2 backwards, 4 upside down), from the text's own groups (an
+    // attribute's embedded multiline text, after 101, has a 71 of its own).
+    let generation = t.0.iter().take_while(|g| g.code != 101).find(|g| g.code == 71).map_or(0, |g| g.i64());
     let mut text = Text {
+        formula: None,
         insert: t.p(10),
         align_pt: if h == HAlign::Left && v == VAlign::Baseline { None } else { align },
         height: t.fd(40, 0.2).max(1e-9),
@@ -205,6 +212,8 @@ fn text_from(t: &T) -> Text {
         style: t.s(7).unwrap_or_else(|| "Standard".into()),
         halign: h,
         valign: v,
+        backwards: generation & 2 != 0,
+        upside_down: generation & 4 != 0,
     };
     let n = Vec3::new(t.fd(210, 0.0), t.fd(220, 0.0), t.fd(230, 1.0));
     if n.z < 0.0 {

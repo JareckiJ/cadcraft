@@ -12,6 +12,7 @@ pub mod animation;
 pub mod autosave;
 pub mod batchplot;
 pub mod bedit;
+pub mod bidi_edit;
 pub mod blockmgr;
 pub mod canvas;
 pub mod chrome;
@@ -29,6 +30,7 @@ pub mod editor_glyphs;
 pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
+pub mod thumbs;
 // The External References palette.
 pub mod xrefs;
 
@@ -134,6 +136,9 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// The Start page shows recent files as a grid of previews instead of a list.
+    #[serde(default)]
+    pub recent_grid: bool,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -214,6 +219,7 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            recent_grid: false,
         }
     }
 }

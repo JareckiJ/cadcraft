@@ -12,6 +12,8 @@ use serde_json::json;
 fn session() -> Session {
     let mut d = cadcraft_engine::doc::Drawing::new_imperial();
     let text = Text {
+        backwards: false,
+        upside_down: false,
         insert: Vec3::new(2.0, 2.0, 0.0),
         align_pt: None,
         height: 2.0,
@@ -24,6 +26,7 @@ fn session() -> Session {
         valign: Default::default(),
     };
     let mtext = MText {
+        frame: false,
         insert: Vec3::new(10.0, 3.0, 0.0),
         height: 2.0,
         width: 0.0,

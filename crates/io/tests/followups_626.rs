@@ -35,6 +35,7 @@ fn mleader_drawing() -> (Drawing, MLeader) {
         landing: Vec3::new(5.0, 4.0, 0.0),
         dogleg: 0.75,
         text: Some(MText {
+            frame: false,
             insert: Vec3::new(5.9, 4.0, 0.0),
             height: 0.4,
             width: 6.0,
@@ -164,6 +165,8 @@ fn code_page_is_kept_before_2007() {
         &Space::Model,
         Common::default(),
         EntityKind::Text(Text {
+            backwards: false,
+            upside_down: false,
             insert: Vec3::ZERO,
             align_pt: None,
             height: 2.5,

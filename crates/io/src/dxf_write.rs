@@ -472,6 +472,10 @@ fn text_tags(w: &mut W, t: &Text, attrib: Option<(&Attrib, Version)>, attdef_pro
         w.f(51, t.oblique.to_degrees());
     }
     w.s(7, &t.style);
+    let generation = i64::from(t.backwards) * 2 + i64::from(t.upside_down) * 4;
+    if generation != 0 {
+        w.i(71, generation);
+    }
     let h = match t.halign {
         HAlign::Left => 0,
         HAlign::Center => 1,
@@ -742,6 +746,11 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             // Line spacing style: 1 = at least, 2 = exactly.
             w.i(73, if t.line_spacing_exact { 2 } else { 1 });
             w.f(44, t.line_spacing);
+            if t.frame {
+                // Background flags: a text frame, no fill (border offset factor 1.5).
+                w.i(90, 16);
+                w.f(45, 1.5);
+            }
             w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
         }
         EntityKind::Insert(i) => {
@@ -1313,6 +1322,8 @@ fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
             handle: Handle(0),
             common: c,
             kind: EntityKind::MText(MText {
+                formula: None,
+                frame: false,
                 insert: g.text_pos.to3(0.0),
                 height: g.text_height,
                 width: 0.0,
@@ -1364,6 +1375,8 @@ fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<Entity> {
                 handle: Handle(0),
                 common: Common { color: cell.color, ..c.clone() },
                 kind: EntityKind::MText(MText {
+                    formula: None,
+                    frame: false,
                     insert: cell.at.to3(0.0),
                     height: cell.height,
                     width: 0.0,

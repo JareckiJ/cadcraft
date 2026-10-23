@@ -441,6 +441,8 @@ fn mleader_kind(s: &Session, pts: &[Vec2], text: &str, landing: bool) -> Option<
         landing: v3(*landing_pt),
         dogleg,
         text: (!text.is_empty()).then(|| MText {
+            formula: None,
+            frame: false,
             insert: v3(tpos),
             height: th,
             width: 0.0,
@@ -490,6 +492,8 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         let th = s.doc()?.dim_style(&style(s)).map(|d| d.text_height).unwrap_or(0.18);
         out.push(
             s.add_entity(EntityKind::MText(MText {
+                formula: None,
+                frame: false,
                 insert: v3(*last + Vec2::new(th * 0.5, th * 0.5)),
                 height: th,
                 width: 0.0,

@@ -513,6 +513,8 @@ fn cell_editor(s: &Session, h: Handle, r: usize, c: usize) -> Option<crate::Text
     let margin = d.table_styles.iter().find(|st| st.name.eq_ignore_ascii_case(&t.style)).map_or(0.06, |st| st.margin);
     let margin = if margin.is_finite() && margin >= 0.0 { margin.min(w * 0.25) } else { 0.0 };
     let mtext = cadcraft_doc::MText {
+        formula: None,
+        frame: false,
         insert: (corner + Vec2::new(margin, -margin)).to3(t.insert.z),
         height,
         width: (w - 2.0 * margin).max(height),
