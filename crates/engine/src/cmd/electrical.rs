@@ -725,7 +725,9 @@ mod tests {
             .model
             .iter()
             .filter_map(|e| match &e.kind {
-                EntityKind::Insert(i) => i.attribs.iter().find(|a| a.tag == "TAG1" || a.tag == "TAG2").map(|a| (i.block.clone(), a.text.value.clone())),
+                EntityKind::Insert(i) => {
+                    i.attribs.iter().find(|a| a.tag == "TAG1" || a.tag == "TAG2").map(|a| (i.block.clone(), a.text.value.clone()))
+                }
                 _ => None,
             })
             .collect();
