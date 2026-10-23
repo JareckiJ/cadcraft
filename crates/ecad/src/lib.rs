@@ -50,7 +50,7 @@ pub type Result<T> = std::result::Result<T, EcadError>;
 macro_rules! id_type {
     ($(#[$m:meta])* $name:ident, $prefix:literal) => {
         $(#[$m])*
-        #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -139,12 +139,6 @@ pub struct EcadProject {
     pub revision: u64,
 }
 
-impl Default for ProjectId {
-    fn default() -> Self {
-        ProjectId(String::new())
-    }
-}
-
 /// A page: one drawing (a DXF file), one sheet.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -155,12 +149,6 @@ pub struct EcadPage {
     pub drawing: String,
     pub title: String,
     pub description: String,
-}
-
-impl Default for PageId {
-    fn default() -> Self {
-        PageId(String::new())
-    }
 }
 
 /// The IEC role of a device's symbol.
@@ -299,12 +287,6 @@ pub struct EcadDevice {
     pub revision: u64,
 }
 
-impl Default for DeviceId {
-    fn default() -> Self {
-        DeviceId(String::new())
-    }
-}
-
 impl EcadDevice {
     /// Whether this is a child component (a contact) carrying a main device's tag.
     pub fn is_child(&self) -> bool {
@@ -348,12 +330,6 @@ pub struct EcadConnection {
     pub color: String,
     pub cross_section: Option<f64>,
     pub wire_type: String,
-}
-
-impl Default for ConnectionId {
-    fn default() -> Self {
-        ConnectionId(String::new())
-    }
 }
 
 impl EcadConnection {
