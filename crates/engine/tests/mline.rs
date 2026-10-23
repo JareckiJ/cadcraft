@@ -149,13 +149,12 @@ fn mledit_tees_and_corner() {
     assert!(m.no_end_caps);
     assert_eq!(pieces(&mline(&s, b)).len(), 2);
 
-    // Open tee: the second one opens where the first meets it.
+    // Merged tee: open tee with merged intersection
     let mut s = Session::new();
     let (a, b) = crossing(&mut s);
-    s.execute("mledit", &json!({"tool": "ot", "first": a.hex(), "p1": [9, 0], "second": b.hex(), "p2": [5, 3]})).unwrap();
+    s.execute("mledit", &json!({"tool": "mt", "first": a.hex(), "p1": [9, 0], "second": b.hex(), "p2": [5, 3]})).unwrap();
     assert_eq!(mline(&s, a).points(), vec![Vec2::new(6.0, 0.0), Vec2::new(10.0, 0.0)]);
     assert_eq!(pieces(&mline(&s, b)), vec![[4.0, -5.0, 4.0, 5.0], [6.0, -5.0, 6.0, -1.0], [6.0, 1.0, 6.0, 5.0]]);
-    assert!(s.execute("mledit", &json!({"tool": "mt", "first": a.hex(), "p1": [9, 0], "second": b.hex(), "p2": [5, 3]})).is_err());
 
     // Corner joint: two multilines become one round the corner.
     let mut s = Session::new();

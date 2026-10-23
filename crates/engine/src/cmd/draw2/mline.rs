@@ -576,8 +576,7 @@ fn mledit_pair(s: &mut Session, tool: Tool, ha: Handle, pa: Vec2, hb: Handle, pb
             let aa = a.clone();
             cut_across(&mut b, u, &outer_of(&bo), &aa, k);
         }
-        Tool::MergedTee => return Err(other("Merged tee is not available yet.")),
-        Tool::ClosedTee | Tool::OpenTee => {
+        Tool::ClosedTee | Tool::OpenTee | Tool::MergedTee => {
             let path = path_seg(&a, k).ok_or_else(|| other("*Invalid selection*"))?;
             let bm = b.miters();
             let (top, bottom) = outer(&bo).ok_or_else(|| other("*Invalid selection*"))?;
@@ -594,7 +593,7 @@ fn mledit_pair(s: &mut Session, tool: Tool, ha: Handle, pa: Vec2, hb: Handle, pb
             };
             let near = if near_e == top { lt } else { lb };
             a = trim_at(&a, k, at, keep_before).ok_or_else(|| other("Nothing would be left of the first multiline."))?;
-            if tool == Tool::OpenTee {
+            if tool == Tool::OpenTee || tool == Tool::MergedTee {
                 // Open the near outer element of the second multiline where the first meets it.
                 let ak = if keep_before { a.vertices.len().saturating_sub(2) } else { 0 };
                 let (am, aoff) = (a.miters(), a.offsets());
@@ -602,6 +601,21 @@ fn mledit_pair(s: &mut Session, tool: Tool, ha: Handle, pa: Vec2, hb: Handle, pb
                     let al = |e: usize| aoff.get(e).and_then(|d| element_line(&a, &am, ak, *d));
                     if let (Some(x), Some(y)) = (al(t2).and_then(|l| meet(&near, &l)), al(b2).and_then(|l| meet(&near, &l))) {
                         add_cut(&mut b, u, near_e, x, y);
+                    }
+                    if tool == Tool::MergedTee {
+                        // In a merged tee, interior elements also open across the intersection.
+                        for e in 0..ao.len() {
+                            if e != t2
+                                && e != b2
+                                && let (Some(l), Some((top_a, bot_a))) = (ao.get(e).and_then(|d| element_line(&a, &am, ak, *d)), outer(&ao))
+                                && let (Some(x), Some(y)) = (
+                                    ao.get(top_a).and_then(|d| element_line(&a, &am, ak, *d)).and_then(|lt2| meet(&l, &lt2)),
+                                    ao.get(bot_a).and_then(|d| element_line(&a, &am, ak, *d)).and_then(|lb2| meet(&l, &lb2)),
+                                )
+                            {
+                                add_cut(&mut a, ak, e, x, y);
+                            }
+                        }
                     }
                 }
             }
