@@ -725,6 +725,11 @@ fn run_esymbol_inner(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let block = ensure_block(s, name)?;
     let h = crate::cmd::blocks::insert(s, &block, at, 1.0, rotation.to_radians(), &values)?;
+    // Symbols never go on a wire layer (the current one while a wire type is current).
+    if s.doc()?.entity(h).is_some_and(|e| super::wires::wire_layer_matches("WIRE*", &e.common.layer)) {
+        s.doc_mut()?.ensure_layer("SYMBOLS");
+        s.doc_mut()?.modify_entity(h, |e| e.common.layer = "SYMBOLS".into())?;
+    }
     let pins: Vec<Vec2> = connection_points(s, h).into_iter().map(|(p, _)| p).collect();
     let cut = if bool_or(p, "breakWires", true) { break_wires(s, &pins, &layers)? } else { 0 };
     // Main devices get their tag straight away, like AutoCAD Electrical's insert-and-tag.

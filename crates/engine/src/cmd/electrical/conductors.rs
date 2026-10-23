@@ -315,7 +315,12 @@ mod tests {
         let l = s.execute("ecables", &json!({})).unwrap();
         assert_eq!(l["cables"][0]["cores"], json!([]));
         // Changing a wire's type.
-        let w = s.doc().unwrap().model.iter().find(|e| e.common.layer == "WIRE_BU_1.5").unwrap().handle.hex();
+        let w =
+            s.doc().unwrap().model.iter().find(|e| e.common.layer == "WIRE_BU_1.5" && matches!(e.kind, EntityKind::Line(_))).unwrap().handle.hex();
+        assert!(
+            !s.doc().unwrap().model.iter().any(|e| e.common.layer == "WIRE_BU_1.5" && matches!(e.kind, EntityKind::Insert(_))),
+            "no symbol on a wire layer"
+        );
         let r = s.execute("ewiretype", &json!({ "color": "GNYE", "size": 2.5, "handles": [w] })).unwrap();
         assert_eq!(r["changed"], 1);
         for bad in [json!({ "color": "PURPLE" }), json!({ "color": "BU", "size": 0 })] {
