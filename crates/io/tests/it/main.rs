@@ -22,6 +22,7 @@ mod dwg_roundtrip_losses;
 mod dwt_template;
 mod dxf_versions;
 mod dynblock_read;
+mod dynblock_scale_polar;
 mod entity_props_roundtrip;
 mod followups_626;
 mod groups_roundtrip;
