@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(r["tag"], "-K103", "placed and tagged where it was drawn");
         assert_eq!(s.doc().unwrap().model.len(), 1, "the geometry became the symbol");
         // Pins face the side they are on, so wires snap and leave the right way.
-        let w = s.execute("ewiredraw", &json!({"from": [105.4, 110.3], "to": [150, 150]})).unwrap();
+        let w = s.execute("ewire", &json!({"from": [105.4, 110.3], "to": [150, 150]})).unwrap();
         assert_eq!(w["snappedFrom"], "pin");
         assert_eq!(w["from"], json!([105.0, 110.0]));
         // And it is placed again like a library symbol.

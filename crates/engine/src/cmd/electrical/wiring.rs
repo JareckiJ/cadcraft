@@ -1,28 +1,36 @@
-//! Drawing wires: EWIREDRAW and ELADDER.
+//! Drawing wires: EWIRE and ELADDER.
 //!
-//! EWIREDRAW draws a wire between two points, each snapped to the nearest symbol connection
+//! EWIRE draws a wire between two points, each snapped to the nearest symbol connection
 //! point (or onto a wire, making a T junction with a dot) within reach, and routed at right
 //! angles: leaving a pin the way its connection point faces. ELADDER lays out a ladder: two
 //! horizontal supply rails and a vertical rung in the middle of each column between them, ready
 //! for symbols to be dropped on (ESYMBOL cuts the rung at the symbol's pins).
+//!
+//! A wire drawn over symbols (through their pins, as along a rung) is cut at each symbol's
+//! pins, so every pin ends a wire segment, found with the [`PinIndex`]. The wire then joins those
+//! pins in the connection graph straight away: like every electrical command EWIRE updates the
+//! project database when it finishes, and its result lists the pins it ends on.
 
 use cadcraft_doc::{EntityKind, Handle, Line, LwPolyline};
 use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 use serde_json::{Value, json};
 
-use super::symbols::insert_connection_points;
+use super::pins::PinIndex;
 use super::wires::{WIRE_LAYERS, wire_layer_matches};
 use crate::cmd::{CommandSpec, bad, f64_or, point_req, str_param};
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 const WIRE_LAYER: &str = "WIRE";
 const JUNCTION_LAYER: &str = "JUNCTION";
+/// Most cutting passes when a wire crosses several symbols.
+const MAX_PASSES: usize = 64;
 /// Most rungs one ladder may have.
 const MAX_RUNGS: usize = 500;
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new("ewiredraw", "Draw Wire", run_wiredraw)
+        CommandSpec::new("ewire", "Draw Wire", run_wiredraw)
+            .alias(&["ewiredraw", "aewire"])
             .menu(&["Tools", "Electrical", "Draw Wire"])
             .params(
                 "{from: [x, y], to: [x, y], snap? (reach, default 3), layer? (default \"WIRE\"), \
@@ -68,15 +76,10 @@ impl Snap {
 fn snap(s: &Session, p: Vec2, reach: f64, layers: &str) -> Snap {
     let Ok(d) = s.doc() else { return Snap::Free(p) };
     let Some(store) = d.space(&s.space()) else { return Snap::Free(p) };
-    let pin = store
-        .iter()
-        .filter_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(insert_connection_points(i)) } else { None })
-        .flatten()
-        .map(|(q, dir)| (q.dist(p), q, dir))
-        .filter(|(dist, ..)| *dist <= reach)
-        .min_by(|a, b| a.0.total_cmp(&b.0));
-    if let Some((_, q, dir)) = pin {
-        return Snap::Pin(q, dir);
+    if let Ok(ix) = PinIndex::build(s)
+        && let Some(pin) = ix.nearest(p, reach)
+    {
+        return Snap::Pin(pin.at, pin.dir);
     }
     let mut best_end: Option<(f64, Vec2)> = None;
     let mut best_on: Option<(f64, Vec2)> = None;
@@ -111,6 +114,17 @@ fn snap(s: &Session, p: Vec2, reach: f64, layers: &str) -> Snap {
         (None, Some((_, q))) => Snap::Wire(q),
         _ => Snap::Free(p),
     }
+}
+
+/// Whether a wire on `layer` ends at `p`.
+fn wire_end_at(s: &Session, layer: &str, p: Vec2) -> bool {
+    let Ok(d) = s.doc() else { return false };
+    let Some(store) = d.space(&s.space()) else { return false };
+    store.iter().filter(|e| wire_layer_matches(layer, &e.common.layer)).any(|e| match &e.kind {
+        EntityKind::Line(l) => l.a.xy().near(p, 1e-6) || l.b.xy().near(p, 1e-6),
+        EntityKind::LwPolyline(pl) => [pl.vertices.first(), pl.vertices.last()].into_iter().flatten().any(|v| v.p.near(p, 1e-6)),
+        _ => false,
+    })
 }
 
 /// The corner points of a right-angled route from `a` to `b`.
@@ -187,7 +201,7 @@ fn run_wiredraw(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
-    const CMD: &str = "ewiredraw";
+    const CMD: &str = "ewire";
     let from = point_req(CMD, p, "from")?;
     let to = point_req(CMD, p, "to")?;
     let reach = f64_or(p, "snap", 3.0);
@@ -211,6 +225,41 @@ fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let pts = route(pa, pb, vertical_first);
     let h = add_wire(s, &pts, &layer)?;
+    // Over a symbol the wire stops at its pins: cut it between them, pass by pass (each cut can
+    // leave a tail that crosses the next symbol).
+    let ix = PinIndex::build(s)?;
+    let mut crossed: Vec<Handle> = Vec::new();
+    let mut pins: Vec<Vec2> = Vec::new();
+    for w in pts.windows(2) {
+        let [a0, b0] = w else { continue };
+        for d in ix.crossed(*a0, *b0) {
+            if !crossed.contains(&d.insert) {
+                crossed.push(d.insert);
+                pins.extend(d.pins.iter().filter_map(|i| ix.pins.get(*i)).map(|p| p.at));
+            }
+        }
+    }
+    let mut cut = 0usize;
+    for _ in 0..MAX_PASSES {
+        let n = super::symbols::break_wires(s, &pins, &layer)?;
+        cut += n;
+        if n == 0 {
+            break;
+        }
+    }
+    // Which pins the wire now ends on (its ends, and the pins it was cut at).
+    let ix = PinIndex::build(s)?;
+    let mut on_pins: Vec<Value> = Vec::new();
+    for at in [pa, pb].into_iter().chain(pins.iter().copied()) {
+        if let Some(pin) = ix.exact(at, 1e-6)
+            && wire_end_at(s, &layer, at)
+        {
+            let v = json!({ "symbol": pin.insert.hex(), "pin": pin.number, "at": [pin.at.x, pin.at.y] });
+            if !on_pins.contains(&v) {
+                on_pins.push(v);
+            }
+        }
+    }
     let mut junctions = 0;
     for sn in [a, b] {
         if let Snap::Wire(q) = sn {
@@ -225,6 +274,9 @@ fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
         "snappedFrom": a.label(),
         "snappedTo": b.label(),
         "junctions": junctions,
+        "symbolsCrossed": crossed.len(),
+        "cuts": cut,
+        "pins": on_pins,
     }))
 }
 
@@ -265,7 +317,7 @@ fn run_ladder_inner(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "rails": rails, "rungs": rungs }))
 }
 
-/// EWIREDRAW at the command line: a start point, then the next points; each wire leg ends the
+/// EWIRE at the command line: a start point, then the next points; each wire leg ends the
 /// command when it lands on a pin or a wire, else the next leg starts where it ended.
 #[derive(Default)]
 struct WireM {
@@ -274,7 +326,7 @@ struct WireM {
 
 impl Interactive for WireM {
     fn name(&self) -> &'static str {
-        "EWIREDRAW"
+        "EWIRE"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         let accept = Accept { point: true, number: false, text: false, select: false, enter: true };
@@ -317,7 +369,7 @@ mod tests {
         let k_top = k["pins"][0].clone();
         let pb_bottom = pb["pins"][1].clone();
         // Clicks near the pins snap onto them; the coil's top pin faces up, so the wire leaves upwards.
-        let r = s.execute("ewiredraw", &json!({"from": [50.8, 105.5], "to": [79.0, 144.2]})).unwrap();
+        let r = s.execute("ewire", &json!({"from": [50.8, 105.5], "to": [79.0, 144.2]})).unwrap();
         assert_eq!(r["snappedFrom"], "pin");
         assert_eq!(r["snappedTo"], "pin");
         assert_eq!(r["from"], k_top);
@@ -327,19 +379,19 @@ mod tests {
         assert_eq!(pl.vertices.len(), 3);
         assert_eq!(pl.vertices[1].p, Vec2::new(50.0, 145.0), "vertical first, out of the coil's top");
         // Numbering sees one network joining the two pins.
-        let w = s.execute("ewire", &json!({})).unwrap();
+        let w = s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(w["potentials"], 1);
     }
 
     #[test]
     fn t_junction_onto_a_wire_gets_a_dot() {
         let mut s = Session::new();
-        s.execute("ewiredraw", &json!({"from": [0, 100], "to": [200, 100]})).unwrap();
-        let r = s.execute("ewiredraw", &json!({"from": [60.5, 101.0], "to": [60.5, 20.0]})).unwrap();
+        s.execute("ewire", &json!({"from": [0, 100], "to": [200, 100]})).unwrap();
+        let r = s.execute("ewire", &json!({"from": [60.5, 101.0], "to": [60.5, 20.0]})).unwrap();
         assert_eq!(r["snappedFrom"], "wire");
         assert_eq!(r["junctions"], 1);
         assert_eq!(r["from"], json!([60.5, 100.0]));
-        assert_eq!(s.execute("ewire", &json!({})).unwrap()["potentials"], 1);
+        assert_eq!(s.execute("ewirenum", &json!({})).unwrap()["potentials"], 1);
     }
 
     #[test]
@@ -348,25 +400,54 @@ mod tests {
         let r = s.execute("eladder", &json!({"top": 270, "bottom": 30, "from": 0, "to": 210})).unwrap();
         assert_eq!(r["rungs"].as_array().unwrap().len(), 5);
         // One network: both rails joined through the rungs.
-        assert_eq!(s.execute("ewire", &json!({})).unwrap()["potentials"], 1);
+        assert_eq!(s.execute("ewirenum", &json!({})).unwrap()["potentials"], 1);
         // A coil on the second rung splits it: top rail side and bottom rail side.
         let c = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [63, 150]})).unwrap();
         assert_eq!(c["wiresCut"], 1);
-        assert_eq!(s.execute("ewire", &json!({"mode": "all"})).unwrap()["potentials"], 1, "still joined by the other rungs");
+        assert_eq!(s.execute("ewirenum", &json!({"mode": "all"})).unwrap()["potentials"], 1, "still joined by the other rungs");
         assert!(s.execute("eladder", &json!({"top": 0, "bottom": 10})).is_err());
         assert!(s.execute("eladder", &json!({"top": 10, "bottom": 0, "spacing": 0})).is_err());
         assert!(s.execute("eladder", &json!({"top": 10, "bottom": 0, "to": 1e9, "spacing": 1})).is_err());
     }
 
     #[test]
+    fn a_wire_over_symbols_is_cut_at_their_pins_and_joins_them() {
+        let mut s = Session::new();
+        let a = s.active;
+        if let Some(d) = s.docs.get_mut(a) {
+            d.title = "ewire-through".into();
+        }
+        s.execute("esymbol", &json!({"name": "IEC_LAMP", "at": [50, 160]})).unwrap();
+        s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [50, 100]})).unwrap();
+        let r = s.execute("ewire", &json!({"from": [50, 250], "to": [50, 0]})).unwrap();
+        assert_eq!(r["symbolsCrossed"], 2, "{r}");
+        assert_eq!(r["cuts"], 2);
+        let numbers: Vec<&str> = r["pins"].as_array().unwrap().iter().filter_map(|p| p["pin"].as_str()).collect();
+        for n in ["X1", "X2", "A1", "A2"] {
+            assert!(numbers.contains(&n), "{n} in {numbers:?}");
+        }
+        let wires = s.doc().unwrap().model.iter().filter(|e| e.common.layer == "WIRE").count();
+        assert_eq!(wires, 3, "top, between the symbols, bottom");
+        // The graph has the lamp's X2 wired to the coil's A1 already: no manual update.
+        let c = s.execute("edb.query", &json!({"what": "connections"})).unwrap();
+        let pairs: Vec<(String, String)> = c
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["from"]["pin"].as_str().unwrap().to_string(), c["to"]["pin"].as_str().unwrap().to_string()))
+            .collect();
+        assert!(pairs.iter().any(|(a, b)| (a == "X2" && b == "A1") || (a == "A1" && b == "X2")), "{pairs:?}");
+    }
+
+    #[test]
     fn interactive_wire_ends_on_a_pin() {
         let mut s = Session::new();
         s.execute("esymbol", &json!({"name": "IEC_LAMP", "at": [100, 100]})).unwrap();
-        s.start("ewiredraw").unwrap();
+        s.start("ewire").unwrap();
         s.input(Input::Point(Vec2::new(0.0, 105.0))).unwrap();
         s.input(Input::Point(Vec2::new(100.0, 105.0))).unwrap();
         assert!(s.running.is_none(), "landing on the lamp's pin ends the command");
-        assert!(s.execute("ewiredraw", &json!({"from": [0, 0], "to": [0, 0]})).is_err());
-        assert!(s.execute("ewiredraw", &json!({"from": [0, 0]})).is_err());
+        assert!(s.execute("ewire", &json!({"from": [0, 0], "to": [0, 0]})).is_err());
+        assert!(s.execute("ewire", &json!({"from": [0, 0]})).is_err());
     }
 }

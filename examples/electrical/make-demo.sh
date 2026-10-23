@@ -33,7 +33,7 @@ cmd text '{"at": [5, 34], "text": "0V", "height": 3}'
 # Sheet 2: motor power circuit, three phases through breaker, main contacts and overload.
 args=()
 for x in 55 60 65; do
-  cmd ewiredraw "{\"from\": [$x, 250], \"to\": [$x, 65]}"
+  cmd ewire "{\"from\": [$x, 250], \"to\": [$x, 65]}"
 done
 sym IEC_MCB_3P 60 210
 sym IEC_MAIN_CONTACTS_3P 60 160 -Q101

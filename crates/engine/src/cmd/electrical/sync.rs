@@ -122,7 +122,7 @@ fn attr(ins: &Insert, tag: &str) -> Option<String> {
 }
 
 /// The pins of a symbol: its `X?TERMnn` connection points, numbered by its `TERMnn` attributes.
-fn pins_of(ins: &Insert) -> Vec<EcadPin> {
+pub(super) fn pins_of(ins: &Insert) -> Vec<EcadPin> {
     let numbers: HashMap<String, String> = ins
         .attribs
         .iter()

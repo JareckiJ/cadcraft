@@ -1,4 +1,4 @@
-//! EWIRE: wire numbers by potential.
+//! EWIRENUM: wire numbers by potential.
 //!
 //! Wires are lines and polylines on the wire layers (`WIRE*` by default). Wires that touch, end to
 //! end or end on another wire (a T junction), form one *potential* (net); wires that only cross
@@ -32,7 +32,7 @@ const MAX_CELLS_PER_SEGMENT: i64 = 4_096;
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new("ewire", "Number Wires", run_ewire)
+        CommandSpec::new("ewirenum", "Number Wires", run_ewire)
             .menu(&["Tools", "Electrical", "Number Wires"])
             .params(
                 "{mode?: \"new\" (default: only potentials without a number) | \"all\" (renumber every potential), \
@@ -264,7 +264,7 @@ pub(super) fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
-    const CMD: &str = "ewire";
+    const CMD: &str = "ewirenum";
     let renumber_all = match str_param(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("new") => false,
         Some("all") => true,
@@ -429,12 +429,12 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
-/// EWIRE at the command line: `Number wires [New/All] <New>:`.
+/// EWIRENUM at the command line: `Number wires [New/All] <New>:`.
 struct EwireM;
 
 impl Interactive for EwireM {
     fn name(&self) -> &'static str {
-        "EWIRE"
+        "EWIRENUM"
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         Prompt::new("Number wires", KW).kw(&["New", "All"]).default("New")
@@ -501,7 +501,7 @@ mod tests {
         wire(&mut s, &[[20.0, 70.0], [40.0, 70.0]]);
         // Potential 3: sheet 2.
         wire(&mut s, &[[430.0, 10.0], [500.0, 10.0]]);
-        let r = s.execute("ewire", &json!({})).unwrap();
+        let r = s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(r["potentials"], 3, "{r}");
         assert_eq!(r["numbered"], 3);
         assert_eq!(numbers(&s), vec!["101", "101A", "201"]);
@@ -513,16 +513,16 @@ mod tests {
     fn new_mode_keeps_numbers_all_mode_renumbers() {
         let mut s = session();
         wire(&mut s, &[[0.0, 0.0], [30.0, 0.0]]);
-        s.execute("ewire", &json!({})).unwrap();
+        s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(numbers(&s), vec!["101"]);
         // A second run adds nothing; a new wire gets the next number.
         wire(&mut s, &[[5.0, 50.0], [35.0, 50.0]]);
-        let r = s.execute("ewire", &json!({})).unwrap();
+        let r = s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(r["kept"], 1);
         assert_eq!(r["numbered"], 1);
         assert_eq!(numbers(&s), vec!["101", "101A"]);
         // Renumbering everything puts the upper wire first.
-        let r = s.execute("ewire", &json!({ "mode": "all" })).unwrap();
+        let r = s.execute("ewirenum", &json!({ "mode": "all" })).unwrap();
         assert_eq!(r["numbered"], 2);
         assert_eq!(numbers(&s), vec!["101", "101A"]);
         let upper = r["wires"].as_array().unwrap().iter().find(|w| w["at"][1].as_f64().unwrap() > 40.0).unwrap();
@@ -535,10 +535,10 @@ mod tests {
         wire(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]);
         wire(&mut s, &[[10.0, 10.0], [20.0, 10.0]]);
         wire(&mut s, &[[100.0, 0.0], [120.0, 0.0]]);
-        let r = s.execute("ewire", &json!({ "format": "W{count}", "dryRun": true })).unwrap();
+        let r = s.execute("ewirenum", &json!({ "format": "W{count}", "dryRun": true })).unwrap();
         assert_eq!(r["potentials"], 2);
         assert!(numbers(&s).is_empty(), "dry run draws nothing");
-        s.execute("ewire", &json!({ "format": "{count}" })).unwrap();
+        s.execute("ewirenum", &json!({ "format": "{count}" })).unwrap();
         assert_eq!(numbers(&s), vec!["1", "2"]);
     }
 
@@ -546,10 +546,10 @@ mod tests {
     fn other_layers_are_not_wires_and_undo_works() {
         let mut s = session();
         s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
-        let r = s.execute("ewire", &json!({})).unwrap();
+        let r = s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(r["potentials"], 0);
         wire(&mut s, &[[0.0, 5.0], [10.0, 5.0]]);
-        s.execute("ewire", &json!({})).unwrap();
+        s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(numbers(&s).len(), 1);
         s.execute("undo", &json!({})).unwrap();
         assert!(numbers(&s).is_empty());
@@ -559,7 +559,7 @@ mod tests {
     fn command_line_form() {
         let mut s = session();
         wire(&mut s, &[[0.0, 0.0], [10.0, 0.0]]);
-        s.cmdline("ewire").unwrap();
+        s.cmdline("ewirenum").unwrap();
         s.cmdline("").unwrap();
         assert!(s.running.is_none());
         assert_eq!(numbers(&s), vec!["101"]);
@@ -579,10 +579,10 @@ mod tests {
             json!({"sheetWidth": 0}),
             json!({"layers": "x".repeat(5000)}),
         ] {
-            assert!(s.execute("ewire", &p).is_err(), "{p}");
+            assert!(s.execute("ewirenum", &p).is_err(), "{p}");
         }
         // A huge wire is handled (or reported outside), never a panic.
-        let _ = s.execute("ewire", &json!({})).unwrap();
+        let _ = s.execute("ewirenum", &json!({})).unwrap();
     }
 
     #[test]

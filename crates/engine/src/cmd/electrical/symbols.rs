@@ -599,7 +599,7 @@ pub(super) fn connection_dir(tag: &str) -> Option<u8> {
 
 /// Cut every wire that runs through two or more of `pins`: the part between the outermost pins
 /// on it goes, so each pin ends a wire. Returns how many wires were cut.
-fn break_wires(s: &mut Session, pins: &[Vec2], layers: &str) -> Result<usize> {
+pub(super) fn break_wires(s: &mut Session, pins: &[Vec2], layers: &str) -> Result<usize> {
     let space = s.space();
     let d = s.doc()?;
     let Some(store) = d.space(&space) else { return Ok(0) };
@@ -838,7 +838,7 @@ mod tests {
             .collect();
         assert!(ends.contains(&(200.0, 105.0)) && ends.contains(&(95.0, 20.0)), "{ends:?}");
         // Wire numbering now sees four networks.
-        let w = s.execute("ewire", &json!({})).unwrap();
+        let w = s.execute("ewirenum", &json!({})).unwrap();
         assert_eq!(w["potentials"], 4);
     }
 

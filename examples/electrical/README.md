@@ -23,7 +23,7 @@ brackets) and undone with Ctrl+Z, except the whole-project commands, which save 
   `IEC_MCB_1P`, `IEC_MCB_3P`, `IEC_OVERLOAD_3P`, `IEC_OVERLOAD_NC`, `IEC_MAIN_CONTACTS_3P`,
   `IEC_MOTOR_3PH`, `IEC_TERMINAL`, `IEC_PSU`, `IEC_PE`), then click on an empty rung. The
   rung is cut at the symbol's connection points and a main device is tagged at once (`-K106`).
-- **Draw Wire** (`EWIREDRAW`): click near a symbol's pin or a wire and the wire snaps to it,
+- **Draw Wire** (`EWIRE`): click near a symbol's pin or a wire and the wire snaps to it,
   turning at right angles; landing on a pin or wire ends it, landing on the middle of a wire adds a
   junction dot.
 - **Insert Ladder** (`ELADDER`) lays out rails and rungs on a new sheet.

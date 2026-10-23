@@ -14,6 +14,7 @@
 
 mod builder;
 mod classes;
+mod pins;
 mod project;
 mod symbols;
 mod sync;
