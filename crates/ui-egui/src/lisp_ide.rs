@@ -265,8 +265,11 @@ fn eval_quick_expr(app: &mut CadApp) {
     for l in new_logs {
         ide.output.push(format!("  {l}"));
     }
-    if let Err(e) = res {
-        ide.output.push(format!("  {}: {e}", t("Error")));
+    match res {
+        Ok(Some(Err(e))) | Err(e) => {
+            ide.output.push(format!("  {}: {e}", t("Error")));
+        }
+        _ => {}
     }
 }
 
