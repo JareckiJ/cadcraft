@@ -256,8 +256,15 @@ fn listed_devices() -> Vec<PlotterConfig> {
     devices()
 }
 
-/// The device a command names: [`find_device`], or a system printer still being listed.
+/// The device a command names (or a layout's page setup names, for a command about to plot):
+/// a built-in device at once; otherwise, once a system printer listing under way has ended (up
+/// to [`PRINTERS_WAIT`]), [`find_device`], so a printer is found and wins over a user device of
+/// the same name even on the first plot after the app starts. Dialogs never wait.
 fn named_device(name: &str) -> Option<PlotterConfig> {
+    let n = name.trim();
+    if !BUILTIN.iter().any(|(b, _, _)| b.eq_ignore_ascii_case(n.strip_suffix(cadcraft_doc::PLOTTER_FILE_EXT).unwrap_or(n))) {
+        wait_for_printers();
+    }
     find_device(name).or_else(|| system_printer(name))
 }
 
@@ -445,7 +452,7 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     let dev = match given {
         Some(n) if n.is_empty() || n.eq_ignore_ascii_case(NO_DEVICE) => None,
         Some(n) => Some(named_device(n).ok_or_else(|| unknown_device(cmd, n))?),
-        None => layout.as_ref().and_then(|pg| find_device(&pg.device)),
+        None => layout.as_ref().and_then(|pg| named_device(&pg.device)),
     };
     let mut out = if p.is_object() { p.clone() } else { json!({}) };
     // Only a system printer chosen as the device prints (below): a `printer` passed with the
