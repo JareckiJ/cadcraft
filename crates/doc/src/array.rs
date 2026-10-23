@@ -37,6 +37,10 @@ pub struct ArrayParams {
     /// Items that refer to another block than the source (ARRAYEDIT REPlace).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replaced: Vec<ReplacedItem>,
+    /// Items deleted with ARRAYEDIT DELete, as (i, j, level); RESet brings them back. Entries
+    /// outside the current grid are ignored (they return if the grid grows back).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<(u32, u32, u32)>,
     /// The source objects are out for editing (ARRAYEDIT Source, until ARRAYCLOSE). Not saved:
     /// a drawing saved meanwhile keeps the objects as separate objects.
     #[serde(skip)]
@@ -153,6 +157,7 @@ impl ArrayParams {
             && !self.source.trim().is_empty()
             && nums.iter().chain(std::iter::once(&self.level_spacing)).all(|v| v.is_finite())
             && self.replaced.len() as u64 <= MAX_ARRAY_ITEMS
+            && self.removed.len() as u64 <= MAX_ARRAY_ITEMS
     }
 
     /// Where every item goes, row by row and level by level; `None` when the parameters are not
@@ -196,7 +201,16 @@ impl ArrayParams {
                 }
             }
         }
+        if !self.removed.is_empty() {
+            let gone: std::collections::HashSet<(u32, u32, u32)> = self.removed.iter().copied().collect();
+            out.retain(|it| !gone.contains(&(it.i, it.j, it.level)));
+        }
         Some(out)
+    }
+
+    /// Whether item (i, j, level) was deleted with ARRAYEDIT DELete.
+    pub fn is_removed(&self, i: u32, j: u32, level: u32) -> bool {
+        self.removed.contains(&(i, j, level))
     }
 
     /// The block an item refers to: a replacement, else the source.
@@ -242,12 +256,12 @@ impl ArrayParams {
     ///
     /// [`items`]: Self::items
     pub fn sync_names<'a>(&mut self, ents: impl Iterator<Item = &'a Entity>) -> bool {
-        let n = self.item_count();
-        let ents: Vec<&Entity> = ents.take(usize::try_from(n).unwrap_or(usize::MAX).saturating_add(1)).collect();
-        if ents.len() as u64 != n {
+        let Some(items) = self.items() else { return false };
+        let n = items.len();
+        let ents: Vec<&Entity> = ents.take(n.saturating_add(1)).collect();
+        if ents.len() != n {
             return false;
         }
-        let Some(items) = self.items() else { return false };
         // Index the replacement entries by placement so each item is matched in O(1) instead of
         // scanning the whole `replaced` vector per item, which is quadratic when both the items
         // and the replacements are large (CWE-407). Last entry wins, as `.rev().find` did.
@@ -296,6 +310,7 @@ mod tests {
             levels: 2,
             level_spacing: 5.0,
             replaced: Vec::new(),
+            removed: Vec::new(),
             editing: None,
         }
     }
@@ -324,6 +339,7 @@ mod tests {
             levels: 1,
             level_spacing: 0.0,
             replaced: Vec::new(),
+            removed: Vec::new(),
             editing: None,
         };
         let items = p.items().unwrap_or_default();
@@ -332,6 +348,24 @@ mod tests {
         assert!(items[1].insert.xy().near(Vec2::new(-10.0, 10.0), 1e-9));
         // Row 1 starts one unit further out.
         assert!(items[4].insert.xy().near(Vec2::new(1.0, 0.0), 1e-9));
+    }
+
+    #[test]
+    fn removed_items_are_left_out() {
+        let mut p = rect(3, 2);
+        p.removed = vec![(1, 0, 0), (2, 1, 1), (9, 9, 9)];
+        let items = p.items().unwrap_or_default();
+        assert_eq!(items.len(), 3 * 2 * 2 - 2, "out-of-grid entries are ignored");
+        assert!(!items.iter().any(|it| (it.i, it.j, it.level) == (1, 0, 0) || (it.i, it.j, it.level) == (2, 1, 1)));
+        assert!(p.is_removed(1, 0, 0) && !p.is_removed(0, 0, 0));
+        let mut d = Drawing::default();
+        let ents = p.item_entities(&mut d).unwrap_or_default();
+        assert_eq!(ents.len(), items.len());
+        let mut q = p.clone();
+        assert!(q.sync_names(ents.iter()), "an array with deleted items still matches its block");
+        let json = serde_json::to_string(&p).unwrap_or_default();
+        let back: ArrayParams = serde_json::from_str(&json).expect("round trip");
+        assert_eq!(back.removed, p.removed);
     }
 
     #[test]

@@ -25,7 +25,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("arrayedit", "Edit Array", run_arrayedit)
             .menu(&["Modify", "Object", "Array"])
             .params(
-                "{handle, cols?, rows?, colSpacing?, rowSpacing?, axisAngle? (degrees), rowElevation?, levels?, levelSpacing?, items?, angle? (fill, degrees), angleBetween?, rotate?: bool, center? ([x, y]), base? ([x, y], the new base point), reset?: bool, replace?: {handles, base? ([x, y], default the objects' centre), items: [[i, j, level]…] | \"source\"}, source?: {item? ([i, j, level], default [0, 0, 0])} (places the source objects for editing; ARRAYCLOSE ends)}",
+                "{handle, cols?, rows?, colSpacing?, rowSpacing?, axisAngle? (degrees), rowElevation?, levels?, levelSpacing?, items?, angle? (fill, degrees), angleBetween?, rotate?: bool, center? ([x, y]), base? ([x, y], the new base point), reset?: bool (restores replaced and deleted items), delete?: [[i, j, level]…] (removes those items), replace?: {handles, base? ([x, y], default the objects' centre), items: [[i, j, level]…] | \"source\"}, source?: {item? ([i, j, level], default [0, 0, 0])} (places the source objects for editing; ARRAYCLOSE ends)}",
             )
             .interactive(|_| Ok(Box::new(EditM::default()))),
         CommandSpec::new("arrayclose", "Close Array Editing", run_arrayclose)
@@ -453,6 +453,16 @@ fn run_arrayedit(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_or(p, "reset", false) {
         let (_, _, mut a) = array_of(s.doc()?, h)?;
         a.replaced.clear();
+        a.removed.clear();
+        rebuild(s, h, a, None)?;
+    }
+    if let Some(list) = p.get("delete").filter(|v| !v.is_null()) {
+        let list = list.as_array().ok_or_else(|| bad("arrayedit", "`delete` must be a list of [i, j, level] item numbers"))?;
+        let (_, _, mut a) = array_of(s.doc()?, h)?;
+        for v in list.iter().take(cadcraft_doc::MAX_ARRAY_ITEMS as usize) {
+            let item = item_param(v).ok_or_else(|| bad("arrayedit", "`delete` holds [i, j, level] item numbers"))?;
+            delete_item(&mut a, item)?;
+        }
         rebuild(s, h, a, None)?;
     }
     if let Some(r) = p.get("replace").filter(|v| !v.is_null()) {
@@ -493,6 +503,20 @@ fn run_arrayedit(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": h.hex() }))
 }
 
+/// Delete `item` from the array: it must exist, and the last item can't go (ERASE the array
+/// instead).
+fn delete_item(a: &mut ArrayParams, item: (u32, u32, u32)) -> Result<()> {
+    let items = a.items().unwrap_or_default();
+    if !items.iter().any(|it| (it.i, it.j, it.level) == item) {
+        return Err(other("The array has no such item."));
+    }
+    if items.len() <= 1 {
+        return Err(other("The last item of an array can't be deleted; erase the array instead."));
+    }
+    a.removed.push(item);
+    Ok(())
+}
+
 fn run_arrayclose(s: &mut Session, p: &Value) -> Result<Value> {
     close_source(s, bool_or(p, "save", true))
 }
@@ -525,6 +549,8 @@ enum Stage {
     RepItems,
     /// Source: the item whose objects are placed for editing.
     SourceItem,
+    /// DELete: the items to delete, one pick at a time.
+    DelItems,
 }
 
 /// ARRAYEDIT: select an array, then change it option by option until eXit.
@@ -600,12 +626,14 @@ impl EditM {
             "Angle between" => Stage::Between,
             "Fill angle" => Stage::Fill,
             "ROTate items" => Stage::Rotate,
+            "DELete items" => Stage::DelItems,
             "RESet" => {
                 self.change(s, |p| {
                     p.replaced.clear();
+                    p.removed.clear();
                     Ok(())
                 })?;
-                s.echo("Replaced items were restored.");
+                s.echo("Replaced and deleted items were restored.");
                 Stage::Main
             }
             _ => return Err(other("Invalid option keyword.")),
@@ -651,10 +679,23 @@ impl Interactive for EditM {
         match self.stage {
             Select => Prompt::new("Select array", Accept::SELECT),
             Main if polar.is_some() => Prompt::new("Enter an option", KEYWORDS)
-                .kw(&["Source", "REPlace", "Base point", "Items", "Angle between", "Fill angle", "Rows", "Levels", "ROTate items", "RESet", "eXit"])
+                .kw(&[
+                    "Source",
+                    "REPlace",
+                    "Base point",
+                    "Items",
+                    "Angle between",
+                    "Fill angle",
+                    "Rows",
+                    "Levels",
+                    "ROTate items",
+                    "DELete items",
+                    "RESet",
+                    "eXit",
+                ])
                 .default("eXit"),
             Main => Prompt::new("Enter an option", KEYWORDS)
-                .kw(&["Source", "REPlace", "Base point", "Rows", "Columns", "Levels", "RESet", "eXit"])
+                .kw(&["Source", "REPlace", "Base point", "Rows", "Columns", "Levels", "DELete items", "RESet", "eXit"])
                 .default("eXit"),
             Base => Prompt::new("Specify base point", Accept::POINT).kw(&["Key point"]).default("centroid"),
             ColsCount => Prompt::new("Enter the number of columns", Accept::NUMBER).default(cols.to_string()),
@@ -687,6 +728,7 @@ impl Interactive for EditM {
             RepBase => Prompt::new("Select base point of replacement objects", Accept::POINT).kw(&["Key point"]).default("centroid"),
             RepItems => Prompt::new("Select an item in array to replace", Accept::POINT).kw(&["Source objects"]),
             SourceItem => Prompt::new("Select item in array", Accept::POINT),
+            DelItems => Prompt::new("Select an item in array to delete", Accept::POINT),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -895,6 +937,13 @@ impl Interactive for EditM {
                 return Ok(Step::Done);
             }
             (SourceItem, Input::Enter) => Main,
+            (DelItems, Input::Point(at)) => {
+                let tol = s.pixel_size() * s.settings.pickbox;
+                let item = item_at(s.doc()?, h, *at, tol).ok_or_else(|| other("No array item there; select an item of the array."))?;
+                self.change(s, |p| delete_item(p, item))?;
+                DelItems
+            }
+            (DelItems, Input::Enter) => Main,
             _ => stage,
         };
         self.stage = next;

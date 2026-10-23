@@ -23,6 +23,7 @@ fn params(source: &str) -> ArrayParams {
         levels: 2,
         level_spacing: 4.0,
         replaced: vec![ReplacedItem { i: 1, j: 0, level: 0, block: "Größe".into() }],
+        removed: Vec::new(),
         editing: None,
     }
 }
@@ -128,4 +129,24 @@ fn renamed_blocks_are_followed() {
     let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
     assert!(back.block("*U2").unwrap().array.is_none());
     assert_eq!(back.block("*U2").unwrap().entities.len(), 19);
+}
+
+#[test]
+fn deleted_items_survive_a_dxf_round_trip() {
+    let mut d = drawing();
+    let mut p = params("*U1");
+    p.removed = vec![(3, 1, 1), (0, 0, 0)];
+    let items = p.item_entities(&mut d).unwrap();
+    let mut arr = Block::new("*U2");
+    for e in items {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p.clone());
+    d.blocks.insert("*U2".into(), Arc::new(arr));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    let arr = back.block("*U2").unwrap();
+    assert_eq!(arr.array.as_ref(), Some(&p));
+    assert_eq!(arr.entities.len(), 18, "two of the 20 items were deleted");
+    let ins = back.model.iter().next().unwrap();
+    assert_eq!(back.array_params(ins), Some(p), "still an associative array");
 }
