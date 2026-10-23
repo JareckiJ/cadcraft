@@ -63,6 +63,15 @@ jobs:
             ls gen-out/*.dxf > /dev/null 2>&1 || { echo "::error title=generate::no sheets written"; status=1; }
             grep -q "warning\|failed" t4.txt && { report t4.txt generate-warnings; status=1; }
           fi
+          # The demo project end to end, then what its reports read.
+          if [ $status -eq 0 ]; then
+            cargo build -q -p cadcraft-cli && bash examples/electrical/make-demo.sh target/debug/cadcraft-cli demo-out 2>&1 | tee t5.txt || { report t5.txt demo; status=1; }
+            grep -qi "error" t5.txt && { report t5.txt demo-errors; status=1; }
+            for k in bom terminals plcio cables wirelist; do
+              target/debug/cadcraft-cli run --metric --cmd "eproject.open {\"path\": \"$PWD/demo-out/Demo.ecproj\"}" --cmd "ereport {\"kind\": \"$k\", \"path\": \"$PWD/demo-out/$k.csv\"}" > /dev/null 2>&1 || true
+            done
+            for f in demo-out/*.csv; do echo "::notice title=$(basename $f)::$(head -c 900 $f | tr '\n' '|')"; done
+          fi
           # On success, show the test counts so a passing run proves the tests ran.
           if [ $status -eq 0 ]; then
             echo "::notice title=tests::$(grep -h 'test result' t1.txt t2.txt 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ')"

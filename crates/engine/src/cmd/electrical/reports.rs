@@ -168,47 +168,48 @@ pub(super) fn report(s: &mut Session, kind: &str) -> Result<(Vec<&'static str>, 
                 .collect();
             (vec!["Wire", "From", "To", "Colour", "mm²"], rows)
         }
-        "terminals" => {
-            let mut rows = Vec::new();
-            for st in super::terminals::strip_report(s, None)? {
-                for t in st["terminals"].as_array().into_iter().flatten() {
-                    rows.push(vec![
-                        strs(&st["strip"]),
-                        strs(&t["number"]),
-                        strs(&t["wireTop"]),
-                        strs(&t["top"]),
-                        strs(&t["bottom"]),
-                        strs(&t["wireBottom"]),
-                    ]);
-                }
-            }
-            (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], rows)
-        }
-        "cables" => {
-            let mut rows = Vec::new();
-            for c in super::conductors::cables(s)? {
-                for core in c["cores"].as_array().into_iter().flatten() {
-                    rows.push(vec![
-                        strs(&c["tag"]),
-                        strs(&c["type"]),
-                        strs(&core["core"]),
-                        strs(&core["wire"]),
-                        strs(&core["from"]),
-                        strs(&core["to"]),
-                    ]);
-                }
-            }
-            (vec!["Cable", "Type", "Core", "Wire", "From", "To"], rows)
-        }
-        "plcio" => {
-            let rows = super::plc::io_list(s)?
-                .into_iter()
-                .map(|p| vec![p.address, p.card, p.point, p.connected.join(", "), p.wire.unwrap_or_default()])
-                .collect();
-            (vec!["Address", "Card", "Point", "Connected", "Wire"], rows)
-        }
+        "terminals" => (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], per_sheet(s, terminal_rows)?),
+        "cables" => (vec!["Cable", "Type", "Core", "Wire", "From", "To"], per_sheet(s, cable_rows)?),
+        "plcio" => (vec!["Address", "Card", "Point", "Connected", "Wire"], per_sheet(s, plc_rows)?),
         _ => return Err(bad("ereport", format!("`kind` must be one of {}", KINDS.join(", ")))),
     })
+}
+
+/// Rows from the drawing-based reports: from every sheet of the open project (in sheet order),
+/// else from this drawing.
+fn per_sheet(s: &mut Session, rows: fn(&mut Session) -> Result<Vec<Vec<String>>>) -> Result<Vec<Vec<String>>> {
+    let Some(path) = super::project::current() else { return rows(s) };
+    let pr = super::project::read_project(&path)?;
+    let mut out = Vec::new();
+    super::project::for_each(s, &path, &pr, false, |s, _, _| {
+        out.extend(rows(s)?);
+        Ok(Value::Null)
+    })?;
+    Ok(out)
+}
+
+fn terminal_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
+    let mut rows = Vec::new();
+    for st in super::terminals::strip_report(s, None)? {
+        for t in st["terminals"].as_array().into_iter().flatten() {
+            rows.push(vec![strs(&st["strip"]), strs(&t["number"]), strs(&t["wireTop"]), strs(&t["top"]), strs(&t["bottom"]), strs(&t["wireBottom"])]);
+        }
+    }
+    Ok(rows)
+}
+
+fn cable_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
+    let mut rows = Vec::new();
+    for c in super::conductors::cables(s)? {
+        for core in c["cores"].as_array().into_iter().flatten() {
+            rows.push(vec![strs(&c["tag"]), strs(&c["type"]), strs(&core["core"]), strs(&core["wire"]), strs(&core["from"]), strs(&core["to"])]);
+        }
+    }
+    Ok(rows)
+}
+
+fn plc_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
+    Ok(super::plc::io_list(s)?.into_iter().map(|p| vec![p.address, p.card, p.point, p.connected.join(", "), p.wire.unwrap_or_default()]).collect())
 }
 
 fn run_report(s: &mut Session, p: &Value) -> Result<Value> {
