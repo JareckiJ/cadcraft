@@ -1,18 +1,18 @@
 //! Durable file replacement for saving drawings (native builds only; the web build has no files).
 //!
 //! [`write_durable`] replaces the file atomically ([`crate::atomic_write::write_atomic`]: a fresh,
-//! exclusively created temporary file, synced and renamed over the target) and then (on Unix)
-//! flushes the folder, so a crash or power loss leaves either the old file or the new one, never a
-//! torn mix. [`backup_previous`] keeps the
-//! version being replaced as `<name>.bak`, but only when that version is itself a readable drawing:
-//! a damaged file never replaces a good backup.
+//! exclusively created temporary file, synced and renamed over the target), so the file holds
+//! either the old content or the new, never a torn mix. On Unix it then flushes the folder as well,
+//! best effort, so the rename also survives a power loss where the file system allows it.
+//! [`backup_previous`] keeps the version being replaced as a backup ([`backup_path`]), but only
+//! when that version is itself a readable drawing: a damaged file never replaces a good backup.
 
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Write `bytes` to `path` so that `path` is always either the old or the new content; on Unix the
-/// folder is flushed too, so the rename itself survives a power loss.
+/// Write `bytes` to `path` so that `path` is always either the old or the new content. On Unix the
+/// folder is flushed too (best effort: a file system that refuses it leaves the rename unflushed).
 pub fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     crate::atomic_write::write_atomic(path, bytes)?;
     sync_parent(path);
@@ -31,14 +31,17 @@ fn sync_parent(path: &Path) {
     let _ = path;
 }
 
-/// The backup file of the drawing at `path`: the same name with the extension `bak`. None for a
-/// path that is itself a `.bak`.
+/// The backup file of the drawing at `path`. A DWG's is `<name>.bak`, as AutoCAD names it (rename
+/// it back to `.dwg` to open it); any other drawing appends `.bak` (`plan.dxf.bak`), so drawings
+/// that differ only in their extension never share, and overwrite, one backup. None for a path
+/// that is itself a `.bak`.
 pub fn backup_path(path: &str) -> Option<PathBuf> {
     let p = Path::new(path);
-    if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("bak")) {
-        return None;
+    match p.extension() {
+        Some(e) if e.eq_ignore_ascii_case("bak") => None,
+        Some(e) if e.eq_ignore_ascii_case("dwg") => Some(p.with_extension("bak")),
+        _ => Some(PathBuf::from(format!("{path}.bak"))),
     }
-    Some(p.with_extension("bak"))
 }
 
 /// Before `path` is overwritten, keep its current content as `<name>.bak`, provided `is_valid`
@@ -91,7 +94,7 @@ mod tests {
     fn backup_keeps_the_previous_version_only_while_it_is_valid() {
         let d = dir("bak");
         let p = d.join("a.dxf").to_string_lossy().to_string();
-        let bak = d.join("a.bak");
+        let bak = d.join("a.dxf.bak");
         assert!(!backup_previous(&p, |_| true).unwrap(), "nothing to back up yet");
         fs::write(&p, b"good").unwrap();
         assert!(backup_previous(&p, |b| b == b"good").unwrap());
@@ -108,6 +111,24 @@ mod tests {
     #[test]
     fn a_bak_file_has_no_backup() {
         assert_eq!(backup_path("/x/a.dwg"), Some(PathBuf::from("/x/a.bak")));
+        assert_eq!(backup_path("/x/a.DWG"), Some(PathBuf::from("/x/a.bak")));
         assert_eq!(backup_path("/x/a.BAK"), None);
+    }
+
+    /// Drawings that differ only in their extension keep separate backups.
+    #[test]
+    fn same_named_drawings_keep_their_own_backups() {
+        assert_eq!(backup_path("/x/a.dxf"), Some(PathBuf::from("/x/a.dxf.bak")));
+        assert_eq!(backup_path("/x/a.dwt"), Some(PathBuf::from("/x/a.dwt.bak")));
+        assert_eq!(backup_path("/x/a"), Some(PathBuf::from("/x/a.bak")));
+        let d = dir("same-name");
+        let (dwg, dxf) = (d.join("a.dwg").to_string_lossy().to_string(), d.join("a.dxf").to_string_lossy().to_string());
+        fs::write(&dwg, b"dwg v1").unwrap();
+        fs::write(&dxf, b"dxf v1").unwrap();
+        assert!(backup_previous(&dwg, |_| true).unwrap());
+        assert!(backup_previous(&dxf, |_| true).unwrap());
+        assert_eq!(fs::read(d.join("a.bak")).unwrap(), b"dwg v1");
+        assert_eq!(fs::read(d.join("a.dxf.bak")).unwrap(), b"dxf v1");
+        let _ = fs::remove_dir_all(&d);
     }
 }

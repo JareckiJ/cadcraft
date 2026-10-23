@@ -416,8 +416,8 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
 fn store(path: &str, bytes: &[u8]) -> Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // The version being replaced is kept as `<name>.bak` when it is a readable drawing. A
-        // backup that can't be made never stops the save.
+        // The version being replaced is kept as a backup (`durable::backup_path`) when it is a
+        // readable drawing. A backup that can't be made never stops the save.
         if is_drawing_file(path) {
             let name = file_name(path);
             let valid = |old: &[u8]| io().is_some_and(|h| (h.read)(old, &name).is_ok());
