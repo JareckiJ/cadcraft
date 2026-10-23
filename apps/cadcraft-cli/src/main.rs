@@ -349,9 +349,15 @@ fn run(args: &[String]) -> Result<(), String> {
     }
     check_framed_output(framing, exp.as_deref())?;
     let before = model_views(&s);
+    let mut script_failures = 0usize;
     for (kind, body) in steps {
         match kind.as_str() {
-            "script" => s.script(&body).map_err(|e| e.to_string())?,
+            "script" => {
+                for (line, e) in s.script_report(&body) {
+                    eprintln!("script line {line}: {e}");
+                    script_failures += 1;
+                }
+            }
             _ => {
                 let (id, json) = body.split_once(' ').unwrap_or((&body, "{}"));
                 let params: Value = serde_json::from_str(json).map_err(|e| format!("--cmd {id}: {e}"))?;
@@ -371,6 +377,11 @@ fn run(args: &[String]) -> Result<(), String> {
     if let Some(p) = exp {
         let window = if cadcraft_io::is_image(&p) { export_window(&s, framing, Some(&before))? } else { None };
         export_framed(&s, &p, window)?;
+    }
+    // The drawing is written first: a bad line costs that line, not the output. The exit status
+    // still reports the failure, so scripts and agents can check it (#1522).
+    if script_failures > 0 {
+        return Err(format!("script: {script_failures} line(s) failed; everything else ran"));
     }
     Ok(())
 }
