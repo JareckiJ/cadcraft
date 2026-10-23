@@ -88,10 +88,29 @@ pub fn export_list(list: &cadcraft_render::DisplayList, window: Option<Bounds2>)
                 // A wipeout's mask hides what lies under it with the white background.
                 let c = if p.kind == Kind::Mask { white.hex() } else { c };
                 let _ = write!(s, r#"<path fill="{c}"{op} d=""#);
-                for t in pts.chunks(3) {
-                    if let [a, b2, cc] = t {
-                        let _ =
-                            write!(s, "M{:.dp$} {:.dp$}L{:.dp$} {:.dp$}L{:.dp$} {:.dp$}Z", tx(a.x), ty(a.y), tx(b2.x), ty(b2.y), tx(cc.x), ty(cc.y));
+                // One path around the fill (nonzero, the SVG default, covers what the triangles
+                // cover) instead of a subpath per triangle.
+                if let Some(contours) = list.fill_contours(p) {
+                    for l in &contours {
+                        for (i, q) in l.iter().enumerate() {
+                            let _ = write!(s, "{}{:.dp$} {:.dp$}", if i == 0 { 'M' } else { 'L' }, tx(q.x), ty(q.y));
+                        }
+                        s.push('Z');
+                    }
+                } else {
+                    for t in pts.chunks(3) {
+                        if let [a, b2, cc] = t {
+                            let _ = write!(
+                                s,
+                                "M{:.dp$} {:.dp$}L{:.dp$} {:.dp$}L{:.dp$} {:.dp$}Z",
+                                tx(a.x),
+                                ty(a.y),
+                                tx(b2.x),
+                                ty(b2.y),
+                                tx(cc.x),
+                                ty(cc.y)
+                            );
+                        }
                     }
                 }
                 s.push_str(r#""/>"#);
