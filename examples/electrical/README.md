@@ -42,7 +42,16 @@ brackets) and undone with Ctrl+Z, except the whole-project commands, which save 
 The single-drawing versions (**Tag Devices**, **Number Wires**, **Cross-References**) do the same
 for the open drawing only.
 
-## 4. Make your own symbols
+## 4. Device data (the project database)
+
+**Database → Electrical Devices** opens a panel listing every device. Click a device (or select
+its symbol in the drawing) to edit its tag, manufacturer, catalogue number, descriptions, location
+and technical ratings; **Apply** saves it in the project database (`Demo.ecdb`) and writes it into
+the symbol, on whichever sheet it is. The panel also shows what the device is wired to. Every
+electrical command keeps the database up to date; after ordinary edits use **Update from
+Drawing**. **Database → Report** (`EDB.QUERY`) gives the parts list (`bom`) and wire list.
+
+## 5. Make your own symbols
 
 **Symbol Builder** (`ESYMBUILD`): draw the shape with lines, circles and arcs, select it, pick its
 base point, click each connection point (Enter when done), then give a name, the IEC class letter
