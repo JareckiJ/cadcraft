@@ -78,10 +78,12 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let (width, height) = (px(sheet.size.x), px(sheet.size.y));
     let lineweights = o.lineweights.unwrap_or(if space.is_paper() { page.lineweights } else { true });
     let table = cadcraft_doc::plot_style_table(d, &page.plot_style_table).map(Arc::new);
-    // Paper units per drawing unit: 1 for a layout at 1:1, the fitted scale for model space.
+    // Paper units per drawing unit: the fitted scale for model space (or a layout fitted to the
+    // paper); else, for a layout, the command's scale or the page setup's, as PDF plots it (1 at 1:1).
     let fit = matches!(space, Space::Model) || o.fit == Some(true);
     let window = o.window.filter(|w| matches!(space, Space::Model) && !w.is_empty());
-    let est = if fit { fit_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, &o) } else { 1.0 };
+    let unfitted = pdf::sheet_scale(space, &page, &o).unwrap_or(1.0);
+    let est = if fit { fit_scale(&window.unwrap_or_else(|| d.extents(space)), &sheet, &o) } else { unfitted };
     // Chord tolerance: a fifth of a pixel.
     let tolerance = (0.2 / (k * est)).max(1e-9);
     let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
@@ -89,7 +91,7 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
     let half = Vec2::new(f64::from(width), f64::from(height)) / (2.0 * k);
     let b = window.unwrap_or(list.bounds);
-    let s = if fit { fit_scale(&b, &sheet, &o) } else { 1.0 };
+    let s = if fit { fit_scale(&b, &sheet, &o) } else { unfitted };
     // Plot style ends, joins and fill patterns at the plot scale, as PDF draws them (a layout's
     // are already drawn).
     cadcraft_render::pen::apply(&mut list, s * sheet.unit_mm);
@@ -99,7 +101,8 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
         let center = from + (half - to) / s;
         raster::View { center, scale: k * s, width, height }
     } else {
-        raster::View { center: half, scale: k, width, height }
+        // Paper origin at the image's corner; the drawing is `s` paper units per drawing unit.
+        raster::View { center: half / s, scale: k * s, width, height }
     };
     let px_per_mm = if lineweights { (k / sheet.unit_mm) as f32 } else { 0.0 };
     let ro = raster::RasterOptions { background: Rgb(255, 255, 255), hairline: 1.0, px_per_mm, antialias: true };
@@ -111,7 +114,11 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let Space::Model = space else {
         let (sheet, page) = sheet(d, space, &o)?;
         let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-        return Ok(crate::svg::export_window_with(d, space, Some(sheet.bounds()), transparency).into_bytes());
+        // The drawing window the sheet shows at the layout's plot scale, as PDF plots it (the
+        // sheet itself at 1:1; a scale that overflows leaves the sheet as is).
+        let shown = sheet.size / pdf::sheet_scale(space, &page, &o).unwrap_or(1.0);
+        let window = if shown.x.is_finite() && shown.y.is_finite() { Bounds2::new(Vec2::ZERO, shown) } else { sheet.bounds() };
+        return Ok(crate::svg::export_window_with(d, space, Some(window), transparency).into_bytes());
     };
     // Model space as plotted: the plot style table, lineweights, and the table's ends, joins and
     // fills at the scale that fits the window (or the extents) on the device's paper.
@@ -236,5 +243,143 @@ mod tests {
         let err = plot(&d, &model, &json!({"output": "svg", "center": false, "offset": [0, 0]})).unwrap_err();
         assert!(err.to_string().contains("not supported for SVG"));
         assert!(plot(&d, &model, &json!({"output": "svg", "center": true})).unwrap().starts_with(b"<svg"));
+    }
+
+    /// Layout `Layout1` (A3 landscape, no margins) saved at `scale`, holding a horizontal line from
+    /// (100, 100) to (4100, 100) drawing units.
+    fn layout_drawing(scale: f64) -> (Drawing, Space) {
+        let mut d = Drawing::new_metric();
+        let name = d.layouts[0].name.clone();
+        let space = Space::Paper(name);
+        d.add(&space, Common::default(), EntityKind::Line(Line { a: Vec3::new(100.0, 100.0, 0.0), b: Vec3::new(4100.0, 100.0, 0.0) })).unwrap();
+        d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(100.0, 50.0, 0.0) })).unwrap();
+        let page = &mut d.layouts[0].page;
+        (page.paper, page.width_mm, page.height_mm, page.landscape) = ("A3".into(), 297.0, 420.0, true);
+        (page.margins_mm, page.scale) = ([0.0; 4], scale);
+        (d, space)
+    }
+
+    /// The horizontal extent in millimetres on the sheet of what a PDF plot draws.
+    fn pdf_x_mm(b: &[u8]) -> (f64, f64) {
+        let text = String::from_utf8_lossy(b).into_owned();
+        let xs: Vec<f64> =
+            text.lines().filter(|l| l.ends_with(" m") || l.ends_with(" l")).filter_map(|l| l.split(' ').next()?.parse::<f64>().ok()).collect();
+        let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+        assert!(xs.len() >= 2, "a line in the PDF");
+        (lo * 25.4 / 72.0, hi * 25.4 / 72.0)
+    }
+
+    /// The horizontal extent in millimetres on the sheet of the non-white pixels of a PNG made at
+    /// `dpi` (and the image width in pixels).
+    fn png_x_mm(b: &[u8], dpi: f64) -> (f64, f64, u32) {
+        let pm = tiny_skia::Pixmap::decode_png(b).unwrap();
+        let w = pm.width();
+        let (mut lo, mut hi) = (u32::MAX, 0);
+        for (i, px) in pm.pixels().iter().enumerate() {
+            if (px.red(), px.green(), px.blue()) != (255, 255, 255) {
+                let x = i as u32 % w;
+                (lo, hi) = (lo.min(x), hi.max(x + 1));
+            }
+        }
+        assert!(lo < hi, "something is drawn");
+        (f64::from(lo) * 25.4 / dpi, f64::from(hi) * 25.4 / dpi, w)
+    }
+
+    /// The horizontal extent in millimetres on a sheet `sheet_mm` wide of the polylines of an SVG.
+    fn svg_x_mm(svg: &str, sheet_mm: f64) -> (f64, f64) {
+        let vb = svg.split("viewBox=\"").nth(1).unwrap().split('"').next().unwrap();
+        let vw: f64 = vb.split(' ').nth(2).unwrap().parse().unwrap();
+        let pts = svg.split("points=\"").nth(1).unwrap().split('"').next().unwrap();
+        let xs: Vec<f64> = pts.split(' ').filter_map(|p| p.split(',').next()?.parse().ok()).collect();
+        let (lo, hi) = xs.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+        (lo / vw * sheet_mm, hi / vw * sheet_mm)
+    }
+
+    fn near(got: (f64, f64), want: (f64, f64), tol: f64) -> bool {
+        (got.0 - want.0).abs() <= tol && (got.1 - want.1).abs() <= tol
+    }
+
+    #[test]
+    fn png_and_svg_of_a_layout_use_the_scale_pdf_plots_at() {
+        let (d, layout) = layout_drawing(0.1);
+        let sheet = json!({"device": "None", "paper": "A3", "landscape": true});
+        let with = |extra: Value| {
+            let mut o = sheet.clone();
+            o.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            o
+        };
+        // 1:10 from the page setup: the line runs from 10 mm to 410 mm of the 420 mm sheet.
+        let pdf_mm = pdf_x_mm(&plot(&d, &layout, &with(json!({"compress": false}))).unwrap());
+        assert!(near(pdf_mm, (10.0, 410.0), 0.01), "{pdf_mm:?}");
+        let png = plot(&d, &layout, &with(json!({"output": "png", "resolution": 127.0}))).unwrap();
+        let (lo, hi, w) = png_x_mm(&png, 127.0);
+        assert_eq!(w, 2100, "the whole sheet");
+        assert!(near((lo, hi), pdf_mm, 0.6), "PNG {lo} {hi} against the PDF {pdf_mm:?}");
+        let svg = String::from_utf8(plot(&d, &layout, &with(json!({"output": "svg"}))).unwrap()).unwrap();
+        assert!(near(svg_x_mm(&svg, 420.0), pdf_mm, 0.01), "SVG {:?}", svg_x_mm(&svg, 420.0));
+        // The command's own scale wins in all three; a page setup fitted to paper leaves its scale aside.
+        let o = with(json!({"scale": 0.05, "compress": false}));
+        let pdf_mm = pdf_x_mm(&plot(&d, &layout, &o).unwrap());
+        assert!(near(pdf_mm, (5.0, 205.0), 0.01), "{pdf_mm:?}");
+        let (lo, hi, _) = png_x_mm(&plot(&d, &layout, &with(json!({"output": "png", "resolution": 127.0, "scale": 0.05}))).unwrap(), 127.0);
+        assert!(near((lo, hi), pdf_mm, 0.6), "PNG with a scale {lo} {hi}");
+        let svg = String::from_utf8(plot(&d, &layout, &with(json!({"output": "svg", "scale": 0.05}))).unwrap()).unwrap();
+        assert!(near(svg_x_mm(&svg, 420.0), pdf_mm, 0.01), "SVG with a scale");
+        let mut fitted = d.clone();
+        fitted.layouts[0].page.scale_to_fit = true;
+        let png = plot(&fitted, &layout, &with(json!({"output": "png", "resolution": 127.0}))).unwrap();
+        let (lo, hi, _) = png_x_mm(&png, 127.0);
+        assert!((lo - 100.0).abs() < 1.0 && hi > 419.0, "1:1 as before, off the sheet: {lo} {hi}");
+    }
+
+    #[test]
+    fn the_plot_dialogs_preview_draws_at_the_scale_ok_plots_at() {
+        let (d, layout) = layout_drawing(0.1);
+        // The parameters the Plot dialog sends for a layout (no scale; fit as the page setup says).
+        let preview = json!({"landscape": true, "fit": false, "lineweights": false, "plotTransparency": false,
+            "device": "None", "output": "png", "resolution": 127.0, "width": 297.0, "height": 420.0, "margins": [0, 0, 0, 0]});
+        let ok = json!({"landscape": true, "fit": false, "lineweights": false, "plotTransparency": false,
+            "device": "CADCraft PDF", "paper": "A3", "compress": false});
+        let (lo, hi, _) = png_x_mm(&plot(&d, &layout, &preview).unwrap(), 127.0);
+        let pdf_mm = pdf_x_mm(&plot(&d, &layout, &ok).unwrap());
+        assert!(near((lo, hi), pdf_mm, 0.6) && near(pdf_mm, (10.0, 410.0), 0.01), "preview {lo} {hi}, OK {pdf_mm:?}");
+        // The same layout saved at 1:1 previews differently (it did not on the PNG path before).
+        let (one, _) = layout_drawing(1.0);
+        assert_ne!(plot(&one, &layout, &preview).unwrap(), plot(&d, &layout, &preview).unwrap());
+    }
+
+    #[test]
+    fn model_space_png_and_svg_are_unchanged_and_ignore_the_layouts_scale() {
+        // Model space fits the extents to the printable area, whatever the layouts or a `scale`.
+        let (d, _) = layout_drawing(0.1);
+        let (one, _) = layout_drawing(1.0);
+        let a4 = json!({"output": "png", "resolution": 127.0, "width": 210, "height": 297, "landscape": true, "margins": [5, 5, 5, 5]});
+        let fitted = plot(&d, &Space::Model, &a4).unwrap();
+        assert_eq!(fitted, plot(&one, &Space::Model, &a4).unwrap(), "the layout's page setup does not reach model space");
+        let mut scaled = a4.clone();
+        scaled.as_object_mut().unwrap().extend(json!({"scale": 0.5}).as_object().unwrap().clone());
+        assert_eq!(fitted, plot(&d, &Space::Model, &scaled).unwrap(), "model-space PNG fits unless `fit: false`");
+        // The line (0,0)-(100,50) fills the printable width of the 297 mm sheet with 5 mm margins:
+        // 5 mm .. 292 mm (main gives the same).
+        let (lo, hi, w) = png_x_mm(&fitted, 127.0);
+        assert_eq!(w, 1485);
+        assert!(near((lo, hi), (5.0, 292.0), 0.6), "{lo} {hi}");
+        let svg =
+            |d: &Drawing| String::from_utf8(plot(d, &Space::Model, &json!({"output": "svg", "device": "None", "paper": "A3"})).unwrap()).unwrap();
+        assert_eq!(svg(&d), svg(&one));
+        assert!(svg(&d).contains("viewBox=\"0 0 104.000000 "), "model SVG in drawing units: the 100-unit line plus 2 % margins");
+    }
+
+    #[test]
+    fn hostile_layout_scales_never_panic_in_png_and_svg() {
+        for sc in [1e300, 1e12, 1e-12, 1e-300, 5e-324, f64::NAN, f64::INFINITY, -1.0, 0.0] {
+            let (d, layout) = layout_drawing(sc);
+            for out in ["png", "svg"] {
+                let r = plot(&d, &layout, &json!({"output": out, "resolution": 50.0, "device": "None", "paper": "A3"}));
+                assert!(r.is_ok(), "{out} at {sc:e}");
+            }
+            let r = plot(&layout_drawing(0.1).0, &layout, &json!({"output": "png", "resolution": 50.0, "scale": sc}));
+            assert!(r.is_ok(), "png with scale {sc:e}");
+        }
     }
 }

@@ -1184,6 +1184,19 @@ mod plot_dialog_tests {
     }
 
     #[test]
+    fn a_layouts_preview_and_ok_ask_for_the_same_scale() {
+        // The layout's scale comes from its page setup in the drawing: neither request carries one,
+        // and both say whether the page is fitted to paper, so the plotter draws them alike.
+        let st = state("Layout1");
+        let (ok, preview) = (plot_params(&st, None), plot_params(&st, Some(96.0)));
+        for key in ["layout", "fit", "landscape", "lineweights", "plotTransparency"] {
+            assert_eq!(ok[key], preview[key], "{key}");
+        }
+        assert!(ok.get("scale").is_none() && preview.get("scale").is_none());
+        assert_eq!(preview["output"], json!("png"));
+    }
+
+    #[test]
     fn plot_transparency_checkbox_reaches_the_plot() {
         let mut st = state("Model");
         assert!(!st.page.plot_transparency, "off by default");
