@@ -130,7 +130,7 @@ impl SelectPhase {
 }
 
 /// The objects among `hs` whose layer is locked.
-fn on_locked_layers(s: &Session, hs: &[Handle]) -> Result<Vec<Handle>> {
+pub(crate) fn on_locked_layers(s: &Session, hs: &[Handle]) -> Result<Vec<Handle>> {
     let d = s.doc()?;
     Ok(hs.iter().copied().filter(|h| d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked)).collect())
 }

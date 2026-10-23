@@ -8,7 +8,7 @@ use cadcraft_geom::{
 use serde_json::{Value, json};
 
 use super::helpers::*;
-use super::machines::{SelOutcome, SelectPhase, number};
+use super::machines::{SelOutcome, SelectPhase, number, on_locked_layers};
 use super::trimextend::{self, TrimM};
 use super::*;
 use crate::select::{SelectKind, SelectMode};
@@ -2031,6 +2031,16 @@ impl Interactive for SelectThen {
         }
         if self.ask_erase {
             let yes = matches!(&i, Input::Keyword(k) if k == "Yes") || matches!(&i, Input::Text(t) if t.trim().to_ascii_lowercase().starts_with('y'));
+            // Erasing the sources mirrors them in place, which leaves those on locked layers alone.
+            if yes {
+                let locked = on_locked_layers(s, &self.objs)?;
+                self.objs.retain(|h| !locked.contains(h));
+                match locked.len() {
+                    0 => {}
+                    1 => s.echo("1 was on a locked layer."),
+                    n => s.echo(format!("{n} were on a locked layer.")),
+                }
+            }
             let (a, b) = (self.pts[0], self.pts[1]);
             transform_entities(s, &self.objs, &Mat3::mirror(a, b), !yes)?;
             s.set_selection(Vec::new());

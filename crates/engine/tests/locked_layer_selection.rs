@@ -90,3 +90,33 @@ fn remove_does_not_count_locked_objects() {
     s.cmdline("all").unwrap();
     assert!(!s.log.iter().any(|m| m.contains("locked layer")), "{:?}", s.log);
 }
+
+/// MIRROR erasing the source objects mirrors them in place, so the ones on locked layers stay
+/// where they are, and the command line says so once the answer is Yes.
+#[test]
+fn mirror_erasing_sources_says_one_was_on_a_locked_layer() {
+    let (mut s, free, held) = drawing(1);
+    s.cmdline("mirror").unwrap();
+    s.cmdline("all").unwrap();
+    assert!(!s.log.iter().any(|m| m.contains("locked layer")), "{:?}", s.log);
+    s.script("\n0,-10 10,-10\ny\n").unwrap();
+    assert!(s.running.is_none());
+    assert!(logged(&s, "1 was on a locked layer."), "{:?}", s.log);
+    assert_eq!(start(&s, free), (0.0, -20.0));
+    assert_eq!(start(&s, held[0]), (0.0, 5.0));
+}
+
+/// Keeping the source objects, MIRROR copies the ones on locked layers too and says nothing.
+#[test]
+fn mirror_keeping_sources_copies_objects_on_locked_layers() {
+    let (mut s, free, held) = drawing(2);
+    s.cmdline("mirror").unwrap();
+    s.cmdline("all").unwrap();
+    s.script("\n0,-10 10,-10\nn\n").unwrap();
+    assert!(s.running.is_none());
+    assert!(!s.log.iter().any(|m| m.contains("locked layer")), "{:?}", s.log);
+    assert_eq!(start(&s, free), (0.0, 0.0));
+    assert!(held.iter().all(|h| start(&s, *h).1 >= 5.0));
+    let lines = s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
+    assert_eq!(lines, 6);
+}
