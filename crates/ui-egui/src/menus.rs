@@ -405,6 +405,12 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::hatchdlg::open_edit(app);
             Ok(Value::Null)
         }
+        // Typed or from a menu or the Tool Sets: the Attribute Definition dialog. -ATTDEF and JSON
+        // calls keep the command line and the JSON form.
+        "attdef" | "att" if params.is_null() && app.session.state().is_ok() => {
+            crate::attdefdlg::open(app);
+            Ok(Value::Null)
+        }
         "properties" | "pr" | "props" | "ch" if params.is_null() => {
             crate::docking::command(app, false, &json!({"operation":"open", "panel":"properties"}))
         }
