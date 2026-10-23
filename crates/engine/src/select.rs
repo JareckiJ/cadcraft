@@ -89,7 +89,7 @@ pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
     let polys = hit_polylines(d, e, tol);
     let mut best = polys.iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
     let filled = matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Table(_))
-        || matches!(e.kind, EntityKind::Tolerance(_));
+        || matches!(e.kind, EntityKind::Tolerance(_) | EntityKind::Image(_));
     if (filled && entity_bounds(d, e, 0).contains(p)) || in_text(d, e, p) {
         best = 0.0;
     }

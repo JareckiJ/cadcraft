@@ -89,6 +89,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if let Some(r) = crate::xrefs::route(app, id, params) {
         return Some(r);
     }
+    if let Some(r) = crate::lisp_ide::route(app, id, params) {
+        return Some(r);
+    }
     if let Some(r) = crate::bedit::route(app, id, params) {
         return Some(r);
     }
@@ -221,6 +224,24 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         // Typed or chosen from a menu or the tool bar: ask for the file (or show the preview).
         "export" | "exp" | "import" | "imp" | "publish" | "preview" | "pre" if params.is_null() && app.session.state().is_ok() => {
             return Some(crate::exchange::route(app, id));
+        }
+        // IMAGEATTACH from menu or typed without parameters: ask for the file with the native image picker.
+        "imageattach" | "iat" | "image" if params.is_null() && app.session.state().is_ok() => {
+            if let Some(pick) = app.services.pick_image.as_ref() {
+                if let Some(path) = pick() {
+                    app.cmd.buffer.clear();
+                    if let Err(e) = app.session.start("imageattach") {
+                        app.session.echo(e.to_string());
+                    } else {
+                        let _ = app.session.input(cadcraft_engine::Input::Text(path));
+                    }
+                }
+                return Some(Ok(Value::Null));
+            }
+            if let Err(e) = app.session.start("imageattach") {
+                app.session.echo(e.to_string());
+            }
+            return Some(Ok(Value::Null));
         }
         "ui.toggle.statusbar" => {
             toggle(&mut app.ui.show_status_bar, params);
@@ -566,6 +587,7 @@ pub(crate) fn entry_ui(ui: &mut egui::Ui, e: &Entry, clicked: &mut Option<String
     }
 }
 
+/// Render the top application menu bar, including the `.NET` / AutoLISP `🧩 Plugins` dropdown.
 pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     let tree = tree(app);
@@ -584,6 +606,7 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
                         }
                     });
                 }
+                crate::lisp_ide::plugin_menubar_item(app, ui);
             });
         },
     );
@@ -667,10 +690,14 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
         return;
     }
     // Cmd/Ctrl+C, X and V arrive as clipboard events, not key presses.
+    let had_paste_event = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
     let mut fire = crate::clipboard::shortcut_commands(app, ctx);
     ctx.input_mut(|i| {
         for (s, id) in pairs {
             if i.consume_shortcut(s) && !fire.contains(id) {
+                if had_paste_event && (*id == "pasteclip" || *id == "pasteblock") {
+                    continue;
+                }
                 fire.push(*id);
             }
         }
@@ -718,6 +745,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            ..Default::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }

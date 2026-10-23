@@ -98,6 +98,25 @@ pub struct DisplayList {
     /// Plot style end, join and fill style per primitive (parallel to `prims`; missing entries
     /// are "use object"), turned into geometry by [`pen::apply`].
     pub pens: Vec<Pen>,
+    /// Raster images placed in the display list's coordinate space (for PDF plotting and CPU rasterisation).
+    pub images: Vec<PlotImage>,
+}
+
+/// A raster image placed in world/paper coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlotImage {
+    /// Bottom-left corner in world/paper coordinates.
+    pub origin: Vec2,
+    /// Bottom edge vector (`u * size.x`) in world/paper coordinates.
+    pub u: Vec2,
+    /// Left edge vector (`v * size.y`) in world/paper coordinates.
+    pub v: Vec2,
+    /// Raw encoded image bytes (PNG/JPEG).
+    pub bytes: std::sync::Arc<[u8]>,
+    /// Fade percentage (0..=100).
+    pub fade: u8,
+    /// Optional clip rectangle (e.g. when inside a viewport).
+    pub clip: Option<Bounds2>,
 }
 
 /// A glyph of plotted text: the font glyph and, in world coordinates, where it sits. It is
@@ -400,8 +419,14 @@ impl Builder<'_> {
     }
     /// Shaped text: strokes as polylines; TrueType glyphs filled (TEXTFILL) or outlined.
     fn shaped(&mut self, ctx: &Ctx, color: Ink, lw: f32, sh: &cadcraft_fonts::Shaped) {
+        let on_screen = !self.plotting && self.opts.min_dash > 0.0;
+        let stroke_lw = if on_screen && lw * 3.78 <= 1.35 {
+            -1.0
+        } else {
+            lw
+        };
         for s in &sh.strokes {
-            self.polyline(ctx, color, lw, s);
+            self.polyline(ctx, color, stroke_lw, s);
         }
         if sh.glyphs.is_empty() {
             return;
@@ -419,10 +444,20 @@ impl Builder<'_> {
                     let xf = crate::text::placement(t, ctx.xf);
                     let mesh = crate::text::mesh(t, xf, pixel);
                     self.tris_at(ctx, color, &mesh.triangles, xf);
+                    if on_screen && xf.a.hypot(xf.b).hypot(xf.c.hypot(xf.d)) * 1000.0 <= pixel * 9.0 {
+                        for c in g {
+                            self.polyline(ctx, color, stroke_lw, c);
+                        }
+                    }
                     mesh.triangles.len()
                 } else {
                     let tris = fill::triangulate_evenodd(g);
                     self.tris(ctx, color, &tris);
+                    if on_screen {
+                        for c in g {
+                            self.polyline(ctx, color, stroke_lw, c);
+                        }
+                    }
                     tris.len()
                 };
                 if let Some(t) = glyph.filter(|_| self.plotting)
@@ -606,6 +641,7 @@ fn append(dst: &mut DisplayList, src: DisplayList) {
         t
     }));
     dst.pens.extend(src.pens);
+    dst.images.extend(src.images);
     dst.bounds = dst.bounds.union(&src.bounds);
     dst.expanded = dst.expanded.saturating_add(src.expanded);
 }
@@ -872,6 +908,24 @@ fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
             }
         }
     }
+    let clip_bounds = match clip {
+        Clip::Rect(rect) => *rect,
+        Clip::Poly(c) => c.bounds(),
+    };
+    for img in &src.images {
+        let mut ib = Bounds2::EMPTY;
+        for q in [img.origin, img.origin + img.u, img.origin + img.u + img.v, img.origin + img.v] {
+            ib.add(q);
+        }
+        if ib.intersects(&clip_bounds) {
+            let mut clipped = img.clone();
+            clipped.clip = Some(match clipped.clip {
+                Some(prev) => Bounds2 { min: prev.min.max(clip_bounds.min), max: prev.max.min(clip_bounds.max) },
+                None => clip_bounds,
+            });
+            dst.images.push(clipped);
+        }
+    }
 }
 
 fn push_raw(dst: &mut DisplayList, p: &DPrim, kind: Kind, pts: &[Vec2]) {
@@ -1092,7 +1146,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                     b.polyline(ctx, rgb, lw, &dash);
                 }
             }
-            // Text embedded in the linetype (shapes need SHX files and are not drawn).
+            // Text and shapes embedded in the linetype (shapes when their SHX file is found).
             if b.opts.text {
                 for sh in linetype_text::texts(ctx.d, pts, lt, ltscale, min) {
                     b.shaped(ctx, rgb, lw, &sh);
@@ -1225,9 +1279,32 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             let o = i.insert.xy();
             let u = i.u.xy() * i.size.x;
             let v = i.v.xy() * i.size.y;
-            b.polyline(ctx, rgb, lw, &[o, o + u, o + u + v, o + v, o]);
-            b.polyline(ctx, rgb, lw, &[o, o + u + v]);
-            b.polyline(ctx, rgb, lw, &[o + u, o + v]);
+            for q in [o, o + u, o + u + v, o + v] {
+                b.list.bounds.add(ctx.xf.apply(q));
+            }
+            if b.opts.fill
+                && let Some(bytes) = resolve_image_bytes(ctx.d, i)
+            {
+                let world_o = ctx.xf.apply(o);
+                let world_u = ctx.xf.apply(o + u) - world_o;
+                let world_v = ctx.xf.apply(o + v) - world_o;
+                b.list.images.push(PlotImage {
+                    origin: world_o,
+                    u: world_u,
+                    v: world_v,
+                    bytes,
+                    fade: i.fade.clamp(0, 100) as u8,
+                    clip: None,
+                });
+            }
+            let frame = match ctx.d.header.get("IMAGEFRAME").and_then(cadcraft_doc::HVal::as_i64).unwrap_or(1) {
+                0 => false,
+                2 => !b.plotting,
+                _ => !i.path.starts_with("clipboard_paste_"),
+            };
+            if frame {
+                b.polyline(ctx, rgb, lw, &[o, o + u, o + u + v, o + v, o]);
+            }
         }
         EntityKind::Table(t) => table(b, ctx, t, rgb, lw),
         EntityKind::Tolerance(t) => tolerance::draw(b, ctx, e, t, lw, tol),
@@ -1315,15 +1392,41 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
 }
 
+/// Resolve image bytes from in-memory drawing assets or disk.
+fn resolve_image_bytes(d: &Drawing, i: &cadcraft_doc::Image) -> Option<std::sync::Arc<[u8]>> {
+    let file_name = i.path.rsplit(['/', '\\']).next().unwrap_or(&i.path).trim();
+    if let Some(b) = d
+        .get_image_asset(&i.path)
+        .or_else(|| d.get_image_asset(&i.name))
+        .or_else(|| d.get_image_asset(file_name))
+    {
+        return Some(std::sync::Arc::from(b.as_slice()));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let s = i.path.trim().trim_matches('"').trim_matches('\'').trim();
+        if !s.is_empty() && let Ok(bytes) = std::fs::read(s) {
+            return Some(std::sync::Arc::from(bytes));
+        }
+    }
+    None
+}
+
 /// The text style of an entity (Standard defaults when missing).
 fn text_style(d: &Drawing, name: &str) -> cadcraft_doc::TextStyle {
     d.text_style(name).cloned().unwrap_or_default()
 }
 
+/// The font a text style draws with: its font file (TrueType, or an SHX font found by name),
+/// its big font and its vertical flag.
+pub fn style_font(ts: &cadcraft_doc::TextStyle) -> cadcraft_fonts::TextFont {
+    cadcraft_fonts::TextFont::resolve_style(&ts.font, &ts.big_font, ts.vertical)
+}
+
 /// Shape a TEXT / ATTRIB / ATTDEF with its style's font and generation flags.
 pub fn place_text_entity(d: &Drawing, t: &cadcraft_doc::Text, value: &str) -> (cadcraft_fonts::Shaped, Bounds2) {
     let ts = text_style(d, &t.style);
-    let font = cadcraft_fonts::TextFont::resolve(&ts.font);
+    let font = style_font(&ts);
     let (h, v) = align(t.halign, t.valign);
     let p = cadcraft_fonts::TextParams {
         insert: t.insert.xy(),
@@ -1351,7 +1454,7 @@ pub fn layout_mtext_entity(d: &Drawing, t: &cadcraft_doc::MText) -> cadcraft_fon
         rotation: t.rotation,
         line_spacing: t.line_spacing,
         line_spacing_exact: t.line_spacing_exact,
-        font: cadcraft_fonts::TextFont::resolve(&ts.font),
+        font: style_font(&ts),
         width_factor: ts.width_factor,
         oblique: ts.oblique,
         columns: t.columns.as_ref().map(|c| cadcraft_fonts::MTextColumnSpec {
@@ -1388,7 +1491,7 @@ fn mtext(b: &mut Builder, ctx: &Ctx, t: &cadcraft_doc::MText, rgb: Ink, lw: f32)
 /// The font settings of a dimension style's text style.
 pub fn dim_text(d: &Drawing, st: &cadcraft_doc::DimStyle) -> DimText {
     let ts = text_style(d, &st.text_style);
-    DimText { font: cadcraft_fonts::TextFont::resolve(&ts.font), fixed_height: ts.height, width_factor: ts.width_factor, oblique: ts.oblique }
+    DimText { font: style_font(&ts), fixed_height: ts.height, width_factor: ts.width_factor, oblique: ts.oblique }
 }
 
 /// Geometry of a dimension in a drawing: its style, overrides and text font.

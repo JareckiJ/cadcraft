@@ -690,6 +690,8 @@ pub struct Session {
     pub last_used: LastUsed,
     /// Where `clipboard` came from and the layers, styles and blocks its objects need.
     pub clipboard_source: Option<cmd::clipboard::ClipSource>,
+    /// A raster image payload on the clipboard.
+    pub clipboard_image: Option<cmd::clipboard::ClipboardImage>,
     /// The window last picked with PLOTWINDOW (the Plot dialog's "Window <").
     pub plot_window: Option<cadcraft_geom::Bounds2>,
     /// AutoLISP: each drawing's symbols and the routine running ([`lisp`]).
@@ -698,6 +700,22 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// State of an active interactive pick requested by a .NET DLL plugin (`dotnet.bridge`).
+    pub dotnet_pick: DotNetPickState,
+    /// Optional Z coordinate of a 3D point passed programmatically (e.g. from LISP `command` into `3DPOLY`).
+    pub(crate) pending_point_z: Option<f64>,
+    /// Directory of the most recently loaded LISP file, searched by `findfile`, `open` and `-INSERT`.
+    pub lisp_file_dir: Option<String>,
+}
+
+/// Interactive pick state requested by an external .NET plugin via `dotnet.bridge`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DotNetPickState {
+    pub status: String,
+    pub point: Option<[f64; 3]>,
+    pub handle: Option<String>,
+    pub handles: Vec<String>,
+    pub value: Option<f64>,
 }
 
 impl Default for Session {
@@ -743,11 +761,30 @@ impl Session {
             last_dim: None,
             last_used: LastUsed::default(),
             clipboard_source: None,
+            clipboard_image: None,
             plot_window: None,
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            dotnet_pick: DotNetPickState::default(),
+            pending_point_z: None,
+            lisp_file_dir: None,
         }
+    }
+    /// Record the folder of a loaded LISP file so `findfile`, `open` and `-INSERT` search it.
+    pub fn set_lisp_file_dir(&mut self, dir: Option<String>) {
+        self.lisp_file_dir = dir;
+    }
+    /// Put a raster image payload onto the clipboard.
+    pub fn set_clipboard_image(&mut self, bytes: Vec<u8>, width: u32, height: u32) {
+        self.clipboard = Vec::new();
+        self.clipboard_base = Vec2::ZERO;
+        self.clipboard_source = None;
+        self.clipboard_image = Some(cmd::clipboard::ClipboardImage { bytes: std::sync::Arc::new(bytes), width, height });
+    }
+    /// The file path of the active drawing, if known.
+    pub fn drawing_path(&self) -> Option<String> {
+        self.state().ok().and_then(|s| s.path.clone())
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
         self.untitled_counter += 1;
@@ -963,6 +1000,9 @@ impl Session {
         let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
         let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
         let Some(spec) = find_command(&id) else {
+            if !transparent {
+                self.lisp_ensure_user_loaded();
+            }
             // A command defined in LISP: (defun c:NAME …).
             if !transparent && let Some(f) = self.lisp_command(&lower) {
                 if self.running.is_some() {
@@ -1350,8 +1390,11 @@ impl Session {
     /// transparent command, cancels it and the command it interrupted.
     pub fn cancel(&mut self) {
         self.point_mods.clear();
+        if self.dotnet_pick.status == "waiting" {
+            self.dotnet_pick.status = "cancel".into();
+        }
         // Esc stops a LISP routine waiting for input, and the command it paused in.
-        if self.lisp_waiting() {
+        if self.lisp_waiting() || self.lisp_running() {
             if self.running.is_some() {
                 let _ = self.feed(Some(Input::Cancel));
             }
@@ -1482,6 +1525,13 @@ impl Session {
         loop {
             if self.running.is_none() {
                 if !script && !first {
+                    return Ok(());
+                }
+                if self.lisp_prompt().is_none() && is_bare_lisp_prefix(rest) {
+                    let wrapped = format!("({})", rest.trim());
+                    if let Err(e) = self.lisp_eval(&wrapped, true, false, Vec::new()) {
+                        self.echo(e.to_string());
+                    }
                     return Ok(());
                 }
                 // `cmd {json}`: programmatic call with parameters.
@@ -1851,6 +1901,46 @@ impl Session {
 fn lisp_expression(t: &str) -> bool {
     let t = t.trim();
     t.starts_with('(') || (t.starts_with('!') && t.len() > 1)
+}
+
+/// Bare prefix LISP/arithmetic expression typed at `Command:` without outer parentheses (e.g. `+ 1 2`).
+pub fn is_bare_lisp_prefix(t: &str) -> bool {
+    let t = t.trim_start();
+    let Some((op, rest)) = t.split_once([' ', '\t']) else {
+        return false;
+    };
+    is_bare_lisp_operator(op) && !rest.trim().is_empty()
+}
+
+/// Whether `op` is a LISP prefix operator that accepts space-separated arguments on the command line.
+pub fn is_bare_lisp_operator(op: &str) -> bool {
+    let op = op.to_ascii_lowercase();
+    matches!(
+        op.as_str(),
+        "+" | "-"
+            | "*"
+            | "/"
+            | "="
+            | "/="
+            | "<"
+            | ">"
+            | "<="
+            | ">="
+            | "1+"
+            | "1-"
+            | "sin"
+            | "cos"
+            | "sqrt"
+            | "abs"
+            | "min"
+            | "max"
+            | "expt"
+            | "rem"
+            | "gcd"
+            | "strcat"
+            | "setq"
+            | "defun"
+    )
 }
 
 /// The next command-line input in `rest` and what follows it: up to a space or tab, except that

@@ -187,7 +187,7 @@ fn text_from(t: &T) -> Text {
         5 => HAlign::Fit,
         _ => HAlign::Left,
     };
-    let v = match t.i(73).or_else(|| t.i(74)).unwrap_or(0) {
+    let v = match t.i(74).or_else(|| t.i(73)).unwrap_or(0) {
         1 => VAlign::Bottom,
         2 => VAlign::Middle,
         3 => VAlign::Top,
@@ -510,6 +510,7 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
         }
         // The file path comes from the IMAGEDEF object (`dxf_image::resolve`).
         "IMAGE" => EntityKind::Image(crate::dxf_image::read_entity(tags)),
+        "OLE2FRAME" | "OLEFRAME" => EntityKind::Image(crate::dxf_image::read_ole_placeholder(tags)),
         "TOLERANCE" => {
             let dir = t.p(11);
             let dir = if dir.xy().is_finite() && dir.xy().len() > 1e-12 { dir } else { Vec3::new(1.0, 0.0, 0.0) };
@@ -1934,7 +1935,15 @@ fn apply_sortents(
     for (owner, map) in tables {
         let Some(name) = brs.get(owner) else { continue };
         let up = name.to_ascii_uppercase();
-        let key = |e: &Entity| map.get(&e.handle).copied().unwrap_or(e.handle.0);
+        // Attribute definitions are not drawn in block references; preserve their record order so
+        // INSERT prompts attributes in creation/BATTMAN order rather than draw order.
+        let key = |e: &Entity| {
+            if matches!(e.kind, EntityKind::AttDef(_)) {
+                (1u8, 0)
+            } else {
+                (0u8, map.get(&e.handle).copied().unwrap_or(e.handle.0))
+            }
+        };
         if up == "*MODEL_SPACE" {
             d.model.sort_by_key(key);
         } else if up.starts_with("*PAPER_SPACE") {

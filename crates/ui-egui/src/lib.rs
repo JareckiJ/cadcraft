@@ -27,6 +27,7 @@ mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
 pub mod xrefs;
+pub mod lisp_ide;
 
 pub mod dyngrips;
 pub mod dyninput;
@@ -109,6 +110,9 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// Plugin files (`.lsp`, `.dll`) pinned to the Startup Suite so they load automatically
+    /// at startup and when switching/opening drawings.
+    pub startup_plugins: Vec<String>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -180,15 +184,18 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            startup_plugins: Vec::new(),
         }
     }
 }
 
-/// Host services (file pickers, clipboard) injected by the app so this crate stays portable.
+/// Host services (file pickers, clipboard, on-demand control server) injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    pub pick_image: Option<Box<dyn Fn() -> Option<String>>>,
+    pub start_control: Option<Box<dyn Fn() -> Receiver<ControlRequest>>>,
 }
 
 pub struct CadApp {
@@ -248,6 +255,7 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    pub lisp_ide: Option<lisp_ide::LispIdeState>,
 }
 
 impl CadApp {
@@ -288,6 +296,7 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            lisp_ide: None,
         }
     }
 
@@ -307,13 +316,27 @@ impl CadApp {
         self.canvas.gpu_device = Some(rs.device.clone());
     }
 
+    /// Attach a running control-server request channel to the application.
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
         self
     }
 
+    /// Ensure the loopback control server is running (starting it on demand via [`Services::start_control`])
+    /// so out-of-process `.NET` DLL plugins can communicate with the session.
+    pub fn ensure_control(&mut self) {
+        if self.control_rx.is_none()
+            && let Some(start) = self.services.start_control.take()
+        {
+            self.control_rx = Some(start());
+        }
+    }
+
     /// Run a command programmatically (or a UI command).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id.eq_ignore_ascii_case("pasteclip") || id.eq_ignore_ascii_case("paste") {
+            crate::clipboard::sync_os_clipboard_for_paste(self);
+        }
         if let Some(r) = menus::run_ui_command(self, id, &params) {
             return r;
         }
@@ -333,7 +356,16 @@ impl CadApp {
 
     /// Start a command as if typed (interactive when it has prompts).
     pub fn start(&mut self, name: &str) {
+        if name.eq_ignore_ascii_case("pasteclip") || name.eq_ignore_ascii_case("paste") {
+            crate::clipboard::sync_os_clipboard_for_paste(self);
+        }
+        if !self.session.prompting() && !name.contains('.') {
+            self.cmd.push_history(&name.to_ascii_uppercase());
+        }
         if menus::run_ui_command(self, name, &Value::Null).is_some() {
+            return;
+        }
+        if lisp_ide::try_run_dotnet_command(self, name) {
             return;
         }
         if let Err(e) = self.session.start(name) {
@@ -346,10 +378,21 @@ impl CadApp {
     pub fn cmdline(&mut self, text: &str) -> Option<String> {
         if !self.session.prompting() {
             let first = text.split_whitespace().next().unwrap_or("");
+            if first.eq_ignore_ascii_case("pasteclip") || first.eq_ignore_ascii_case("paste") {
+                crate::clipboard::sync_os_clipboard_for_paste(self);
+            }
             // `cmd {json}` is a programmatic call: the engine runs it with those parameters.
             let json_form = text.trim_start().get(first.len()..).is_some_and(|rest| rest.trim_start().starts_with('{'));
-            if !first.is_empty() && !json_form && menus::run_ui_command(self, &first.to_ascii_lowercase(), &Value::Null).is_some() {
-                return None;
+            if !first.is_empty() && !json_form {
+                if !first.starts_with("ui.") {
+                    self.cmd.push_history(text);
+                }
+                if menus::run_ui_command(self, &first.to_ascii_lowercase(), &Value::Null).is_some() {
+                    return None;
+                }
+                if lisp_ide::try_run_dotnet_command(self, first) {
+                    return None;
+                }
             }
         }
         let e = self.session.cmdline(text).err()?.to_string();
@@ -383,6 +426,9 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if !self.ui.startup_plugins.is_empty() {
+            prefs["startupPlugins"] = json!(self.ui.startup_plugins);
+        }
         prefs.to_string()
     }
 
@@ -410,6 +456,14 @@ impl CadApp {
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
         }
+        if let Some(plugins) = v.get("startupPlugins").and_then(Value::as_array) {
+            self.ui.startup_plugins = plugins
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect();
+        }
     }
 
     pub fn set_status(&mut self, s: impl Into<String>) {
@@ -420,6 +474,14 @@ impl CadApp {
     /// "Opening ..." card shows ([`opening`]); [`Self::finish_opening`] adds it when ready. On the
     /// web it opens at once.
     pub fn open_path(&mut self, path: &str) {
+        // A .NET DLL / VB.NET / C# plugin file: load into the NETLOAD / VBAIDE Studio.
+        if lisp_ide::is_plugin_file(path) {
+            if !path.trim().to_ascii_lowercase().ends_with(".dll") {
+                self.ui.dialog = Some("vbaide".into());
+            }
+            lisp_ide::load_path_into_ide(self, path);
+            return;
+        }
         // A LISP file (dropped on the window): loaded as APPLOAD loads it.
         if is_lisp_file(path) {
             match cadcraft_engine::lisp::builtins::read_text_file(path) {
@@ -578,6 +640,7 @@ impl CadApp {
         self.drain_control(ctx);
         self.finish_opening();
         self.opening.show(ctx);
+        lisp_ide::ensure_startup_plugins_loaded(self);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
         }
@@ -592,7 +655,34 @@ impl CadApp {
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let p = f.path().to_string_lossy().to_string();
             if !p.is_empty() {
-                self.open_path(&p);
+                let lower = p.to_ascii_lowercase();
+                if lower.ends_with(".png")
+                    || lower.ends_with(".jpg")
+                    || lower.ends_with(".jpeg")
+                    || lower.ends_with(".bmp")
+                    || lower.ends_with(".webp")
+                    || lower.ends_with(".tif")
+                    || lower.ends_with(".tiff")
+                    || lower.ends_with(".gif")
+                {
+                    let center = self.session.state().map(|s| s.view().center).unwrap_or(cadcraft_geom::Vec2::ZERO);
+                    match self.session.execute(
+                        "imageattach",
+                        &serde_json::json!({
+                            "path": p,
+                            "at": [center.x, center.y],
+                        }),
+                    ) {
+                        Ok(_) => {
+                            self.session.echo(format!("Attached image: {p}"));
+                        }
+                        Err(e) => {
+                            self.session.echo(e.to_string());
+                        }
+                    }
+                } else {
+                    self.open_path(&p);
+                }
             }
         }
     }

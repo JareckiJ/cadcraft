@@ -101,6 +101,13 @@ pub fn specs() -> Vec<CommandSpec> {
         })
         .noundo(),
         CommandSpec::new("layout.set", "Switch Layout", run_layout_set).params("{name: \"Model\" | layout name}").noundo(),
+        CommandSpec::new("model", "Model Tab", |s, _| run_layout_set(s, &json!({"name": "Model"}))).noundo(),
+        CommandSpec::new("viewres", "View Resolution", |s, _| {
+            s.touch();
+            ok()
+        })
+        .noundo()
+        .interactive(|_| Ok(Box::new(ViewresM::default()))),
     ];
     v.extend(named_views::specs());
     v.extend(vports::specs());
@@ -606,6 +613,37 @@ impl Interactive for PanM {
             }
             (_, Input::Enter) => Ok(Step::Done),
             _ => Ok(Step::Continue),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ViewresM {
+    step: u8,
+}
+
+impl Interactive for ViewresM {
+    fn name(&self) -> &'static str {
+        "VIEWRES"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.step == 0 {
+            Prompt::new("Do you want fast zooms?", Accept::TEXT).kw(&["Yes", "No"]).default("Y")
+        } else {
+            Prompt::new("Enter circle zoom percent (1-20000)", Accept::NUMBER).default("1000")
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Cancel),
+            _ if self.step == 0 => {
+                self.step = 1;
+                Ok(Step::Continue)
+            }
+            _ => {
+                s.touch();
+                Ok(Step::Done)
+            }
         }
     }
 }

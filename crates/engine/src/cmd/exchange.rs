@@ -307,10 +307,13 @@ fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     if let Some(name) = str_param(p, "paper") {
-        let ps = paper::paper_size(name).ok_or_else(|| bad("preview", format!("unknown paper size `{name}`")))?;
-        page.paper = ps.name.into();
-        page.width_mm = ps.width_mm;
-        page.height_mm = ps.height_mm;
+        if let Some(ps) = paper::paper_size(name) {
+            page.paper = ps.name.into();
+            page.width_mm = ps.width_mm;
+            page.height_mm = ps.height_mm;
+        } else if !(page.paper.eq_ignore_ascii_case(name) && page.width_mm > 0.0 && page.height_mm > 0.0) {
+            return Err(bad("preview", format!("unknown paper size `{name}`")));
+        }
     }
     if let Some(l) = p.get("landscape").and_then(Value::as_bool) {
         page.landscape = l;
