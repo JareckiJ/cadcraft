@@ -336,7 +336,7 @@ fn typed_arrayedit() {
     let a = rect_array(&mut s);
     typed(&mut s, &["arrayedit", "l"]);
     let p = s.prompt_text();
-    assert!(p.contains("Enter an option or [Source/REPlace/Base point/Rows/Columns/Levels/RESet/eXit] <eXit>"), "{p}");
+    assert!(p.contains("Enter an option or [Source/REPlace/Base point/Rows/Columns/Levels/DELete items/RESet/eXit] <eXit>"), "{p}");
     typed(&mut s, &["c", "4", "t", "9", "r", "2", "5", ""]);
     assert!(s.prompt_text().contains("Enter an option"), "{}", s.prompt_text());
     assert_eq!(centres(&s, &a).len(), 8);
@@ -376,4 +376,35 @@ fn json_arrays_follow_arrayassociativity() {
     assert_eq!(model(&s).iter().filter(|e| matches!(e.kind, EntityKind::Circle(_))).count(), 3);
     let r = s.execute("arraypolar", &json!({"handles": [h], "center": [10, 0], "count": 4, "associative": true})).unwrap();
     assert_eq!(r["associative"], true);
+}
+
+#[test]
+fn arrayedit_deletes_items_and_reset_restores_them() {
+    let mut s = Session::new();
+    let a = rect_array(&mut s);
+    s.execute("arrayedit", &json!({"handle": a, "delete": [[1, 0, 0]]})).unwrap();
+    assert_eq!(centres(&s, &a), vec![(0, 0), (4000, 0)]);
+    let (_, p) = the_array(&s);
+    assert_eq!(p.removed, vec![(1, 0, 0)], "still associative, with the item recorded as deleted");
+    // Changing the spacing keeps the gap.
+    s.execute("arrayedit", &json!({"handle": a, "colSpacing": 3})).unwrap();
+    assert_eq!(centres(&s, &a), vec![(0, 0), (6000, 0)]);
+    // A missing item, a deleted item again and the last item are refused and change nothing.
+    assert!(s.execute("arrayedit", &json!({"handle": a, "delete": [[7, 0, 0]]})).is_err());
+    assert!(s.execute("arrayedit", &json!({"handle": a, "delete": [[1, 0, 0]]})).is_err());
+    assert!(s.execute("arrayedit", &json!({"handle": a, "delete": [[0, 0, 0], [2, 0, 0]]})).is_err());
+    assert_eq!(centres(&s, &a), vec![(0, 0), (6000, 0)]);
+    assert!(s.execute("arrayedit", &json!({"handle": a, "delete": "x"})).is_err());
+    // RESet brings it back.
+    s.execute("arrayedit", &json!({"handle": a, "reset": true})).unwrap();
+    assert_eq!(centres(&s, &a), vec![(0, 0), (3000, 0), (6000, 0)]);
+
+    // Typed: DELete items, pick item 2, Enter, eXit; one undo restores it.
+    typed(&mut s, &["arrayedit", "1,0", "del"]);
+    assert!(s.prompt_text().contains("Select an item in array to delete"), "{}", s.prompt_text());
+    typed(&mut s, &["6,0", "", "x"]);
+    assert!(s.current_prompt().is_none(), "{}", s.prompt_text());
+    assert_eq!(centres(&s, &a), vec![(0, 0), (3000, 0)]);
+    s.execute("undo", &json!({})).unwrap();
+    assert_eq!(centres(&s, &a).len(), 3);
 }
