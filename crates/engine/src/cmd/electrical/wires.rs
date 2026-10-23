@@ -24,6 +24,10 @@ use crate::{EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub(super) const WIRE_LAYERS: &str = "WIRE*";
 pub(super) const LABEL_LAYER: &str = "WIRENO";
+/// Texts naming a potential for good (`+24V`, `0V`, `L1`, `PE`), like EPLAN's potential
+/// definition points: the network a text on this layer sits on takes its name as wire number,
+/// and numbering never changes it.
+pub(super) const POTENTIAL_LAYER: &str = "POTENTIAL";
 const FORMAT: &str = "{sheet}{col2}";
 /// Most wire segments handled at once.
 const MAX_SEGMENTS: usize = 200_000;
@@ -210,19 +214,24 @@ pub(super) fn networks(s: &Session) -> Result<Vec<Network>> {
     let (handles, segs) = wire_segments(s, WIRE_LAYERS)?;
     let groups = potentials(handles.len(), &segs, 0.01);
     let numbers = labels(s, LABEL_LAYER)?;
+    let fixed = labels(s, POTENTIAL_LAYER)?;
     let ix = super::pins::PinIndex::build(s)?;
     let mut out = Vec::with_capacity(groups.len());
     for g in &groups {
         let gsegs: Vec<&Seg> = segs.iter().filter(|sg| g.contains(&sg.wire)).collect();
         let pins: Vec<(Handle, String, Vec2)> =
             ix.pins.iter().filter(|p| gsegs.iter().any(|sg| sg.dist_to(p.at) <= 0.01)).map(|p| (p.insert, p.number.clone(), p.at)).collect();
-        let number = numbers
+        let number = fixed
             .iter()
+            .chain(numbers.iter())
             .filter(|(_, _, v)| !v.is_empty())
             .map(|(_, at, v)| (gsegs.iter().map(|sg| sg.dist_to(*at)).fold(f64::INFINITY, f64::min), v))
             .filter(|(d, _)| *d <= 6.0)
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, v)| v.clone());
+        let named =
+            fixed.iter().filter(|(_, at, v)| !v.is_empty() && gsegs.iter().any(|sg| sg.dist_to(*at) <= 6.0)).map(|(_, _, v)| v.clone()).next();
+        let number = named.or(number);
         out.push(Network { pins, number, wire_handles: g.iter().filter_map(|w| handles.get(*w)).copied().collect() });
     }
     Ok(out)
@@ -288,6 +297,8 @@ struct Potential {
     column: u64,
     /// Label already on the drawing (handle, value).
     label: Option<(Handle, String)>,
+    /// Its fixed name (a text on the POTENTIAL layer).
+    fixed: Option<String>,
 }
 
 pub(super) fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
@@ -347,6 +358,21 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
 
+    // Fixed potential names.
+    let names = labels(s, POTENTIAL_LAYER)?;
+    let mut named: HashMap<usize, String> = HashMap::new(); // potential index -> name
+    for (_, at, v) in names.iter().filter(|(_, _, v)| !v.is_empty()) {
+        let best = groups
+            .iter()
+            .enumerate()
+            .flat_map(|(gi, g)| g.iter().flat_map(|w| by_wire.get(*w).into_iter().flatten()).map(move |sg| (gi, sg.dist_to(*at))))
+            .filter(|(_, d)| *d <= reach)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((gi, _)) = best {
+            named.entry(gi).or_insert_with(|| v.clone());
+        }
+    }
+
     let mut pots: Vec<Potential> = Vec::new();
     let mut outside = 0usize;
     for (gi, g) in groups.iter().enumerate() {
@@ -362,19 +388,20 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
             .filter_map(|(li, _)| existing.get(*li))
             .min_by_key(|(h, ..)| *h)
             .map(|(h, _, v)| (*h, v.clone()));
-        pots.push(Potential { wires: g.clone(), at, label_at, vertical, sheet, column, label });
+        pots.push(Potential { wires: g.clone(), at, label_at, vertical, sheet, column, label, fixed: named.get(&gi).cloned() });
     }
     pots.sort_by(|a, b| (a.sheet, a.column).cmp(&(b.sheet, b.column)).then(b.at.y.total_cmp(&a.at.y)).then(a.at.x.total_cmp(&b.at.x)));
 
     // Numbers kept (new mode) are reserved first.
     let keep = |pt: &Potential| !renumber_all && pt.label.as_ref().is_some_and(|(_, v)| !v.is_empty());
     let mut used: HashSet<String> = pots.iter().filter(|pt| keep(pt)).filter_map(|pt| pt.label.as_ref().map(|(_, v)| v.clone())).collect();
+    used.extend(pots.iter().filter_map(|pt| pt.fixed.clone()));
     // Numbers taken elsewhere (other drawings of a project).
     used.extend(super::reserved_param(p));
     let mut counters: HashMap<String, u64> = HashMap::new();
     let mut plan: Vec<(usize, String)> = Vec::new();
     for (i, pt) in pots.iter().enumerate() {
-        if keep(pt) {
+        if keep(pt) || pt.fixed.is_some() {
             continue;
         }
         let number = if counted {
@@ -413,6 +440,14 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
                 d.remove_entity(*h);
             }
         }
+        // A named potential needs no number of its own: its name is its label.
+        if !renumber_all {
+            let stale: Vec<Handle> = pots.iter().filter(|pt| pt.fixed.is_some()).filter_map(|pt| pt.label.as_ref().map(|(h, _)| *h)).collect();
+            let d = s.doc_mut()?;
+            for h in stale {
+                d.remove_entity(h);
+            }
+        }
         for (i, number) in &plan {
             let Some(pt) = pots.get(*i) else { continue };
             match (&pt.label, renumber_all) {
@@ -446,7 +481,7 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, pt)| {
-            let number = numbers.get(&i).map(|n| n.to_string()).or_else(|| pt.label.as_ref().map(|(_, v)| v.clone()));
+            let number = pt.fixed.clone().or_else(|| numbers.get(&i).map(|n| n.to_string())).or_else(|| pt.label.as_ref().map(|(_, v)| v.clone()));
             let hs: Vec<String> = pt.wires.iter().filter_map(|w| handles.get(*w)).map(|h| h.hex()).collect();
             json!({ "number": number, "handles": hs, "at": [pt.at.x, pt.at.y], "sheet": pt.sheet, "column": pt.column })
         })

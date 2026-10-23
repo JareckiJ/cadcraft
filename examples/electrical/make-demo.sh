@@ -18,7 +18,7 @@ rm -f "$proj" "$out"/Demo-0*.dxf "$out"/Demo.ecdb
 args=()
 cmd() { args+=(--cmd "$1 $2"); }
 sym() { cmd esymbol "{\"name\": \"$1\", \"at\": [$2, $3]${4:+, \"tag\": \"$4\"}}"; }
-cmd eladder '{"top": 240, "bottom": 40}'
+cmd eladder '{"top": 240, "bottom": 40, "potentials": ["+24V", "0V"]}'
 sym IEC_PB_NC 21 200        # stop
 sym IEC_PB_NO 21 160        # start
 sym IEC_CONTACTOR_COIL 21 90
@@ -29,8 +29,6 @@ sym IEC_COIL 147 90
 sym IEC_NO 189 170 -K104
 sym IEC_LAMP 189 100
 cmd eladder.clean '{}'      # the rungs nothing went on would short +24V to 0V
-cmd text '{"at": [5, 244], "text": "+24V DC", "height": 3}'
-cmd text '{"at": [5, 34], "text": "0V", "height": 3}'
 "$cli" run "$out/Demo-01.dxf" "${args[@]}" --save "$out/Demo-01.dxf"
 
 # Sheet 2: motor power circuit, three phases through breaker, main contacts and overload.

@@ -41,7 +41,8 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .menu(&["Tools", "Electrical", "Insert Ladder"])
             .params(
                 "{top: y, bottom: y, from? x (default 0), to? x (default from + 420), spacing? (default 42, a column), \
-                 layer? (default \"WIRE\")} → {rails: [handle], rungs: [handle]}",
+                 layer? (default \"WIRE\"), potentials?: [top name, bottom name] (e.g. [\"+24V\", \"0V\"]: the rails' fixed wire \
+                 numbers), rungs?: bool (default true)} → {rails: [handle], rungs: [handle]}",
             )
             .interactive(|_| Ok(Box::new(super::interactive::LadderM::default()))),
         CommandSpec::new("eladder.clean", "Remove Empty Rungs", run_clean).menu(&["Tools", "Electrical", "Remove Empty Rungs"]).params(
@@ -255,6 +256,30 @@ fn add_wire(s: &mut Session, pts: &[Vec2], layer: &str) -> Result<Handle> {
 }
 
 /// A junction dot at `p`.
+/// A fixed potential name (`+24V`) on the POTENTIAL layer, just above the wire at `at`.
+fn potential_name(s: &mut Session, at: Vec2, name: &str) -> Result<()> {
+    let layer = super::wires::POTENTIAL_LAYER;
+    ensure_layer(s, layer, 5)?;
+    let mut common = s.current_common();
+    common.layer = layer.to_string();
+    let p = cadcraft_geom::Vec3::new(at.x, at.y + 1.0, 0.0);
+    let t = cadcraft_doc::Text {
+        insert: p,
+        align_pt: Some(p),
+        height: 3.0,
+        value: name.to_string(),
+        rotation: 0.0,
+        width_factor: 1.0,
+        oblique: 0.0,
+        style: "Standard".into(),
+        halign: cadcraft_doc::HAlign::Left,
+        valign: cadcraft_doc::VAlign::Bottom,
+    };
+    let space = s.space();
+    s.doc_mut()?.add(&space, common, EntityKind::Text(t))?;
+    Ok(())
+}
+
 fn add_dot(s: &mut Session, p: Vec2) -> Result<()> {
     ensure_layer(s, JUNCTION_LAYER, 1)?;
     let mut common = s.current_common();
@@ -396,9 +421,19 @@ fn run_ladder_inner(s: &mut Session, p: &Value) -> Result<Value> {
         add_wire(s, &[Vec2::new(x0, top), Vec2::new(x1, top)], &layer)?.hex(),
         add_wire(s, &[Vec2::new(x0, bottom), Vec2::new(x1, bottom)], &layer)?.hex(),
     ];
+    if let Some(names) = p.get("potentials") {
+        let names: Vec<&str> = names.as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        if names.len() != 2 || names.iter().any(|n| n.trim().is_empty() || n.chars().count() > 32) {
+            return Err(bad(CMD, "`potentials` must be two names, top rail first (e.g. [\"+24V\", \"0V\"])"));
+        }
+        for (name, y) in names.iter().zip([top, bottom]) {
+            potential_name(s, Vec2::new(x0 + 2.0, y), name.trim())?;
+        }
+    }
     let mut rungs = Vec::new();
     let mut x = x0 + spacing / 2.0;
-    while x < x1 && rungs.len() < MAX_RUNGS {
+    let draw_rungs = p.get("rungs").and_then(Value::as_bool).unwrap_or(true);
+    while draw_rungs && x < x1 && rungs.len() < MAX_RUNGS {
         rungs.push(add_wire(s, &[Vec2::new(x, top), Vec2::new(x, bottom)], &layer)?.hex());
         add_dot(s, Vec2::new(x, top))?;
         add_dot(s, Vec2::new(x, bottom))?;
@@ -450,6 +485,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn rails_keep_their_potential_names() {
+        let mut s = Session::new();
+        s.execute("eladder", &json!({ "top": 200, "bottom": 50, "to": 84, "potentials": ["+24V", "0V"] })).unwrap();
+        s.execute("esymbol", &json!({ "name": "IEC_COIL", "at": [21, 120] })).unwrap();
+        s.execute("eladder.clean", &json!({})).unwrap();
+        for mode in ["new", "all"] {
+            let n = s.execute("ewirenum", &json!({ "mode": mode })).unwrap();
+            let mut nums: Vec<String> = n["wires"].as_array().unwrap().iter().map(|w| w["number"].as_str().unwrap_or("").to_string()).collect();
+            nums.sort();
+            assert_eq!(nums, vec!["+24V", "0V"], "{n}");
+        }
+        let labels = s.doc().unwrap().model.iter().filter(|e| e.common.layer == "WIRENO").count();
+        assert_eq!(labels, 0, "named rails carry no extra number");
+        assert!(s.execute("eladder", &json!({ "top": 200, "bottom": 50, "potentials": ["x"] })).is_err());
+    }
 
     #[test]
     fn empty_rungs_are_removed_and_the_rails_part() {
