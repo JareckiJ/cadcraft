@@ -454,9 +454,9 @@ pub(crate) fn assoc_xdata(assoc: &[DimAssoc]) -> Vec<Tag> {
     v
 }
 
-/// An arc-length dimension as CADCraft xdata: `1000 ARCLEN`, `1002 {`, the arc centre as an xdata
-/// point (`1010`/`1020`/`1030`), `1002 }`. The record itself stays a standard aligned dimension
-/// (DXF has no arc-length DIMENSION type), so other programs still read it.
+/// An arc-length dimension as CADCraft xdata, for the formats without ARC_DIMENSION (R2000):
+/// `1000 ARCLEN`, `1002 {`, the arc centre as an xdata point (`1010`/`1020`/`1030`), `1002 }`.
+/// The record itself is a standard aligned dimension, so other programs still read it.
 pub(crate) fn arclen_xdata(center: cadcraft_geom::Vec3) -> Vec<Tag> {
     vec![Tag::s(1000, "ARCLEN"), Tag::s(1002, "{"), Tag::f(1010, center.x), Tag::f(1020, center.y), Tag::f(1030, center.z), Tag::s(1002, "}")]
 }
@@ -533,7 +533,10 @@ pub(crate) fn read_marks(tags: &[Tag]) -> cadcraft_doc::DimMarks {
     m
 }
 
-/// The arc centre written by [`arclen_xdata`]; None for other dimensions and other writers.
+/// The arc centre of an arc-length dimension saved as an aligned DIMENSION with the centre in
+/// `1000 ARCLEN` xdata (`1002 {`, centre `1010`/`1020`/`1030`, `1002 }`): CADCraft 0.7.0 and
+/// earlier, and today's R2000 files, whose format has no ARC_DIMENSION; None for other dimensions
+/// and other writers.
 pub(crate) fn read_arclen(tags: &[Tag]) -> Option<cadcraft_geom::Vec3> {
     let list = xdata_list(xdata(tags, APP), "ARCLEN");
     let g = |c: i32| list.iter().find(|t| t.code == c).map(Tag::f64).filter(|v| v.is_finite());

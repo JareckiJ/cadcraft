@@ -1770,10 +1770,10 @@ fn arc_length_dimension_keeps_its_kind_and_centre_on_roundtrip() {
     let mut al = dim(DimKind::ArcLength, Vec3::new(15.0, 5.0, 0.0), Vec3::new(5.0, 15.0, 0.0));
     al.p15 = Vec3::new(5.0, 5.0, 0.0);
     let h = d.add(&Space::Model, Default::default(), EntityKind::Dimension(al)).unwrap();
-    let text = write_dxf(&d);
-    // A standard aligned DIMENSION record (type 1 | 32), so other programs can read it.
+    let text = cadcraft_dxf::write_ascii(&dxf_write::tags(&d, cadcraft_dxf::Version::R2018));
+    // An ARC_DIMENSION record (the Reference's arc-length dimension), not an aligned DIMENSION.
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
-    assert!(lines.windows(2).any(|w| w == ["70", "33"]) && !lines.windows(2).any(|w| w == ["70", "40"]), "{text}");
+    assert!(lines.windows(2).any(|w| w == ["0", "ARC_DIMENSION"]) && !lines.windows(2).any(|w| w == ["0", "DIMENSION"]), "{text}");
     let back = read_dxf(text.as_bytes()).unwrap();
     match &back.entity(h).unwrap().kind {
         EntityKind::Dimension(x) => {

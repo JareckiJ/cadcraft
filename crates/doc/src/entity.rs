@@ -1080,6 +1080,8 @@ impl EntityKind {
             EntityKind::MText(_) => "MTEXT",
             EntityKind::AttDef(_) => "ATTDEF",
             EntityKind::Insert(_) => "INSERT",
+            // The arc-length dimension is the DXF Reference's ARC_DIMENSION.
+            EntityKind::Dimension(d) if matches!(d.kind, DimKind::ArcLength) => "ARC_DIMENSION",
             EntityKind::Dimension(_) => "DIMENSION",
             EntityKind::MLine(_) => "MLINE",
             EntityKind::Leader(_) => "LEADER",
@@ -1293,6 +1295,11 @@ impl EntityKind {
                 }
                 if let DimKind::Linear { rotation } = &mut d.kind {
                     *rotation = cadcraft_geom::norm_angle(*rotation + rot);
+                }
+                // Counter-clockwise from 13 to 14: a mirror reverses the sense, so the ends swap
+                // (the arc keeps its length instead of becoming the complementary one).
+                if mirror && matches!(d.kind, DimKind::ArcLength) {
+                    std::mem::swap(&mut d.p13, &mut d.p14);
                 }
                 d.marks.transform(&t3, rot, s, mirror);
                 d.block = None;

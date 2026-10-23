@@ -423,9 +423,14 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 row_spacing: t.fd(45, 0.0),
             })
         }
-        "DIMENSION" => {
+        // ARC_DIMENSION (DXF Reference) is CADCraft's arc-length dimension: centre 15, ends 13 and
+        // 14, text 11, measurement 42. The Reference gives its group 70 no type of its own (AutoCAD
+        // 2027 writes the three-point angular value), so only its flag bits are read.
+        "DIMENSION" | "ARC_DIMENSION" => {
             let ty = t.i(70).unwrap_or(0) & 0x0f;
+            let kind_is_arc_dimension = kind == "ARC_DIMENSION";
             let kind = match ty {
+                _ if kind_is_arc_dimension => DimKind::ArcLength,
                 0 => DimKind::Linear { rotation: t.fd(50, 0.0).to_radians() },
                 1 => DimKind::Aligned,
                 2 => DimKind::Angular,
@@ -436,7 +441,7 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 8 => DimKind::ArcLength,
                 _ => DimKind::Aligned,
             };
-            EntityKind::Dimension(Dimension {
+            let mut dm = Dimension {
                 kind,
                 defpt: t.p(10),
                 // The text midpoint is the one OCS point of a DIMENSION.
@@ -454,7 +459,11 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 overrides: Default::default(),
                 assoc: Vec::new(),
                 marks: Default::default(),
-            })
+            };
+            if kind_is_arc_dimension {
+                arc_dimension_order(&mut dm, t.f(40), t.f(41));
+            }
+            EntityKind::Dimension(dm)
         }
         "LEADER" => EntityKind::Leader(Leader {
             vertices: t.pts(10).into_iter().map(|p| p.to3(0.0)).collect(),
@@ -1052,11 +1061,45 @@ fn entity_plot_style(tags: &[Tag], rx: &Rx) -> Option<String> {
     None
 }
 
+/// The angle between two directions, 0 to pi.
+fn angle_gap(a: f64, b: f64) -> f64 {
+    let d = cadcraft_geom::norm_angle(a - b);
+    d.min(std::f64::consts::TAU - d)
+}
+
+/// An ARC_DIMENSION's ends 13 and 14 in the order CADCraft measures them (counter-clockwise from 13
+/// to 14 about the centre 15). Another writer may list them clockwise, which would turn the
+/// dimension into the complementary arc. Of the two possible arcs, the one that agrees with the
+/// start and end angles 40/41 (when both are present and finite) is taken, else the one whose
+/// length is closer to the measurement 42; when neither says, the order stays as it is.
+fn arc_dimension_order(dm: &mut Dimension, start: Option<f64>, end: Option<f64>) {
+    let c = dm.p15.xy();
+    let (a13, a14) = (c.angle_to(dm.p13.xy()), c.angle_to(dm.p14.xy()));
+    if !(a13.is_finite() && a14.is_finite()) {
+        return;
+    }
+    let swap = match (start.filter(|a| a.is_finite()), end.filter(|a| a.is_finite())) {
+        (Some(s), Some(e)) => {
+            let (keep, swapped) = (angle_gap(a13, s) + angle_gap(a14, e), angle_gap(a14, s) + angle_gap(a13, e));
+            (keep - swapped).abs() > 1e-9 && swapped < keep
+        }
+        _ => {
+            let r = c.dist(dm.p13.xy());
+            let ccw = cadcraft_geom::norm_angle(a14 - a13) * r;
+            let cw = cadcraft_geom::norm_angle(a13 - a14) * r;
+            dm.measurement.is_finite() && dm.measurement > 0.0 && ((ccw - dm.measurement).abs() - (cw - dm.measurement).abs()) > 1e-9
+        }
+    };
+    if swap {
+        std::mem::swap(&mut dm.p13, &mut dm.p14);
+    }
+}
+
 /// Dimension overrides and associativity, table references: data of an entity record that
 /// needs the file's handle maps.
 fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &mut Rx) {
     match (kind, k) {
-        ("DIMENSION", EntityKind::Dimension(dm)) => {
+        ("DIMENSION" | "ARC_DIMENSION", EntityKind::Dimension(dm)) => {
             dm.overrides = crate::dxf_ext::read_dstyle(tags, &rx.styles, &rx.brs, &rx.ltypes);
             dm.assoc = crate::dxf_ext::read_assoc(tags);
             if let Some(center) = crate::dxf_ext::read_arclen(tags) {

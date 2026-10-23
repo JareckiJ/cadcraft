@@ -109,6 +109,13 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             let nh = d.new_handle();
             let mut ne = Entity { handle: nh, ..e };
             ne.kind.transform(m);
+            if m.is_mirroring()
+                && let EntityKind::Dimension(dm) = &ne.kind
+                && let Some(assoc) = crate::assoc::mirrored_arc_length_assoc(d, dm)
+                && let EntityKind::Dimension(dm) = &mut ne.kind
+            {
+                dm.assoc = assoc;
+            }
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
@@ -119,6 +126,16 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
                 continue;
             }
             d.modify_entity(*h, |e| e.kind.transform(m))?;
+            if m.is_mirroring()
+                && let Some(EntityKind::Dimension(dm)) = d.entity(*h).map(|e| &e.kind)
+                && let Some(assoc) = crate::assoc::mirrored_arc_length_assoc(d, dm)
+            {
+                d.modify_entity(*h, |e| {
+                    if let EntityKind::Dimension(dm) = &mut e.kind {
+                        dm.assoc = assoc;
+                    }
+                })?;
+            }
             out.push(*h);
         }
     }

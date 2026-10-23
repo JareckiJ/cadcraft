@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (ARC_DIMENSION read and written) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -76,7 +76,7 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 | LINE, POINT, CIRCLE, ARC, ELLIPSE, LWPOLYLINE (widths, bulges, elevation), SPLINE, RAY, XLINE | yes | yes | round-trip tests |
 | POLYLINE 2D/3D | yes | yes (as LWPOLYLINE / 3D POLYLINE) | polyface and polygon meshes flattened: lossy |
 | TEXT, MTEXT, ATTDEF, INSERT + ATTRIB | yes; multiline attributes (embedded MTEXT) read and drawn | yes; multiline attributes written as embedded MTEXT (DXF 2007 and later; older versions: one line) | ATTDEF prompt kept (#137) |
-| DIMENSION (all 7 kinds) | yes | yes, with anonymous `*D` blocks | a reopened dimension's `*D` block is regenerated under its name, unreferenced ones dropped (#495); DIMASSOC objects written |
+| DIMENSION (all 7 kinds) and ARC_DIMENSION (arc length) | yes | yes, with anonymous `*D` blocks; the arc-length dimension is an `ARC_DIMENSION` / `AcDbArcDimension` (13/14/15, 40/41, 42; group 70 has the three-point angular value, as AutoCAD 2027 writes it, the Reference gives none of its own; no proxy flags in its CLASS; no partial or leader groups), through DWG too (#1166), from format 2004 on (AutoCAD 2006 introduced it; R2000 files, DXF or DWG, get the aligned DIMENSION with `ARCLEN` xdata, which reads back as the arc-length dimension); files of 0.7.0 and earlier (aligned DIMENSION with `ARCLEN` xdata) still read; ends listed clockwise by another writer are put in CADCraft's counter-clockwise order from 40/41, else 42 | a reopened dimension's `*D` block is regenerated under its name, unreferenced ones dropped (#495); DIMASSOC objects written |
 | LEADER | yes | yes | |
 | MULTILEADER | yes (#459) | yes, native MULTILEADER with MLEADERSTYLE (#459) | several landings per multileader are folded into one; per-object overrides and annotative scale contexts not kept |
 | HATCH pattern / solid | yes | yes; associative hatches keep their boundary objects in blocks too, and the boundary carries the hatch reactor (stretched dynamic blocks drag the fill in AutoCAD) | |
@@ -138,6 +138,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-19 | minor | ARC_DIMENSION read as CADCraft's arc-length dimension and written for DIMARC (it was an unknown entity on read, and an aligned DIMENSION that AutoCAD shows as the chord on write), with its `*D` block, through DXF and DWG from format 2004 (R2000 keeps the aligned DIMENSION with `ARCLEN` xdata), by `entget`/`entmod` as `ARC_DIMENSION`, and MIRROR keeps its arc length (#1166) |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |

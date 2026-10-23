@@ -141,6 +141,12 @@ impl Ctx {
     fn native_mleader(&self) -> bool {
         self.target >= Version::R2007
     }
+    /// Whether an arc-length dimension is written as ARC_DIMENSION: AutoCAD 2006 (format 2004)
+    /// introduced it, so the formats before it (R2000) get an aligned DIMENSION with the arc's
+    /// centre in CADCraft xdata, which CADCraft reads back as the arc-length dimension.
+    fn native_arc_dimension(&self) -> bool {
+        self.target >= Version::R2004
+    }
     fn style(&self, name: &str) -> Option<String> {
         self.styles.get(&name.to_ascii_uppercase()).cloned()
     }
@@ -227,7 +233,7 @@ fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
         w.s(1002, "}");
     }
     let mut ours = Vec::new();
-    if matches!(dm.kind, DimKind::ArcLength) {
+    if matches!(dm.kind, DimKind::ArcLength) && !cx.native_arc_dimension() {
         ours.extend(dxf_ext::arclen_xdata(dm.p15));
     }
     if !dm.assoc.is_empty() {
@@ -893,7 +899,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             }
         }
         EntityKind::Dimension(dm) => {
-            w.s(0, "DIMENSION");
+            // An arc-length dimension is an ARC_DIMENSION (DXF Reference) where the format has it;
+            // the others, and the arc-length one in R2000, are DIMENSIONs.
+            let arc = matches!(dm.kind, DimKind::ArcLength) && cx.native_arc_dimension();
+            w.s(0, if arc { "ARC_DIMENSION" } else { "DIMENSION" });
             common_x(w, e, owner, paper, "AcDbDimension", cx.assoc.get(&e.handle));
             let bname = cx.dim_blocks.get(&e.handle).cloned().or_else(|| dm.block.clone()).unwrap_or_default();
             w.s(2, bname);
@@ -909,7 +918,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 DimKind::Radius => 4,
                 DimKind::Angular3P => 5,
                 DimKind::Ordinate { x_type } => 6 | if x_type { 64 } else { 0 },
-                // Written as aligned, marked by CADCraft xdata (see `dim_xdata`).
+                // The Reference gives ARC_DIMENSION no type value of its own; AutoCAD 2027 writes
+                // the three-point angular one (observed), and so does this. In R2000 the record is
+                // an aligned DIMENSION, marked by CADCraft xdata (see `dim_xdata`).
+                DimKind::ArcLength if arc => 5,
                 DimKind::ArcLength => 1,
             };
             w.i(70, ty | 32 | if dm.user_text_pos { 128 } else { 0 });
@@ -931,13 +943,30 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                     oblique_52(w, dm, rotation);
                     w.s(100, "AcDbRotatedDimension");
                 }
-                DimKind::Aligned | DimKind::ArcLength => {
+                DimKind::Aligned => {
                     w.s(100, "AcDbAlignedDimension");
                     w.p(13, dm.p13);
                     w.p(14, dm.p14);
-                    if matches!(dm.kind, DimKind::Aligned) {
-                        oblique_52(w, dm, (dm.p14.xy() - dm.p13.xy()).angle());
-                    }
+                    oblique_52(w, dm, (dm.p14.xy() - dm.p13.xy()).angle());
+                }
+                DimKind::ArcLength if !arc => {
+                    w.s(100, "AcDbAlignedDimension");
+                    w.p(13, dm.p13);
+                    w.p(14, dm.p14);
+                }
+                DimKind::ArcLength => {
+                    // 13/14: where the extension lines start; 15: the arc's centre; 40/41: the
+                    // arc's start and end angles (radians, as AutoCAD 2027 writes them).
+                    let angle = |p: Vec3| {
+                        let a = (p.xy() - dm.p15.xy()).angle();
+                        if a.is_finite() { cadcraft_geom::norm_angle(a) } else { 0.0 }
+                    };
+                    w.s(100, "AcDbArcDimension");
+                    w.p(13, dm.p13);
+                    w.p(14, dm.p14);
+                    w.p(15, dm.p15);
+                    w.f(40, angle(dm.p13));
+                    w.f(41, angle(dm.p14));
                 }
                 DimKind::Radius => {
                     w.s(100, "AcDbRadialDimension");
@@ -1977,6 +2006,10 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     if every.iter().any(|e| matches!(e.kind, EntityKind::Helix(_))) {
         classes.push(("HELIX", "AcDbHelix", 4095, true));
+    }
+    if cx.native_arc_dimension() && every.iter().any(|e| matches!(&e.kind, EntityKind::Dimension(dm) if matches!(dm.kind, DimKind::ArcLength))) {
+        // The Reference gives no proxy flags for it: none are claimed.
+        classes.push(("ARC_DIMENSION", "AcDbArcDimension", 0, true));
     }
     if !cx.assoc.is_empty() {
         classes.push(("DIMASSOC", "AcDbDimAssoc", 0, false));

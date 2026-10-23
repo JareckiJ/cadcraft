@@ -10,6 +10,40 @@ use cadcraft_geom::{Vec2, Vec3};
 /// Definition point names in the order they are tried.
 const POINTS: [&str; 5] = ["defpt", "p13", "p14", "p15", "p16"];
 
+/// The attachments of an arc-length dimension a mirror has just transformed. The mirror swapped its
+/// ends (`p13` ↔ `p14`, so it still runs counter-clockwise and measures the same arc), so each
+/// attachment of `p13` or `p14` now belongs to the other end; one on an arc's start or end also
+/// becomes the other end of the arc, as the mirrored arc runs the other way. [`recompute`] checks
+/// such an attachment against the dimension as it was under its old label.
+/// `None` when there is nothing to change.
+pub(crate) fn mirrored_arc_length_assoc(d: &Drawing, dm: &Dimension) -> Option<Vec<DimAssoc>> {
+    if !matches!(dm.kind, DimKind::ArcLength) || dm.assoc.is_empty() {
+        return None;
+    }
+    let mut out = dm.assoc.clone();
+    for a in out.iter_mut() {
+        let Some(other) = other_end(&a.point) else { continue };
+        a.point = other.into();
+        if matches!(d.entity(a.handle).map(|e| &e.kind), Some(EntityKind::Arc(_))) {
+            a.snap = match a.snap {
+                AssocSnap::Start => AssocSnap::End,
+                AssocSnap::End => AssocSnap::Start,
+                ref s => s.clone(),
+            };
+        }
+    }
+    (out != dm.assoc).then_some(out)
+}
+
+/// The other end of an arc-length dimension: `p13` ↔ `p14`.
+fn other_end(point: &str) -> Option<&'static str> {
+    match point {
+        "p13" => Some("p14"),
+        "p14" => Some("p13"),
+        _ => None,
+    }
+}
+
 /// A definition point of a dimension by name.
 pub fn def_point(d: &Dimension, name: &str) -> Option<Vec3> {
     Some(match name {
@@ -242,16 +276,30 @@ pub fn recompute(dm: &Dimension, prev: Option<&Dimension>, before: &Drawing, aft
     let mut deltas: Vec<Vec2> = Vec::new();
     let mut moved: Vec<String> = Vec::new();
     let was = prev.unwrap_or(dm);
-    nd.assoc.retain(|a| {
-        let Some(old) = def_point(was, &a.point) else { return false };
-        // Only follow if the point sat on the object before the change.
-        if let Some(prev) = snap_point(before, a)
-            && !close(prev, old.xy())
-        {
-            return false;
-        }
-        snap_point(after, a).is_some()
-    });
+    nd.assoc = dm
+        .assoc
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| {
+            // The attachment as it was before the change: a mirror hands an arc-length
+            // dimension's attachments to its other end (`mirrored_arc_length_assoc`), so the old
+            // one is the same object under the other end's label.
+            let o = was
+                .assoc
+                .get(*i)
+                .filter(|o| o.handle == a.handle && matches!(dm.kind, DimKind::ArcLength) && other_end(&o.point) == Some(a.point.as_str()))
+                .unwrap_or(a);
+            let Some(old) = def_point(was, &o.point) else { return false };
+            // Only follow if the point sat on the object before the change.
+            if let Some(prev) = snap_point(before, o)
+                && !close(prev, old.xy())
+            {
+                return false;
+            }
+            snap_point(after, a).is_some()
+        })
+        .map(|(_, a)| a.clone())
+        .collect();
     for a in &nd.assoc {
         if let (Some(p), Some(old)) = (snap_point(after, a), def_point(dm, &a.point)) {
             deltas.push(p - old.xy());
