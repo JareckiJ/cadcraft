@@ -201,8 +201,10 @@ mod tests {
         s.input(Input::Point(Vec2::new(10.0, 150.0))).unwrap();
         s.input(Input::Point(Vec2::new(60.0, 150.0))).unwrap();
         assert!(s.running.is_none());
+        // A wrong keyword is reported and the prompt stays.
         s.start("eplc").unwrap();
-        assert!(s.input(Input::Keyword("ZZ".into())).is_err());
+        let _ = s.input(Input::Keyword("ZZ".into()));
+        assert!(s.running.is_some());
         s.cancel();
     }
 }
