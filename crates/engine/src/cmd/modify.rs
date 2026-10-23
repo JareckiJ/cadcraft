@@ -1958,6 +1958,9 @@ impl Interactive for SelectThen {
     }
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         self.sel = SelectPhase::begin(s);
+        // These leave objects on locked layers alone whatever comes next; COPY copies them, and
+        // MIRROR does too unless the source objects are erased.
+        self.sel.skip_locked = matches!(self.op, Op::Erase | Op::Move | Op::Rotate | Op::Scale);
         if self.sel.done {
             self.objs = self.sel.picked.clone();
             return self.apply(s);
