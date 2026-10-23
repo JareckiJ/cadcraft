@@ -1358,3 +1358,60 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+# Electrical design tools (IEC 81346 tagging, wire numbering, symbols, projects, database).
+	Add Current Drawing	Додати поточне креслення
+	Add Drawing to Project	Додати креслення до проєкту
+	Add New Sheet	Додати новий аркуш
+	Cross-Reference Project	Перехресні посилання проєкту
+	Cross-References	Перехресні посилання
+	Cross-References (Whole Project)	Перехресні посилання (весь проєкт)
+	Database	База даних
+	Device Data	Дані пристрою
+	Draw Wire	Накреслити провід
+	Electrical	Електрика
+	Insert Ladder	Вставити сходову схему
+	Insert Symbol	Вставити символ
+	Link Contacts	Зв'язати контакти
+	Link Contacts to Device	Зв'язати контакти з пристроєм
+	List Devices	Список пристроїв
+	List Devices (IEC 81346)	Список пристроїв (IEC 81346)
+	List Drawings	Список креслень
+	List Project Drawings	Список креслень проєкту
+	New Project	Новий проєкт
+	New Project from Open Drawings	Новий проєкт з відкритих креслень
+	New Project...	Новий проєкт...
+	Number Wires	Пронумерувати проводи
+	Number Wires (Whole Project)	Пронумерувати проводи (весь проєкт)
+	Number Wires in Project	Пронумерувати проводи в проєкті
+	Open Project	Відкрити проєкт
+	Open Project...	Відкрити проєкт...
+	Project	Проєкт
+	Query Project Database	Запит до бази даних проєкту
+	Report	Звіт
+	Symbol Builder	Конструктор символів
+	Tag Devices	Позначити пристрої
+	Tag Devices (IEC 81346)	Позначити пристрої (IEC 81346)
+	Tag Devices (Whole Project)	Позначити пристрої (весь проєкт)
+	Tag Devices in Project	Позначити пристрої в проєкті
+	Update Database (Whole Project)	Оновити базу даних (весь проєкт)
+	Update Drawing	Оновити креслення
+	Update Drawing from Database	Оновити креслення з бази даних
+	Update Project Database	Оновити базу даних проєкту
+	Update Project Database (Whole Project)	Оновити базу даних проєкту (весь проєкт)
+	Update from Drawing	Оновити з креслення
+	Add rating	Додати параметр
+	Catalogue number	Номер за каталогом
+	Contact	Контакт
+	Device	Пристрій
+	Electrical Devices	Електричні пристрої
+	Installation	Установка
+	Location	Розташування
+	Manufacturer	Виробник
+	No devices yet: place symbols, or run Update from Drawing.	Пристроїв ще немає: розмістіть символи або виконайте «Оновити з креслення».
+	Not a number	Не число
+	Ratings	Номінальні параметри
+	Saved to the database and the drawing.	Збережено в базі даних і на кресленні.
+	Select a device in the list or a symbol in the drawing.	Виберіть пристрій у списку або символ на кресленні.
+	Tag	Позначення
+	Unit	Одиниця
+	Wired to	З'єднано з

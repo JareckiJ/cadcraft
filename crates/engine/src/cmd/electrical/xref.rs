@@ -35,6 +35,13 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 }
 
 fn run_elink(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_elink_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_elink_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "elink";
     let attribute = attribute_param(p);
     let main = p
@@ -235,6 +242,13 @@ pub(super) fn layer_and_height(cmd: &str, p: &Value) -> Result<(String, f64)> {
 }
 
 fn run_exref(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_exref_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_exref_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "exref";
     let attribute = attribute_param(p);
     let (layer, height) = layer_and_height(CMD, p)?;

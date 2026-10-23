@@ -12,6 +12,9 @@
 //!   `DESC1`–`DESC3`, `LOC`, `INST`, `TAG1`/`TAG2`), on whichever sheet it is. Data the symbol
 //!   has no attribute for (technical ratings, conductor data) lives in the database only.
 //!
+//! Every electrical command (tagging, numbering, placing symbols, drawing wires…) syncs its
+//! drawing when it finishes; EDB.SYNC does it on demand, after ordinary edits.
+//!
 //! In a project the database is `<project>.ecdb` (redb) next to the project file; a drawing
 //! outside a project uses one kept in memory for the session.
 
@@ -366,6 +369,18 @@ fn push_active(s: &mut Session, db: &EcadDb, page: &PageId) -> Result<usize> {
     Ok(changed)
 }
 
+/// Update the database from the active drawing after an electrical command. A failure (no
+/// database, a locked file) never fails the command: the next sync catches up.
+pub(super) fn auto(s: &mut Session) {
+    let r = place_of_active(s).and_then(|place| {
+        let db = open_db(place.project.as_ref().map(|(p, _)| p.as_str()))?;
+        sync_active(s, &db, &place)
+    });
+    if let Err(e) = r {
+        log::warn!("project database not updated: {e}");
+    }
+}
+
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("edb.sync", "Update Project Database", run_sync)
@@ -614,10 +629,11 @@ mod tests {
     fn drawing_to_database_and_back() {
         let mut s = session("both-ways");
         let (pb, k, _) = circuit(&mut s);
+        // Placing the symbols already put them in the database (each electrical command syncs).
+        let k_id = eid(&s, &k);
         let r = s.execute("edb.sync", &json!({})).unwrap();
         assert_eq!(r["devices"], 3);
-        assert_eq!(r["newIds"], 3);
-        let k_id = eid(&s, &k);
+        assert_eq!(r["newIds"], 0);
         assert!(k_id.starts_with("D-"), "the symbol now carries its device id");
         // Pins and the graph: the button's 14 and the coil's A1 are wired.
         let dev = s.execute("edb.device", &json!({ "id": k_id })).unwrap();
@@ -630,6 +646,7 @@ mod tests {
         // Re-syncing keeps the ids.
         let r = s.execute("edb.sync", &json!({})).unwrap();
         assert_eq!(r["newIds"], 0);
+        assert_eq!(eid(&s, &k), k_id);
         // Database → drawing: part data lands in the symbol's attributes.
         s.execute(
             "edb.device",

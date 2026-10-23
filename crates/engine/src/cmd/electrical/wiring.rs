@@ -180,6 +180,13 @@ fn layer_param(cmd: &str, p: &Value) -> Result<String> {
 }
 
 fn run_wiredraw(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_wiredraw_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_wiredraw_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ewiredraw";
     let from = point_req(CMD, p, "from")?;
     let to = point_req(CMD, p, "to")?;
@@ -222,6 +229,13 @@ fn run_wiredraw(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_ladder(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_ladder_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_ladder_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "eladder";
     let top = p.get("top").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "`top` (y of the upper rail) is required"))?;
     let bottom =

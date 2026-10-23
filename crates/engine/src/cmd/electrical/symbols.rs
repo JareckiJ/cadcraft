@@ -685,6 +685,13 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 }
 
 pub(super) fn run_esymbol(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_esymbol_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_esymbol_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "esymbol";
     if bool_or(p, "list", false) {
         let list: Vec<Value> = library()

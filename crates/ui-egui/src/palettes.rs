@@ -9,11 +9,12 @@ use crate::CadApp;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 
+/// The QuickCalc palette.
+pub mod devices;
 #[cfg(test)]
 mod layer_menu_tests;
 /// The hatch pattern picker.
 pub mod patterns;
-/// The QuickCalc palette.
 pub mod quickcalc;
 
 type Tool = (Icon, &'static str, &'static str);

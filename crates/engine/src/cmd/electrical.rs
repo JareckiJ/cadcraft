@@ -331,6 +331,13 @@ struct Planned {
 }
 
 fn run_etag(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_etag_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    sync::auto(s);
+    Ok(r)
+}
+
+fn run_etag_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "etag";
     let renumber_all = match str_param(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("new") => false,

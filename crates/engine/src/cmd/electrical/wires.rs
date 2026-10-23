@@ -257,6 +257,13 @@ struct Potential {
 }
 
 pub(super) fn run_ewire(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_ewire_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ewire";
     let renumber_all = match str_param(p, "mode").map(str::to_ascii_lowercase).as_deref() {
         None | Some("new") => false,

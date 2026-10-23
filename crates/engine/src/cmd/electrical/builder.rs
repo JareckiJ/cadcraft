@@ -75,6 +75,13 @@ fn bounds_of(s: &Session, hs: &[Handle]) -> Result<Bounds2> {
 }
 
 fn run_build(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_build_inner(s, p)?;
+    // Keep the project database in step with the drawing.
+    super::sync::auto(s);
+    Ok(r)
+}
+
+fn run_build_inner(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "esymbuild";
     let name = str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()).ok_or_else(|| bad(CMD, "`name` is required"))?.to_string();
     let base = point_req(CMD, p, "base")?;
