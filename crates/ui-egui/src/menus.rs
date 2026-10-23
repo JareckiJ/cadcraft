@@ -24,6 +24,11 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.newtemplate", "New from Template...", &["File", "New from Template..."], None),
     ("ui.saveas", "Save As...", &[], None),
     ("ui.sample", "Open Sample Drawing", &["Help", "Open Sample Drawing"], None),
+    ("help.discord", "Join the CADCraft Discord...", &["Help", "Join the CADCraft Discord..."], None),
+    ("help.website", "CADCraft Website", &["Help", "CADCraft Website"], None),
+    ("help.artcraftWebsite", "ArtCraft Website", &["Help", "ArtCraft Website"], None),
+    ("help.github", "CADCraft on GitHub", &["Help", "CADCraft on GitHub"], None),
+    ("help.reportIssue", "Report an Issue...", &["Help", "Report an Issue..."], None),
     ("ui.toggle.toolsets", "Tool Sets", &["Window", "Tool Sets"], Some("Cmd+3")),
     ("ui.panel.properties", "Properties Inspector", &["Window", "Properties Inspector"], Some("Cmd+1")),
     ("ui.panel.layers", "Layers Palette", &["Window", "Layers Palette"], None),
@@ -63,7 +68,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.parameters", "Parameters Manager", &["Window", "Parameters Manager"], None),
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
     ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
-    ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
+    ("ui.dialog.commands", "Command Reference", &["Help", "Command Reference"], Some("F1")),
     ("ui.toggle.history", "Command History", &["Window", "Command History"], Some("F2")),
     ("ui.cmdline.lines", "Command Line History Lines", &[], None),
     ("ui.cmdline.clear", "Clear Command History", &[], None),
@@ -74,7 +79,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
 ];
 
 pub fn is_ui_command(id: &str) -> bool {
-    UI_COMMANDS.iter().any(|c| c.0 == id)
+    UI_COMMANDS.iter().any(|c| c.0 == id) || crate::links::url_for(id).is_some()
 }
 
 /// Run a UI-only command. `None` if `id` isn't one.
@@ -83,6 +88,9 @@ pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value) -> Option<Resu
 }
 
 fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if let Some(url) = crate::links::url_for(id) {
+        return Some(Ok(crate::links::open(app, url)));
+    }
     if let Some(result) = crate::spacemouse::route(app, id, params) {
         return Some(result);
     }
@@ -589,6 +597,9 @@ pub fn menu_bar(app: &mut CadApp, ui: &mut egui::Ui) {
     );
     if let Some(id) = clicked {
         activate(app, &id);
+        if let Some(url) = app.ui.pending_url.take() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(&url));
+        }
     }
 }
 
@@ -718,6 +729,7 @@ mod tests {
                 log.borrow_mut().push(name.to_string());
                 answer.clone()
             })),
+            ..Default::default()
         };
         (CadApp::new(Session::new(), services), asked)
     }
@@ -753,7 +765,7 @@ mod tests {
         let r = app.run("plot", json!({})).unwrap();
         assert!(r["data"].is_string());
         assert_eq!(asked.borrow().len(), 1);
-        assert!(app.ui.dialog.is_none());
+        assert!(app.ui.dialog.is_none(), "JSON calls never open dialogs");
     }
 
     #[test]
