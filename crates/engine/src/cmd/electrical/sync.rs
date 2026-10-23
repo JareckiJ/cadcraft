@@ -713,7 +713,7 @@ mod tests {
         // A copy carries the same EID: it becomes a device of its own, at once (every edit of a
         // symbol syncs).
         s.execute("copy", &json!({ "handles": [k], "from": [0, 0], "to": [42, 0] })).unwrap();
-        let copy = s.doc().unwrap().model.iter().rev().find(|e| matches!(e.kind, EntityKind::Insert(_))).unwrap().handle.hex();
+        let copy = s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Insert(_))).last().unwrap().handle.hex();
         assert_ne!(copy, k);
         assert!(!eid(&s, &copy).is_empty() && eid(&s, &copy) != eid(&s, &k));
         let r = s.execute("edb.sync", &json!({})).unwrap();
