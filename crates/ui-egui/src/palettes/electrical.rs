@@ -182,6 +182,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 tool(app, ui, crate::tl!("Draw Wire"), "ewire", crate::tl!("Click pins or wires; the wire routes at right angles"));
                 tool(app, ui, crate::tl!("Wire Type"), "ewiretype", crate::tl!("Colour and cross-section of new wires"));
                 tool(app, ui, crate::tl!("Ladder"), "eladder", crate::tl!("Supply rails with a rung in every column"));
+                project_cmd(
+                    app,
+                    ui,
+                    crate::tl!("Remove Empty Rungs"),
+                    "eladder.clean",
+                    crate::tl!("Rungs nothing was placed on (they would short the rails)"),
+                );
                 tool(app, ui, crate::tl!("Cable"), "ecable", crate::tl!("A cable line across its wires"));
                 tool(app, ui, crate::tl!("PLC card"), "eplc", crate::tl!("A digital or analog I/O card"));
                 tool(app, ui, crate::tl!("Link Contacts"), "elink", crate::tl!("Give contacts their coil's tag"));

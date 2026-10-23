@@ -28,6 +28,7 @@ sym IEC_ESTOP 147 200
 sym IEC_COIL 147 90
 sym IEC_NO 189 170 -K104
 sym IEC_LAMP 189 100
+cmd eladder.clean '{}'      # the rungs nothing went on would short +24V to 0V
 cmd text '{"at": [5, 244], "text": "+24V DC", "height": 3}'
 cmd text '{"at": [5, 34], "text": "0V", "height": 3}'
 "$cli" run "$out/Demo-01.dxf" "${args[@]}" --save "$out/Demo-01.dxf"

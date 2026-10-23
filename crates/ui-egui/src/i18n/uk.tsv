@@ -1515,3 +1515,5 @@
 	Wire list	Список проводів
 	Wire numbers	Номери проводів
 	rows saved	рядків збережено
+	Remove Empty Rungs	Видалити порожні східці
+	Rungs nothing was placed on (they would short the rails)	Східці без елементів (вони закорочують шини)

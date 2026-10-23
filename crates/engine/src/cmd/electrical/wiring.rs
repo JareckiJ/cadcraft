@@ -44,7 +44,92 @@ pub(super) fn specs() -> Vec<CommandSpec> {
                  layer? (default \"WIRE\")} → {rails: [handle], rungs: [handle]}",
             )
             .interactive(|_| Ok(Box::new(super::interactive::LadderM::default()))),
+        CommandSpec::new("eladder.clean", "Remove Empty Rungs", run_clean).menu(&["Tools", "Electrical", "Remove Empty Rungs"]).params(
+            "{dryRun?: bool} → {removed: [handle]} — ladder rungs nothing was placed on: straight vertical wires from \
+                 one horizontal wire to another with no symbol, pin or branch on them (each would short its rails)",
+        ),
     ]
+}
+
+fn run_clean(s: &mut Session, p: &Value) -> Result<Value> {
+    let r = run_clean_inner(s, p)?;
+    super::sync::auto(s);
+    Ok(r)
+}
+
+/// The empty rungs: wires of one vertical segment whose two ends both land on other, horizontal
+/// wires, with nothing else on them.
+fn empty_rungs(s: &Session) -> Result<Vec<(Handle, Vec2, Vec2)>> {
+    const TOL: f64 = 1e-6;
+    let (handles, segs) = super::wires::wire_segments(s, WIRE_LAYERS)?;
+    let pins = PinIndex::build(s)?;
+    let mut per_wire = vec![0usize; handles.len()];
+    for g in &segs {
+        if let Some(n) = per_wire.get_mut(g.wire) {
+            *n += 1;
+        }
+    }
+    let horizontal = |g: &super::wires::Seg| (g.a.y - g.b.y).abs() < TOL && (g.a.x - g.b.x).abs() > TOL;
+    let mut out = Vec::new();
+    for g in &segs {
+        if per_wire.get(g.wire) != Some(&1) || (g.a.x - g.b.x).abs() > TOL || (g.a.y - g.b.y).abs() < TOL {
+            continue;
+        }
+        let Some(&h) = handles.get(g.wire) else { continue };
+        let others = || segs.iter().filter(|o| o.wire != g.wire);
+        let end_ok = |p: Vec2| {
+            let touching: Vec<&super::wires::Seg> = others().filter(|o| o.dist_to(p) < TOL).collect();
+            !touching.is_empty() && touching.iter().all(|o| horizontal(o)) && pins.exact(p, TOL).is_none()
+        };
+        if !end_ok(g.a) || !end_ok(g.b) {
+            continue;
+        }
+        // Nothing branches off it, and no symbol sits across it.
+        let branch = others().any(|o| [o.a, o.b].iter().any(|q| !q.near(g.a, TOL) && !q.near(g.b, TOL) && g.dist_to(*q) < TOL));
+        if branch || !pins.crossed(g.a, g.b).is_empty() {
+            continue;
+        }
+        out.push((h, g.a, g.b));
+    }
+    Ok(out)
+}
+
+fn run_clean_inner(s: &mut Session, p: &Value) -> Result<Value> {
+    let rungs = empty_rungs(s)?;
+    let removed: Vec<String> = rungs.iter().map(|r| r.0.hex()).collect();
+    if p.get("dryRun").and_then(Value::as_bool).unwrap_or(false) || rungs.is_empty() {
+        return Ok(json!({ "removed": removed }));
+    }
+    // The junction dots at their ends go too: the rail just runs on there.
+    let ends: Vec<Vec2> = rungs.iter().flat_map(|r| [r.1, r.2]).collect();
+    let dots: Vec<Handle> = {
+        let d = s.doc()?;
+        d.space(&s.space())
+            .map(|store| {
+                store
+                    .iter()
+                    .filter(|e| e.common.layer.eq_ignore_ascii_case(JUNCTION_LAYER))
+                    .filter_map(|e| match &e.kind {
+                        EntityKind::LwPolyline(pl) if !pl.vertices.is_empty() => {
+                            let n = pl.vertices.len() as f64;
+                            let c = pl.vertices.iter().fold(Vec2::new(0.0, 0.0), |acc, v| acc + v.p) * (1.0 / n);
+                            ends.iter().any(|q| q.near(c, 1e-3)).then_some(e.handle)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let d = s.doc_mut()?;
+    for (h, _, _) in &rungs {
+        d.remove_entity(*h);
+    }
+    for h in dots {
+        d.remove_entity(h);
+    }
+    s.log.push(format!("{} empty rung(s) removed.", rungs.len()));
+    Ok(json!({ "removed": removed }))
 }
 
 /// What a point snapped to.
@@ -365,6 +450,27 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn empty_rungs_are_removed_and_the_rails_part() {
+        let mut s = Session::new();
+        s.execute("eladder", &json!({ "top": 200, "bottom": 50, "to": 168 })).unwrap();
+        // Four rungs at 21, 63, 105, 147; a coil on the first, a branch off the third.
+        s.execute("esymbol", &json!({ "name": "IEC_COIL", "at": [21, 120] })).unwrap();
+        let branch = s.execute("ewire", &json!({ "from": [105, 150], "to": [130, 150] })).unwrap();
+        let dry = s.execute("eladder.clean", &json!({ "dryRun": true })).unwrap();
+        assert_eq!(dry["removed"].as_array().unwrap().len(), 2, "the branched rung stays: {dry}");
+        s.execute("erase", &json!({ "handles": [branch["handle"]] })).unwrap();
+        let r = s.execute("eladder.clean", &json!({})).unwrap();
+        assert_eq!(r["removed"].as_array().unwrap().len(), 3, "{r}");
+        // The rails are two potentials now, joined only through the coil.
+        let n = s.execute("ewirenum", &json!({})).unwrap();
+        assert_eq!(n["potentials"], 2, "{n}");
+        let again = s.execute("eladder.clean", &json!({})).unwrap();
+        assert!(again["removed"].as_array().unwrap().is_empty());
+        let dots = s.doc().unwrap().model.iter().filter(|e| e.common.layer == JUNCTION_LAYER).count();
+        assert!(dots <= 3, "the removed rungs' dots are gone: {dots}");
+    }
 
     #[test]
     fn wires_snap_to_pins_and_route_at_right_angles() {
