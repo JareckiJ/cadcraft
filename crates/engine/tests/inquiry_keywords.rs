@@ -103,3 +103,12 @@ fn area_of_an_ellipse_reports_its_exact_perimeter() {
     let (_, log) = run(&["ellipse c 0,0 10,0 4", "area", "o", "10,0"]);
     assert!(has(&log, "Perimeter = 46.0262"), "{log:?}");
 }
+
+/// Issue #1956: with architectural units the area is square inches and square feet, never a
+/// feet-and-inches length; the perimeter stays a length.
+#[test]
+fn area_in_architectural_units_is_square_inches_and_feet() {
+    let (_, log) = run(&["setvar lunits 4", "area", "0,0", "240,0", "240,120", "0,120", ""]);
+    assert!(has(&log, "Area = 28800.0000 sq in (200.0000 sq ft), Perimeter = 60'"), "{log:?}");
+    assert!(!log.iter().any(|l| l.contains("Area = 2400'")), "{log:?}");
+}
