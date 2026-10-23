@@ -1729,3 +1729,127 @@
 	Tab or Enter: insert · Esc: close	Tab або Enter: вставити · Esc: закрити
 	A text that starts with = shows the result of a formula, as in a spreadsheet: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). The formula stays with the text: editing the text edits the formula. Dates and times follow the computer's clock and are worked out again when the drawing is opened (Tools ▸ Update Fields does it at once). Date fields in AutoCAD drawings are updated the same way.	Текст, що починається зі знака =, показує результат формули, як в електронній таблиці: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy"). Формула зберігається разом із текстом: під час редагування тексту редагується формула. Дати й час беруться з годинника комп’ютера та перераховуються під час відкриття креслення (Сервіс ▸ Оновити поля робить це одразу). Поля дати в кресленнях AutoCAD оновлюються так само.
 	Operators: + - * / ^ (power), % (percent), & (joins texts), = <> < > <= >= (compare). Texts in double quotes. Arguments are separated by commas or semicolons. While typing a formula, a list of functions appears: the arrows choose, Tab or Enter inserts.	Операції: + - * / ^ (степінь), % (відсоток), & (з’єднує тексти), = <> < > <= >= (порівняння). Тексти пишуться в подвійних лапках. Аргументи розділяються комами або крапками з комою. Поки ви набираєте формулу, з’являється список функцій: стрілки вибирають, Tab або Enter вставляє.
+	Starts a new drawing from the default template.	Створює нове креслення за типовим шаблоном.
+	Opens a drawing (DWG, DXF) from a file.	Відкриває креслення (DWG, DXF) з файлу.
+	Saves the drawing to its file (asks for a name the first time).	Зберігає креслення у його файл (уперше запитує ім’я).
+	Saves the drawing under a new name, format or version.	Зберігає креслення під новим ім’ям, в іншому форматі чи версії.
+	Undoes the last action. The arrow beside it undoes several at once.	Скасовує останню дію. Стрілка поруч скасовує одразу кілька.
+	Redoes what was undone. The arrow beside it redoes several at once.	Повертає скасовану дію. Стрілка поруч повертає одразу кілька.
+	Prints the current layout or model space to a printer or a PDF file.	Друкує поточний аркуш або простір моделі на принтер чи в PDF.
+	Prints several sheets at once, to separate files or one PDF.	Друкує одразу кілька аркушів: в окремі файли або в один PDF.
+	Sets the paper, printer and plot settings of layouts.	Задає папір, принтер і параметри друку аркушів.
+	Shows the page as it will be printed.	Показує сторінку так, як її буде надруковано.
+	Brings another file's contents (DXF, SVG...) into this drawing.	Додає до креслення вміст іншого файлу (DXF, SVG...).
+	Saves the drawing or part of it as PDF, SVG, PNG or another format.	Зберігає креслення або його частину в PDF, SVG, PNG чи інший формат.
+	Attaches an external reference: a drawing, image or PDF shown in this one.	Прикріплює зовнішнє посилання: креслення, зображення чи PDF, що показуються в цьому кресленні.
+	Shares the drawing with others.	Надсилає креслення іншим людям.
+	Zooms to a rectangle you draw.	Збільшує область, яку ви обведете рамкою.
+	Moves the view without changing its scale.	Зсуває вигляд, не змінюючи масштаб.
+	Turns the view around the drawing in 3D.	Повертає вигляд навколо креслення в 3D.
+	Zooms to show the whole drawing.	Показує все креслення цілком.
+	Shows or hides the Properties and Layers palettes.	Показує або ховає палітри «Властивості» та «Шари».
+	Opens the Layer Properties Manager: create layers, set their colour, linetype and state.	Відкриває диспетчер шарів: створення шарів, їхній колір, тип ліній і стан.
+	Opens the block manager: insert, edit and manage blocks.	Відкриває диспетчер блоків: вставлення, редагування й керування блоками.
+	Measures the distance and angle between two points.	Вимірює відстань і кут між двома точками.
+	Lists everything about the selected objects in the command history.	Виводить до історії команд усі відомості про вибрані об’єкти.
+	Measures the area and perimeter of an object or of points you pick.	Вимірює площу й периметр об’єкта або вказаних точок.
+	About CADCraft and help.	Про CADCraft і довідка.
+	Creates and changes text styles: font, height, width factor.	Створює та змінює текстові стилі: шрифт, висота, коефіцієнт ширини.
+	Creates and changes dimension styles: arrows, text, lines, units.	Створює та змінює розмірні стилі: стрілки, текст, лінії, одиниці.
+	Opens the program's settings.	Відкриває налаштування програми.
+	The current layer: new objects are drawn on it. Pick another from the list.	Поточний шар: на ньому малюються нові об’єкти. Виберіть інший зі списку.
+	Makes the layer of the object you pick the current layer.	Робить поточним шар вибраного об’єкта.
+	Moves the selected objects to the layer of another object.	Переносить вибрані об’єкти на шар іншого об’єкта.
+	Undoes the last change to layer settings.	Скасовує останню зміну налаштувань шарів.
+	Hides or locks every layer except those of the selected objects.	Ховає або блокує всі шари, крім шарів вибраних об’єктів.
+	Turns off the layer of the object you pick.	Вимикає шар вибраного об’єкта.
+	Freezes the layer of the object you pick: hidden and not regenerated.	Заморожує шар вибраного об’єкта: він прихований і не перераховується.
+	Locks the layer of the object you pick: its objects can't be changed.	Блокує шар вибраного об’єкта: його об’єкти не можна змінити.
+	Unlocks the layer of the object you pick.	Розблоковує шар вибраного об’єкта.
+	The current text style, used by new text.	Поточний текстовий стиль для нового тексту.
+	The current dimension style, used by new dimensions.	Поточний розмірний стиль для нових розмірів.
+	The linetype of new objects.	Тип ліній нових об’єктів.
+	The lineweight of new objects.	Товщина ліній нових об’єктів.
+	Draws straight line segments, one after another.	Малює прямі відрізки, один за одним.
+	Draws a polyline: connected straight and arc segments that form one object.	Малює полілінію: з’єднані прямі й дугові сегменти, що утворюють один об’єкт.
+	Draws a circle by its centre and radius, or by points.	Малює коло за центром і радіусом або за точками.
+	Draws a rectangle by two corners, or by its width and height.	Малює прямокутник за двома кутами або за шириною й висотою.
+	Draws an arc through three points, or by centre, start and end.	Малює дугу за трьома точками або за центром, початком і кінцем.
+	Draws a smooth curve through or near the points you pick.	Малює плавну криву через вказані точки або поруч із ними.
+	Draws an infinite construction line, for alignment.	Малює нескінченну допоміжну пряму для вирівнювання.
+	Draws a line that starts at a point and runs on without end.	Малює промінь: лінію, що починається в точці й іде в нескінченність.
+	Draws an ellipse or an elliptical arc.	Малює еліпс або еліптичну дугу.
+	Draws a regular polygon with as many sides as you like.	Малює правильний багатокутник із будь-якою кількістю сторін.
+	Places points, one after another.	Ставить точки, одну за одною.
+	Draws a filled ring or a filled circle.	Малює зафарбоване кільце або зафарбований круг.
+	Draws a revision cloud around something to mark a change.	Малює хмару навколо об’єкта, щоб позначити зміну.
+	Turns closed shapes into regions (areas you can combine and measure).	Перетворює замкнені контури на області (їх можна об’єднувати й вимірювати).
+	Covers what is behind an area with the background colour.	Закриває те, що під областю, кольором фону.
+	Fills an enclosed area with a pattern or a solid colour.	Заповнює замкнену область штрихуванням або суцільним кольором.
+	Fills an enclosed area with a colour gradient.	Заповнює замкнену область градієнтом.
+	Draws a polyline around an enclosed area you click inside.	Малює полілінію по контуру замкненої області, всередині якої ви клацнули.
+	Groups selected objects into a block that can be inserted again and again.	Об’єднує вибрані об’єкти в блок, який можна вставляти багато разів.
+	Inserts a block (opens the block manager).	Вставляє блок (відкриває диспетчер блоків).
+	Opens a block to change what it contains.	Відкриває блок, щоб змінити його вміст.
+	Defines an attribute: text asked for each time the block is inserted.	Визначає атрибут: текст, що запитується під час кожного вставлення блока.
+	Moves objects by a distance, from a base point to another point.	Переміщує об’єкти від базової точки до іншої точки.
+	Copies objects to other places.	Копіює об’єкти в інші місця.
+	Turns objects around a base point.	Повертає об’єкти навколо базової точки.
+	Cuts off the parts of objects that cross other objects. Hover to see what goes.	Відрізає частини об’єктів, що перетинають інші об’єкти. Наведіть курсор, щоб побачити, що буде видалено.
+	Rounds the corner between two objects with an arc.	Заокруглює кут між двома об’єктами дугою.
+	Copies objects in rows and columns.	Копіює об’єкти рядами й стовпцями.
+	Makes a mirror copy of objects across a line (and can erase the originals).	Створює дзеркальну копію об’єктів відносно лінії (і може видалити вихідні).
+	Makes objects larger or smaller from a base point.	Збільшує або зменшує об’єкти відносно базової точки.
+	Lengthens objects to meet other objects. Hover to see the extension.	Подовжує об’єкти до інших об’єктів. Наведіть курсор, щоб побачити подовження.
+	Makes a parallel copy of a line, curve or outline at a distance.	Створює паралельну копію лінії, кривої чи контуру на заданій відстані.
+	Copies objects around a centre point.	Копіює об’єкти по колу навколо центру.
+	Stretches objects crossed by a selection window, moving their points inside it.	Розтягує об’єкти, перетнуті рамкою: точки всередині рамки зсуваються.
+	Bevels the corner between two lines.	Зрізає кут між двома лініями фаскою.
+	Breaks a compound object (block, polyline, dimension) into its parts.	Розбиває складений об’єкт (блок, полілінію, розмір) на частини.
+	Breaks an object in two, or removes a part between two points.	Розриває об’єкт на два або видаляє частину між двома точками.
+	Joins lines, arcs and polylines that touch into one object.	З’єднує дотичні лінії, дуги й полілінії в один об’єкт.
+	Deletes the selected objects.	Видаляє вибрані об’єкти.
+	Changes the length of lines and arcs.	Змінює довжину відрізків і дуг.
+	Copies the properties of one object (layer, colour, style...) to others.	Копіює властивості одного об’єкта (шар, колір, стиль...) на інші.
+	Writes single-line text. A text starting with = shows a formula's result.	Створює однорядковий текст. Текст, що починається з =, показує результат формули.
+	Writes multiline text in a box, with formatting.	Створює багаторядковий текст у рамці, з форматуванням.
+	Inserts a table of rows and columns.	Вставляє таблицю з рядків і стовпців.
+	Finds text in the drawing and replaces it.	Шукає текст у кресленні та замінює його.
+	A horizontal or vertical dimension between two points.	Горизонтальний або вертикальний розмір між двома точками.
+	A dimension parallel to the line between two points.	Розмір, паралельний лінії між двома точками.
+	The radius of a circle or arc.	Радіус кола або дуги.
+	The diameter of a circle or arc.	Діаметр кола або дуги.
+	The angle between two lines, or of an arc.	Кут між двома лініями або кут дуги.
+	The length along an arc.	Довжина дуги.
+	The X or Y coordinate of a point.	Координата X або Y точки.
+	More dimensions from the same base line as the last one.	Нові розміри від тієї ж бази, що й останній.
+	More dimensions continuing from the end of the last one.	Нові розміри, що продовжують останній (ланцюжком).
+	Dimensions several objects at once.	Проставляє розміри одразу для кількох об’єктів.
+	A note with an arrow pointing at something (multileader).	Виноска: текст зі стрілкою, що вказує на об’єкт.
+	Adds another leader line to a multileader.	Додає ще одну лінію до виноски.
+	Removes a leader line from a multileader.	Видаляє лінію виноски.
+	Lines up several multileaders.	Вирівнює кілька виносок.
+	Adds geometric constraints to the selected objects automatically.	Автоматично накладає геометричні залежності на вибрані об’єкти.
+	Keeps two points together.	Утримує дві точки разом.
+	Keeps two lines parallel.	Утримує дві лінії паралельними.
+	Keeps two lines at right angles.	Утримує дві лінії під прямим кутом.
+	Keeps a line horizontal.	Утримує лінію горизонтальною.
+	Keeps a line vertical.	Утримує лінію вертикальною.
+	Keeps a curve tangent to another object.	Утримує криву дотичною до іншого об’єкта.
+	Keeps circles and arcs on one centre.	Утримує кола й дуги на спільному центрі.
+	Keeps two lines the same length, or two circles the same size.	Утримує рівними довжини двох ліній або розміри двох кіл.
+	Draws a 3D box.	Створює 3D-паралелепіпед.
+	Draws a 3D cylinder.	Створює 3D-циліндр.
+	Draws a 3D pyramid.	Створює 3D-піраміду.
+	Draws a 3D sphere.	Створює 3D-кулю.
+	Draws a 3D torus (a ring).	Створює 3D-тор (кільце).
+	Draws a 3D cone.	Створює 3D-конус.
+	Pulls a closed shape into a 3D solid.	Видавлює замкнений контур у 3D-тіло.
+	Turns a shape around an axis into a 3D solid.	Обертає контур навколо осі й створює 3D-тіло.
+	Sweeps a shape along a path into a 3D solid.	Протягує контур уздовж траєкторії й створює 3D-тіло.
+	Makes a 3D solid through several cross sections.	Створює 3D-тіло за кількома перерізами.
+	Joins 3D solids or regions into one.	Об’єднує 3D-тіла або області в одне.
+	Cuts 3D solids or regions out of others.	Віднімає одні 3D-тіла або області від інших.
+	Keeps only the part 3D solids or regions share.	Залишає лише спільну частину 3D-тіл або областей.
+	Undo (Ctrl+Z)	Скасувати (Ctrl+Z)
+	Redo (Ctrl+Y)	Повернути (Ctrl+Y)

@@ -432,8 +432,29 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let bar = Rect::from_min_size(pos2(canvas.center().x - w / 2.0, canvas.bottom() - h - 10.0), vec2(w, h));
     let p = ui.painter_at(canvas);
     history(app, ui, canvas, bar);
-    // History lines above the bar (the expanded window replaces them).
+    // History lines above the bar (the expanded window replaces them), shown while the pointer is
+    // over the bar or over them.
     let n = if app.cmd.expanded { 0 } else { visible_lines(app, canvas, bar) };
+    let shown = n.min(app.session.log.len());
+    let over = {
+        let lines_h = 16.0 * shown as f32 + 6.0;
+        let zone = Rect::from_min_max(pos2(bar.left(), bar.top() - lines_h), bar.max).expand(2.0);
+        let now = ui.input(|i| i.time);
+        let hover_id = egui::Id::new("cc_cmd_history_hover");
+        if ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| zone.contains(p)) {
+            ui.data_mut(|d| d.insert_temp(hover_id, now));
+            true
+        } else {
+            // A moment's grace, so the lines don't flicker at the edge.
+            let last: f64 = ui.data(|d| d.get_temp(hover_id)).unwrap_or(f64::NEG_INFINITY);
+            let left = now - last < 0.3;
+            if left {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            left
+        }
+    };
+    let n = if over { n } else { 0 };
     let lines: Vec<String> = app.session.log.iter().rev().take(n).rev().cloned().collect();
     if !lines.is_empty() {
         let lh = 16.0;

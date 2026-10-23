@@ -470,9 +470,143 @@ pub fn add_item(items: &mut Vec<String>, command: &str, index: Option<usize>) ->
 }
 
 /// The tooltip of a tool button: name, command and alias, shortcut.
+/// Short descriptions of the tools, shown in their tooltips: (command, what it does).
+pub const DESCRIPTIONS: &[(&str, &str)] = &[
+    ("new", "Starts a new drawing from the default template."),
+    ("open", "Opens a drawing (DWG, DXF) from a file."),
+    ("qsave", "Saves the drawing to its file (asks for a name the first time)."),
+    ("saveas", "Saves the drawing under a new name, format or version."),
+    ("u", "Undoes the last action. The arrow beside it undoes several at once."),
+    ("redo", "Redoes what was undone. The arrow beside it redoes several at once."),
+    ("plot", "Prints the current layout or model space to a printer or a PDF file."),
+    ("publish", "Prints several sheets at once, to separate files or one PDF."),
+    ("pagesetup", "Sets the paper, printer and plot settings of layouts."),
+    ("preview", "Shows the page as it will be printed."),
+    ("import", "Brings another file's contents (DXF, SVG...) into this drawing."),
+    ("export", "Saves the drawing or part of it as PDF, SVG, PNG or another format."),
+    ("attach", "Attaches an external reference: a drawing, image or PDF shown in this one."),
+    ("share", "Shares the drawing with others."),
+    ("zoom.window", "Zooms to a rectangle you draw."),
+    ("pan", "Moves the view without changing its scale."),
+    ("3dorbit", "Turns the view around the drawing in 3D."),
+    ("zoom.extents", "Zooms to show the whole drawing."),
+    ("ui.toggle.palettes", "Shows or hides the Properties and Layers palettes."),
+    ("ui.dialog.layers", "Opens the Layer Properties Manager: create layers, set their colour, linetype and state."),
+    ("ui.dialog.blocks", "Opens the block manager: insert, edit and manage blocks."),
+    ("dist", "Measures the distance and angle between two points."),
+    ("list", "Lists everything about the selected objects in the command history."),
+    ("area", "Measures the area and perimeter of an object or of points you pick."),
+    ("ui.dialog.about", "About CADCraft and help."),
+    ("style", "Creates and changes text styles: font, height, width factor."),
+    ("dimstyle", "Creates and changes dimension styles: arrows, text, lines, units."),
+    ("options", "Opens the program's settings."),
+    ("layer.combo", "The current layer: new objects are drawn on it. Pick another from the list."),
+    ("laymcur", "Makes the layer of the object you pick the current layer."),
+    ("laymch", "Moves the selected objects to the layer of another object."),
+    ("layerp", "Undoes the last change to layer settings."),
+    ("layiso", "Hides or locks every layer except those of the selected objects."),
+    ("layoff", "Turns off the layer of the object you pick."),
+    ("layfrz", "Freezes the layer of the object you pick: hidden and not regenerated."),
+    ("laylck", "Locks the layer of the object you pick: its objects can't be changed."),
+    ("layulk", "Unlocks the layer of the object you pick."),
+    ("textstyle.combo", "The current text style, used by new text."),
+    ("dimstyle.combo", "The current dimension style, used by new dimensions."),
+    ("linetype.combo", "The linetype of new objects."),
+    ("lweight.combo", "The lineweight of new objects."),
+    ("line", "Draws straight line segments, one after another."),
+    ("pline", "Draws a polyline: connected straight and arc segments that form one object."),
+    ("circle", "Draws a circle by its centre and radius, or by points."),
+    ("rectang", "Draws a rectangle by two corners, or by its width and height."),
+    ("arc", "Draws an arc through three points, or by centre, start and end."),
+    ("spline", "Draws a smooth curve through or near the points you pick."),
+    ("xline", "Draws an infinite construction line, for alignment."),
+    ("ray", "Draws a line that starts at a point and runs on without end."),
+    ("ellipse", "Draws an ellipse or an elliptical arc."),
+    ("polygon", "Draws a regular polygon with as many sides as you like."),
+    ("point.multiple", "Places points, one after another."),
+    ("donut", "Draws a filled ring or a filled circle."),
+    ("revcloud", "Draws a revision cloud around something to mark a change."),
+    ("region", "Turns closed shapes into regions (areas you can combine and measure)."),
+    ("wipeout", "Covers what is behind an area with the background colour."),
+    ("hatch", "Fills an enclosed area with a pattern or a solid colour."),
+    ("gradient", "Fills an enclosed area with a colour gradient."),
+    ("boundary", "Draws a polyline around an enclosed area you click inside."),
+    ("block", "Groups selected objects into a block that can be inserted again and again."),
+    ("insert", "Inserts a block (opens the block manager)."),
+    ("bedit", "Opens a block to change what it contains."),
+    ("attdef", "Defines an attribute: text asked for each time the block is inserted."),
+    ("move", "Moves objects by a distance, from a base point to another point."),
+    ("copy", "Copies objects to other places."),
+    ("rotate", "Turns objects around a base point."),
+    ("trim", "Cuts off the parts of objects that cross other objects. Hover to see what goes."),
+    ("fillet", "Rounds the corner between two objects with an arc."),
+    ("arrayrect", "Copies objects in rows and columns."),
+    ("mirror", "Makes a mirror copy of objects across a line (and can erase the originals)."),
+    ("scale", "Makes objects larger or smaller from a base point."),
+    ("extend", "Lengthens objects to meet other objects. Hover to see the extension."),
+    ("offset", "Makes a parallel copy of a line, curve or outline at a distance."),
+    ("arraypolar", "Copies objects around a centre point."),
+    ("stretch", "Stretches objects crossed by a selection window, moving their points inside it."),
+    ("chamfer", "Bevels the corner between two lines."),
+    ("explode", "Breaks a compound object (block, polyline, dimension) into its parts."),
+    ("break", "Breaks an object in two, or removes a part between two points."),
+    ("join", "Joins lines, arcs and polylines that touch into one object."),
+    ("erase", "Deletes the selected objects."),
+    ("lengthen", "Changes the length of lines and arcs."),
+    ("matchprop", "Copies the properties of one object (layer, colour, style...) to others."),
+    ("text", "Writes single-line text. A text starting with = shows a formula's result."),
+    ("mtext", "Writes multiline text in a box, with formatting."),
+    ("table", "Inserts a table of rows and columns."),
+    ("find", "Finds text in the drawing and replaces it."),
+    ("dimlinear", "A horizontal or vertical dimension between two points."),
+    ("dimaligned", "A dimension parallel to the line between two points."),
+    ("dimradius", "The radius of a circle or arc."),
+    ("dimdiameter", "The diameter of a circle or arc."),
+    ("dimangular", "The angle between two lines, or of an arc."),
+    ("dimarc", "The length along an arc."),
+    ("dimordinate", "The X or Y coordinate of a point."),
+    ("dimbaseline", "More dimensions from the same base line as the last one."),
+    ("dimcontinue", "More dimensions continuing from the end of the last one."),
+    ("qdim", "Dimensions several objects at once."),
+    ("mleader", "A note with an arrow pointing at something (multileader)."),
+    ("mleaderedit", "Adds another leader line to a multileader."),
+    ("mleaderedit.remove", "Removes a leader line from a multileader."),
+    ("mleaderalign", "Lines up several multileaders."),
+    ("autoconstrain", "Adds geometric constraints to the selected objects automatically."),
+    ("gccoincident", "Keeps two points together."),
+    ("gcparallel", "Keeps two lines parallel."),
+    ("gcperpendicular", "Keeps two lines at right angles."),
+    ("gchorizontal", "Keeps a line horizontal."),
+    ("gcvertical", "Keeps a line vertical."),
+    ("gctangent", "Keeps a curve tangent to another object."),
+    ("gcconcentric", "Keeps circles and arcs on one centre."),
+    ("gcequal", "Keeps two lines the same length, or two circles the same size."),
+    ("box", "Draws a 3D box."),
+    ("cylinder", "Draws a 3D cylinder."),
+    ("pyramid", "Draws a 3D pyramid."),
+    ("sphere", "Draws a 3D sphere."),
+    ("torus", "Draws a 3D torus (a ring)."),
+    ("cone", "Draws a 3D cone."),
+    ("extrude", "Pulls a closed shape into a 3D solid."),
+    ("revolve", "Turns a shape around an axis into a 3D solid."),
+    ("sweep", "Sweeps a shape along a path into a 3D solid."),
+    ("loft", "Makes a 3D solid through several cross sections."),
+    ("union", "Joins 3D solids or regions into one."),
+    ("subtract", "Cuts 3D solids or regions out of others."),
+    ("intersect", "Keeps only the part 3D solids or regions share."),
+];
+
+/// The short description of a command for its tooltip.
+pub fn description(command: &str) -> Option<&'static str> {
+    DESCRIPTIONS.iter().find(|(c, _)| *c == command).map(|(_, d)| *d)
+}
+
 pub fn tooltip(ui: &mut egui::Ui, tool: &Tool, mac: bool) {
-    ui.set_max_width(280.0);
+    ui.set_max_width(300.0);
     ui.label(RichText::new(crate::i18n::t(tool.label)).strong());
+    if let Some(d) = description(tool.command) {
+        ui.label(crate::i18n::t(d));
+    }
     if !tool.command.starts_with("ui.") && !is_combo(tool.command) {
         let name = tool.command.split('.').next().unwrap_or(tool.command).to_ascii_uppercase();
         let mut line = format!("{} {name}", crate::tl!("Command:"));
@@ -1646,6 +1780,12 @@ mod tests {
         assert_eq!(items.last().map(String::as_str), Some("ui.dialog.about"));
         assert_eq!(items.iter().filter(|i| *i == SEPARATOR).count(), STANDARD.len() - 1);
         assert_eq!(sanitize(&items), items, "the default bar is already clean");
+    }
+
+    #[test]
+    fn every_tool_has_a_description() {
+        let missing: Vec<&str> = catalog().iter().map(|t| t.command).filter(|c| description(c).is_none()).collect();
+        assert!(missing.is_empty(), "{missing:?}");
     }
 
     #[test]

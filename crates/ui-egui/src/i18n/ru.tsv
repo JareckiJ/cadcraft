@@ -1476,3 +1476,127 @@
 	A text without spaces at its ends and double spaces.	Текст без пробелов по краям и двойных пробелов.
 	A text in capitals.	Текст прописными буквами.
 	The year of a date.	Год даты.
+	Starts a new drawing from the default template.	Создаёт новый чертёж по шаблону по умолчанию.
+	Opens a drawing (DWG, DXF) from a file.	Открывает чертёж (DWG, DXF) из файла.
+	Saves the drawing to its file (asks for a name the first time).	Сохраняет чертёж в его файл (при первом сохранении спрашивает имя).
+	Saves the drawing under a new name, format or version.	Сохраняет чертёж под новым именем, в другом формате или версии.
+	Undoes the last action. The arrow beside it undoes several at once.	Отменяет последнее действие. Стрелка рядом отменяет сразу несколько.
+	Redoes what was undone. The arrow beside it redoes several at once.	Возвращает отменённое действие. Стрелка рядом возвращает сразу несколько.
+	Prints the current layout or model space to a printer or a PDF file.	Печатает текущий лист или пространство модели на принтер или в PDF.
+	Prints several sheets at once, to separate files or one PDF.	Печатает сразу несколько листов: в отдельные файлы или в один PDF.
+	Sets the paper, printer and plot settings of layouts.	Задаёт бумагу, принтер и параметры печати листов.
+	Shows the page as it will be printed.	Показывает страницу так, как она будет напечатана.
+	Brings another file's contents (DXF, SVG...) into this drawing.	Добавляет в чертёж содержимое другого файла (DXF, SVG...).
+	Saves the drawing or part of it as PDF, SVG, PNG or another format.	Сохраняет чертёж или его часть в PDF, SVG, PNG или другой формат.
+	Attaches an external reference: a drawing, image or PDF shown in this one.	Прикрепляет внешнюю ссылку: чертёж, изображение или PDF, которые показываются в этом чертеже.
+	Shares the drawing with others.	Отправляет чертёж другим людям.
+	Zooms to a rectangle you draw.	Увеличивает область, которую вы обведёте рамкой.
+	Moves the view without changing its scale.	Сдвигает вид, не меняя масштаб.
+	Turns the view around the drawing in 3D.	Поворачивает вид вокруг чертежа в 3D.
+	Zooms to show the whole drawing.	Показывает весь чертёж целиком.
+	Shows or hides the Properties and Layers palettes.	Показывает или прячет палитры «Свойства» и «Слои».
+	Opens the Layer Properties Manager: create layers, set their colour, linetype and state.	Открывает диспетчер слоёв: создание слоёв, их цвет, тип линий и состояние.
+	Opens the block manager: insert, edit and manage blocks.	Открывает диспетчер блоков: вставка, редактирование и управление блоками.
+	Measures the distance and angle between two points.	Измеряет расстояние и угол между двумя точками.
+	Lists everything about the selected objects in the command history.	Выводит в историю команд все сведения о выбранных объектах.
+	Measures the area and perimeter of an object or of points you pick.	Измеряет площадь и периметр объекта или указанных точек.
+	About CADCraft and help.	О программе CADCraft и справка.
+	Creates and changes text styles: font, height, width factor.	Создаёт и изменяет текстовые стили: шрифт, высота, коэффициент ширины.
+	Creates and changes dimension styles: arrows, text, lines, units.	Создаёт и изменяет размерные стили: стрелки, текст, линии, единицы.
+	Opens the program's settings.	Открывает настройки программы.
+	The current layer: new objects are drawn on it. Pick another from the list.	Текущий слой: на нём рисуются новые объекты. Выберите другой из списка.
+	Makes the layer of the object you pick the current layer.	Делает текущим слой выбранного объекта.
+	Moves the selected objects to the layer of another object.	Переносит выбранные объекты на слой другого объекта.
+	Undoes the last change to layer settings.	Отменяет последнее изменение настроек слоёв.
+	Hides or locks every layer except those of the selected objects.	Скрывает или блокирует все слои, кроме слоёв выбранных объектов.
+	Turns off the layer of the object you pick.	Отключает слой выбранного объекта.
+	Freezes the layer of the object you pick: hidden and not regenerated.	Замораживает слой выбранного объекта: он скрыт и не пересчитывается.
+	Locks the layer of the object you pick: its objects can't be changed.	Блокирует слой выбранного объекта: его объекты нельзя изменить.
+	Unlocks the layer of the object you pick.	Разблокирует слой выбранного объекта.
+	The current text style, used by new text.	Текущий текстовый стиль для нового текста.
+	The current dimension style, used by new dimensions.	Текущий размерный стиль для новых размеров.
+	The linetype of new objects.	Тип линий новых объектов.
+	The lineweight of new objects.	Вес линий новых объектов.
+	Draws straight line segments, one after another.	Рисует прямые отрезки, один за другим.
+	Draws a polyline: connected straight and arc segments that form one object.	Рисует полилинию: связанные прямые и дуговые сегменты, образующие один объект.
+	Draws a circle by its centre and radius, or by points.	Рисует окружность по центру и радиусу или по точкам.
+	Draws a rectangle by two corners, or by its width and height.	Рисует прямоугольник по двум углам или по ширине и высоте.
+	Draws an arc through three points, or by centre, start and end.	Рисует дугу по трём точкам или по центру, началу и концу.
+	Draws a smooth curve through or near the points you pick.	Рисует плавную кривую через указанные точки или рядом с ними.
+	Draws an infinite construction line, for alignment.	Рисует бесконечную вспомогательную прямую для выравнивания.
+	Draws a line that starts at a point and runs on without end.	Рисует луч: линию, которая начинается в точке и уходит в бесконечность.
+	Draws an ellipse or an elliptical arc.	Рисует эллипс или эллиптическую дугу.
+	Draws a regular polygon with as many sides as you like.	Рисует правильный многоугольник с любым числом сторон.
+	Places points, one after another.	Ставит точки, одну за другой.
+	Draws a filled ring or a filled circle.	Рисует закрашенное кольцо или закрашенный круг.
+	Draws a revision cloud around something to mark a change.	Рисует облако вокруг объекта, чтобы отметить изменение.
+	Turns closed shapes into regions (areas you can combine and measure).	Превращает замкнутые контуры в области (их можно объединять и измерять).
+	Covers what is behind an area with the background colour.	Закрывает то, что под областью, цветом фона.
+	Fills an enclosed area with a pattern or a solid colour.	Заполняет замкнутую область штриховкой или сплошным цветом.
+	Fills an enclosed area with a colour gradient.	Заполняет замкнутую область градиентом.
+	Draws a polyline around an enclosed area you click inside.	Рисует полилинию по контуру замкнутой области, внутри которой вы щёлкнули.
+	Groups selected objects into a block that can be inserted again and again.	Объединяет выбранные объекты в блок, который можно вставлять много раз.
+	Inserts a block (opens the block manager).	Вставляет блок (открывает диспетчер блоков).
+	Opens a block to change what it contains.	Открывает блок, чтобы изменить его содержимое.
+	Defines an attribute: text asked for each time the block is inserted.	Определяет атрибут: текст, который запрашивается при каждой вставке блока.
+	Moves objects by a distance, from a base point to another point.	Перемещает объекты от базовой точки к другой точке.
+	Copies objects to other places.	Копирует объекты в другие места.
+	Turns objects around a base point.	Поворачивает объекты вокруг базовой точки.
+	Cuts off the parts of objects that cross other objects. Hover to see what goes.	Отрезает части объектов, пересекающие другие объекты. Наведите курсор, чтобы увидеть, что будет удалено.
+	Rounds the corner between two objects with an arc.	Скругляет угол между двумя объектами дугой.
+	Copies objects in rows and columns.	Копирует объекты рядами и столбцами.
+	Makes a mirror copy of objects across a line (and can erase the originals).	Создаёт зеркальную копию объектов относительно линии (и может удалить исходные).
+	Makes objects larger or smaller from a base point.	Увеличивает или уменьшает объекты относительно базовой точки.
+	Lengthens objects to meet other objects. Hover to see the extension.	Удлиняет объекты до других объектов. Наведите курсор, чтобы увидеть удлинение.
+	Makes a parallel copy of a line, curve or outline at a distance.	Создаёт параллельную копию линии, кривой или контура на заданном расстоянии.
+	Copies objects around a centre point.	Копирует объекты по кругу вокруг центра.
+	Stretches objects crossed by a selection window, moving their points inside it.	Растягивает объекты, пересечённые рамкой: точки внутри рамки сдвигаются.
+	Bevels the corner between two lines.	Срезает угол между двумя линиями фаской.
+	Breaks a compound object (block, polyline, dimension) into its parts.	Разбивает составной объект (блок, полилинию, размер) на части.
+	Breaks an object in two, or removes a part between two points.	Разрывает объект на два или удаляет часть между двумя точками.
+	Joins lines, arcs and polylines that touch into one object.	Соединяет касающиеся линии, дуги и полилинии в один объект.
+	Deletes the selected objects.	Удаляет выбранные объекты.
+	Changes the length of lines and arcs.	Изменяет длину отрезков и дуг.
+	Copies the properties of one object (layer, colour, style...) to others.	Копирует свойства одного объекта (слой, цвет, стиль...) на другие.
+	Writes single-line text. A text starting with = shows a formula's result.	Создаёт однострочный текст. Текст, начинающийся с =, показывает результат формулы.
+	Writes multiline text in a box, with formatting.	Создаёт многострочный текст в рамке, с форматированием.
+	Inserts a table of rows and columns.	Вставляет таблицу из строк и столбцов.
+	Finds text in the drawing and replaces it.	Ищет текст в чертеже и заменяет его.
+	A horizontal or vertical dimension between two points.	Горизонтальный или вертикальный размер между двумя точками.
+	A dimension parallel to the line between two points.	Размер, параллельный линии между двумя точками.
+	The radius of a circle or arc.	Радиус окружности или дуги.
+	The diameter of a circle or arc.	Диаметр окружности или дуги.
+	The angle between two lines, or of an arc.	Угол между двумя линиями или угол дуги.
+	The length along an arc.	Длина дуги.
+	The X or Y coordinate of a point.	Координата X или Y точки.
+	More dimensions from the same base line as the last one.	Новые размеры от той же базы, что и последний.
+	More dimensions continuing from the end of the last one.	Новые размеры, продолжающие последний (цепочкой).
+	Dimensions several objects at once.	Проставляет размеры сразу для нескольких объектов.
+	A note with an arrow pointing at something (multileader).	Выноска: текст со стрелкой, указывающей на объект.
+	Adds another leader line to a multileader.	Добавляет ещё одну линию к выноске.
+	Removes a leader line from a multileader.	Удаляет линию выноски.
+	Lines up several multileaders.	Выравнивает несколько выносок.
+	Adds geometric constraints to the selected objects automatically.	Автоматически накладает геометрические зависимости на выбранные объекты.
+	Keeps two points together.	Удерживает две точки вместе.
+	Keeps two lines parallel.	Удерживает две линии параллельными.
+	Keeps two lines at right angles.	Удерживает две линии под прямым углом.
+	Keeps a line horizontal.	Удерживает линию горизонтальной.
+	Keeps a line vertical.	Удерживает линию вертикальной.
+	Keeps a curve tangent to another object.	Удерживает кривую касательной к другому объекту.
+	Keeps circles and arcs on one centre.	Удерживает окружности и дуги на общем центре.
+	Keeps two lines the same length, or two circles the same size.	Удерживает равными длины двух линий или размеры двух окружностей.
+	Draws a 3D box.	Создаёт 3D-параллелепипед.
+	Draws a 3D cylinder.	Создаёт 3D-цилиндр.
+	Draws a 3D pyramid.	Создаёт 3D-пирамиду.
+	Draws a 3D sphere.	Создаёт 3D-шар.
+	Draws a 3D torus (a ring).	Создаёт 3D-тор (кольцо).
+	Draws a 3D cone.	Создаёт 3D-конус.
+	Pulls a closed shape into a 3D solid.	Вытягивает замкнутый контур в 3D-тело.
+	Turns a shape around an axis into a 3D solid.	Вращает контур вокруг оси и создаёт 3D-тело.
+	Sweeps a shape along a path into a 3D solid.	Протягивает контур вдоль траектории и создаёт 3D-тело.
+	Makes a 3D solid through several cross sections.	Создаёт 3D-тело по нескольким сечениям.
+	Joins 3D solids or regions into one.	Объединяет 3D-тела или области в одно.
+	Cuts 3D solids or regions out of others.	Вычитает одни 3D-тела или области из других.
+	Keeps only the part 3D solids or regions share.	Оставляет только общую часть 3D-тел или областей.
+	Undo (Ctrl+Z)	Отменить (Ctrl+Z)
+	Redo (Ctrl+Y)	Вернуть (Ctrl+Y)
