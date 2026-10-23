@@ -410,7 +410,15 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
         let hr = Rect::from_min_size(pos2(bar.left(), bar.top() - lh * lines.len() as f32 - 4.0), vec2(w, lh * lines.len() as f32 + 2.0));
         p.rect_filled(hr, 3.0, t.cmd_history);
         for (i, l) in lines.iter().enumerate() {
-            p.text(pos2(hr.left() + 8.0, hr.top() + 1.0 + lh * i as f32), egui::Align2::LEFT_TOP, l, crate::theme::small(), t.text_dim);
+            // The inline history translates like the expanded one (gaps.md L1), so the same log
+            // line reads the same above the bar and in the F2 window.
+            p.text(
+                pos2(hr.left() + 8.0, hr.top() + 1.0 + lh * i as f32),
+                egui::Align2::LEFT_TOP,
+                crate::i18n::t(l),
+                crate::theme::small(),
+                t.text_dim,
+            );
         }
     }
     p.rect_filled(bar, 3.0, t.cmd_bg);
