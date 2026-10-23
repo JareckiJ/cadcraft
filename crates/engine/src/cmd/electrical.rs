@@ -59,7 +59,43 @@ const MAX_DEVICES: usize = 200_000;
 /// Run after every command that changed the drawing (the engine's after-command hook): keeps
 /// the project database and the cross-references in step with ordinary CAD edits.
 pub(crate) fn after_command(s: &mut Session, before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
+    retag_copies(s, before, uid);
     xref::live(s, before, uid);
+}
+
+/// Copies keep their tag in AutoCAD Electrical only for contacts: a main device that appeared in
+/// this command (COPY, ARRAY, paste…) with the numbered tag of another device gets a new tag from
+/// where it now is.
+fn retag_copies(s: &mut Session, before: Option<&std::sync::Arc<cadcraft_doc::Drawing>>, uid: Option<u64>) {
+    let (Some(before), Ok(st)) = (before, s.state()) else { return };
+    if uid.is_some_and(|u| u != st.uid) || std::sync::Arc::ptr_eq(before, &st.doc) {
+        return;
+    }
+    let space = s.space();
+    let existed: HashSet<Handle> = before.space(&space).map(|st| st.iter().map(|e| e.handle).collect()).unwrap_or_default();
+    let Ok(all) = devices(s, None, None) else { return };
+    let overrides = HashMap::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for d in all.iter().filter(|d| !is_child(d, &overrides) && d.family.as_deref() != Some("TERMINAL") && is_numbered(&d.tag)) {
+        *seen.entry(d.tag.clone()).or_default() += 1;
+    }
+    let fresh: Vec<String> = all
+        .iter()
+        .filter(|d| !existed.contains(&d.handle))
+        .filter(|d| !is_child(d, &overrides) && d.family.as_deref() != Some("TERMINAL"))
+        .filter(|d| seen.get(&d.tag).is_some_and(|n| *n > 1))
+        .map(|d| d.handle.hex())
+        .collect();
+    if fresh.is_empty() {
+        return;
+    }
+    // Clear their tags, then tag them like new devices (mode new keeps every other tag).
+    for d in all.iter().filter(|d| fresh.contains(&d.handle.hex())) {
+        let _ = set_tag(s, d.handle, &d.attr, "");
+    }
+    if let Err(e) = run_etag_inner(s, &json!({ "handles": fresh })) {
+        log::warn!("copied devices not retagged: {e}");
+    }
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -672,6 +708,33 @@ mod tests {
         s.cmdline("all").unwrap();
         assert!(s.running.is_none());
         assert_eq!(tag_of(&s, &a), "-K101");
+    }
+
+    #[test]
+    fn copies_of_a_device_get_their_own_tag() {
+        let mut s = Session::new();
+        let k = s.execute("esymbol", &json!({ "name": "IEC_COIL", "at": [21, 100] })).unwrap();
+        assert_eq!(k["tag"], "-K101");
+        let c = s.execute("esymbol", &json!({ "name": "IEC_NO", "at": [63, 150], "tag": "-K101" })).unwrap();
+        // Copy both two columns right: the coil's copy is retagged, the contact's copy keeps the
+        // tag it carries (a second contact of the same coil).
+        s.execute("copy", &json!({ "handles": [k["handle"], c["handle"]], "delta": [84, 0] })).unwrap();
+        let tags: Vec<(String, String)> = s
+            .doc()
+            .unwrap()
+            .model
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntityKind::Insert(i) => i.attribs.iter().find(|a| a.tag == "TAG1" || a.tag == "TAG2").map(|a| (i.block.clone(), a.text.value.clone())),
+                _ => None,
+            })
+            .collect();
+        let coils: Vec<&str> = tags.iter().filter(|t| t.0 == "IEC_COIL").map(|t| t.1.as_str()).collect();
+        assert_eq!(coils.len(), 2, "{tags:?}");
+        assert_eq!(coils[0], "-K101");
+        assert!(coils[1].starts_with("-K") && coils[1] != "-K101", "{tags:?}");
+        let contacts: Vec<&str> = tags.iter().filter(|t| t.0 == "IEC_NO").map(|t| t.1.as_str()).collect();
+        assert_eq!(contacts, vec!["-K101", "-K101"]);
     }
 
     #[test]
