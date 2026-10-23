@@ -178,3 +178,37 @@ fn battman_starts_from_a_selected_reference() {
     s.cmdline("x").unwrap();
     assert!(s.running.is_none());
 }
+
+#[test]
+fn battman_modes_and_multiline_switching() {
+    let (mut s, ..) = drawing();
+    let r = battman(
+        &mut s,
+        json!({
+            "name": "B",
+            "action": "edit",
+            "tag": "a",
+            "verify": true,
+            "preset": true,
+            "lockPosition": true,
+            "multiline": true
+        }),
+    );
+    let attr = &r["attributes"][0];
+    assert_eq!(attr["verify"], true);
+    assert_eq!(attr["preset"], true);
+    assert_eq!(attr["lockPosition"], true);
+    assert_eq!(attr["multiline"], true);
+
+    // Switch multiline back to false
+    let r2 = battman(
+        &mut s,
+        json!({
+            "name": "B",
+            "action": "edit",
+            "tag": "a",
+            "multiline": false
+        }),
+    );
+    assert_eq!(r2["attributes"][0].get("multiline"), None);
+}
