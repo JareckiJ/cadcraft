@@ -99,7 +99,7 @@ fn utf8_wins_when_valid() {
 /// A code page CADCraft doesn't know (or none) reads as ANSI_1252, as before.
 #[test]
 fn unknown_code_page_falls_back_to_ansi_1252() {
-    for cp in ["ANSI_1361", "EBCDIC", "", "\u{1}"] {
+    for cp in ["ANSI_9999", "EBCDIC", "", "\u{1}"] {
         let d = cadcraft_io::read_dxf(&ascii_dxf("AC1015", cp, b"Caf\xE9", b"B", b"\x80 \xD8")).unwrap();
         assert_eq!(names(&d), ("Café".into(), "B".into(), "€ Ø".into()), "{cp:?}");
     }
@@ -159,7 +159,43 @@ fn binary_dxf_honours_the_code_page() {
     // A short Cyrillic string that is also valid UTF-8 (D1 B2) is still read in the code page.
     assert_eq!(read(&bin("AC1015", "ANSI_1251", b"\xD1\xB2")), "СІ");
     assert_eq!(read(&bin("AC1021", "ANSI_1251", "Привет".as_bytes())), "Привет");
-    assert_eq!(read(&bin("AC1015", "ANSI_1361", b"Caf\xE9")), "Café");
+    assert_eq!(read(&bin("AC1015", "ANSI_9999", b"Caf\xE9")), "Café");
+    // Johab and the other DOS code pages too (FF4).
+    assert_eq!(read(&bin("AC1015", "ANSI_1361", b"\xD0\x65\x8B\x69")), "한글");
+    assert_eq!(read(&bin("AC1015", "DOS857", b"\x98stanbul")), "İstanbul");
+}
+
+/// FF4: Korean Johab (`ANSI_1361`) and the DOS code pages 855, 857, 860–865 and 869 read
+/// correctly instead of as ANSI_1252, and saving declares the file's code page again (text as
+/// `\U+` escapes before 2007, UTF-8 after), so the text survives a round trip in every version.
+#[test]
+fn johab_and_dos_code_pages_read_and_survive_a_round_trip() {
+    let cases: [(&str, &[u8], &str); 10] = [
+        ("ANSI_1361", b"\xD0\x65\x8B\x69", "한글"),
+        ("DOS855", b"\x80\x81", "ђЂ"),
+        ("DOS857", b"\x98stanbul \x9E\xA7", "İstanbul Şğ"),
+        ("DOS860", b"P\x84o", "Pão"),
+        ("DOS861", b"\x8B\x8C", "Ðð"),
+        ("DOS862", b"\x80\x81", "אב"),
+        ("DOS863", b"\x84me", "Âme"),
+        ("DOS864", b"x", "x"),
+        ("DOS865", b"\x9B\x9D", "øØ"),
+        ("DOS869", b"\x86", "Ά"),
+    ];
+    for (cp, bytes, text) in cases {
+        let d = cadcraft_io::read_dxf(&ascii_dxf("AC1015", cp, bytes, b"B", bytes)).unwrap();
+        assert_eq!(names(&d), (text.to_string(), "B".to_string(), text.to_string()), "{cp}");
+        for v in [cadcraft_dxf::Version::R2000, cadcraft_dxf::Version::R2018] {
+            let opts = cadcraft_io::SaveOptions { version: Some(v), binary: false };
+            let out = String::from_utf8(cadcraft_io::write_with(&d, "x.dxf", &opts).unwrap()).unwrap();
+            let lines: Vec<&str> = out.lines().map(str::trim).collect();
+            let at = lines.iter().position(|l| *l == "$DWGCODEPAGE").unwrap();
+            assert_eq!(lines.get(at + 2).copied(), Some(cp), "{cp} {v:?}");
+            let back = cadcraft_io::read_dxf(out.as_bytes()).unwrap();
+            assert_eq!(names(&back), (text.to_string(), "B".to_string(), text.to_string()), "{cp} {v:?}");
+            assert_eq!(back.header.str("DWGCODEPAGE", ""), cp);
+        }
+    }
 }
 
 /// Truncated and invalid multibyte sequences become U+FFFD; nothing panics and the structure of
@@ -177,7 +213,7 @@ fn hostile_multibyte_never_panics() {
     cut.push(0xB5);
     let _ = cadcraft_io::read_dxf(&cut);
     let all: Vec<u8> = (0..=255u8).collect();
-    for cp in ["ANSI_932", "ANSI_936", "ANSI_949", "ANSI_950", "ANSI_1251", "DOS437", "DOS852", "MACINTOSH"] {
+    for cp in ["ANSI_932", "ANSI_936", "ANSI_949", "ANSI_950", "ANSI_1251", "ANSI_1361", "DOS437", "DOS852", "DOS857", "DOS864", "MACINTOSH"] {
         let d = cadcraft_io::read_dxf(&ascii_dxf(
             "AC1015",
             cp,
