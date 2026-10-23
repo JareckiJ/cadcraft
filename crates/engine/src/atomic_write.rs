@@ -36,13 +36,20 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
+    write_atomic_with(path, permissions, |file| file.write_all(bytes))
+}
+
+/// [`write_atomic`] filling the temporary file through `fill` (streamed rather than one buffer),
+/// with `permissions` given to it from its creation (`None`: the usual creation mode). A symlink
+/// at `path` is replaced by the new file, never written through.
+pub fn write_atomic_with(path: &Path, permissions: Option<Permissions>, fill: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let (mut file, tmp) = create_temp(&dir, permissions.as_ref())?;
     let write = (|| {
         if let Some(permissions) = permissions {
             file.set_permissions(permissions)?;
         }
-        file.write_all(bytes)?;
+        fill(&mut file)?;
         file.flush()?;
         file.sync_all()
     })();

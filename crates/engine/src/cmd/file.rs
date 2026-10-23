@@ -450,7 +450,8 @@ pub fn looks_like_drawing(bytes: &[u8]) -> bool {
     }
 }
 
-/// Before `path` is replaced: copy it to its `.bak`, streamed and written atomically too. Nothing
+/// Before `path` is replaced: copy it to its `.bak`, streamed and written atomically too
+/// ([`crate::atomic_write::write_atomic_with`]). Nothing
 /// to keep when there is no file yet. A file that doesn't look like a drawing
 /// ([`looks_like_drawing`]) is not backed up, and the `.bak` already there is left alone.
 #[cfg(not(target_arch = "wasm32"))]
@@ -469,19 +470,24 @@ fn backup(path: &std::path::Path) -> std::io::Result<()> {
         return Ok(());
     }
     let bak = backup_path(path);
-    // The backup is no more readable than the drawing (a private 0600 drawing keeps a private
-    // .bak): a .bak already there takes the drawing's mode first (only a plain file, never
-    // through a symlink), as craft-atomic keeps an existing file's mode; a new one is staged
-    // privately and given the drawing's mode.
+    // The backup is no more readable than the drawing, nor than the .bak it replaces (a private
+    // 0600 drawing or .bak stays private). The mode is set as the new file is created, so a
+    // failed write leaves the old .bak as it was; a symlink at the .bak is replaced, never
+    // written through.
     #[cfg(unix)]
-    let mode = src.metadata()?.permissions();
-    #[cfg(unix)]
-    if std::fs::symlink_metadata(&bak).is_ok_and(|m| m.is_file()) {
-        std::fs::set_permissions(&bak, mode.clone())?;
-    }
-    craft_atomic::WriteOptions::default().with_new_file_permissions(craft_atomic::NewFilePermissions::Private).atomic_write_with(&bak, |out| {
-        #[cfg(unix)]
-        out.set_permissions(mode)?;
+    let permissions = {
+        use std::os::unix::fs::PermissionsExt;
+        let mut mode = src.metadata()?.permissions().mode() & 0o777;
+        if let Ok(m) = std::fs::symlink_metadata(&bak)
+            && m.is_file()
+        {
+            mode &= m.permissions().mode();
+        }
+        Some(std::fs::Permissions::from_mode(mode))
+    };
+    #[cfg(not(unix))]
+    let permissions = None;
+    crate::atomic_write::write_atomic_with(&bak, permissions, |out| {
         std::io::Write::write_all(out, &head)?;
         std::io::copy(&mut src, out).map(|_| ())
     })

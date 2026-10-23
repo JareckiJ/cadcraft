@@ -142,5 +142,36 @@ fn the_backup_is_no_more_readable_than_the_drawing() {
     s.execute("qsave", &json!({})).unwrap();
     assert_eq!(mode(&backup_path(&path)), 0o600, "a .bak already there");
     assert_eq!(circles(&backup_path(&path)), 2);
+
+    // A .bak kept more private than the drawing is never widened.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(backup_path(&path), std::fs::Permissions::from_mode(0o600)).unwrap();
+    add_circle(&mut s, 15.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(mode(&backup_path(&path)), 0o600, "a more private .bak");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A symlink planted at the .bak is replaced by the backup, never written through: the file it
+/// pointed at is left as it was.
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_backup_is_not_followed() {
+    let _saving = saving();
+    hooks();
+    let dir = temp_dir("link");
+    let path = dir.join("Plan.dxf");
+    let p = path.to_string_lossy().to_string();
+    let other = dir.join("other.txt");
+    std::fs::write(&other, b"someone else's file").unwrap();
+    let mut s = Session::new();
+    add_circle(&mut s, 0.0);
+    s.execute("saveas", &json!({ "path": p })).unwrap();
+    std::os::unix::fs::symlink(&other, backup_path(&path)).unwrap();
+    add_circle(&mut s, 5.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(std::fs::read(&other).unwrap(), b"someone else's file");
+    assert!(std::fs::symlink_metadata(backup_path(&path)).unwrap().is_file(), "the .bak is a file now");
+    assert_eq!(circles(&backup_path(&path)), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

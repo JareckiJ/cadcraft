@@ -15,7 +15,6 @@ cadcraft-doc = { workspace = true }
 cadcraft-dxf = { workspace = true }
 cadcraft-constraints = { workspace = true }
 cadcraft-fonts = { workspace = true }
-craft-atomic = { workspace = true }
 cadcraft-render = { workspace = true }
 craft-docpath = { workspace = true }
 serde = { workspace = true }
