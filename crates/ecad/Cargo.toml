@@ -1,0 +1,19 @@
+[package]
+name = "cadcraft-ecad"
+description = "Electrical project data graph: projects, pages, devices, pins and connections, in an embedded database"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# The embedded database (pure Rust, ACID; MIT OR Apache-2.0). Native only: the web build keeps
+# the graph in memory.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+redb = "2"
