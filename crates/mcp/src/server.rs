@@ -23,6 +23,8 @@ Verify with inspect_drawing / query_entities and look with render.";
 pub struct Server {
     backend: Box<dyn Backend>,
     initialized: bool,
+    /// Tools that write files or run LISP are refused (#1931): `cadcraft-cli mcp --readonly`.
+    readonly: bool,
 }
 
 fn response(id: Value, result: Value) -> Value {
@@ -34,7 +36,12 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false }
+        Self { backend, initialized: false, readonly: false }
+    }
+    /// Refuse the tools that write files or run LISP (#1931): the CLI's `--readonly`.
+    pub fn readonly(mut self, on: bool) -> Self {
+        self.readonly = on;
+        self
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
         self.backend.as_mut()
@@ -113,7 +120,7 @@ impl Server {
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "missing tool `name`".to_string()))?;
                 let args = params.get("arguments").unwrap_or(&Value::Null);
-                call_tool(self.backend.as_mut(), name, args).map_err(|m| (INVALID_PARAMS, m))
+                call_tool(self.backend.as_mut(), name, args, self.readonly).map_err(|m| (INVALID_PARAMS, m))
             }
             "resources/list" => Ok(json!({"resources": [
                 {"uri": "cadcraft://drawing", "name": "Active drawing", "mimeType": "application/json"},

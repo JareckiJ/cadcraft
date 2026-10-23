@@ -230,3 +230,57 @@ fn a_lazy_bridge_starts_without_the_app_and_says_how_to_open_it() {
     assert_ne!(r["result"]["isError"], json!(true), "{r}");
     app.join().unwrap();
 }
+
+// ---------- read-only mode (#1931) ----------
+
+fn ro_server() -> Server {
+    let mut s = Server::new(Box::new(Headless::default())).readonly(true);
+    let _ = call(&mut s, 1, "initialize", json!({"protocolVersion": "2025-06-18"}));
+    let _ = s.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+    s
+}
+
+/// The refusal is a tool error (`isError`), so an agent sees it as the tool's own result.
+fn refused(s: &mut Server, name: &str, args: Value) -> String {
+    let r = call(s, 98, "tools/call", json!({"name": name, "arguments": args}));
+    assert_eq!(r["result"]["isError"], json!(true), "{name} was not refused: {r}");
+    r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string()
+}
+
+#[test]
+fn readonly_still_draws_and_reads() {
+    let mut s = ro_server();
+    tool(&mut s, "command_line", json!({"text": "rectang 0,0 100,60"}));
+    tool(&mut s, "execute", json!({"command": "circle", "params": {"center": [10, 10], "radius": 4}}));
+    let info = tool(&mut s, "inspect_drawing", json!({}));
+    assert_eq!(info["entityCount"], 2, "drawing edits are allowed in read-only mode");
+    // A render without `path` writes nothing: it comes back as an image.
+    let png = tool(&mut s, "render", json!({}));
+    assert_eq!(png["type"], json!("image"));
+}
+
+#[test]
+fn readonly_refuses_file_writes_and_lisp() {
+    let mut s = ro_server();
+    // The save tool, and execute by id and by alias.
+    assert!(refused(&mut s, "save", json!({"path": "x.dxf"})).contains("read-only mode"));
+    assert!(refused(&mut s, "execute", json!({"command": "saveas", "params": {"path": "x.dxf"}})).contains("saveas"));
+    assert!(refused(&mut s, "execute", json!({"command": "qsave", "params": {}})).contains("qsave"));
+    // Typing at the command line: directly, hidden mid-line, and LISP expressions.
+    assert!(refused(&mut s, "command_line", json!({"text": "save"})).contains("read-only mode"));
+    assert!(refused(&mut s, "command_line", json!({"text": "zoom e save out.dxf"})).contains("read-only mode"));
+    assert!(refused(&mut s, "command_line", json!({"text": "(command \"_.LINE\" (list 0 0))"})).contains("LISP"));
+    assert!(refused(&mut s, "command_line", json!({"text": "!x"})).contains("LISP"));
+    // A script is refused whole when any line writes files or runs LISP; comments are fine.
+    assert!(refused(&mut s, "script", json!({"text": "; a comment\ncircle 0,0 1\nsave out.dxf"})).contains("save out.dxf"));
+    // render/screenshot with a `path` write a file.
+    assert!(refused(&mut s, "render", json!({"path": "out.png"})).contains("`path`"));
+}
+
+#[test]
+fn readonly_refuses_the_lisp_entry_points() {
+    let mut s = ro_server();
+    for cmd in ["lisp", "appload", "script"] {
+        assert!(refused(&mut s, "execute", json!({"command": cmd, "params": {}})).contains(cmd), "{cmd}");
+    }
+}
