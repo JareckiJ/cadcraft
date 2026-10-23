@@ -23,6 +23,7 @@ mod press_first_clicks;
 mod properties_units;
 mod rapid_clicks;
 mod selection_cycling;
+mod selection_windows;
 mod shared_controls;
 mod shortcut_menus;
 mod status_bar_toggles;
