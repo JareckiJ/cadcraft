@@ -369,14 +369,26 @@ pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> 
         d
     };
     let links = all_links(d, o);
-    // Each page is written as soon as its sheet is plotted, so only one display list is held
-    // at a time (#1068).
+    write_items(d, drawn, items, o, &links, fonts::MAX_FONT_BYTES)
+}
+
+/// Write the pages of `items`, plotted from `drawn`, each as soon as its sheet is plotted, so
+/// only one display list is held at a time (#1068); `max_font_bytes` caps the embedded font
+/// data.
+fn write_items(
+    d: &Drawing,
+    drawn: &Drawing,
+    items: &[(Space, PdfOptions)],
+    o: &PdfOptions,
+    links: &[(Handle, String)],
+    max_font_bytes: usize,
+) -> Result<Vec<u8>> {
     let mut w = Writer::new(d, o);
-    let mut gather = fonts::Gather::default();
+    let mut gather = fonts::Gather::new(max_font_bytes);
     let geometry = fonts::Fonts::default();
     let mut first_label = None;
     for (s, po) in items {
-        let p = sheet(drawn, s, po, &links)?;
+        let p = sheet(drawn, s, po, links)?;
         first_label.get_or_insert_with(|| p.label.clone());
         w.page(&p, if o.text_as_geometry { &geometry } else { gather.add(&p.list) });
     }
@@ -390,11 +402,24 @@ pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> 
         // plot again, holding every sheet until the fonts are known.
         None => {
             drop(w);
-            let pages = items.iter().map(|(s, po)| sheet(drawn, s, po, &links)).collect::<Result<Vec<_>>>()?;
-            let fonts = fonts::Fonts::collect(pages.iter().map(|p| &p.list));
-            Ok(assemble(d, &pages, &fonts, o, &title))
+            write_held(d, drawn, items, o, links, &title, max_font_bytes)
         }
     }
+}
+
+/// Write the pages of `items` holding every plotted sheet until the fonts are known.
+fn write_held(
+    d: &Drawing,
+    drawn: &Drawing,
+    items: &[(Space, PdfOptions)],
+    o: &PdfOptions,
+    links: &[(Handle, String)],
+    title: &str,
+    max_font_bytes: usize,
+) -> Result<Vec<u8>> {
+    let pages = items.iter().map(|(s, po)| sheet(drawn, s, po, links)).collect::<Result<Vec<_>>>()?;
+    let fonts = fonts::Fonts::collect(pages.iter().map(|p| &p.list), max_font_bytes);
+    Ok(assemble(d, &pages, &fonts, o, title))
 }
 
 /// One plotted sheet, ready to be written as a page.
@@ -1042,5 +1067,124 @@ impl<'a> Writer<'a> {
         let _ = write!(x, "trailer\n<< /Size {} /Root {catalog} 0 R /Info {info} 0 R >>\nstartxref\n{xref}\n%%EOF\n", offsets.len() + 1);
         out.extend_from_slice(x.as_bytes());
         out
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/support/ttf.rs"]
+mod ttf;
+
+#[cfg(test)]
+mod tests {
+    use cadcraft_doc::{Common, EntityKind, Line, Text, TextStyle};
+    use cadcraft_geom::Vec3;
+
+    use super::*;
+
+    fn text(d: &mut Drawing, space: &Space, layer: &str, at: (f64, f64), value: &str) -> Handle {
+        let t = Text {
+            insert: Vec3::new(at.0, at.1, 0.0),
+            align_pt: None,
+            height: 10.0,
+            value: value.into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Real".into(),
+            halign: Default::default(),
+            valign: Default::default(),
+        };
+        d.add(space, Common { layer: layer.into(), ..Default::default() }, EntityKind::Text(t)).unwrap()
+    }
+
+    fn line(d: &mut Drawing, space: &Space, layer: &str, a: (f64, f64), b: (f64, f64)) -> Handle {
+        let l = EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
+        d.add(space, Common { layer: layer.into(), ..Default::default() }, l).unwrap()
+    }
+
+    /// Text in an embeddable font on two sheets, lines on layers (one shared by both sheets,
+    /// one off) and link annotations on each sheet.
+    fn sheets() -> (Drawing, Vec<(Space, PdfOptions)>, PdfOptions) {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| cadcraft_fonts::ttf::register("cadcraft-pdf-unit.ttf", ttf::test_font(0)));
+        let mut d = Drawing::new_metric();
+        d.text_styles.push(TextStyle { name: "Real".into(), font: "cadcraft-pdf-unit.ttf".into(), ..TextStyle::default() });
+        let paper = Space::Paper("Layout1".into());
+        text(&mut d, &Space::Model, "Notes", (0.0, 0.0), "AB");
+        let wall = line(&mut d, &Space::Model, "Walls", (0.0, -20.0), (100.0, -20.0));
+        line(&mut d, &Space::Model, "Off", (0.0, -40.0), (100.0, -40.0));
+        text(&mut d, &paper, "Notes", (20.0, 40.0), "BA");
+        let frame = line(&mut d, &paper, "Walls", (10.0, 10.0), (150.0, 10.0));
+        if let Some(l) = d.layers.iter_mut().find(|l| l.name == "Off") {
+            l.on = false;
+        }
+        let o = PdfOptions {
+            compress: false,
+            layers: true,
+            include_off_layers: true,
+            links: vec![(wall, "https://example.com/wall".into()), (frame, "https://example.com/frame".into())],
+            ..PdfOptions::default()
+        };
+        let items = vec![(Space::Model, o.clone()), (paper, PdfOptions { landscape: Some(true), ..o.clone() })];
+        (d, items, o)
+    }
+
+    /// The drawing plotted from (layers that are off turned on, as `pdf_items` does).
+    fn drawn(d: &Drawing) -> Drawing {
+        let mut c = d.clone();
+        for l in c.layers.iter_mut().filter(|l| !l.frozen) {
+            l.on = true;
+        }
+        c
+    }
+
+    fn ascii(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| if b.is_ascii() { char::from(*b) } else { '?' }).collect()
+    }
+
+    #[test]
+    fn pages_written_as_plotted_match_the_file_assembled_from_every_sheet() {
+        let (d, items, o) = sheets();
+        let drawn = drawn(&d);
+        let links = all_links(&d, &o);
+        for compress in [false, true] {
+            let o = PdfOptions { compress, ..o.clone() };
+            let streamed = write_items(&d, &drawn, &items, &o, &links, fonts::MAX_FONT_BYTES).unwrap();
+            let held = write_held(&d, &drawn, &items, &o, &links, "Model", fonts::MAX_FONT_BYTES).unwrap();
+            assert_eq!(streamed, held, "compress: {compress}");
+            assert_eq!(streamed, pdf_items(&d, &items, &o).unwrap());
+        }
+        // What the comparison covers: both pages, real text, layers shared across pages (the
+        // one that is off starts hidden), page labels and one link annotation per page.
+        let p = ascii(&write_items(&d, &drawn, &items, &o, &links, fonts::MAX_FONT_BYTES).unwrap());
+        assert!(p.contains("/Count 2"));
+        assert_eq!(p.matches("/FontFile2").count(), 1);
+        assert_eq!(p.lines().filter(|l| l.ends_with(" Tj")).count(), 4);
+        assert_eq!(p.matches("/Type /OCG").count(), 3, "Notes, Walls and Off, once each");
+        assert!(p.contains("/OFF [") && !p.contains("/OFF []"));
+        assert!(p.contains("/PageLabels << /Nums [0 << /P (Model) >> 1 << /P (Layout1) >> ] >>"), "{p}");
+        assert_eq!(p.matches("/Subtype /Link").count(), 2);
+    }
+
+    #[test]
+    fn fonts_over_the_data_cap_are_planned_as_text_then_plotted_again_as_outlines() {
+        // The plan made while the pages are written cannot see the cap on font data, so the
+        // writer must start again holding every sheet: the result is the held file, with the
+        // text that did not fit drawn as outlines.
+        let (d, items, o) = sheets();
+        let drawn = drawn(&d);
+        let links = all_links(&d, &o);
+        let mut planned = fonts::Gather::new(1);
+        for (s, po) in &items {
+            let page = sheet(&drawn, s, po, &links).unwrap();
+            assert!(!planned.add(&page.list).texts(&page.list).is_empty(), "planned as text");
+        }
+        assert!(planned.finish().is_none(), "the plan does not hold");
+        let capped = write_items(&d, &drawn, &items, &o, &links, 1).unwrap();
+        assert_eq!(capped, write_held(&d, &drawn, &items, &o, &links, "Model", 1).unwrap());
+        let p = ascii(&capped);
+        assert!(!p.contains("/FontFile2") && !p.contains(" Tf"), "no font, no text operators");
+        assert!(p.contains("h\nf\n"), "the glyphs are outlines");
+        assert_eq!(p.matches("/Subtype /Link").count(), 2);
     }
 }

@@ -19,7 +19,7 @@ use super::{Objects, num, refs, stream};
 /// Most embedded fonts in one file.
 const MAX_FONTS: usize = 64;
 /// Most embedded font data in one file (uncompressed bytes).
-const MAX_FONT_BYTES: usize = 64 << 20;
+pub(super) const MAX_FONT_BYTES: usize = 64 << 20;
 
 /// A face's identity: its loaded file and face index.
 type FaceKey = (usize, usize, u32);
@@ -46,17 +46,18 @@ pub(super) struct Fonts {
 }
 
 impl Fonts {
-    /// Collect the glyphs of every plotted text glyph and subset their fonts.
-    pub(super) fn collect<'a>(lists: impl IntoIterator<Item = &'a DisplayList>) -> Fonts {
-        let mut g = Gather::default();
+    /// Collect the glyphs of every plotted text glyph and subset their fonts, embedding at
+    /// most `max_bytes` of font data.
+    pub(super) fn collect<'a>(lists: impl IntoIterator<Item = &'a DisplayList>, max_bytes: usize) -> Fonts {
+        let mut g = Gather::new(max_bytes);
         for list in lists {
             g.glyphs(list);
         }
-        Fonts::build(g.used)
+        Fonts::build(g.used, max_bytes)
     }
 
     /// Subset the fonts of the glyphs used, by face in order of first use.
-    fn build(used: Vec<(Face, BTreeMap<u16, char>)>) -> Fonts {
+    fn build(used: Vec<(Face, BTreeMap<u16, char>)>, max_bytes: usize) -> Fonts {
         let mut out = Fonts::default();
         let mut total = 0usize;
         for (face, chars) in used {
@@ -64,7 +65,7 @@ impl Fonts {
             let font = (out.fonts.len() < MAX_FONTS)
                 .then(|| subset::subset(&face, &chars.keys().copied().collect::<BTreeSet<u16>>()).ok())
                 .flatten()
-                .filter(|data| total.saturating_add(data.len()) <= MAX_FONT_BYTES)
+                .filter(|data| total.saturating_add(data.len()) <= max_bytes)
                 .and_then(|data| Some(Font { info: subset::info(&face)?, face, chars, data }));
             match font {
                 Some(f) => {
@@ -105,15 +106,20 @@ impl Fonts {
 /// [`Fonts::collect`] would give it, unless it cannot be embedded at all; whether the plan
 /// holds (the caps on fonts and font data are only known at the end) is checked by
 /// [`Gather::finish`].
-#[derive(Default)]
 pub(super) struct Gather {
     used: Vec<(Face, BTreeMap<u16, char>)>,
     index: HashMap<FaceKey, usize>,
     plan: Fonts,
     planned: usize,
+    /// The cap on font data ([`MAX_FONT_BYTES`] outside tests).
+    max_bytes: usize,
 }
 
 impl Gather {
+    pub(super) fn new(max_bytes: usize) -> Gather {
+        Gather { used: Vec::new(), index: HashMap::new(), plan: Fonts::default(), planned: 0, max_bytes }
+    }
+
     /// Add the glyphs of a sheet; returns the fonts to write its page with.
     pub(super) fn add(&mut self, list: &DisplayList) -> &Fonts {
         for face in self.glyphs(list) {
@@ -151,7 +157,7 @@ impl Gather {
     /// The fonts to write, or `None` when they differ from the plan the pages were written
     /// with (a cap was reached, or a subset failed with more glyphs).
     pub(super) fn finish(self) -> Option<Fonts> {
-        let fonts = Fonts::build(self.used);
+        let fonts = Fonts::build(self.used, self.max_bytes);
         (fonts.by_face == self.plan.by_face).then_some(fonts)
     }
 }
