@@ -236,12 +236,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad("properties.set", format!("unknown justification `{j}`")));
     }
-    let style_doc = justify.map(|_| {
-        let mut x = cadcraft_doc::Drawing::default();
-        x.text_styles = d.text_styles.clone();
-        x.header = d.header.clone();
-        x
-    });
+    let style_doc = justify.map(|_| cadcraft_doc::Drawing { text_styles: d.text_styles.clone(), header: d.header.clone(), ..Default::default() });
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {

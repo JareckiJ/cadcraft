@@ -649,7 +649,7 @@ fn call(name: &str, a: &[Val], env: &Env) -> R {
     let n1 = |a: &[Val]| arg(a, 1).and_then(Val::num);
     let checked = |v: f64| if v.is_finite() { Ok(Val::Num(v)) } else { Err(Err::Num) };
     let chars = |v: &Val| v.text().chars().collect::<Vec<char>>();
-    let count = |v: f64| usize::try_from(v.max(0.0).min(1e6) as i64).unwrap_or(0);
+    let count = |v: f64| if v.is_finite() { usize::try_from(v.clamp(0.0, 1e6) as i64).unwrap_or(0) } else { 0 };
     let (y, mo, d, h, mi, s) = env.now;
     let now = serial(i64::from(y), i64::from(mo), i64::from(d)) + (f64::from(h) * 3600.0 + f64::from(mi) * 60.0 + f64::from(s)) / 86_400.0;
     match name {

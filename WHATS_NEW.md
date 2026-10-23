@@ -8,6 +8,80 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 23.10.2026 (0.9.0-b15)
+
+### Русский
+
+**Палитра «Свойства»: прокрутка длинных списков**
+- Выпадающие списки в «Свойствах» (слои, типы линий, стили, выбор объектов по типу и другие), а также список «Загрузить…» типов линий и списки быстрых свойств теперь прокручиваются, если они слишком длинные. Полоса прокрутки видна всегда.
+
+**Лист при первом открытии вписывается в экран**
+- Когда вкладку листа открывают впервые, лист целиком вписывается в окно с небольшим отступом. Раньше для листов в миллиметрах внутри дюймового чертежа (как в «אריה צוק») масштаб получался в 25,4 раза неверным.
+
+**Стартовая страница: недавние файлы списком или сеткой**
+- Рядом с заголовком «Недавние» есть две кнопки: «Список» и «Сетка с эскизами».
+- В сетке у каждого файла есть эскиз. Для DWG и DXF берётся эскиз, сохранённый в самом файле (AutoCAD его записывает). Если его нет, CADCraft рисует пространство модели сам. Эскизы маленькие (обычно 10–25 КБ) и хранятся в папке настроек программы. Когда файл меняется, эскиз создаётся заново.
+- Если файла по прежнему пути нет, вместо эскиза показан крупный значок: пунктирный лист с красным кругом и вопросительным знаком, а под именем написано «Файл не найден». В режиме списка рядом с таким файлом стоит маленький такой же значок.
+
+**Текст: выравнивание, «справа налево», «вверх ногами», рамка**
+- В «Свойствах» у текста появились «Выравнивание» (все 15 вариантов AutoCAD: Влево, По центру, Вправо, Вписанный, Посередине, По ширине и девять вариантов «Вверху/Посередине/Внизу слева/по центру/справа»), «Справа налево (зеркально)» и «Вверх ногами».
+- При смене выравнивания текст остаётся на месте: перемещается только точка, по которой он выровнен.
+- У многострочного текста: «Выравнивание» (9 вариантов, текст тоже остаётся на месте), «Поворот» и «Рамка текста». Рамка рисуется вокруг текста и сохраняется так, что AutoCAD её тоже видит.
+- Флаги «Справа налево» и «Вверх ногами» читаются из чертежей AutoCAD для каждого текста отдельно, как в AutoCAD. Раньше CADCraft брал их из текстового стиля. Из-за этого тексты в «зеркальных» стилях (в «אריה צוק» это, например, стиль T-NEW) могли показываться зеркально, хотя в AutoCAD они нормальные. Новый текст, как и в AutoCAD, получает эти флаги от своего стиля.
+- Выравнивание существующих текстов читалось правильно и раньше: группы 72/73 и точка выравнивания.
+
+**Окно редактирования текста: иврит и английский в одной строке**
+- Убран «второй» текст другим шрифтом, который был виден при выделении.
+- Окно редактирования теперь своё, а не стандартное: текст в нём расположен так же, как на чертеже. Каждый абзац получает направление по первой «сильной» букве. Абзац, начинающийся на иврите, читается справа налево, на английском — слева направо. Внутри абзаца английские слова, числа, пробелы и знаки становятся на свои места по правилам Unicode, как в Word, и больше не «перепрыгивают».
+- Стрелки ← и → двигают курсор туда, куда они указывают на экране, в любом направлении текста. Ctrl+стрелки переходят по словам, Shift+стрелки выделяют, выделение подсвечивает именно выбранные буквы. Работают Home/End, Ctrl+A, копирование, вырезание, вставка, отмена (Ctrl+Z) и возврат (Ctrl+Y), выделение мышью и двойной щелчок по слову.
+
+**Формулы в тексте (как в Excel)**
+- Текст, который начинается со знака «=», показывает результат формулы: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy").
+- Формула хранится вместе с текстом. При двойном щелчке открывается формула, а не результат. Если ввести обычный текст без «=», формула удаляется.
+- Пока набирается имя функции, рядом с курсором появляется список подходящих функций с описанием. Стрелки выбирают, Tab или Enter вставляют, Esc закрывает.
+- Доступные функции: ABS, ACOS, AND, ASIN, ATAN, AVERAGE, CONCAT, COS, DATE, DAY, DEGREES, EXP, FILENAME, FIXED, HOUR, IF, INT, LEFT, LEN, LN, LOG10, LOWER, MAX, MID, MIN, MINUTE, MOD, MONTH, NOT, NOW, OR, PI, POWER, RADIANS, RIGHT, ROUND, ROUNDDOWN, ROUNDUP, SHEET, SIN, SQRT, SUM, TAN, TEXT, TODAY, TRIM, UPPER, YEAR. Операции: + - * / ^ % & и сравнения. Аргументы разделяются запятой или точкой с запятой. Ошибки показываются как в Excel: #DIV/0!, #NAME?, #VALUE!.
+- Описание всех функций: «Справка ▸ Формулы в тексте».
+- Дата и время берутся из часов Windows и пересчитываются при каждом открытии чертежа. Пересчитать сразу: «Сервис ▸ Обновить поля» (команда UPDATEFIELD).
+- Поля даты из AutoCAD тоже работают. На листе «4» в «אריה צוק» дата в правом нижнем углу — это поле AutoCAD «дата» в формате dd.MM.yyyy. Теперь CADCraft его понимает и при открытии показывает сегодняшнюю дату, как AutoCAD. Само поле сохраняется в файле, и в AutoCAD оно продолжит работать.
+- Формулы CADCraft записываются в файл так, что AutoCAD увидит их результат как обычный текст.
+
+### English
+
+**Properties palette: long lists scroll**
+- Drop-down lists in Properties (layers, linetypes, styles, select by type and others), as well as the linetype "Load…" list and the Quick Properties lists, now scroll when they are too long. The scrollbar is always visible.
+
+**A layout fits the screen the first time it is shown**
+- When a layout tab is opened for the first time, the whole sheet fits the window with a small margin. Before, layouts in millimetres inside an inch drawing (as in "אריה צוק") came out 25.4 times off.
+
+**Start page: recent files as a list or a grid**
+- Two buttons next to the "Recent" heading: "List" and "Grid with previews".
+- In the grid, each file has a preview. For DWG and DXF it is the preview saved in the file itself (AutoCAD writes one). When a file has none, CADCraft draws its model space. Previews are small (usually 10–25 KB) and kept in the program's settings folder. A changed file gets a new preview.
+- If a file is no longer at its path, a large icon shows instead of the preview: a dashed page with a red circle and a question mark, and "File not found" under its name. In the list, such a file has the same small icon next to it.
+
+**Text: justification, backwards, upside down, frame**
+- Text in Properties now has "Justify" (all 15 AutoCAD options: Left, Center, Right, Aligned, Middle, Fit, and the nine Top/Middle/Bottom left/center/right ones), "Backwards" and "Upside down".
+- Changing the justification keeps the text in place: only the point it is justified by moves.
+- Multiline text: "Justify" (9 options; the text also stays in place), "Rotation" and "Text frame". The frame is drawn around the text and saved so that AutoCAD shows it too.
+- Backwards and Upside down are read from AutoCAD drawings for each text, as AutoCAD does. CADCraft used to take them from the text style, which could mirror texts in "backwards" styles (in "אריה צוק", style T-NEW for example) that AutoCAD shows normally. As in AutoCAD, new text takes these settings from its style.
+- The justification of existing texts was already read correctly (groups 72/73 and the alignment point).
+
+**The text editing box: Hebrew and English on one line**
+- The "second" text in another font that showed up while selecting is gone.
+- The editing box is now CADCraft's own, not the standard one: text in it is laid out the same way as on the drawing. Each paragraph takes its direction from its first strong letter. A paragraph that starts in Hebrew reads right to left, one that starts in English left to right. Within a paragraph, English words, numbers, spaces and punctuation fall into place by the Unicode rules, as in Word, and no longer jump around.
+- ← and → move the caret where they point on screen, whatever the text direction. Ctrl+arrows move by words, Shift+arrows select, and a selection highlights exactly the selected letters. Home/End, Ctrl+A, copy, cut, paste, undo (Ctrl+Z) and redo (Ctrl+Y), mouse selection and double-clicking a word all work.
+
+**Formulas in text (as in Excel)**
+- A text that starts with "=" shows the result of a formula: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();"dd.mm.yyyy").
+- The formula stays with the text. Double-clicking opens the formula, not the result. Typing plain text without "=" removes the formula.
+- While a function name is typed, a list of matching functions with descriptions appears next to the caret. The arrows choose, Tab or Enter inserts, Esc closes.
+- Available functions: ABS, ACOS, AND, ASIN, ATAN, AVERAGE, CONCAT, COS, DATE, DAY, DEGREES, EXP, FILENAME, FIXED, HOUR, IF, INT, LEFT, LEN, LN, LOG10, LOWER, MAX, MID, MIN, MINUTE, MOD, MONTH, NOT, NOW, OR, PI, POWER, RADIANS, RIGHT, ROUND, ROUNDDOWN, ROUNDUP, SHEET, SIN, SQRT, SUM, TAN, TEXT, TODAY, TRIM, UPPER, YEAR. Operators: + - * / ^ % & and comparisons. Arguments are separated by commas or semicolons. Errors show as in Excel: #DIV/0!, #NAME?, #VALUE!.
+- All functions are described in Help ▸ Text Formulas.
+- Dates and times come from the Windows clock and are worked out again every time the drawing is opened. To do it at once: Tools ▸ Update Fields (the UPDATEFIELD command).
+- AutoCAD date fields work too. On sheet "4" in "אריה צוק", the date in the bottom right corner is an AutoCAD "date" field in the dd.MM.yyyy format. CADCraft now understands it and shows today's date when the drawing is opened, as AutoCAD does. The field itself is kept in the file and keeps working in AutoCAD.
+- CADCraft formulas are saved so that AutoCAD shows their result as ordinary text.
+
+---
+
 ## 22.10.2026 (0.9.0-b14)
 
 ### Русский
