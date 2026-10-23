@@ -543,6 +543,14 @@ impl BlockM {
 mod insert_file;
 pub(crate) mod xref;
 
+/// When `t` names a drawing file (as at INSERT's block name prompt: `name=path`, or a path with a
+/// folder separator or a .dwg/.dxf extension that isn't already a block), read it and (re)define
+/// its block as INSERT does; returns the block's name. `None` when `t` isn't a file name.
+pub(crate) fn define_block_from_file(s: &mut Session, t: &str) -> Option<Result<String>> {
+    let f = insert_file::file_ref(s, t)?;
+    Some(f.define(s))
+}
+
 /// Where the command-line INSERT is in its prompt sequence.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum InsStage {
