@@ -5,9 +5,17 @@ Start the desktop app with `--control PORT` (or `CADCRAFT_CONTROL_PORT=PORT`). I
 `--control` wins over the variable; a bare `--control` keeps the variable's port.
 
 ```json
-{"id": 1, "method": "cmdline.input", "params": {"text": "circle 0,0 5"}}
+{"id": 1, "method": "cmdline.input", "params": {"text": "circle 0,0 5"}, "token": "<session token>"}
 {"id": 1, "ok": true, "result": {"prompt": "Command:", "output": ["Command: CIRCLE"], ...}}
 ```
+
+Every request must carry the session `token`. Because loopback TCP cannot tell local operating
+system users apart, the app writes an unguessable per-session token to an owner-only file when the
+control server starts, and refuses (`unauthorized`) any request without a matching token. The file
+is `cadcraft-control-<port>.token` in the per-user runtime directory (`$XDG_RUNTIME_DIR`, else
+`~/.cache`; `%LOCALAPPDATA%` on Windows); its path is logged at startup. A client reads the token
+from that file — which requires the desktop user's own filesystem access — and includes it on each
+line. The MCP bridge (`cadcraft-cli mcp --connect`) does this automatically.
 
 Errors come back as `{"id": …, "ok": false, "error": "message"}`. An unknown method's error points
 to `control.methods`, which lists the methods the server answers.
@@ -85,6 +93,19 @@ base64-encoded bytes in the result's `data` field. The `command` alias can be us
 Sending `open` or `document.bytes` as the top-level `method` returns an `unknown method` error:
 the protocol dispatches methods explicitly and does not fall through to the command registry.
 `app.open` is a top-level convenience method for opening a drawing with `{path}`.
+
+To read selected objects as structured geometry in a single query, execute `entities` with
+`selected: true` (a boolean; omitted/false keeps the unfiltered selection behavior):
+
+```json
+{"id":7,"method":"engine.execute","params":{"command":"entities","params":{"selected":true,"limit":1000}}}
+```
+
+Only selected entities in the active space are returned; an empty selection returns an empty
+page. The selection filter combines with `type`, `layer` and `window` before `offset`/`limit`.
+The existing response is unchanged: `count` is all matches, `returned` is the page size and
+`entities` contains handles, layers and geometry. This query does not change selection, drawing
+contents or undo history. `entities` is a command, not a top-level protocol method.
 
 The MCP server (`cadcraft-cli mcp --connect 127.0.0.1:PORT`) wraps this protocol; headless
 (`cadcraft-cli mcp`) it serves the same methods from an in-process session.
