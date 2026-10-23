@@ -169,6 +169,10 @@ fn display(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
         color_row(ui, app.options.paper_background, Tokens::DARK.paper, "paperBackground", changes);
         ui.end_row();
 
+        ui.label(crate::tl!("Crosshair color"));
+        color_row(ui, app.options.crosshair_color, Tokens::DARK.crosshair, "crosshairColor", changes);
+        ui.end_row();
+
         ui.label(crate::tl!("Crosshair size"));
         let mut size = app.session.settings.cursorsize;
         if ui.add(egui::Slider::new(&mut size, 1.0..=100.0).integer().suffix(" %")).changed() {
@@ -261,6 +265,10 @@ fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, s
             }
             preview_square(ui, size, t.snap);
         });
+        ui.end_row();
+
+        ui.label(crate::tl!("Snap marker color"));
+        color_row(ui, app.options.snap_marker_color, Tokens::DARK.snap, "snapMarkerColor", changes);
         ui.end_row();
 
         ui.label(crate::tl!("Object snap aperture"));
@@ -369,6 +377,9 @@ fn selection(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) 
             }
             ui.label(crate::tl!("Object selection limit for display of grips"));
         });
+        right.add_space(4.0);
+        right.label(crate::tl!("Grip color"));
+        color_row(right, app.options.grip_color, Tokens::DARK.grip, "gripColor", changes);
         right.add_space(8.0);
         heading(right, crate::tl!("Preview"));
         right.label(crate::tl!("Selection preview"));
@@ -390,6 +401,9 @@ fn selection(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) 
 
 /// Whether the Visual Effect Settings window is open (egui temp data).
 const VISUAL_EFFECTS: &str = "cc_options_visual_effects";
+
+/// Whether the Right-Click Customization window is open (egui temp data).
+const RIGHT_CLICK_CUSTOMIZATION: &str = "cc_options_right_click";
 
 fn heading(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).strong());
@@ -456,6 +470,49 @@ fn visual_effects(ctx: &egui::Context, st: &cadcraft_engine::Settings, open: &mu
     }
 }
 
+/// Right-Click Customization dialog (AutoCAD parity): time-sensitive right-click toggle,
+/// hold duration threshold, and shortcut menu behaviors.
+fn right_click_customization(ctx: &egui::Context, app: &CadApp, open: &mut bool, changes: &mut Map<String, Value>) {
+    let mut close = false;
+    egui::Window::new(crate::tl!("Right-Click Customization"))
+        .id(egui::Id::new("cc_right_click_customization"))
+        .open(open)
+        .resizable(false)
+        .collapsible(false)
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center())
+        .show(ctx, |ui| {
+            heading(ui, crate::tl!("Time-Sensitive Right-Click"));
+            let mut timed = app.options.time_sensitive_right_click;
+            if ui.checkbox(&mut timed, crate::tl!("Turn on time-sensitive right-click")).changed() {
+                changes.insert("timeSensitiveRightClick".into(), json!(timed));
+            }
+            ui.add_space(4.0);
+            hint(ui, crate::tl!("Quick click (< 250 ms) equals Enter. Longer click (>= 250 ms) displays Shortcut menu."));
+            ui.add_space(8.0);
+            heading(ui, crate::tl!("Command and Edit Modes"));
+            ui.label(RichText::new(crate::tl!("When a command is in progress, right-click means:")).small());
+            let mode_timed = app.options.time_sensitive_right_click;
+            if ui.radio(mode_timed, crate::tl!("ENTER (holding opens Shortcut menu)")).clicked() && !mode_timed {
+                changes.insert("timeSensitiveRightClick".into(), json!(true));
+            }
+            if ui.radio(!mode_timed, crate::tl!("Shortcut menu always")).clicked() && mode_timed {
+                changes.insert("timeSensitiveRightClick".into(), json!(false));
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(crate::tl!("Close")).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+    if close {
+        *open = false;
+    }
+}
+
 /// A colour by its index (ACI 1-255): a swatch and the number; a change goes into `changes`.
 fn aci_row(ui: &mut egui::Ui, current: u8, key: &str, changes: &mut Map<String, Value>) {
     ui.horizontal(|ui| {
@@ -470,6 +527,7 @@ fn aci_row(ui: &mut egui::Ui, current: u8, key: &str, changes: &mut Map<String, 
 }
 
 fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
+    let mut right_click_modal = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(RIGHT_CLICK_CUSTOMIZATION)).unwrap_or(false));
     grid(ui, "options_preferences", |ui| {
         ui.label(crate::tl!("Interface language"));
         let mut lang = app.ui.interface_language;
@@ -491,12 +549,21 @@ fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>
         ui.end_row();
     });
     hint(ui, crate::tl!("An array that would create more objects than this is refused."));
-    ui.add_space(6.0);
+    ui.add_space(8.0);
+    heading(ui, crate::tl!("Right-Click Customization"));
     let mut timed = app.options.time_sensitive_right_click;
     if ui.checkbox(&mut timed, crate::tl!("Time-sensitive right-click: a quick click is Enter, holding opens the menu")).changed() {
         changes.insert("timeSensitiveRightClick".into(), json!(timed));
     }
     hint(ui, crate::tl!("Turned off, a right-click while a command runs always opens the shortcut menu."));
+    ui.add_space(4.0);
+    if ui.button(crate::tl!("Right-Click Customization...")).clicked() {
+        right_click_modal = true;
+    }
+    if right_click_modal {
+        right_click_customization(ui.ctx(), app, &mut right_click_modal, changes);
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(RIGHT_CLICK_CUSTOMIZATION), right_click_modal));
 }
 
 fn profiles(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
@@ -507,6 +574,31 @@ fn profiles(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     ui.horizontal(|ui| {
         if ui.button(crate::tl!("Reset to Defaults")).clicked() {
             changes.insert("reset".into(), json!(true));
+        }
+        if ui.button(crate::tl!("Export Profile...")).clicked() {
+            let json_str = serde_json::to_string_pretty(&super::report(app)).unwrap_or_default();
+            if let Some(pick) = &app.services.pick_save {
+                if let Some(path) = pick("cadcraft-profile.json") {
+                    let _ = std::fs::write(&path, &json_str);
+                }
+            } else {
+                ui.ctx().copy_text(json_str);
+            }
+        }
+        if ui.button(crate::tl!("Import Profile...")).clicked()
+            && let Some(map) = app
+                .services
+                .pick_open
+                .as_ref()
+                .and_then(|pick| pick())
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+                .and_then(|val| match val {
+                    Value::Object(m) => Some(m),
+                    _ => None,
+                })
+        {
+            changes.extend(map);
         }
         if ui.button(crate::tl!("Copy as JSON")).clicked() {
             ui.ctx().copy_text(serde_json::to_string_pretty(&super::report(app)).unwrap_or_default());

@@ -246,6 +246,12 @@ pub struct Canvas {
     pub snap_marker: f32,
     /// The colour selected objects are highlighted in.
     pub selection: Option<Color32>,
+    /// The crosshair cursor colour.
+    pub crosshair: Option<Color32>,
+    /// Object snap marker colour.
+    pub snap_color: Option<Color32>,
+    /// Unselected grip colour.
+    pub grip_color: Option<Color32>,
 }
 
 /// The default object snap marker size.
@@ -253,7 +259,7 @@ pub const SNAP_MARKER: f32 = 11.0;
 
 impl Default for Canvas {
     fn default() -> Self {
-        Canvas { model: None, paper: None, snap_marker: SNAP_MARKER, selection: None }
+        Canvas { model: None, paper: None, snap_marker: SNAP_MARKER, selection: None, crosshair: None, snap_color: None, grip_color: None }
     }
 }
 
@@ -263,7 +269,14 @@ impl Canvas {
             Some(bg) => t.with_model_background(bg),
             None => t,
         };
-        Tokens { paper: self.paper.unwrap_or(t.paper), selection: self.selection.unwrap_or(t.selection), ..t }
+        Tokens {
+            paper: self.paper.unwrap_or(t.paper),
+            selection: self.selection.unwrap_or(t.selection),
+            crosshair: self.crosshair.unwrap_or(t.crosshair),
+            snap: self.snap_color.unwrap_or(t.snap),
+            grip: self.grip_color.unwrap_or(t.grip),
+            ..t
+        }
     }
 }
 

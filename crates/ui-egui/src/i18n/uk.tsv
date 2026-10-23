@@ -1430,3 +1430,17 @@
 	Swivel	Поворот
 	Thicken	Потовщення
 	Wedge	Клин
+	Crosshair color	Колір перехрестя
+	Snap marker color	Колір маркера прив'язки
+	Grip color	Колір ручок
+	Right-Click Customization	Налаштування правої кнопки миші
+	Right-Click Customization...	Налаштування правої кнопки миші...
+	Time-Sensitive Right-Click	Контекстне клацання за часом
+	Turn on time-sensitive right-click	Увімкнути контекстне клацання за часом
+	Quick click (< 250 ms) equals Enter. Longer click (>= 250 ms) displays Shortcut menu.	Швидке клацання (< 250 мс) діє як Enter. Довге клацання (>= 250 мс) відкриває контекстне меню.
+	Command and Edit Modes	Режими команд і редагування
+	When a command is in progress, right-click means:	Під час виконання команди права кнопка означає:
+	ENTER (holding opens Shortcut menu)	ENTER (утримування відкриває контекстне меню)
+	Shortcut menu always	Завжди контекстне меню
+	Export Profile...	Експортувати профіль...
+	Import Profile...	Імпортувати профіль...
