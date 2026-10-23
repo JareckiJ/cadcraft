@@ -446,12 +446,13 @@ fn run_entities(s: &mut Session, p: &Value) -> Result<Value> {
     let Some(store) = d.space(&st.space) else { return Ok(json!({ "count": 0, "returned": 0, "entities": [] })) };
     let tol = window.as_ref().map(crate::select::window_tol).unwrap_or(0.0);
     let selection: std::collections::HashSet<Handle> = if selected { st.selection.iter().copied().collect() } else { Default::default() };
+    let mut cx = crate::select::TextCx::new();
     let matches: Vec<&std::sync::Arc<cadcraft_doc::Entity>> = store
         .iter()
         .filter(|e| !selected || selection.contains(&e.handle))
         .filter(|e| ty.as_ref().is_none_or(|t| e.kind.type_name().to_ascii_lowercase() == *t || e.kind.dxf_name().to_ascii_lowercase() == *t))
         .filter(|e| layer.as_ref().is_none_or(|l| e.common.layer.to_ascii_lowercase() == *l))
-        .filter(|e| window.as_ref().is_none_or(|w| crate::select::in_window(d, e, None, w, crossing, tol)))
+        .filter(|e| window.as_ref().is_none_or(|w| crate::select::in_window(d, e, None, w, crossing, tol, &mut cx)))
         .collect();
     let page: Vec<Value> = matches.iter().skip(offset).take(limit).map(|e| entity_summary(e)).collect();
     // `count` is every match; `returned` is this page of them (`offset`, `limit`).

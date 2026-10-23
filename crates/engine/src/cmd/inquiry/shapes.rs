@@ -62,11 +62,12 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let wtol = window.as_ref().map(crate::select::window_tol).unwrap_or(0.0);
     let mut skipped: BTreeMap<&str, (usize, BTreeSet<&str>)> = BTreeMap::new();
     let mut shapes: Vec<(&Entity, Facts)> = Vec::new();
+    let mut cx = crate::select::TextCx::new();
     for e in store
         .iter()
         .filter(|e| ty.as_ref().is_none_or(|t| e.kind.type_name().to_ascii_lowercase() == *t || e.kind.dxf_name().to_ascii_lowercase() == *t))
         .filter(|e| layer.as_ref().is_none_or(|l| e.common.layer.to_ascii_lowercase() == *l))
-        .filter(|e| window.as_ref().is_none_or(|w| crate::select::in_window(d, e, None, w, crossing, wtol)))
+        .filter(|e| window.as_ref().is_none_or(|w| crate::select::in_window(d, e, None, w, crossing, wtol, &mut cx)))
     {
         match facts(s, e, tol)? {
             Facts::Skip(why) => {
