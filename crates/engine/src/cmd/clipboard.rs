@@ -208,6 +208,7 @@ impl Used {
                 self.dim_styles.insert(up(&dm.style));
                 blocks.extend(dm.block.clone());
             }
+            EntityKind::Unknown(u) => blocks.extend(u.block_names().filter(|n| !n.is_empty()).map(str::to_string)),
             EntityKind::Leader(l) => {
                 self.dim_styles.insert(up(&l.style));
             }
@@ -343,16 +344,17 @@ fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Ent
     e.handle = d.new_handle();
     match &mut e.kind {
         EntityKind::Insert(i) => {
-            if let Some(n) = renames.get(&i.block) {
+            if let Some(n) = super::renamed_block(renames, &i.block) {
                 i.block = n.clone();
             }
         }
         EntityKind::Dimension(dm) => {
             dm.assoc.clear();
-            if let Some(n) = dm.block.as_ref().and_then(|b| renames.get(b)) {
+            if let Some(n) = dm.block.as_ref().and_then(|b| super::renamed_block(renames, b)) {
                 dm.block = Some(n.clone());
             }
         }
+        EntityKind::Unknown(u) => u.rename_blocks(|b| super::renamed_block(renames, b).cloned()),
         _ => {}
     }
     e

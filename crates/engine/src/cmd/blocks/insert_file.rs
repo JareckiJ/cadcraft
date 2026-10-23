@@ -187,16 +187,17 @@ fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Ent
     e.handle = d.new_handle();
     match &mut e.kind {
         EntityKind::Insert(i) => {
-            if let Some(n) = renames.get(&i.block) {
+            if let Some(n) = crate::cmd::renamed_block(renames, &i.block) {
                 i.block = n.clone();
             }
         }
         EntityKind::Dimension(dm) => {
             dm.assoc.clear();
-            if let Some(n) = dm.block.as_ref().and_then(|b| renames.get(b)) {
+            if let Some(n) = dm.block.as_ref().and_then(|b| crate::cmd::renamed_block(renames, b)) {
                 dm.block = Some(n.clone());
             }
         }
+        EntityKind::Unknown(u) => u.rename_blocks(|b| crate::cmd::renamed_block(renames, b).cloned()),
         _ => {}
     }
     e

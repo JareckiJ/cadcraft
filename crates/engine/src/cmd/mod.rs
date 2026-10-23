@@ -230,6 +230,13 @@ pub fn resolve_alias(name: &str) -> String {
 
 // ---------- param helpers ----------
 
+/// The new name block `name` got in a copy between drawings (`renames`, from the source's names),
+/// matched as `Drawing::block` matches block names: exactly, else ignoring ASCII case, so an object
+/// naming `*d1` follows the copy of `*D1`.
+pub(crate) fn renamed_block<'a>(renames: &'a std::collections::BTreeMap<String, String>, name: &str) -> Option<&'a String> {
+    renames.get(name).or_else(|| renames.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v))
+}
+
 pub(crate) fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
