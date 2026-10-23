@@ -77,7 +77,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(PathArrayM::default()))),
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
-            .alias(&["ed", "ddedit"])
+            .alias(&["ed", "ddedit", "mtedit"])
             .params("{handle, text} (text, mtext, attribute definitions, dimension text override, tolerance frame)")
             .interactive(|_| Ok(Box::new(TextEditM::default()))),
 
@@ -2263,6 +2263,8 @@ fn run_textedit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 struct TextEditM {
     h: Option<(Handle, String)>,
+    /// When editing an MTEXT entity, its current definition (for the on-canvas MTEXT editor).
+    mtext: Option<cadcraft_doc::MText>,
     /// Edits made in this run, newest last: each object as it was before (the Undo option).
     edits: Vec<(Handle, EntityKind)>,
     /// Single mode: end after one edit (the Mode option; Multiple by default).
@@ -2274,6 +2276,9 @@ struct TextEditM {
 impl Interactive for TextEditM {
     fn name(&self) -> &'static str {
         "TEXTEDIT"
+    }
+    fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
+        self.mtext.clone()
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         if self.mode {
@@ -2299,8 +2304,12 @@ impl Interactive for TextEditM {
         match (&self.h, i) {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                let old = text_of(&curves::entity(s, h)?.kind)
-                    .ok_or_else(|| other("Select a text, mtext, attribute definition, dimension or tolerance."))?;
+                let ent = curves::entity(s, h)?;
+                let old = text_of(&ent.kind).ok_or_else(|| other("Select a text, mtext, attribute definition, dimension or tolerance."))?;
+                self.mtext = match &ent.kind {
+                    EntityKind::MText(m) => Some(m.clone()),
+                    _ => None,
+                };
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }
@@ -2310,10 +2319,12 @@ impl Interactive for TextEditM {
                 set_text(s, h, &t)?;
                 self.edits.push((h, before));
                 self.h = None;
+                self.mtext = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (Some(_), Input::Enter) => {
                 self.h = None;
+                self.mtext = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (None, Input::Enter) => Ok(Step::Done),

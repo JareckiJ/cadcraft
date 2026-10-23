@@ -66,10 +66,10 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let (rect, scale) = app.canvas.xf.map_or((ctx.content_rect(), 20.0), |x| (x.rect, x.scale.max(1e-6)));
     let mut st = ctx.data_mut(|d| d.get_temp::<State>(state_id())).unwrap_or_else(|| {
-        let mut fmt = Formatted::default();
+        let mut fmt = if !mt.contents.is_empty() { Formatted::from_contents(&mt.contents) } else { Formatted::default() };
         if let Some(f) = app.session.doc().ok().and_then(|d| d.text_style(&mt.style).map(|s| s.font.clone())) {
             // A family name, not a font file (`txt.shx`, `arial.ttf`).
-            if !f.is_empty() && !f.contains('.') {
+            if !f.is_empty() && !f.contains('.') && fmt.base_font.is_empty() {
                 fmt.base_font = f;
             }
         }
@@ -122,9 +122,8 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         Done::Ok => {
             ctx.data_mut(|d| d.remove::<State>(state_id()));
             // The editor holds the whole contents: one input, then Enter ends MTEXT's text entry.
-            if !st.fmt.is_empty() {
-                let _ = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents()));
-            }
+            let contents = st.fmt.to_contents();
+            let _ = app.session.input(cadcraft_engine::Input::Text(contents));
             if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") {
                 let _ = app.session.input(cadcraft_engine::Input::Enter);
             }

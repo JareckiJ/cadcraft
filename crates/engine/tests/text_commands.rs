@@ -2,6 +2,7 @@
 
 use cadcraft_engine::Session;
 use cadcraft_engine::doc::{EntityKind, Space};
+use serde_json::json;
 
 fn kinds(s: &Session) -> Vec<EntityKind> {
     s.doc().ok().and_then(|d| d.space(&Space::Model)).map(|st| st.iter().map(|e| e.kind.clone()).collect()).unwrap_or_default()
@@ -66,4 +67,32 @@ fn textedit_prompt_mode_and_undo() {
     s.cmdline("once").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
     assert_eq!(texts(&s), vec!["once".to_string()]);
+}
+
+#[test]
+fn textedit_mtext_provides_editing_mtext() {
+    let mut s = Session::new();
+    s.execute(
+        "mtext",
+        &json!({
+            "at": [0, 10],
+            "width": 20.0,
+            "text": "Initial\\Pmultiline"
+        }),
+    )
+    .unwrap();
+
+    // Start textedit / mtedit
+    s.cmdline("mtedit").unwrap();
+    assert!(s.running.is_some());
+    // Pick the mtext near insertion point (0, 10)
+    s.cmdline("0,10").unwrap();
+    let em = s.editing_mtext();
+    assert!(em.is_some(), "editing_mtext must be populated when editing an MText");
+    let mt = em.unwrap();
+    assert_eq!(mt.contents, "Initial\\Pmultiline");
+
+    // Enter updated text
+    s.cmdline("Updated\\Pline").unwrap();
+    assert_eq!(mtexts(&s), vec!["Updated\\Pline".to_string()]);
 }
