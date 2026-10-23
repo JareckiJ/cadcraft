@@ -187,7 +187,7 @@ fn wrap(r: Result<Value, String>) -> Outcome {
 }
 
 /// What `control.methods` replies: method, params, description. Keep in step with `handle` and the
-/// table in `docs/control-protocol.md` (`tests/control_methods.rs` checks the table).
+/// table in `docs/control-protocol.md` (`tests/it/control_methods.rs` checks the table).
 const METHODS: &[(&str, &str, &str)] = &[
     ("cmdline.input", "{text}", "Type a line at the command line exactly like a user (commands, prompts, keywords; empty = Enter)."),
     ("cmdline.script", "{text}", "Run a multi-line script, like a .scr file."),
@@ -537,7 +537,8 @@ fn render_view(bounds: &cadcraft_geom::Bounds2, center: Vec2, height: f64, fit: 
 /// The `ui.render` reply, matching the headless backend (`pngBase64`, `width`, `height`), plus
 /// `bytes`, `path` and `truncated` (the build left block contents out, see #1070).
 fn render_reply(png: &[u8], w: u32, h: u32, path: Option<&str>, truncated: bool) -> Value {
-    let mut v = json!({"pngBase64": cadcraft_engine::cmd::file::base64_encode(png), "width": w, "height": h, "bytes": png.len(), "truncated": truncated});
+    let mut v =
+        json!({"pngBase64": cadcraft_engine::cmd::file::base64_encode(png), "width": w, "height": h, "bytes": png.len(), "truncated": truncated});
     if let (Some(path), Some(o)) = (path, v.as_object_mut()) {
         o.insert("path".to_string(), json!(path));
     }
