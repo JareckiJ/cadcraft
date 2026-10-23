@@ -12,6 +12,7 @@ use crate::theme::Tokens;
 /// The QuickCalc palette.
 pub mod community;
 pub mod devices;
+pub mod electrical;
 #[cfg(test)]
 mod layer_menu_tests;
 /// The hatch pattern picker.

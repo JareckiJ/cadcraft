@@ -1467,3 +1467,51 @@
 	Cable List	Список кабелів
 	Title Block	Основний напис
 	Title Block...	Основний напис...
+# Electrical palette.
+	A cable line across its wires	Лінія кабелю через його проводи
+	A digital or analog I/O card	Дискретний або аналоговий модуль вводу/виводу
+	A framed sheet at the end of the project	Аркуш із рамкою в кінці проєкту
+	A new project with a first sheet	Новий проєкт із першим аркушем
+	CSV (Excel)	CSV (Excel)
+	Cable	Кабель
+	Cables	Кабелі
+	Click pins or wires; the wire routes at right angles	Клацніть виводи або проводи; провід прокладається під прямими кутами
+	Coils and timers	Котушки й таймери
+	Colour and cross-section of new wires	Колір і переріз нових проводів
+	Contacts	Контакти
+	Contacts and coils on this drawing	Контакти й котушки на цьому кресленні
+	Cross-reference coils and contacts across sheets	Перехресні посилання котушок і контактів між аркушами
+	Cross-references	Перехресні посилання
+	Device list	Список пристроїв
+	Devices	Пристрої
+	Edit device data	Редагувати дані пристрою
+	Electrical Palette	Палітра «Електрика»
+	Give contacts their coil's tag	Надати контактам позначення котушки
+	IEC 81346 tags from sheet and column	Позначення IEC 81346 за аркушем і стовпцем
+	Ladder	Сходова схема
+	Lamps and signals	Лампи й сигналізація
+	Make a symbol from drawn geometry	Створити символ із накресленої геометрії
+	Motors, drives, supplies	Двигуни, приводи, живлення
+	No project open.	Проєкт не відкрито.
+	Number new wires across the project	Пронумерувати нові проводи в проєкті
+	One number per network, at its start	Один номер на мережу, на її початку
+	Open an .ecproj project	Відкрити проєкт .ecproj
+	Other	Інше
+	PLC I/O	Входи/виходи ПЛК
+	PLC card	Модуль ПЛК
+	Parts list	Специфікація
+	Protection and switching	Захист і комутація
+	Push-buttons and switches	Кнопки й перемикачі
+	Reports (CSV)	Звіти (CSV)
+	Sensors	Датчики
+	Shared manufacturer parts	Спільні деталі виробників
+	Supply rails with a rung in every column	Шини живлення зі східцем у кожному стовпці
+	Symbols	Символи
+	Tag new devices across the project	Позначити нові пристрої в проєкті
+	Terminal plan	План клем
+	Terminals and connectors	Клеми й з'єднувачі
+	Terminals numbered per strip	Клеми, пронумеровані за колодками
+	Update the project database from every sheet	Оновити базу даних проєкту з усіх аркушів
+	Wire list	Список проводів
+	Wire numbers	Номери проводів
+	rows saved	рядків збережено

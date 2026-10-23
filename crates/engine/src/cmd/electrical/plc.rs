@@ -23,10 +23,15 @@ const PITCH: f64 = 10.0;
 const MAX_POINTS: u64 = 64;
 
 pub(super) fn specs() -> Vec<CommandSpec> {
-    vec![CommandSpec::new("eplc", "PLC I/O Card", run_plc).menu(&["Tools", "Electrical", "Insert PLC I/O Card"]).params(
-        "{kind: DI | DO | AI | AO, points? (default 8, up to 64), address? (first address, default I0.0 / Q0.0 / IW64 / QW64), \
+    vec![
+        CommandSpec::new("eplc", "PLC I/O Card", run_plc)
+            .menu(&["Tools", "Electrical", "Insert PLC I/O Card"])
+            .params(
+                "{kind: DI | DO | AI | AO, points? (default 8, up to 64), address? (first address, default I0.0 / Q0.0 / IW64 / QW64), \
                  at: [x, y], tag?, description?} → {handle, block, tag, addresses}",
-    )]
+            )
+            .interactive(|_| Ok(Box::new(super::interactive::PlcM::new()))),
+    ]
 }
 
 /// The address `n` places after `first`: bit addresses count 0–7 then carry (`I0.7` → `I1.0`),

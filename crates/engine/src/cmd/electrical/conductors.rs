@@ -43,10 +43,12 @@ pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("ewiretype", "Wire Type", run_wiretype)
             .menu(&["Tools", "Electrical", "Wire Type..."])
-            .params("{color: BK | BN | RD | OG | YE | GN | BU | VT | GY | WH | PK | GNYE | DBU, size?: mm² (default 1), handles? (wires to change; default: make it current)} → {layer, changed}"),
+            .params("{color: BK | BN | RD | OG | YE | GN | BU | VT | GY | WH | PK | GNYE | DBU, size?: mm² (default 1), handles? (wires to change; default: make it current)} → {layer, changed}")
+            .interactive(|_| Ok(Box::new(super::interactive::WireTypeM::default()))),
         CommandSpec::new("ecable", "Insert Cable", run_cable)
             .menu(&["Tools", "Electrical", "Insert Cable"])
-            .params("{from: [x, y], to: [x, y] (the line across the cable's wires), tag?, type? (e.g. \"5G1.5\", \"4x0.75\"), description?} → {handle, tag, cores}"),
+            .params("{from: [x, y], to: [x, y] (the line across the cable's wires), tag?, type? (e.g. \"5G1.5\", \"4x0.75\"), description?} → {handle, tag, cores}")
+            .interactive(|_| Ok(Box::new(super::interactive::CableM::default()))),
         CommandSpec::new("ecables", "Cable List", run_cables)
             .menu(&["Tools", "Electrical", "Reports", "Cable List"])
             .params("{} → {cables: [{tag, type, cores: [{core, colour, wire, from, to}]}]}")

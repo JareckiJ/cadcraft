@@ -16,6 +16,7 @@ mod builder;
 mod classes;
 mod conductors;
 pub mod generate;
+mod interactive;
 mod pins;
 mod plc;
 mod project;

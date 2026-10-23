@@ -37,10 +37,13 @@ pub(super) fn specs() -> Vec<CommandSpec> {
                  verticalFirst? (default: from the start pin's direction)} → {handle, from, to, snappedFrom, snappedTo, junctions}",
             )
             .interactive(|_| Ok(Box::new(WireM::default()))),
-        CommandSpec::new("eladder", "Insert Ladder", run_ladder).menu(&["Tools", "Electrical", "Insert Ladder"]).params(
-            "{top: y, bottom: y, from? x (default 0), to? x (default from + 420), spacing? (default 42, a column), \
+        CommandSpec::new("eladder", "Insert Ladder", run_ladder)
+            .menu(&["Tools", "Electrical", "Insert Ladder"])
+            .params(
+                "{top: y, bottom: y, from? x (default 0), to? x (default from + 420), spacing? (default 42, a column), \
                  layer? (default \"WIRE\")} → {rails: [handle], rungs: [handle]}",
-        ),
+            )
+            .interactive(|_| Ok(Box::new(super::interactive::LadderM::default()))),
     ]
 }
 
