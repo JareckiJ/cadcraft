@@ -24,16 +24,20 @@ jobs:
       - name: Tests and clippy
         shell: bash
         run: |
+          set +e
           set -o pipefail
           report() {
             # Errors and failing tests, without build progress, in annotations of 30 lines.
-            grep -v -E '^\s*(Compiling|Downloaded|Downloading|Checking|Running|Doc-tests)|^test .* ok$' "$1" \
-              | grep -E -A12 '^(error|warning)|panicked|FAILED|^failures:|test result' | head -270 > rep.txt || true
+            grep -v -E '^\s*(Compiling|Downloaded|Downloading|Checking|Running|Doc-tests|Fresh)|^test .* ok$' "$1" \
+              | grep -E -A12 '^(error|warning)|panicked|FAILED|^failures:|test result' | head -270 > rep.txt
+            [ -s rep.txt ] || tail -120 "$1" > rep.txt
             split -l 30 rep.txt part_
             for f in part_*; do
+              [ -f "$f" ] || continue
               msg=$(sed -e 's/%/%25/g' "$f" | awk 'BEGIN{ORS="%0A"} {print}')
               echo "::error title=$2::$msg"
             done
+            rm -f part_* rep.txt
           }
           status=0
           cargo test -p cadcraft-engine --lib electrical 2>&1 | tee t1.txt || { report t1.txt electrical-tests; status=1; }
