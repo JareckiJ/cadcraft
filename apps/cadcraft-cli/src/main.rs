@@ -574,9 +574,11 @@ enum McpTarget {
 
 /// Parses the arguments after `mcp`. `--connect` must be followed by a `HOST:PORT`; a missing,
 /// empty or flag-like value is an error, never a silent fall back to a headless session (#103).
-fn parse_mcp_args(args: &[String]) -> Result<McpTarget, String> {
+/// `--readonly` refuses the tools that write files or run LISP (#1931); it composes with both
+/// the headless session and `--connect`.
+fn parse_mcp_args(args: &[String]) -> Result<(McpTarget, bool), String> {
     let mut addr: Option<String> = None;
-    let (mut lazy, mut launch) = (false, false);
+    let (mut lazy, mut launch, mut readonly) = (false, false, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -593,19 +595,22 @@ fn parse_mcp_args(args: &[String]) -> Result<McpTarget, String> {
             }
             "--lazy" => lazy = true,
             "--launch" => launch = true,
+            "--readonly" => readonly = true,
             other => return Err(format!("mcp: unknown argument {other}\n{USAGE}")),
         }
     }
-    match addr {
+    let target = match addr {
         // `--launch` connects at the first call too (the app opens then).
-        Some(addr) => Ok(McpTarget::Connect { addr, lazy: lazy || launch, launch }),
-        None if lazy || launch => Err("--lazy and --launch need --connect HOST:PORT".into()),
-        None => Ok(McpTarget::Headless),
-    }
+        Some(addr) => McpTarget::Connect { addr, lazy: lazy || launch, launch },
+        None if lazy || launch => return Err("--lazy and --launch need --connect HOST:PORT".into()),
+        None => McpTarget::Headless,
+    };
+    Ok((target, readonly))
 }
 
 fn mcp(args: &[String]) -> Result<(), String> {
-    let backend: Box<dyn cadcraft_mcp::Backend> = match parse_mcp_args(args)? {
+    let (target, readonly) = parse_mcp_args(args)?;
+    let backend: Box<dyn cadcraft_mcp::Backend> = match target {
         McpTarget::Connect { addr, lazy: true, launch } => Box::new(cadcraft_mcp::Remote::lazy(&addr, launch)),
         McpTarget::Connect { addr, .. } => match cadcraft_mcp::Remote::connect(&addr) {
             Ok(r) => Box::new(r),
@@ -615,7 +620,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
     };
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    cadcraft_mcp::Server::new(backend).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+    cadcraft_mcp::Server::new(backend).readonly(readonly).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -628,12 +633,12 @@ mod mcp_args_tests {
 
     #[test]
     fn mcp_without_connect_is_headless() {
-        assert_eq!(parse_mcp_args(&args(&[])), Ok(McpTarget::Headless));
+        assert_eq!(parse_mcp_args(&args(&[])), Ok((McpTarget::Headless, false)));
     }
 
     #[test]
     fn mcp_connect_with_address_selects_remote() {
-        let to = |addr: &str, lazy, launch| Ok(McpTarget::Connect { addr: addr.into(), lazy, launch });
+        let to = |addr: &str, lazy, launch| Ok((McpTarget::Connect { addr: addr.into(), lazy, launch }, false));
         assert_eq!(parse_mcp_args(&args(&["--connect", "127.0.0.1:7979"])), to("127.0.0.1:7979", false, false));
         assert_eq!(parse_mcp_args(&args(&["--connect", "localhost:7979"])), to("localhost:7979", false, false));
         assert_eq!(parse_mcp_args(&args(&["--lazy", "--connect", "localhost:7979"])), to("localhost:7979", true, false));
@@ -641,6 +646,13 @@ mod mcp_args_tests {
         // Without an app to reach they mean nothing: never a headless session.
         assert!(parse_mcp_args(&args(&["--lazy"])).is_err());
         assert!(parse_mcp_args(&args(&["--launch"])).is_err());
+    }
+
+    #[test]
+    fn mcp_readonly_composes_with_headless_and_connect() {
+        assert_eq!(parse_mcp_args(&args(&["--readonly"])), Ok((McpTarget::Headless, true)));
+        let (t, r) = parse_mcp_args(&args(&["--readonly", "--connect", "127.0.0.1:7979"])).unwrap_or((McpTarget::Headless, false));
+        assert!(matches!(t, McpTarget::Connect { ref addr, .. } if addr == "127.0.0.1:7979") && r);
     }
 
     #[test]

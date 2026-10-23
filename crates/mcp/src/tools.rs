@@ -4,6 +4,71 @@ use serde_json::{Value, json};
 
 use crate::backend::Backend;
 
+/// Commands the MCP layer refuses in read-only mode (`cadcraft-cli mcp --readonly`): each writes
+/// files (drawings, exports, plots, extracted CSVs, plot styles), or runs scripts/LISP, which can
+/// write files through the command line (#1931; wblock/publish/… from the CodeRabbit review).
+const REFUSED_WHEN_READONLY: &[&str] = &[
+    "saveas",
+    "save",
+    "qsave",
+    "wblock",
+    "publish",
+    "export",
+    "exportpdf",
+    "plot",
+    "plotwindow",
+    "plottermanager",
+    "plotstyle",
+    "stylesmanager",
+    "tableexport",
+    "dataextraction",
+    "eattext",
+    "script",
+    "lisp",
+    "appload",
+];
+
+/// A typed token that is a LISP expression (`(…)` or `!var`), which read-only mode refuses.
+fn lisp_token(t: &str) -> bool {
+    t.starts_with('(') || t.starts_with('!') && t.len() > 1
+}
+
+/// Whether the text would write files or run LISP. Every token counts twice over: at the
+/// `Command:` prompt each space-separated word can start a command, so `zoom e save out.dxf`
+/// reaches SAVE with its third token — and a LISP expression is evaluated wherever it appears,
+/// so `line (command "_.SAVE" "x.dwg")` runs LISP with its second (CodeRabbit review of #1973).
+/// Prompt answers that spell a refused command name are refused too — read-only mode fails
+/// closed.
+fn refused_text(text: &str) -> bool {
+    text.split([' ', '\t']).any(|tok| {
+        lisp_token(tok) || {
+            let stripped = tok.trim_start_matches(['\'', '_', '.', '-']).to_ascii_lowercase();
+            REFUSED_WHEN_READONLY.contains(&cadcraft_engine::cmd::resolve_alias(&stripped).as_str())
+        }
+    })
+}
+
+/// The read-only refusal for a tool call, when this one is refused (#1931). Reading, drawing
+/// edits and UI inspection still work; only filesystem writes and LISP are refused.
+fn readonly_refusal(name: &str, a: &Value) -> Option<String> {
+    const MODE: &str = "refused: this MCP server runs in read-only mode; start it without --readonly to allow file writes and LISP";
+    let texts = || a.get("text").and_then(Value::as_str).unwrap_or_default();
+    match name {
+        "save" => Some(format!("the `save` tool writes files. {MODE}")),
+        "render" | "screenshot" if a.get("path").and_then(Value::as_str).is_some() => Some(format!("`{name}` with a `path` writes a file. {MODE}")),
+        "execute" => {
+            let cmd = a.get("command").and_then(Value::as_str).unwrap_or_default();
+            refused_text(cmd).then(|| format!("`{cmd}` writes files or runs LISP. {MODE}"))
+        }
+        "command_line" => refused_text(texts()).then(|| format!("the line would write files or run LISP. {MODE}")),
+        "script" => texts()
+            .lines()
+            .find(|l| !l.trim_start().starts_with(';') && refused_text(l))
+            .map(|l| format!("script line `{l}` would write files or run LISP. {MODE}")),
+        _ => None,
+    }
+}
+
 pub fn tool_definitions(has_ui: bool) -> Value {
     let mut tools = vec![
         json!({"name": "command_line", "description": "Type one line at the CADCraft command line, exactly as a user would at an AutoCAD-style prompt. Starts commands by name or alias (LINE, L, CIRCLE, C, PLINE, RECTANG, MOVE, TRIM, OFFSET, ZOOM…) and answers the active prompt: points `x,y`, relative `@dx,dy`, polar `@dist<angle`, distances, keywords (e.g. `c` for Close), empty text = Enter. Spaces act as Enter, so `circle 0,0 5` works in one call. Returns the new prompt and command-line output, and `error` when the line was refused.",
@@ -107,8 +172,13 @@ fn command_matches(c: &Value, f: &str) -> bool {
 
 /// Run a tool. `Err` is a protocol error (unknown tool, or arguments that don't fit its input
 /// schema), answered with JSON-RPC invalid params; a failing tool is an `isError` result.
-pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Result<Value, String> {
+/// Read-only mode (`--readonly`, #1931) refuses file-writing tools and LISP with an `isError`
+/// result before the backend is reached.
+pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value, readonly: bool) -> Result<Value, String> {
     let a = check_args(name, args)?;
+    if readonly && let Some(why) = readonly_refusal(name, &a) {
+        return Ok(err_text(&why));
+    }
     let r = match name {
         "command_line" => b.call("cmdline.input", a),
         "script" => b.call("cmdline.script", a),
