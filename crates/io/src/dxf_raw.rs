@@ -7,8 +7,9 @@
 //! named object dictionary…). Writing ([`finish`]) runs over the finished tag list: it places the
 //! entities of types CADCraft doesn't model among the written ones (the entity writer leaves them
 //! out), puts the data back on the records that still exist and points each reference at what now
-//! has the role it named. Kept objects get new handles above the written ones (so they never
-//! collide with the handles the writer hands out). A reference to something that is gone is
+//! has the role it named. Written records get back the handles they had in the file read, by role
+//! ([`Foreign::handles`], gap FF7), and kept objects keep theirs; one whose handle a written record
+//! now has gets a new handle above the written ones. A reference to something that is gone is
 //! dropped (from reactor lists and dictionaries) or written as the null handle `0`; objects whose
 //! owner is gone go with it.
 
@@ -184,9 +185,28 @@ fn modelled_key(key: &str) -> bool {
 /// name, blocks by name, the named object dictionary, its entries, and their entries.
 fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, ForeignKey> {
     let mut out: HashMap<String, ForeignKey> = HashMap::new();
+    for (h, k) in roles_in_order(tables, blocks, &Vec::new(), objects).into_iter().filter(|(_, k)| !sub_role(&k.0)) {
+        out.entry(h).or_insert(k);
+    }
+    out
+}
+
+/// Roles that only keep handles (attributes, vertices, sequence ends, entities' extension
+/// dictionaries): kept data doesn't refer to them by role.
+fn sub_role(kind: &str) -> bool {
+    matches!(kind, "ATTRIB" | "VERTEX" | "SEQEND" | "XDICT") || kind.starts_with("XDICT/")
+}
+
+/// Every role of a file's records with its (normalised) handle, in file order (see
+/// [`ForeignKey`] and [`Foreign::handles`]): table records and tables, blocks and their ends, the
+/// named object dictionary with its entries and their entries, the attributes, vertices and
+/// sequence ends of the entities in `blocks` and `entities` (by owner and position), and the
+/// extension dictionaries of entities with their entries.
+fn roles_in_order(tables: &Recs, blocks: &Recs, entities: &Recs, objects: &Recs) -> Vec<(String, ForeignKey)> {
+    let mut out: Vec<(String, ForeignKey)> = Vec::new();
     let mut put = |h: Option<String>, k: ForeignKey| {
         if let Some(h) = h {
-            out.entry(h).or_insert(k);
+            out.push((h, k));
         }
     };
     for (kind, _, t) in tables {
@@ -196,30 +216,150 @@ fn identities(tables: &Recs, blocks: &Recs, objects: &Recs) -> HashMap<String, F
         }
     }
     let mut block = String::new();
-    for (kind, _, t) in blocks {
+    // Sub-entities by owner: the next index of each owner's attributes and vertices.
+    let mut index: HashMap<(String, &str), usize> = HashMap::new();
+    // Extension dictionary → the handle of the entity that has it.
+    let mut xdict_owner: HashMap<String, String> = HashMap::new();
+    for (kind, _, t) in blocks.iter().chain(entities) {
+        // Other entities only matter with an extension dictionary: most have none, and their
+        // groups aren't read further.
+        let other = !matches!(kind.as_str(), "BLOCK" | "ENDBLK" | "ATTRIB" | "VERTEX" | "SEQEND");
+        if other && !t.iter().take_while(|g| g.code < 1000).any(|g| g.code == 102 && g.str().trim() == "{ACAD_XDICTIONARY") {
+            continue;
+        }
+        let hd = head(t);
         match kind.as_str() {
             "BLOCK" => {
                 block = up(&val(t, 2).unwrap_or_default());
-                put(head(t).handle, ("BLOCK".into(), block.clone()));
+                put(hd.handle, ("BLOCK".into(), block.clone()));
             }
-            "ENDBLK" => put(head(t).handle, ("ENDBLK".into(), block.clone())),
-            _ => {}
+            "ENDBLK" => put(hd.handle, ("ENDBLK".into(), block.clone())),
+            "ATTRIB" | "VERTEX" | "SEQEND" => {
+                let Some(owner) = hd.owner.filter(|o| handle(o).is_some()) else { continue };
+                let key = if kind == "SEQEND" {
+                    owner
+                } else {
+                    let i = index.entry((owner.clone(), kind.as_str())).or_insert(0);
+                    let key = format!("{owner}#{i}");
+                    *i += 1;
+                    key
+                };
+                put(hd.handle, (kind.clone(), key));
+            }
+            _ => {
+                if let (Some(h), Some(x)) = (hd.handle, hd.xdict) {
+                    xdict_owner.entry(x).or_insert(h);
+                }
+            }
         }
     }
-    let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) else { return out };
-    put(head(root).handle, ("NOD".into(), String::new()));
     let by_handle: HashMap<String, (&str, &[Tag])> = objects.iter().filter_map(|(k, _, t)| Some((head(t).handle?, (k.as_str(), *t)))).rev().collect();
-    for (key, h) in entries(root) {
-        put(Some(h.clone()), ("NOD".into(), up(&key)));
-        if let Some((k, t)) = by_handle.get(&h)
-            && is_dictionary(k)
-        {
-            for (name, eh) in entries(t) {
-                put(Some(eh), (format!("NOD/{}", up(&key)), up(&name)));
+    if let Some((_, _, root)) = objects.first().filter(|(k, _, _)| is_dictionary(k)) {
+        put(head(root).handle, ("NOD".into(), String::new()));
+        for (key, h) in entries(root) {
+            put(Some(h.clone()), ("NOD".into(), up(&key)));
+            if let Some((k, t)) = by_handle.get(&h)
+                && is_dictionary(k)
+            {
+                // Annotation scales by their names (programs key them `A0`, `S0`…).
+                let scales = up(&key) == "ACAD_SCALELIST";
+                for (name, eh) in entries(t) {
+                    let name = by_handle.get(&eh).filter(|_| scales).and_then(|(_, o)| val(o, 300)).unwrap_or(name);
+                    put(Some(eh), (format!("NOD/{}", up(&key)), up(&name)));
+                }
             }
         }
+    }
+    // Extension dictionaries of entities (the one an entity names, owned by it) and their entries.
+    for (kind, _, t) in objects {
+        let hd = head(t);
+        let (Some(h), Some(o)) = (hd.handle, hd.owner) else { continue };
+        if !is_dictionary(kind) || xdict_owner.get(&h) != Some(&o) {
+            continue;
+        }
+        for (name, eh) in entries(t) {
+            put(Some(eh), (format!("XDICT/{o}"), up(&name)));
+        }
+        put(Some(h), ("XDICT".into(), o));
     }
     out
+}
+
+/// Each role's handle among `roles`, for the roles only one record has.
+fn unique_roles(roles: Vec<(String, ForeignKey)>) -> HashMap<ForeignKey, String> {
+    let mut seen: HashMap<ForeignKey, Option<String>> = HashMap::new();
+    for (h, k) in roles {
+        seen.entry(k).and_modify(|v| *v = v.take().filter(|x| *x == h)).or_insert(Some(h));
+    }
+    seen.into_iter().filter_map(|(k, h)| Some((k, h?))).collect()
+}
+
+/// A record's own handle (group 5 or 105 outside `102` groups) as a number.
+fn record_handle(tags: &[Tag]) -> Option<u64> {
+    head(tags).handle.and_then(|h| Handle::parse_hex(&h)).map(|h| h.0)
+}
+
+/// Give the records a written file has in one of the roles of `want` (see [`Foreign::handles`])
+/// the handles they had in the file read (gap FF7): every record handle and every reference to
+/// it is rewritten, for each role whose old handle no other written record has. The header's
+/// `$HANDSEED` is left alone (the old handles are below it).
+pub(crate) fn restore_handles(tags: &mut [Tag], want: &BTreeMap<ForeignKey, Handle>) {
+    if want.is_empty() {
+        return;
+    }
+    let recs = written_records(tags);
+    restore_handles_in(tags, want, &recs);
+}
+
+/// [`restore_handles`] with the written records of `tags` (renumbering leaves them where they
+/// are, so a caller that has them already passes them in).
+fn restore_handles_in(tags: &mut [Tag], want: &BTreeMap<ForeignKey, Handle>, recs: &[Rec]) {
+    if want.is_empty() {
+        return;
+    }
+    let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
+    let by_sec = |name: &str| -> Recs {
+        recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
+    };
+    let (tables, blocks, entities, objects) = (by_sec("TABLES"), by_sec("BLOCKS"), by_sec("ENTITIES"), by_sec("OBJECTS"));
+    let roles = unique_roles(roles_in_order(&tables, &blocks, &entities, &objects));
+    // The roles whose record now has another handle than it was read with (new → old), in the
+    // order of the roles. Usually none on a second pass: then the records' handles aren't counted.
+    let moved: Vec<(u64, u64)> = want
+        .iter()
+        .filter_map(|(key, old)| {
+            let new = Handle::parse_hex(roles.get(key)?)?;
+            (old.0 != 0 && old.0 != new.0).then_some((new.0, old.0))
+        })
+        .collect();
+    if moved.is_empty() {
+        return;
+    }
+    // How many written records have each handle: only a record with a handle of its own is
+    // renumbered (a hostile file's handles can exhaust the range, and every new one is the last).
+    let mut used: HashMap<u64, usize> = HashMap::new();
+    for h in recs.iter().filter_map(|r| record_handle(body(r))) {
+        *used.entry(h).or_default() += 1;
+    }
+    let mut map: HashMap<u64, u64> = HashMap::new();
+    let mut taken: HashSet<u64> = HashSet::new();
+    for (new, old) in moved {
+        if used.get(&new) == Some(&1) && !used.contains_key(&old) && taken.insert(old) {
+            map.insert(new, old);
+        }
+    }
+    if map.is_empty() {
+        return;
+    }
+    let seed = seed_index(tags);
+    for (i, t) in tags.iter_mut().enumerate() {
+        if !(matches!(t.code, 5 | 105) || is_pointer(t.code)) || Some(i) == seed {
+            continue;
+        }
+        if let Some(old) = Handle::parse_hex(&t.str()).and_then(|h| map.get(&h.0)) {
+            *t = Tag::s(t.code, format!("{old:X}"));
+        }
+    }
 }
 
 /// Other applications' xdata of a record of type `kind`: whole applications, each with valid
@@ -403,7 +543,13 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             memo.insert(p, verdict);
         }
     }
-    let mut f = Foreign::default();
+    let mut f = Foreign {
+        handles: unique_roles(roles_in_order(&tables, &blocks, &entities, &objects))
+            .into_iter()
+            .filter_map(|(k, h)| Some((k, handle(&h)?)))
+            .collect(),
+        ..Foreign::default()
+    };
     let mut kept: HashSet<String> = HashSet::new();
     for (i, (kind, _, t)) in objects.iter().enumerate() {
         if memo.get(&i) != Some(&true) || f.objects.len() >= MAX_OBJECTS {
@@ -629,6 +775,9 @@ struct Map<'a> {
     roles: HashMap<ForeignKey, String>,
     /// Entities in the written file.
     entities: HashSet<String>,
+    /// Every record handle of the written file. Written records keep the handles they were
+    /// read with (FF7), so a reference to one of them still names it.
+    written: HashSet<String>,
 }
 
 impl Map<'_> {
@@ -646,7 +795,9 @@ impl Map<'_> {
         if let Some(role) = self.f.targets.get(&h) {
             return self.roles.get(role).cloned();
         }
-        self.entities.contains(&v).then_some(v)
+        // Written records keep the handles they were read with (FF7), so a reference to one still
+        // names it.
+        (self.entities.contains(&v) || self.written.contains(&v)).then_some(v)
     }
 
     /// A kept group with its handle remapped (a dangling one becomes null).
@@ -764,7 +915,10 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     if f.is_empty() && unknown.is_empty() && xd.is_empty() {
         return;
     }
+    // The written records get the handles they had in the file read (FF7) before anything is
+    // matched by handle.
     let recs = written_records(tags);
+    restore_handles_in(tags, &f.handles, &recs);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
     let by_sec = |name: &str| -> Recs {
         recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
@@ -841,15 +995,25 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             alive_memo.insert(p, verdict);
         }
     }
-    // New handles for the written kept objects, above every written handle and the seed.
+    // The written kept objects keep their handles (FF7); one that a written record now has gets a
+    // new handle, above every written handle and the seed.
     let mut next = seed(tags).max(max_handle(tags).saturating_add(1));
     let mut alive: HashMap<String, String> = HashMap::new();
+    // Handles taken by the kept objects so far (the written records' are in `written`).
+    let mut taken: HashSet<String> = HashSet::new();
     for o in f.objects.iter().filter(|o| alive_memo.get(&o.handle.hex()) == Some(&true)) {
-        alive.insert(o.handle.hex(), format!("{next:X}"));
-        next = next.saturating_add(1);
+        let own = o.handle.hex();
+        let h = if !written.contains(&own) && taken.insert(own.clone()) {
+            own
+        } else {
+            let h = format!("{next:X}");
+            next = next.saturating_add(1);
+            h
+        };
+        alive.insert(o.handle.hex(), h);
     }
     let entities: HashSet<String> = all_entities(d).map(|e| e.handle.hex()).filter(|h| written.contains(h)).collect();
-    let map = Map { f, alive, raw: objs.keys().cloned().collect(), roles, entities };
+    let map = Map { f, alive, raw: objs.keys().cloned().collect(), roles, entities, written };
     let class_names: HashSet<String> = recs.iter().filter(|r| r.kind == "CLASS").filter_map(|r| val(body(r), 1)).map(|n| up(&n)).collect();
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().map(|o| o.tags.len() + 1).sum::<usize>());
     let mut block = String::new();
@@ -885,6 +1049,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
     }
     add_appids(&mut out);
+    // Application records added just now: their handles too.
+    restore_handles(&mut out, &f.handles);
     let top = max_handle(&out).saturating_add(1);
     if let Some(t) = seed_index(&out).and_then(|i| out.get_mut(i))
         && Handle::parse_hex(&t.str()).is_none_or(|h| h.0 < top)
