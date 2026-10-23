@@ -209,6 +209,11 @@ pub trait Interactive: Send {
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
         Vec::new()
     }
+    /// Geometry shown glowing under the cursor: what picking there would take away or add
+    /// (TRIM, EXTEND), drawn over the drawing as a highlight.
+    fn glow(&self, _s: &Session, _cursor: Vec2) -> Option<Glow> {
+        None
+    }
     /// The preview as existing objects under one transform, when it is that (MOVE, COPY,
     /// ROTATE, SCALE). The UI then draws them from geometry uploaded once instead of rebuilding
     /// the transformed copies every frame; `None` falls back to [`Interactive::preview`].
@@ -253,6 +258,14 @@ pub enum EditorKind {
     Dimension { measured: String },
     /// A table cell (`name` such as `B3`); Tab, Shift+Tab and the arrows move between cells.
     TableCell { name: String },
+}
+
+/// See [`Interactive::glow`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Glow {
+    pub kinds: Vec<EntityKind>,
+    /// The geometry is what a pick takes away (a trim), not what it adds (an extend).
+    pub removing: bool,
 }
 
 /// See [`Interactive::drag`].

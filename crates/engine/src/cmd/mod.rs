@@ -39,6 +39,7 @@ mod settings;
 mod spline_opts;
 mod table;
 mod tolerance;
+mod trim_hatch;
 mod trimextend;
 mod utility;
 mod view;

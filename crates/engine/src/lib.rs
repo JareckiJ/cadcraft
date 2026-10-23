@@ -45,7 +45,7 @@ pub use cadcraft_geom as geom;
 pub use cadcraft_render as render;
 pub use cmd::hatch::{HatchPicks, PatternChoice, PickMode, pattern_choices};
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
-pub use prompt::{Accept, Drag, EditorKind, Input, Interactive, Picker, Prompt, Step, TextEditor};
+pub use prompt::{Accept, Drag, EditorKind, Glow, Input, Interactive, Picker, Prompt, Step, TextEditor};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -1428,6 +1428,18 @@ impl Session {
             (None, None) => Vec::new(),
         };
         kinds.into_iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k }).collect()
+    }
+
+    /// What the active command shows glowing under the cursor ([`Interactive::glow`]), as
+    /// entities with the current properties, and whether it is what a pick would take away.
+    pub fn glow(&self, cursor: Vec2) -> Option<(Vec<Entity>, bool)> {
+        if self.lisp_prompt().is_some() {
+            return None;
+        }
+        let r = self.running.as_ref()?;
+        let g = r.machine.glow(self, cursor)?;
+        let common = self.current_common();
+        Some((g.kinds.into_iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k }).collect(), g.removing))
     }
 
     /// The active command's preview as a transform of existing objects (see

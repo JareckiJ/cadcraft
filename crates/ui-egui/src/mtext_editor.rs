@@ -239,13 +239,11 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
                 }
                 ui.add_space(6.0);
                 let mac = ui.ctx().os().is_mac();
-                let tip = |undo: bool| {
-                    match (undo, mac) {
-                        (true, true) => crate::tl!("Undo (⌘Z)"),
-                        (true, false) => crate::tl!("Undo (Ctrl+Z)"),
-                        (false, true) => crate::tl!("Redo (⇧⌘Z)"),
-                        (false, false) => crate::tl!("Redo (Ctrl+Y)"),
-                    }
+                let tip = |undo: bool| match (undo, mac) {
+                    (true, true) => crate::tl!("Undo (⌘Z)"),
+                    (true, false) => crate::tl!("Undo (Ctrl+Z)"),
+                    (false, true) => crate::tl!("Redo (⇧⌘Z)"),
+                    (false, false) => crate::tl!("Redo (Ctrl+Y)"),
                 };
                 for (undo, icon) in [(true, crate::icons::Icon::Undo), (false, crate::icons::Icon::Redo)] {
                     let any = if undo { !st.undo.is_empty() } else { !st.redo.is_empty() };

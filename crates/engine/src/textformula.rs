@@ -23,9 +23,18 @@ pub fn env(s: &crate::Session) -> Env {
 
 /// The measurement a dimension shows (for `<>` in its formula).
 pub fn measured(d: &Drawing, dm: &cadcraft_doc::Dimension) -> Option<f64> {
-    let plain = cadcraft_doc::Dimension { text: String::new(), block: None, marks: cadcraft_doc::DimMarks { formula: None, ..dm.marks.clone() }, ..dm.clone() };
+    let plain = cadcraft_doc::Dimension {
+        text: String::new(),
+        block: None,
+        marks: cadcraft_doc::DimMarks { formula: None, ..dm.marks.clone() },
+        ..dm.clone()
+    };
     let v = cadcraft_render::dimension_in(d, &plain).value;
-    let s: String = v.chars().skip_while(|c| !c.is_ascii_digit() && *c != '-' && *c != '.').take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | ' ')).collect();
+    let s: String = v
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit() && *c != '-' && *c != '.')
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | ' '))
+        .collect();
     s.replace(' ', "").replace(',', ".").parse().ok()
 }
 
@@ -107,4 +116,3 @@ pub fn refresh(d: &mut Drawing, env: &Env) -> usize {
     }
     n
 }
-

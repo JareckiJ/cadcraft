@@ -419,7 +419,11 @@ fn post(template: &str, meas: &str) -> String {
 
 /// The first number in a formatted measurement (`R12.5` → 12.5, `1 250,5` → 1250.5).
 fn measured_number(base: &str) -> Option<f64> {
-    let s: String = base.chars().skip_while(|c| !c.is_ascii_digit() && *c != '-' && *c != '.').take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | ' ')).collect();
+    let s: String = base
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit() && *c != '-' && *c != '.')
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | ' '))
+        .collect();
     s.replace(' ', "").replace(',', ".").parse().ok()
 }
 

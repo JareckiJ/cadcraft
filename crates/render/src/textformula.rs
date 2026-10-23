@@ -9,7 +9,6 @@
 //! The functions are listed in [`FUNCTIONS`] (name, arguments, description), which the editor's
 //! completion list and Help show.
 
-
 /// Longest formula worked out.
 const MAX_LEN: usize = 2000;
 /// Deepest nesting.

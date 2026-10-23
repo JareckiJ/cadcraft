@@ -2,16 +2,16 @@
 //! (TRIMEXTENDMODE), cutting/boundary edges, Fence, Crossing, Project (PROJMODE), Edge (EDGEMODE),
 //! eRase and Undo. The geometry of one trim or extend is in modify.rs.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use cadcraft_doc::{Drawing, EntityKind, Handle};
-use cadcraft_geom::{Bounds2, Line, Vec2, line_line};
+use cadcraft_doc::{Drawing, EntityKind, Handle, Space};
+use cadcraft_geom::{Bounds2, Line, PolyVertex, Segment, Vec2, line_line};
 use serde_json::{Value, json};
 
 use super::helpers::{line, lwpoly, rect_vertices};
-use super::modify::{Edges, extend, trim};
+use super::modify::{Edges, edge_segments_owned, extend, extend_result, prim_to_segments, trim, trim_result};
 use super::{bad, point_param, points_param};
-use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Glow, Input, Interactive, Prompt, Result, Session, Step};
 
 /// Most fence points the JSON form takes.
 const MAX_FENCE: usize = 10_000;
@@ -231,6 +231,12 @@ enum Stage {
     Erase(Vec<Handle>),
 }
 
+/// The cutting (boundary) edges of one drawing and space, kept while the cursor moves: the
+/// drawing (by address), the space, whether edges are implied, and the edges with their objects.
+type EdgeCache = (usize, Space, bool, Arc<Vec<(Handle, Segment)>>);
+/// The last glow worked out: the drawing (by address), the cursor and the result.
+type GlowCache = (usize, (u64, u64), Option<Glow>);
+
 pub(crate) struct TrimM {
     extend: bool,
     /// Cutting/boundary edges; `None`: all objects.
@@ -238,11 +244,159 @@ pub(crate) struct TrimM {
     stage: Stage,
     /// The drawing before each trim, extend or erase, for Undo.
     undo: Vec<Arc<Drawing>>,
+    edge_cache: Mutex<Option<EdgeCache>>,
+    glow_cache: Mutex<Option<GlowCache>>,
+}
+
+/// Samples along an object when finding the part of it a trim takes away or an extend adds.
+const GLOW_SAMPLES: f64 = 512.0;
+
+/// The parts of `orig` that `others` don't run along, as open polylines: what a trim takes away
+/// (`others` the pieces left) or an extend adds (`orig` the extended object, `others` it before).
+fn uncovered(orig: &EntityKind, others: &[EntityKind]) -> Vec<EntityKind> {
+    let segs: Vec<Segment> = orig.prims().iter().flat_map(prim_to_segments).collect();
+    let total: f64 = segs.iter().map(Segment::len).sum();
+    if !total.is_finite() || total <= 0.0 {
+        return Vec::new();
+    }
+    let other: Vec<Segment> = others.iter().flat_map(|k| k.prims()).flat_map(|p| prim_to_segments(&p)).collect();
+    let tol = total * 2e-4;
+    let covered = |p: Vec2| other.iter().any(|sg| sg.closest(p).dist(p) <= tol);
+    let step = total / GLOW_SAMPLES;
+    let mut out: Vec<Vec<Vec2>> = Vec::new();
+    let mut cur: Vec<Vec2> = Vec::new();
+    let flush = |cur: &mut Vec<Vec2>, out: &mut Vec<Vec<Vec2>>| {
+        if cur.len() >= 2 {
+            out.push(std::mem::take(cur));
+        } else {
+            cur.clear();
+        }
+    };
+    for sg in &segs {
+        let len = sg.len();
+        if !len.is_finite() || len <= 0.0 {
+            continue;
+        }
+        if cur.last().is_some_and(|l| !l.near(sg.at(0.0), tol)) {
+            flush(&mut cur, &mut out);
+        }
+        let n = (len / step).ceil().clamp(1.0, 4096.0) as usize;
+        let mut prev: Option<(f64, bool)> = None;
+        for i in 0..=n {
+            let t = i as f64 / n as f64;
+            let c = covered(sg.at(t));
+            if let Some((pt, pc)) = prev
+                && pc != c
+            {
+                // Where coverage changes between the samples.
+                let (mut lo, mut hi) = (pt, t);
+                for _ in 0..20 {
+                    let mid = (lo + hi) * 0.5;
+                    if covered(sg.at(mid)) == pc {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let x = sg.at((lo + hi) * 0.5);
+                // The transition lies `tol` off the end of the piece that covers the rest: snap
+                // to that end.
+                let x = other
+                    .iter()
+                    .flat_map(|o| [o.at(0.0), o.at(1.0)])
+                    .filter(|e| e.dist(x) <= 3.0 * tol)
+                    .min_by(|a, b| a.dist(x).total_cmp(&b.dist(x)))
+                    .unwrap_or(x);
+                if c {
+                    cur.push(x);
+                    flush(&mut cur, &mut out);
+                } else {
+                    cur.push(x);
+                }
+            }
+            if !c {
+                cur.push(sg.at(t));
+            }
+            prev = Some((t, c));
+        }
+        if prev.is_some_and(|(_, c)| c) {
+            flush(&mut cur, &mut out);
+        }
+    }
+    flush(&mut cur, &mut out);
+    out.into_iter().map(|pts| lwpoly(pts.into_iter().map(PolyVertex::new).collect(), false)).collect()
 }
 
 impl TrimM {
     pub(crate) fn new(extend: bool) -> Self {
-        TrimM { extend, edges: None, stage: Stage::Pick, undo: Vec::new() }
+        TrimM { extend, edges: None, stage: Stage::Pick, undo: Vec::new(), edge_cache: Mutex::new(None), glow_cache: Mutex::new(None) }
+    }
+    /// The cutting (boundary) edges with their objects, from the cache while the drawing is the
+    /// same.
+    fn cached_edges(&self, s: &Session, implied: bool) -> Option<Arc<Vec<(Handle, Segment)>>> {
+        let doc = Arc::as_ptr(&s.state().ok()?.doc) as usize;
+        let space = s.space();
+        let mut cache = self.edge_cache.lock().ok()?;
+        if let Some((d, sp, i, e)) = cache.as_ref()
+            && *d == doc
+            && *sp == space
+            && *i == implied
+        {
+            return Some(e.clone());
+        }
+        let e = Arc::new(edge_segments_owned(s, Edges { only: self.edges.as_deref(), implied }).ok()?);
+        *cache = Some((doc, space, implied, e.clone()));
+        Some(e)
+    }
+    /// What a pick at `c` would trim away or extend by.
+    fn work_out_glow(&self, s: &Session, c: Vec2) -> Option<Glow> {
+        let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
+        let space = s.space();
+        let d = s.doc().ok()?;
+        let h = crate::select::pick(d, &space, c, ap)?;
+        if super::curves::is_locked(s, h) {
+            return None;
+        }
+        let quick = quick_mode(s);
+        let implied = !quick && edge_mode(s);
+        let edges = self.cached_edges(s, implied)?;
+        let cut: Vec<Segment> = edges.iter().filter(|(o, _)| *o != h).map(|(_, sg)| *sg).collect();
+        if self.extend {
+            let (e, new) = extend_result(s, h, c, &cut).ok()?;
+            let kinds = uncovered(&new, std::slice::from_ref(&e.kind));
+            return (!kinds.is_empty()).then_some(Glow { kinds, removing: false });
+        }
+        let kinds = match trim_result(s, h, c, &cut) {
+            Ok((e, pieces)) => match &e.kind {
+                EntityKind::Hatch(hatch) => {
+                    let (_, face) = super::trim_hatch::trim_hatch(hatch, &cut, c).ok()?;
+                    // The outline of the part taken away, and the part filled.
+                    let mut out: Vec<EntityKind> = face.iter().map(|l| lwpoly(l.iter().copied().map(PolyVertex::new).collect(), true)).collect();
+                    let loops = face
+                        .into_iter()
+                        .map(|l| cadcraft_doc::HatchLoop {
+                            vertices: l.into_iter().map(PolyVertex::new).collect(),
+                            outer: false,
+                            sources: Vec::new(),
+                        })
+                        .collect();
+                    out.push(EntityKind::Hatch(cadcraft_doc::Hatch {
+                        pattern: "SOLID".into(),
+                        solid: true,
+                        loops,
+                        gradient: None,
+                        style: 0,
+                        ..hatch.clone()
+                    }));
+                    out
+                }
+                k => uncovered(k, &pieces),
+            },
+            // A Quick-mode trim of an object no edge crosses erases all of it.
+            Err(err) if quick && misses_edges(&err) => vec![d.entity(h)?.kind.clone()],
+            Err(_) => return None,
+        };
+        (!kinds.is_empty()).then_some(Glow { kinds, removing: true })
     }
     fn edges(&self, quick: bool, implied: bool) -> Edges<'_> {
         Edges { only: self.edges.as_deref(), implied: !quick && implied }
@@ -397,6 +551,13 @@ impl Interactive for TrimM {
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        // Edges and settings may change: work the glow out afresh.
+        if let Ok(c) = self.edge_cache.get_mut() {
+            *c = None;
+        }
+        if let Ok(c) = self.glow_cache.get_mut() {
+            *c = None;
+        }
         let quick = quick_mode(s);
         let implied = edge_mode(s);
         let extending = self.extend;
@@ -553,6 +714,25 @@ impl Interactive for TrimM {
                 _ => Ok(Step::Continue),
             },
         }
+    }
+    fn glow(&self, s: &Session, c: Vec2) -> Option<Glow> {
+        if self.stage != Stage::Pick {
+            return None;
+        }
+        let doc = Arc::as_ptr(&s.state().ok()?.doc) as usize;
+        let key = (c.x.to_bits(), c.y.to_bits());
+        if let Ok(cache) = self.glow_cache.lock()
+            && let Some((d, k, g)) = cache.as_ref()
+            && *d == doc
+            && *k == key
+        {
+            return g.clone();
+        }
+        let g = self.work_out_glow(s, c);
+        if let Ok(mut cache) = self.glow_cache.lock() {
+            *cache = Some((doc, key, g.clone()));
+        }
+        g
     }
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
         match &self.stage {

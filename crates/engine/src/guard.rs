@@ -75,6 +75,15 @@ impl Interactive for Guarded {
             Vec::new()
         })
     }
+    fn glow(&self, s: &Session, cursor: Vec2) -> Option<crate::prompt::Glow> {
+        if self.broken.get().is_some() {
+            return None;
+        }
+        catch_unwind(AssertUnwindSafe(|| self.inner.glow(s, cursor))).unwrap_or_else(|_| {
+            self.broken.set(Some("panic in preview"));
+            None
+        })
+    }
     fn drag(&self, s: &Session, cursor: Vec2) -> Option<crate::prompt::Drag> {
         if self.broken.get().is_some() {
             return None;

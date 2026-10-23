@@ -782,13 +782,18 @@ pub(crate) struct Edges<'a> {
 }
 
 /// All primitives of the cutting edges (excluding `exclude`).
-fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segment>> {
+pub(crate) fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segment>> {
+    Ok(edge_segments_owned(s, edges)?.into_iter().filter(|(h, _)| *h != exclude).map(|(_, sg)| sg).collect())
+}
+
+/// [`edge_segments`] of every edge object, each with the object it comes from.
+pub(crate) fn edge_segments_owned(s: &Session, edges: Edges) -> Result<Vec<(Handle, Segment)>> {
     let d = s.doc()?;
     let space = s.space();
     let store = d.space(&space).ok_or(EngineError::NoDocument)?;
     let mut out = Vec::new();
     for e in store.iter() {
-        if e.handle == exclude || !d.is_visible(e) {
+        if !d.is_visible(e) {
             continue;
         }
         if let Some(es) = edges.only
@@ -799,11 +804,11 @@ fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segme
         if edges.implied
             && let Some(segs) = implied_edge(&e.kind)
         {
-            out.extend(segs);
+            out.extend(segs.into_iter().map(|sg| (e.handle, sg)));
             continue;
         }
         for p in e.kind.prims() {
-            out.extend(prim_to_segments(&p));
+            out.extend(prim_to_segments(&p).into_iter().map(|sg| (e.handle, sg)));
         }
     }
     Ok(out)
@@ -838,7 +843,7 @@ fn implied_edge(k: &EntityKind) -> Option<Vec<Segment>> {
     }
 }
 
-fn prim_to_segments(p: &Prim) -> Vec<Segment> {
+pub(crate) fn prim_to_segments(p: &Prim) -> Vec<Segment> {
     match p {
         Prim::Seg(s) => vec![*s],
         Prim::Circle(c) => vec![Segment::Arc { arc: Arc { center: c.center, radius: c.radius, start: 0.0, end: TAU - 1e-12 }, ccw: true }],
@@ -862,8 +867,27 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
     if super::curves::is_locked(s, h) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
-    let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
     let cut = edge_segments(s, edges, h)?;
+    let (e, pieces) = trim_result(s, h, pick, &cut)?;
+    let common = e.common.clone();
+    let space = s.space();
+    let d = s.doc_mut()?;
+    d.remove_entity(h);
+    let mut out = Vec::new();
+    for k in pieces {
+        let nh = d.new_handle();
+        if let Some(st) = d.space_mut(&space) {
+            st.push(Entity { handle: nh, common: common.clone(), kind: k });
+            out.push(nh);
+        }
+    }
+    Ok(out)
+}
+
+/// What trimming `h` at `pick` against the cutting edges `cut` leaves: the object and the
+/// pieces that replace it (the drawing is not changed).
+pub(crate) fn trim_result(s: &Session, h: Handle, pick: Vec2, cut: &[Segment]) -> Result<(Entity, Vec<EntityKind>)> {
+    let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
     let pieces: Vec<EntityKind> = match &e.kind {
         EntityKind::Line(l) => {
             let ln = Line::new(l.a.xy(), l.b.xy());
@@ -933,22 +957,11 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
             }
             keep.into_iter().collect()
         }
-        EntityKind::LwPolyline(p) => trim_polyline(p, &cut, pick)?,
-        k => super::modify2::trim_other(k, &cut, pick)?,
+        EntityKind::LwPolyline(p) => trim_polyline(p, cut, pick)?,
+        EntityKind::Hatch(hatch) => super::trim_hatch::trim_hatch(hatch, cut, pick)?.0.into_iter().collect(),
+        k => super::modify2::trim_other(k, cut, pick)?,
     };
-    let common = e.common.clone();
-    let space = s.space();
-    let d = s.doc_mut()?;
-    d.remove_entity(h);
-    let mut out = Vec::new();
-    for k in pieces {
-        let nh = d.new_handle();
-        if let Some(st) = d.space_mut(&space) {
-            st.push(Entity { handle: nh, common: common.clone(), kind: k });
-            out.push(nh);
-        }
-    }
-    Ok(out)
+    Ok((e, pieces))
 }
 
 /// Sub-polyline between length parameters `a` and `b` (open polylines).
@@ -1054,8 +1067,16 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
     if super::curves::is_locked(s, h) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
-    let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
     let cut = edge_segments(s, edges, h)?;
+    let new_kind = extend_result(s, h, pick, &cut)?.1;
+    s.doc_mut()?.modify_entity(h, |e| e.kind = new_kind)?;
+    Ok(())
+}
+
+/// What extending `h` at `pick` to the boundary edges `cut` makes of it: the object and its
+/// new geometry (the drawing is not changed).
+pub(crate) fn extend_result(s: &Session, h: Handle, pick: Vec2, cut: &[Segment]) -> Result<(Entity, EntityKind)> {
+    let e = s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))?;
     let new_kind = match &e.kind {
         EntityKind::Line(l) => {
             let (a, b) = (l.a.xy(), l.b.xy());
@@ -1105,10 +1126,9 @@ pub(crate) fn extend(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Re
             }
             lwpoly(vs, false)
         }
-        k => super::modify2::extend_other(k, &cut, pick)?,
+        k => super::modify2::extend_other(k, cut, pick)?,
     };
-    s.doc_mut()?.modify_entity(h, |e| e.kind = new_kind)?;
-    Ok(())
+    Ok((e, new_kind))
 }
 
 // ---------------- fillet / chamfer ----------------
