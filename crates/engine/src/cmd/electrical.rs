@@ -13,6 +13,7 @@
 //! (`RELAY_24V` → `K`, see [`classes`]).
 
 mod classes;
+mod wires;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -39,7 +40,7 @@ const MAX_COLUMNS: u64 = 1_000;
 const MAX_DEVICES: usize = 200_000;
 
 pub fn specs() -> Vec<CommandSpec> {
-    vec![
+    let mut v = vec![
         CommandSpec::new("etag", "Tag Devices (IEC 81346)", run_etag)
             .menu(&["Tools", "Electrical", "Tag Devices"])
             .params(
@@ -58,7 +59,9 @@ pub fn specs() -> Vec<CommandSpec> {
                  → {devices: [{handle, block, tag, class, sheet, column}], duplicates: {tag: [handle]}, untagged}",
             )
             .noundo(),
-    ]
+    ];
+    v.extend(wires::specs());
+    v
 }
 
 /// The sheet grid devices are placed on.
