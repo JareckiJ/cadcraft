@@ -16,9 +16,12 @@ mod builder;
 mod classes;
 pub mod generate;
 mod pins;
+mod plc;
 mod project;
+mod reports;
 mod symbols;
 mod sync;
+mod terminals;
 mod wires;
 mod wiring;
 mod xref;
@@ -83,6 +86,9 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(wiring::specs());
     v.extend(builder::specs());
     v.extend(generate::specs());
+    v.extend(terminals::specs());
+    v.extend(plc::specs());
+    v.extend(reports::specs());
     v.extend(project::specs());
     v.extend(sync::specs());
     v
@@ -384,6 +390,10 @@ fn run_etag_inner(s: &mut Session, p: &Value) -> Result<Value> {
     let mut todo: Vec<(Device, String, u64, u64)> = Vec::new();
     let (mut kept, mut unclassified, mut outside) = (0usize, Vec::new(), Vec::new());
     for dev in all {
+        // Terminals carry their strip's tag (-X1), numbered by ETERMNUM.
+        if dev.family.as_deref() == Some("TERMINAL") {
+            continue;
+        }
         let keep = !in_scope(&dev) || (!renumber_all && is_numbered(&dev.tag));
         if keep {
             if !dev.tag.is_empty() {
@@ -478,7 +488,8 @@ fn run_edevices(s: &mut Session, p: &Value) -> Result<Value> {
     let list: Vec<Value> = devs
         .iter()
         .map(|d| {
-            let auxiliary = is_child(d, &overrides);
+            // Contacts share their coil's tag and terminals their strip's: neither is a duplicate.
+            let auxiliary = is_child(d, &overrides) || d.family.as_deref() == Some("TERMINAL");
             // A contact shares its coil's tag: neither a duplicate nor untagged.
             if !auxiliary && is_numbered(&d.tag) {
                 by_tag.entry(d.tag.clone()).or_default().push(d.handle.hex());

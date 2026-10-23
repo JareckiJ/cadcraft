@@ -194,6 +194,39 @@ pub(super) fn potentials(wires: usize, segs: &[Seg], tol: f64) -> Vec<Vec<usize>
     groups.into_values().collect()
 }
 
+/// A wire network of the current space: the symbol pins on it and its wire number.
+#[derive(Clone, Debug, Default)]
+pub(super) struct Network {
+    /// (block reference, pin number, position) of every pin on the network.
+    pub pins: Vec<(Handle, String, Vec2)>,
+    pub number: Option<String>,
+    pub wires: Vec<Handle>,
+}
+
+/// The wire networks of the current space (on the default wire and label layers), with the
+/// symbol pins on each: what a pin is wired to.
+pub(super) fn networks(s: &Session) -> Result<Vec<Network>> {
+    let (handles, segs) = wire_segments(s, WIRE_LAYERS)?;
+    let groups = potentials(handles.len(), &segs, 0.01);
+    let numbers = labels(s, LABEL_LAYER)?;
+    let ix = super::pins::PinIndex::build(s)?;
+    let mut out = Vec::with_capacity(groups.len());
+    for g in &groups {
+        let gsegs: Vec<&Seg> = segs.iter().filter(|sg| g.contains(&sg.wire)).collect();
+        let pins: Vec<(Handle, String, Vec2)> =
+            ix.pins.iter().filter(|p| gsegs.iter().any(|sg| sg.dist_to(p.at) <= 0.01)).map(|p| (p.insert, p.number.clone(), p.at)).collect();
+        let number = numbers
+            .iter()
+            .filter(|(_, _, v)| !v.is_empty())
+            .map(|(_, at, v)| (gsegs.iter().map(|sg| sg.dist_to(*at)).fold(f64::INFINITY, f64::min), v))
+            .filter(|(d, _)| *d <= 6.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, v)| v.clone());
+        out.push(Network { pins, number, wires: g.iter().filter_map(|w| handles.get(*w)).copied().collect() });
+    }
+    Ok(out)
+}
+
 /// Texts on the label layer in the current space: handle, insertion point, value.
 pub(super) fn labels(s: &Session, layer: &str) -> Result<Vec<(Handle, Vec2, String)>> {
     let d = s.doc()?;

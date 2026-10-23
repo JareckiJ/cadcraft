@@ -480,7 +480,7 @@ fn text(at: Vec2, height: f64, value: &str, halign: HAlign, valign: VAlign) -> T
 }
 
 /// An attribute definition.
-fn attdef(tag: &str, at: Vec2, height: f64, value: &str, invisible: bool, halign: HAlign) -> EntityKind {
+pub(super) fn attdef(tag: &str, at: Vec2, height: f64, value: &str, invisible: bool, halign: HAlign) -> EntityKind {
     EntityKind::AttDef(Attrib {
         tag: tag.to_string(),
         text: text(at, height, value, halign, VAlign::Middle),
@@ -731,6 +731,13 @@ fn run_esymbol_inner(s: &mut Session, p: &Value) -> Result<Value> {
         matches!(s.doc()?.entity(h).map(|e| &e.kind), Some(EntityKind::Insert(i)) if i.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("TAG1")));
     if has_tag1 && str_param(p, "tag").is_none() {
         super::run_etag(s, &json!({ "handles": [h.hex()] }))?;
+    }
+    // A terminal joins its strip (-X1 by default) with the next free number.
+    let terminal = matches!(s.doc()?.entity(h).map(|e| &e.kind), Some(EntityKind::Insert(i))
+        if i.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("EFAMILY") && a.text.value.eq_ignore_ascii_case("TERMINAL")));
+    if terminal {
+        let strip = str_param(p, "tag").map(str::to_string).unwrap_or_else(|| super::terminals::DEFAULT_STRIP.to_string());
+        super::terminals::number(s, Some(&strip), false)?;
     }
     let tag = match s.doc()?.entity(h).map(|e| &e.kind) {
         Some(EntityKind::Insert(i)) => {
