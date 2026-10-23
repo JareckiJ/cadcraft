@@ -115,3 +115,27 @@ fn hostile_clip_handles_do_not_panic() {
     g.remove(at);
     assert_eq!(viewport(&cadcraft_io::read_dxf(text_of(&g).as_bytes()).unwrap(), v).clip, None);
 }
+
+/// Issue #1966: AutoCAD writes the view centre (12/22) relative to the view target (17/27/37).
+/// A viewport whose target is away from the origin shows the model around target + centre, and
+/// keeps showing it after a save.
+#[test]
+fn viewport_view_centre_is_relative_to_the_view_target() {
+    let (d, v, _) = drawing(false, true);
+    let text = cadcraft_io::write_dxf(&d);
+    let mut gs = groups(&text);
+    let at = gs.iter().position(|(c, x)| c == "0" && x == "VIEWPORT").unwrap();
+    let i = at + gs[at..].iter().position(|(c, _)| c == "12").unwrap();
+    // Centre (50, 50) written as target (9500, -19600) + centre (-9450, 19650).
+    gs[i].1 = "-9450.0".into();
+    let j = i + gs[i..].iter().position(|(c, _)| c == "22").unwrap();
+    gs[j].1 = "19650.0".into();
+    for (k, (c, x)) in [("17", "9500.0"), ("27", "-19600.0"), ("37", "0.0")].into_iter().enumerate() {
+        gs.insert(j + 1 + k, (c.into(), x.into()));
+    }
+    let back = cadcraft_io::read_dxf(text_of(&gs).as_bytes()).unwrap();
+    let got = viewport(&back, v);
+    assert!((got.view_center - Vec2::new(50.0, 50.0)).len() < 1e-9, "{:?}", got.view_center);
+    let again = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&back).as_bytes()).unwrap();
+    assert!((viewport(&again, v).view_center - Vec2::new(50.0, 50.0)).len() < 1e-9);
+}

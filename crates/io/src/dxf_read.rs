@@ -490,7 +490,11 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
             center: t.p(10),
             width: t.fd(40, 1.0),
             height: t.fd(41, 1.0),
-            view_center: Vec2::new(t.fd(12, 0.0), t.fd(22, 0.0)),
+            // The view centre (12/22) is relative to the view target (17/27/37), which AutoCAD
+            // often leaves away from the origin (#1966). CADCraft draws plan views about the
+            // origin, so the target's XY is folded into the centre; the written file then has the
+            // same view with a zero target.
+            view_center: Vec2::new(t.fd(12, 0.0) + t.fd(17, 0.0), t.fd(22, 0.0) + t.fd(27, 0.0)),
             view_height: t.fd(45, 1.0),
             id: t.i(69).unwrap_or(0) as u32,
             locked: t.i(90).unwrap_or(0) & 16384 != 0,
