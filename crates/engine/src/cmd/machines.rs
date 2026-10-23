@@ -85,11 +85,7 @@ impl SelectPhase {
                 } else {
                     s.echo("0 found");
                 }
-                match locked.len() {
-                    0 => {}
-                    1 => s.echo("1 was on a locked layer."),
-                    n => s.echo(format!("{n} were on a locked layer.")),
-                }
+                say_locked(s, locked.len());
                 s.set_selection(self.picked.clone());
                 if self.single && !self.picked.is_empty() {
                     return Ok(self.finish(s));
@@ -126,6 +122,15 @@ impl SelectPhase {
             s.remember_selection(&self.picked);
             SelOutcome::Done(self.picked.clone())
         }
+    }
+}
+
+/// Tell how many objects were left out for being on a locked layer, as AutoCAD does.
+pub(crate) fn say_locked(s: &mut Session, n: usize) {
+    match n {
+        0 => {}
+        1 => s.echo("1 was on a locked layer."),
+        n => s.echo(format!("{n} were on a locked layer.")),
     }
 }
 

@@ -8,7 +8,7 @@ use cadcraft_geom::{
 use serde_json::{Value, json};
 
 use super::helpers::*;
-use super::machines::{SelOutcome, SelectPhase, number, on_locked_layers};
+use super::machines::{SelOutcome, SelectPhase, number, on_locked_layers, say_locked};
 use super::trimextend::{self, TrimM};
 use super::*;
 use crate::select::{SelectKind, SelectMode};
@@ -1961,6 +1961,16 @@ impl Interactive for SelectThen {
         // These leave objects on locked layers alone whatever comes next; COPY copies them, and
         // MIRROR does too unless the source objects are erased.
         self.sel.skip_locked = matches!(self.op, Op::Erase | Op::Move | Op::Rotate | Op::Scale);
+        if self.sel.done && self.sel.skip_locked {
+            let locked = on_locked_layers(s, &self.sel.picked)?;
+            if !locked.is_empty() {
+                self.sel.picked.retain(|h| !locked.contains(h));
+                say_locked(s, locked.len());
+                s.set_selection(self.sel.picked.clone());
+                // Nothing left of the pickfirst selection: ask for objects instead.
+                self.sel.done = !self.sel.picked.is_empty();
+            }
+        }
         if self.sel.done {
             self.objs = self.sel.picked.clone();
             return self.apply(s);
@@ -2035,11 +2045,7 @@ impl Interactive for SelectThen {
             if yes {
                 let locked = on_locked_layers(s, &self.objs)?;
                 self.objs.retain(|h| !locked.contains(h));
-                match locked.len() {
-                    0 => {}
-                    1 => s.echo("1 was on a locked layer."),
-                    n => s.echo(format!("{n} were on a locked layer.")),
-                }
+                say_locked(s, locked.len());
             }
             let (a, b) = (self.pts[0], self.pts[1]);
             transform_entities(s, &self.objs, &Mat3::mirror(a, b), !yes)?;

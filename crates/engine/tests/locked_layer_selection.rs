@@ -120,3 +120,44 @@ fn mirror_keeping_sources_copies_objects_on_locked_layers() {
     let lines = s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
     assert_eq!(lines, 6);
 }
+
+/// Selected before the command (pickfirst), objects on locked layers are left out the same way:
+/// the command line says so and the preview only drags the others.
+#[test]
+fn move_with_pickfirst_leaves_out_objects_on_locked_layers() {
+    let (mut s, free, held) = drawing(2);
+    s.set_selection(vec![free, held[0], held[1]]);
+    s.cmdline("move").unwrap();
+    assert!(logged(&s, "2 were on a locked layer."), "{:?}", s.log);
+    assert_eq!(s.selection(), vec![free]);
+    s.cmdline("0,0").unwrap();
+    let drawn = s.preview(cadcraft_engine::geom::Vec2::new(3.0, 0.0));
+    assert!(drawn.iter().any(|e| matches!(&e.kind, EntityKind::Line(l) if l.a.y == 0.0 && l.a.x == 3.0)), "{drawn:?}");
+    assert!(!drawn.iter().any(|e| matches!(&e.kind, EntityKind::Line(l) if l.a.y >= 5.0)), "{drawn:?}");
+    s.cmdline("3,0").unwrap();
+    assert!(s.running.is_none());
+    assert_eq!(start(&s, free), (3.0, 0.0));
+    assert!(held.iter().enumerate().all(|(i, h)| start(&s, *h) == (0.0, 5.0 + i as f64)));
+}
+
+/// A pickfirst selection made only of objects on locked layers leaves nothing to act on, so the
+/// command asks for objects.
+#[test]
+fn erase_with_only_locked_pickfirst_asks_for_objects() {
+    let (mut s, _, held) = drawing(1);
+    s.set_selection(held.clone());
+    s.cmdline("erase").unwrap();
+    assert!(logged(&s, "1 was on a locked layer."), "{:?}", s.log);
+    assert!(s.running.is_some());
+    assert!(s.selection().is_empty());
+}
+
+/// COPY keeps a pickfirst selection on locked layers whole.
+#[test]
+fn copy_with_pickfirst_keeps_objects_on_locked_layers() {
+    let (mut s, free, held) = drawing(1);
+    s.set_selection(vec![free, held[0]]);
+    s.cmdline("copy").unwrap();
+    assert!(!s.log.iter().any(|m| m.contains("locked layer")), "{:?}", s.log);
+    assert_eq!(s.selection(), vec![free, held[0]]);
+}
