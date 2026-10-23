@@ -56,6 +56,30 @@ fn the_type_list_turns_a_hatch_solid_user_defined_pattern_or_gradient() {
     assert!(s.execute("hatchedit", &json!({ "handles": [h], "type": "dotted" })).is_err());
 }
 
+/// Turned to a pattern, a hatch takes ANSI31 when HPNAME holds a gradient tile, and a pattern a
+/// .pat file loaded with its lines.
+#[test]
+fn a_hatch_turned_to_a_pattern_never_takes_a_gradient_tile_and_keeps_pat_lines() {
+    let (mut s, _, _, h) = square_with_island();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "solid" })).unwrap();
+    s.execute("setvar", &json!({ "name": "HPNAME", "value": "GR_LINEAR" })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
+    let x = hatch(&s, &h);
+    assert_eq!(x.pattern, "ANSI31", "a gradient tile is no pattern");
+    assert!(x.pattern_lines.is_empty() && !x.solid && x.gradient.is_none());
+
+    // A second hatch loads EDITGRID from a .pat file's text; HPNAME then names it.
+    let pat = "*EDITGRID,Edit grid\n0,0,0,0,.5\n90,0,0,0,.5\n";
+    s.execute("rectang", &json!({ "p1": [30, 0], "p2": [40, 10] })).unwrap();
+    s.execute("hatch", &json!({ "points": [[35, 5]], "pattern": "EDITGRID", "patternText": pat })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "solid" })).unwrap();
+    s.execute("setvar", &json!({ "name": "HPNAME", "value": "EDITGRID" })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
+    let x = hatch(&s, &h);
+    assert_eq!(x.pattern, "EDITGRID");
+    assert_eq!(x.pattern_lines.len(), 2, "the .pat pattern's lines come with it");
+}
+
 #[test]
 fn background_colour_is_set_and_cleared() {
     let (mut s, _, _, h) = square_with_island();

@@ -196,7 +196,8 @@ fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &st
             h.pattern = default_pattern.into();
             h.solid = false;
             h.gradient = None;
-            h.pattern_lines.clear();
+            // A pattern a .pat file loaded brings its lines, as when it is picked by name.
+            h.pattern_lines = super::patfile::lines_for(default_pattern);
         }
         Some(Kind::User) if !h.pattern.eq_ignore_ascii_case(USER) => make_user(h, false),
         // Gradient: the `gradient` edit (default LINEAR when none is given) does it.
@@ -531,7 +532,8 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
     let inherit_origin = bool_or(p, "inheritOrigin", false);
     let default_pattern = {
         let n = s.doc()?.header.str("HPNAME", "ANSI31").to_ascii_uppercase();
-        if n.is_empty() || n == "SOLID" || n == USER { "ANSI31".to_string() } else { n }
+        // HPNAME also holds the Hatch Creation gallery's gradient tiles (GR_*), which are no pattern.
+        if n.is_empty() || n == "SOLID" || n == USER || n.starts_with("GR_") { "ANSI31".to_string() } else { n }
     };
     if grad.is_some() && str_param(p, "pattern").map(|v| v.trim().to_ascii_uppercase()).is_some_and(|v| !v.is_empty() && v != "SOLID") {
         return Err(bad("hatchedit", "give `pattern` or `gradient`, not both"));
