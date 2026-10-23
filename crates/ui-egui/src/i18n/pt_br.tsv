@@ -1247,3 +1247,10 @@
 	Not a number or distance: {text}	Não é um número nem uma distância: {text}
 	Select using two clicks only	Selecionar apenas com dois cliques
 	Define each corner of the selection window with a separate click.	Defina cada canto da janela de seleção com um clique separado.
+	AutoSnap settings	Configurações do AutoSnap
+	Marker	Marcador
+	Magnet	Ímã
+	Display AutoSnap tooltip	Mostrar a dica do AutoSnap
+	Display AutoSnap aperture box	Mostrar a caixa de abertura do AutoSnap
+	Display AutoTrack tooltip	Mostrar a dica do AutoTrack
+	The magnet locks the crosshair onto the snap point; the aperture box shows how near the cursor must come to find one.	O ímã prende a mira ao ponto de snap; a caixa de abertura mostra o quanto o cursor precisa se aproximar para encontrá-lo.
