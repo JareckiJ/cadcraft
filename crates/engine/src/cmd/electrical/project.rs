@@ -44,7 +44,7 @@ impl Default for Project {
 /// The project the project commands use when none is named.
 static CURRENT: Mutex<Option<String>> = Mutex::new(None);
 
-fn current() -> Option<String> {
+pub(super) fn current() -> Option<String> {
     match CURRENT.lock() {
         Ok(g) => g.clone(),
         Err(e) => e.into_inner().clone(),
@@ -66,7 +66,7 @@ fn project_path(cmd: &str, p: &Value) -> Result<String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn read_project(path: &str) -> Result<Project> {
+pub(super) fn read_project(path: &str) -> Result<Project> {
     let bytes = crate::capped_read::read_capped(Path::new(path), MAX_PROJECT_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let mut pr: Project = serde_json::from_slice(&bytes).map_err(|e| EngineError::Other(format!("{path} is not a project file: {e}")))?;
     pr.drawings.truncate(MAX_DRAWINGS);
@@ -80,7 +80,7 @@ fn read_project(path: &str) -> Result<Project> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_project(_path: &str) -> Result<Project> {
+pub(super) fn read_project(_path: &str) -> Result<Project> {
     Err(EngineError::Other("Projects need files, which the web version cannot reach.".into()))
 }
 
@@ -96,7 +96,7 @@ fn write_project(_path: &str, _pr: &Project) -> Result<()> {
 }
 
 /// Where drawing `rel` of the project at `project` is.
-fn drawing_path(project: &str, rel: &str) -> PathBuf {
+pub(super) fn drawing_path(project: &str, rel: &str) -> PathBuf {
     let r = Path::new(rel);
     if r.is_absolute() { r.to_path_buf() } else { Path::new(project).parent().unwrap_or(Path::new("")).join(r) }
 }
@@ -107,7 +107,7 @@ fn relative_to(project: &str, path: &Path) -> String {
     path.strip_prefix(dir).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
-fn same_file(a: &Path, b: &Path) -> bool {
+pub(super) fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(x), Ok(y)) => x == y,
         _ => a == b,
@@ -115,7 +115,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// The grid parameters for sheet `sheet` of `pr`.
-fn sheet_params(pr: &Project, sheet: u64) -> Value {
+pub(super) fn sheet_params(pr: &Project, sheet: u64) -> Value {
     json!({ "firstSheet": sheet, "sheetWidth": pr.sheet_width, "columns": pr.columns, "origin": [0, 0] })
 }
 
@@ -132,7 +132,7 @@ fn with(mut base: Value, extra: &Value) -> Value {
 /// Run `f` on every drawing of the project, in sheet order, as the active drawing: an open one
 /// as it is, another opened for the run and closed after. Drawings are saved after `f` when
 /// `save` is set. The drawing active before stays active.
-fn for_each(
+pub(super) fn for_each(
     s: &mut Session,
     project: &str,
     pr: &Project,

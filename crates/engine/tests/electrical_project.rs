@@ -110,6 +110,12 @@ fn coil_and_contact_on_different_sheets() {
         .collect();
     assert_eq!(saved, vec!["/102"]);
 
+    // The project database: every symbol on both sheets, the contact linked to its coil.
+    let r = s.execute("eproject.sync", &json!({ "project": project })).unwrap();
+    assert_eq!(r["stats"]["pages"], 2, "{r}");
+    assert!(r["stats"]["devices"].as_u64().unwrap() >= 2);
+    assert!(dir.join("plant.ecdb").exists());
+
     // A new sheet joins the project as sheet 3, framed and open.
     let a = s.execute("eproject.addsheet", &json!({ "project": project })).unwrap();
     assert_eq!(a["sheet"], 3);

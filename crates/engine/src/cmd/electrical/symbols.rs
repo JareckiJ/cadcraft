@@ -8,7 +8,8 @@
 //! - `X?TERMnn`, invisible, placed exactly on each connection point; the digit is the side a
 //!   wire leaves from: 1 up, 2 right, 4 down, 8 left;
 //! - `ECLASS` (IEC 81346-2 class letters) and `EFAMILY` (`COIL`, `NO`, `NC`, `DEVICE`,
-//!   `TERMINAL`), invisible, for the tagging and cross-reference commands.
+//!   `TERMINAL`), invisible, for the tagging and cross-reference commands;
+//! - `EID`, invisible: the device's id in the project database, linking symbol and record.
 //!
 //! The built-in shapes are our own drawings of the IEC 60617 symbol forms, drawn on a 2.5 grid
 //! with the pins 10 apart, top and bottom, for vertical (top-to-bottom) ladders. Placing a symbol
@@ -502,6 +503,8 @@ pub(super) fn standard_attdefs(child: bool, class: &str, family: &str, right: f6
         attdef("INST", Vec2::new(x, -13.5), 1.8, "", true, HAlign::Left),
         attdef("ECLASS", Vec2::new(x, -15.5), 1.8, class, true, HAlign::Left),
         attdef("EFAMILY", Vec2::new(x, -17.5), 1.8, family, true, HAlign::Left),
+        // The device's id in the project database (filled in by EDB.SYNC).
+        attdef("EID", Vec2::new(x, -19.5), 1.0, "", true, HAlign::Left),
     ];
     for (i, (p, dir, number)) in pins.iter().enumerate() {
         let n = i + 1;

@@ -47,15 +47,15 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 
 /// One straight piece of a wire.
 #[derive(Clone, Copy, Debug)]
-struct Seg {
-    a: Vec2,
-    b: Vec2,
+pub(super) struct Seg {
+    pub(super) a: Vec2,
+    pub(super) b: Vec2,
     /// Index of the wire (entity) it belongs to.
-    wire: usize,
+    pub(super) wire: usize,
 }
 
 impl Seg {
-    fn dist_to(&self, p: Vec2) -> f64 {
+    pub(super) fn dist_to(&self, p: Vec2) -> f64 {
         let d = self.b - self.a;
         let l2 = d.len2();
         let t = if l2 > 0.0 { ((p - self.a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
@@ -99,7 +99,7 @@ pub(super) fn wire_layer_matches(layers: &str, layer: &str) -> bool {
 }
 
 /// The wires on layers matching `layers` in the current space, as segments.
-fn wire_segments(s: &Session, layers: &str) -> Result<(Vec<Handle>, Vec<Seg>)> {
+pub(super) fn wire_segments(s: &Session, layers: &str) -> Result<(Vec<Handle>, Vec<Seg>)> {
     let d = s.doc()?;
     let Some(store) = d.space(&s.space()) else { return Ok((Vec::new(), Vec::new())) };
     let mut handles = Vec::new();
@@ -139,7 +139,7 @@ fn wire_segments(s: &Session, layers: &str) -> Result<(Vec<Handle>, Vec<Seg>)> {
 }
 
 /// The potentials: groups of wire indices, each wire in exactly one.
-fn potentials(wires: usize, segs: &[Seg], tol: f64) -> Vec<Vec<usize>> {
+pub(super) fn potentials(wires: usize, segs: &[Seg], tol: f64) -> Vec<Vec<usize>> {
     let mut sets = Sets((0..wires).collect());
     // File segments in a uniform grid sized to the drawing, so each end is tested only against
     // nearby segments.
