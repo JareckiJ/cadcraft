@@ -26,6 +26,7 @@ pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
+pub mod xdedit;
 pub mod xrefs;
 pub mod lisp_ide;
 
@@ -255,6 +256,7 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    pub xdedit_dlg: Option<xdedit::XdEditState>,
     pub lisp_ide: Option<lisp_ide::LispIdeState>,
 }
 
@@ -296,6 +298,7 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            xdedit_dlg: None,
             lisp_ide: None,
         }
     }

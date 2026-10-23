@@ -263,8 +263,14 @@ fn preview_options(scale: f64) -> cadcraft_render::Options {
 /// command's rubber band and rebuilt copies of existing objects. They carry CLAYER's properties,
 /// not the objects', so they are drawn opaque (the GPU drag of the objects themselves keeps their
 /// transparency, see [`draw_drag_gpu`]).
-fn rebuilt_preview<'a>(doc: &cadcraft_doc::Drawing, ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>, scale: f64) -> DisplayList {
-    cadcraft_render::build_entities(doc, ents, &preview_options(scale))
+fn rebuilt_preview<'a>(
+    doc: &cadcraft_doc::Drawing,
+    ents: impl IntoIterator<Item = &'a cadcraft_doc::Entity>,
+    scale: f64,
+    orbit: cadcraft_render::Orbit3d,
+) -> DisplayList {
+    let options = cadcraft_render::Options { orbit, ..preview_options(scale) };
+    cadcraft_render::build_entities(doc, ents, &options)
 }
 
 fn color32(c: Rgb) -> Color32 {
@@ -296,10 +302,16 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
     // contents stay in the list, which then follows its view: realtime navigation changes it
     // without a new revision.
     let split = split_viewport(st, stencil_clip(app)).map(|(h, ..)| h);
+    let active_orbit = if matches!(st.space, cadcraft_doc::Space::Paper(_)) && (st.mspace.is_none() || split.is_some()) {
+        cadcraft_render::Orbit3d::default()
+    } else {
+        st.orbit
+    };
     let vp_view = {
         use std::hash::{Hash, Hasher};
         let mut s = std::collections::hash_map::DefaultHasher::new();
         split.hash(&mut s);
+        active_orbit.hash_key().hash(&mut s);
         if split.is_none()
             && let Some((h, vp)) = st.active_viewport()
         {
@@ -352,10 +364,11 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         lineweights: lwdisplay,
         view_height: st.paper_view().height,
         plot_style_table: None,
-        view: build_window(views),
+        view: if active_orbit.is_top() { build_window(views) } else { None },
         transparency: app.session.settings.transparency_display,
         skip_viewport: split,
         cancel: None,
+        orbit: active_orbit,
     };
     if view_only {
         let t = Tokens::get();
@@ -411,9 +424,9 @@ const VP_SETTLE_MS: f64 = 150.0;
 #[derive(Default)]
 struct VpContent {
     list: DisplayList,
-    /// What the list was built from: drawing, revision, document, viewport, tessellation band
-    /// and lineweight display.
-    key: Option<(u64, u64, usize, Handle, i32, bool, bool)>,
+    /// What the list was built from: drawing, revision, document, viewport, tessellation band,
+    /// lineweight display, transparency display and 3D orbit key.
+    key: Option<(u64, u64, usize, Handle, i32, bool, bool, u64)>,
     /// The viewport's view (centre, height) the list was built for, and the paper area it covers.
     view: (Vec2, f64),
     area: Bounds2,
@@ -480,7 +493,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
     };
     let px = 1.0 / xf_paper.scale.max(1e-300);
     let band = px.max(1e-300).log2().floor() as i32;
-    let key = (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, h, band, lwdisplay, transparency);
+    let key = (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, h, band, lwdisplay, transparency, st.orbit.hash_key());
     let now = crate::now_ms();
     let view = (vp.view_center, vp.view_height);
     if view != c.last_view {
@@ -513,10 +526,11 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             lineweights: lwdisplay,
             view_height: st.paper_view().height,
             plot_style_table: None,
-            view: Some(area),
+            view: if st.orbit.is_top() { Some(area) } else { None },
             skip_viewport: None,
             transparency,
             cancel: None,
+            orbit: st.orbit,
         };
         c.list = cadcraft_render::viewport_content(&st.doc, &st.space, h, area, &opts);
         c.key = Some(key);
@@ -655,17 +669,18 @@ struct VpHighlight {
 }
 
 impl VpHighlight {
+    /// Rebuild the viewport highlight display list when the drawing, orbit, zoom band or `handles` change.
     fn update(&mut self, st: &cadcraft_engine::DocState, handles: &[Handle], scale: f64) {
         let tolerance = viewport_highlight_tolerance(scale);
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, tolerance.to_bits(), handles).hash(&mut h);
+            (st.uid, st.revision, std::sync::Arc::as_ptr(&st.doc) as usize, tolerance.to_bits(), st.orbit.hash_key(), handles).hash(&mut h);
             h.finish()
         };
         if self.key != Some(key) {
             let ents = handles.iter().filter_map(|h| st.doc.model.get(*h)).map(|e| e.as_ref());
-            self.list = cadcraft_render::build_entities(&st.doc, ents, &cadcraft_render::Options { tolerance, ..Default::default() });
+            self.list = cadcraft_render::build_entities(&st.doc, ents, &cadcraft_render::Options { tolerance, orbit: st.orbit, ..Default::default() });
             self.key = Some(key);
             self.list_gen = self.list_gen.wrapping_add(1);
         }
@@ -1072,13 +1087,23 @@ fn draw_drag_gpu(
     clipboard: (&[cadcraft_doc::Entity], u64),
     bg: Rgb,
     transparency: bool,
+    orbit: cadcraft_render::Orbit3d,
 ) {
     // Tessellate for a power-of-two zoom band so zooming mid-drag rebuilds only every 2x.
     let band = xf.scale.max(1e-300).log2().round() as i32;
+    let raw_m = drag.matrix;
+    let is_translation = (raw_m.a - 1.0).abs() <= 1e-12
+        && raw_m.b.abs() <= 1e-12
+        && raw_m.c.abs() <= 1e-12
+        && (raw_m.d - 1.0).abs() <= 1e-12;
+    let pre_transform = !orbit.is_top() && !is_translation;
     let key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        (c.key, band, bg.0, bg.1, bg.2, &drag.handles, transparency).hash(&mut h);
+        (c.key, band, bg.0, bg.1, bg.2, &drag.handles, transparency, orbit.hash_key()).hash(&mut h);
+        if pre_transform {
+            [raw_m.a, raw_m.b, raw_m.c, raw_m.d, raw_m.e, raw_m.f].map(f64::to_bits).hash(&mut h);
+        }
         if drag.clipboard {
             clipboard.1.hash(&mut h);
         }
@@ -1086,8 +1111,31 @@ fn draw_drag_gpu(
     };
     if c.drag_key != Some(key) {
         let band_scale = 2f64.powi(band);
-        let opts = cadcraft_render::Options { transparency, ..preview_options(band_scale) };
-        let list = if drag.clipboard {
+        let opts = cadcraft_render::Options { transparency, orbit, ..preview_options(band_scale) };
+        let list = if pre_transform {
+            let transformed: Vec<cadcraft_doc::Entity> = if drag.clipboard {
+                clipboard
+                    .0
+                    .iter()
+                    .map(|e| {
+                        let mut e = e.clone();
+                        e.kind.transform(&raw_m);
+                        e
+                    })
+                    .collect()
+            } else {
+                drag.handles
+                    .iter()
+                    .filter_map(|h| doc.entity(*h))
+                    .map(|e| {
+                        let mut e = (**e).clone();
+                        e.kind.transform(&raw_m);
+                        e
+                    })
+                    .collect()
+            };
+            cadcraft_render::build_entities(doc, transformed.iter(), &opts)
+        } else if drag.clipboard {
             cadcraft_render::build_entities(doc, clipboard.0.iter(), &opts)
         } else {
             cadcraft_render::build_entities(doc, drag.handles.iter().filter_map(|h| doc.entity(*h)).map(|e| e.as_ref()), &opts)
@@ -1101,9 +1149,14 @@ fn draw_drag_gpu(
         c.drag_origin = origin;
     }
     // Positions are relative to the origin o: M(o + p) = L·p + (M(o) − o).
-    let m = drag.matrix;
     let o = c.drag_origin;
-    let t = m.apply(o) - o;
+    let xform = if pre_transform {
+        crate::gpu::IDENTITY_XFORM
+    } else {
+        let m = orbit.project_mat3(raw_m);
+        let t = m.apply(o) - o;
+        [m.a as f32, m.b as f32, m.c as f32, m.d as f32, t.x as f32, t.y as f32]
+    };
     let center = xf.rect.center();
     p.add(egui_wgpu::Callback::new_paint_callback(
         xf.rect,
@@ -1114,7 +1167,7 @@ fn draw_drag_gpu(
             scale: xf.scale as f32,
             center: [center.x, center.y],
             layer: crate::gpu::LAYER_DRAG,
-            xform: [m.a as f32, m.b as f32, m.c as f32, m.d as f32, t.x as f32, t.y as f32],
+            xform,
             dash: 0.0,
             stencil: crate::gpu::Stencil::Off,
         },
@@ -1405,12 +1458,20 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
 
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
 /// is on and the tooltip naming them ("Endpoint: 5.0000 < 90°").
-fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquired], track: Option<&snap::tracking::Track>, far: f64) {
+fn draw_tracking(
+    p: &egui::Painter,
+    xf: &Xf,
+    orbit: cadcraft_render::Orbit3d,
+    acquired: &[snap::tracking::Acquired],
+    track: Option<&snap::tracking::Track>,
+    far: f64,
+) {
     use snap::tracking::{Acquired, PathShape};
     let t = Tokens::get();
     let st = Stroke::new(1.0, t.snap);
+    let to_screen = |w: Vec2| xf.to_screen(orbit.project(w.to3(0.0)));
     for a in acquired {
-        let c = xf.to_screen(a.at());
+        let c = to_screen(a.at());
         if let Acquired::Parallel { .. } = a {
             p.line_segment([c + vec2(-5.0, 3.0), c + vec2(-1.0, -5.0)], st);
             p.line_segment([c + vec2(1.0, 3.0), c + vec2(5.0, -5.0)], st);
@@ -1426,17 +1487,17 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
         let pts: Vec<Pos2> = match path.shape {
             PathShape::Ray { origin, dir } => {
                 let back = (tr.point - origin).dot(dir).clamp(0.0, far);
-                vec![xf.to_screen(tr.point - dir * back), xf.to_screen(tr.point + dir * far)]
+                vec![to_screen(tr.point - dir * back), to_screen(tr.point + dir * far)]
             }
-            PathShape::Line { dir, .. } => vec![xf.to_screen(tr.point - dir * far), xf.to_screen(tr.point + dir * far)],
+            PathShape::Line { dir, .. } => vec![to_screen(tr.point - dir * far), to_screen(tr.point + dir * far)],
             PathShape::Circle { center, radius, .. } => {
                 let (a0, span) = (center.angle_to(tr.point), (far / radius).min(std::f64::consts::PI));
-                (0..=96).map(|i| xf.to_screen(Vec2::polar(center, radius, a0 - span + span * f64::from(i) / 48.0))).collect()
+                (0..=96).map(|i| to_screen(Vec2::polar(center, radius, a0 - span + span * f64::from(i) / 48.0))).collect()
             }
             PathShape::Ellipse { center, major, ratio, .. } => {
                 let e = cadcraft_geom::Ellipse::full(center, major, ratio);
                 let (t0, span) = (e.param_of(tr.point), (far / (major.len() * ratio.min(1.0))).min(std::f64::consts::PI));
-                (0..=96).map(|i| xf.to_screen(e.at_param(t0 - span + span * f64::from(i) / 48.0))).collect()
+                (0..=96).map(|i| to_screen(e.at_param(t0 - span + span * f64::from(i) / 48.0))).collect()
             }
         };
         p.extend(Shape::dotted_line(&pts, t.snap, 6.0, 1.0));
@@ -1453,7 +1514,7 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
     if let Some(o) = tr.object {
         tips.push(crate::i18n::t(o).to_string());
     }
-    let at = xf.to_screen(tr.point);
+    let at = to_screen(tr.point);
     if tr.paths.len() > 1 || tr.object.is_some() {
         p.line_segment([at + vec2(-4.0, -4.0), at + vec2(4.0, 4.0)], st);
         p.line_segment([at + vec2(4.0, -4.0), at + vec2(-4.0, 4.0)], st);
@@ -1463,24 +1524,27 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
 
 /// The rubber-band and snap-adjusted cursor point for the current prompt (the engine's
 /// `Session::snap_cursor`: object snaps, acquiring tracking points, grid, tracking paths, ortho).
-fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, ctx: &egui::Context) -> Vec2 {
+fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render::Orbit3d, ctx: &egui::Context) -> Vec2 {
     let prompt = app.session.current_prompt();
-    let wants_point = prompt.as_ref().is_some_and(cadcraft_engine::pointmod::accepts);
+    let wants_point = app.session.accepts_work_point();
     let base = prompt.as_ref().and_then(|p| p.base);
     let deferred = prompt.as_ref().is_some_and(|p| p.deferred);
     let corner = prompt.as_ref().is_some_and(|p| p.corner);
     app.canvas.snap = None;
     app.canvas.track = None;
-    if !wants_point || app.session.pending_window.is_some() {
-        if !wants_point {
+    if !wants_point {
+        if prompt.as_ref().is_none_or(|p| !cadcraft_engine::pointmod::accepts(p)) {
             app.session.tracking.clear();
         }
         return raw;
     }
+    let Some(work_raw) = orbit.unproject_xy(raw) else {
+        return raw;
+    };
     let (now, shift) = ctx.input(|i| (i.time, i.modifiers.shift));
     let q =
         snap::tracking::CursorQuery { base, deferred, corner, aperture: app.session.settings.aperture / xf.scale, tol: 6.0 / xf.scale, now, shift };
-    let r = app.session.snap_cursor(raw, &q);
+    let r = app.session.snap_cursor(work_raw, &q);
     if r.wait {
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(snap::tracking::DWELL / 4.0));
     }
@@ -1514,6 +1578,7 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
     if points.is_finite() { points } else { 0.0 }
 }
 
+/// Render the interactive CAD canvas, overlays, ViewCube, UCS icon, and handle pointer/keyboard input.
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
@@ -1610,7 +1675,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     {
         if let Some(last) = app.canvas.pan_last {
             let d = hp - last;
-            if let Ok(st) = app.session.state_mut() {
+            if mods.shift
+                && app.session.state().ok().is_some_and(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
+            {
+                let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
+            } else if let Ok(st) = app.session.state_mut() {
                 let v = st.view();
                 st.set_view_quiet(cadcraft_engine::View {
                     center: v.center - Vec2::new(f64::from(d.x) / scale, -f64::from(d.y) / scale),
@@ -1628,6 +1697,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // ZOOM Realtime: dragging up zooms in, down zooms out.
     if resp.dragged_by(egui::PointerButton::Primary) && app.session.realtime_zoom_active() {
         let _ = app.session.realtime_zoom(f64::from(resp.drag_delta().y));
+    }
+    // 3DORBIT: dragging with the primary button rotates the 3D view.
+    if resp.dragged_by(egui::PointerButton::Primary) && app.session.orbit_active() {
+        let d = resp.drag_delta();
+        let _ = app.session.orbit_drag(f64::from(d.x), f64::from(d.y));
     }
     // A click in another tile makes it current (or answers -VPORTS Join's prompts).
     if pressed_primary
@@ -1704,12 +1778,22 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         hatch_dialog = true;
     }
 
+    let current_orbit = app
+        .session
+        .state()
+        .map(|s| {
+            if matches!(s.space, cadcraft_doc::Space::Paper(_)) && s.mspace.is_none() {
+                cadcraft_render::Orbit3d::default()
+            } else {
+                s.orbit
+            }
+        })
+        .unwrap_or_default();
+
     // While a command asks for a point, every click places one, however fast the drafting (#815).
     // egui drops a click whose button comes up a few pixels from where it went down (a drag to it),
     // and eframe hands a slow frame's clicks over together, which egui reports as one.
-    let point_prompt = app.session.current_prompt().is_some_and(|p| cadcraft_engine::pointmod::accepts(&p))
-        && app.session.pending_window.is_none()
-        && !app.session.realtime_zoom_active();
+    let point_prompt = app.session.accepts_work_point() && !app.session.realtime_zoom_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
     if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
@@ -1724,7 +1808,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
             for pos in earlier.iter().filter(|p| rect.contains(**p)) {
-                let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
+                let w = effective_point(app, xf.to_world(*pos), &xf, current_orbit, ui.ctx());
                 let result = match app.canvas.snap {
                     Some(hit) => app.session.input_snapped(hit),
                     None => app.session.input(Input::Point(w)),
@@ -1738,8 +1822,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
     let raw_world = hover_pos.filter(|_| inside).map(|p| xf.to_world(p));
     let dyn_frame = crate::cmdline::dyn_frame(app);
-    if let Some(w) = raw_world {
-        let mut eff = effective_point(app, w, &xf, ui.ctx());
+    let edge_on_work_point = current_orbit.is_edge_on()
+        && app.session.current_prompt().as_ref().is_some_and(cadcraft_engine::pointmod::accepts)
+        && app.session.pending_window.is_none()
+        && app.session.select_mode.is_none()
+        && !app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom"));
+    if let Some(w) = raw_world.filter(|_| !edge_on_work_point) {
+        let mut eff = effective_point(app, w, &xf, current_orbit, ui.ctx());
         // A locked Dynamic Input value (`40,` or `40<` typed) holds the cursor and overrides snaps.
         if let Some(f) = dyn_frame
             && let Some(e) = crate::dyninput::parse(&app.cmd.buffer, &f)
@@ -1761,7 +1850,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.cursor_deferred = app.canvas.snap.and_then(|h| h.deferred);
         // Typed or menu snap overrides (END, NON…) and Tab cycling; a locked Dynamic Input value wins.
         if dyn_frame.and_then(|f| crate::dyninput::parse(&app.cmd.buffer, &f)).is_none_or(|e| e.first_locked().is_none()) {
-            override_cursor(app, w, &xf);
+            override_cursor(app, w, &xf, current_orbit);
         }
         // Typed grip dimensions win over snap overrides too.
         if let Some(q) = grip_held {
@@ -1850,6 +1939,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.drag_window = false;
     }
     if app.session.settings.pickdrag
+        && !app.session.orbit_active()
         && resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
         && app.canvas.cycle.is_none()
@@ -1903,7 +1993,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             && let (Some(w), Ok(st)) = (raw_world, app.session.state())
         {
             let filter = app.session.settings.previewfilter;
-            app.canvas.hover = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, app.session.settings.pickbox.max(1.0) * 1.5 / scale)
+            let edit_space = st.edit_space();
+            let pick_orbit = if matches!(edit_space, cadcraft_doc::Space::Model) { st.orbit } else { cadcraft_render::Orbit3d::default() };
+            app.canvas.hover = cadcraft_engine::select::pick_in_orbit(&st.doc, &edit_space, pick_orbit, w, app.session.settings.pickbox.max(1.0) * 1.5 / scale)
                 .filter(|h| st.doc.entity(*h).is_none_or(|e| !cadcraft_engine::select::preview_filtered(&st.doc, e, filter)));
             app.canvas.hover_at = hover_pos;
         }
@@ -2087,6 +2179,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if (!app.session.prompting() || grip_edit)
         && app.session.shows_grips(sel.len())
         && let Ok(st) = app.session.state()
+        && (!matches!(st.edit_space(), cadcraft_doc::Space::Model) || st.orbit.is_top())
     {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
@@ -2117,6 +2210,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
+    let preview_orbit = if app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom")) {
+        cadcraft_render::Orbit3d::default()
+    } else {
+        current_orbit
+    };
     let drag = match (app.canvas.cursor, app.canvas.gpu.is_some()) {
         (Some(c), true) => app.session.drag(c),
         _ => None,
@@ -2146,8 +2244,8 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
             let serial = app.session.clipboard_source.as_ref().map_or(0, |c| c.serial);
             let transparency = app.session.settings.transparency_display;
-            draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency);
-            let list = rebuilt_preview(&st.doc, extra.iter(), scale);
+            draw_drag_gpu(&mut app.canvas, &painter, &xf, &st.doc, &drag, (&app.session.clipboard, serial), bg, transparency, preview_orbit);
+            let list = rebuilt_preview(&st.doc, extra.iter(), scale, preview_orbit);
             draw_list(&painter, &xf, &list, bg, false);
         }
     } else if let (Some(c), true) = (app.canvas.cursor, app.session.prompting()) {
@@ -2156,7 +2254,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             && let Ok(st) = app.session.state()
         {
             paint_preview_images(&mut app.canvas, &app.session, &ents, &painter, &xf, ui.ctx());
-            let list = rebuilt_preview(&st.doc, ents.iter(), scale);
+            let list = rebuilt_preview(&st.doc, ents.iter(), scale, preview_orbit);
             draw_list(&painter, &xf, &list, bg, false);
         }
     }
@@ -2179,21 +2277,24 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {
-        draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
+        draw_tracking(&painter, &xf, current_orbit, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
+        draw_snap_marker(&painter, xf.to_screen(current_orbit.project(hit.point.to3(0.0))), &hit);
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
     if app.ui.show_ucs_icon {
-        draw_ucs_icon(&painter, rect);
+        draw_ucs_icon(&painter, rect, current_orbit);
         crate::viewcube::ucs_icon(app, ui, rect);
+    }
+    if app.session.orbit_active() {
+        draw_orbit_arcball(&painter, rect, current_orbit);
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
     }
-    viewport_label(&painter, rect);
+    viewport_label(&painter, rect, current_orbit);
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
@@ -2266,6 +2367,7 @@ fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
 fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
     let t = Tokens::get();
     let bg = Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b());
+    let orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
     for (r, tile) in tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0) {
         let p = ui.painter_at(*r);
         let xf = tile_xf(*r, tile);
@@ -2274,7 +2376,7 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
-        viewport_label(&p, *r);
+        viewport_label(&p, *r, orbit);
     }
     let p = ui.painter();
     for (r, tile) in tiles {
@@ -2408,7 +2510,9 @@ fn tooltip(p: &egui::Painter, at: Pos2, text: &str) {
 fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let st = app.session.state().ok()?;
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
-    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    let edit_space = st.edit_space();
+    let orbit = if matches!(edit_space, cadcraft_doc::Space::Model) { st.orbit } else { cadcraft_render::Orbit3d::default() };
+    let h = cadcraft_engine::select::pick_in_orbit(&st.doc, &edit_space, orbit, w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
 }
 
@@ -2431,15 +2535,18 @@ fn snap_cycle(app: &mut CadApp, raw: Vec2, ap: f64) -> Option<usize> {
 /// The cursor under a one-pick object snap override (`Session::snap_override`: END, NON…) or
 /// while Tab cycles the candidates: the snap of that mode (or the cycled candidate) replaces
 /// what the running snaps found; with none, a running snap no longer holds the cursor.
-fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
+fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render::Orbit3d) {
     let over = app.session.snap_override();
     let ap = app.session.settings.aperture / xf.scale;
     let cycle = snap_cycle(app, raw, ap);
     let prompt = app.session.current_prompt();
-    let wants_point = prompt.as_ref().is_some_and(cadcraft_engine::pointmod::accepts);
-    if (over.is_none() && cycle.is_none()) || !wants_point || app.session.pending_window.is_some() {
+    let wants_point = app.session.accepts_work_point();
+    if (over.is_none() && cycle.is_none()) || !wants_point {
         return;
     }
+    let Some(work_raw) = orbit.unproject_xy(raw) else {
+        return;
+    };
     let base = prompt.as_ref().and_then(|p| p.base);
     let deferred = prompt.as_ref().is_some_and(|p| p.deferred);
     let s = &app.session.settings;
@@ -2447,10 +2554,10 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
     let Ok(st) = app.session.state() else { return };
     let hit = match cycle {
         Some(i) => {
-            let cands = cadcraft_engine::pointmod::snap_candidates(&st.doc, &st.edit_space(), raw, ap, osmode, base, deferred);
+            let cands = cadcraft_engine::pointmod::snap_candidates_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred);
             cands.get(i % cands.len().max(1)).copied()
         }
-        None => snap::osnap(&st.doc, &st.edit_space(), raw, ap, osmode, base, deferred),
+        None => snap::osnap_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred),
     };
     let p = match (hit, app.canvas.snap) {
         (Some(h), _) => {
@@ -2459,7 +2566,7 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
         }
         (None, Some(_)) => {
             app.canvas.snap = None;
-            raw
+            work_raw
         }
         (None, None) => return,
     };
@@ -2727,24 +2834,79 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
-fn draw_ucs_icon(p: &egui::Painter, rect: Rect) {
+/// Draw the UCS coordinate icon in the bottom-left corner of the viewport (2D XY or 3D RGB triad).
+fn draw_ucs_icon(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
-    let st = Stroke::new(1.0, t.canvas_ink);
-    p.line_segment([o, o + vec2(60.0, 0.0)], st);
-    p.line_segment([o, o + vec2(0.0, -60.0)], st);
-    p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
     let f = egui::FontId::proportional(13.0);
-    p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
-    p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+    if orbit.is_top() {
+        let st = Stroke::new(1.0, t.canvas_ink);
+        p.line_segment([o, o + vec2(60.0, 0.0)], st);
+        p.line_segment([o, o + vec2(0.0, -60.0)], st);
+        p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+        p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
+        p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+        return;
+    }
+    // 3D UCS Triad: X (Red), Y (Green), Z (Blue).
+    let len = 56.0_f64;
+    let to_scr = |v: cadcraft_geom::Vec3| -> Pos2 {
+        let pr = orbit.project_vec(v);
+        pos2(o.x + pr.x as f32, o.y - pr.y as f32)
+    };
+    let px = to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0));
+    let py = to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0));
+    let pz = to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len));
+    let col_x = t.ucs_x;
+    let col_y = t.ucs_y;
+    let col_z = t.ucs_z;
+    p.line_segment([o, px], Stroke::new(2.0, col_x));
+    p.line_segment([o, py], Stroke::new(2.0, col_y));
+    p.line_segment([o, pz], Stroke::new(2.0, col_z));
+    p.text(px + (px - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "X", f.clone(), col_x);
+    p.text(py + (py - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "Y", f.clone(), col_y);
+    p.text(pz + (pz - o).normalized() * 10.0, egui::Align2::CENTER_CENTER, "Z", f, col_z);
 }
 
-fn viewport_label(p: &egui::Painter, rect: Rect) {
+/// Draw the green 3D Orbit arcball overlay and pivot triad while `3DORBIT` is active.
+fn draw_orbit_arcball(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
+    let t = Tokens::get();
+    let c = rect.center();
+    let r = (rect.width().min(rect.height()) * 0.34).clamp(90.0, 260.0);
+    let green = t.orbit_arcball;
+    p.circle_stroke(c, r, Stroke::new(1.8, green));
+    for d in [vec2(0.0, -r), vec2(0.0, r), vec2(-r, 0.0), vec2(r, 0.0)] {
+        p.circle_stroke(c + d, 6.5, Stroke::new(1.4, green));
+    }
+    // Pivot crosshair + 3D mini triad at center.
+    let len = 28.0_f64;
+    let to_scr = |v: cadcraft_geom::Vec3| -> Pos2 {
+        let pr = orbit.project_vec(v);
+        pos2(c.x + pr.x as f32, c.y - pr.y as f32)
+    };
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(len, 0.0, 0.0))], Stroke::new(1.8, t.ucs_x));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, len, 0.0))], Stroke::new(1.8, t.ucs_y));
+    p.line_segment([c, to_scr(cadcraft_geom::Vec3::new(0.0, 0.0, len))], Stroke::new(1.8, t.ucs_z));
+}
+
+/// Draw the top-left viewport controls label showing current view orientation and visual style.
+fn viewport_label(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d) {
     let t = Tokens::get();
     let at = pos2(rect.left() + 10.0, rect.top() + 8.0);
-    p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    if orbit.is_top() {
+        p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
+    } else {
+        let txt = format!(
+            "+  |  {} ({:.0}°, {:.0}°)  |  3D Orbit Wireframe",
+            orbit.label(),
+            orbit.yaw.to_degrees().rem_euclid(360.0),
+            orbit.pitch.to_degrees()
+        );
+        p.text(at, egui::Align2::LEFT_TOP, txt, crate::theme::small(), t.canvas_ink);
+    }
 }
 
+/// Draw the ViewCube and WCS pill in the top-right corner of the canvas.
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
     let l = crate::viewcube::Layout::new(rect);
     let (c, ring) = (l.center, l.ring);
@@ -2835,6 +2997,9 @@ fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
 fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)> {
     let hp = hover?;
     let st = app.session.state().ok()?;
+    if matches!(st.edit_space(), cadcraft_doc::Space::Model) && !st.orbit.is_top() {
+        return None;
+    }
     let gs = app.session.settings.gripsize as f32 + 3.0;
     let sel = app.session.selection();
     if !app.session.shows_grips(sel.len()) {
@@ -2886,7 +3051,7 @@ pub(crate) mod tests {
         // One canvas across the toggle: the cached drag mesh must be rebuilt.
         let mut c = CanvasState::default();
         let mut alpha = |transparency: bool| {
-            draw_drag_gpu(&mut c, &painter, &xf, &d, &drag, (&[], 0), Rgb(0, 0, 0), transparency);
+            draw_drag_gpu(&mut c, &painter, &xf, &d, &drag, (&[], 0), Rgb(0, 0, 0), transparency, cadcraft_render::Orbit3d::default());
             let mesh = c.drag_slot.lock().unwrap().take().unwrap();
             // The first line vertex's colour alpha (after its 2 × f32 position).
             mesh.lines[11]
@@ -2916,7 +3081,7 @@ pub(crate) mod tests {
         // Built with transparency, the preview would take CLAYER's 40 %.
         let with = cadcraft_render::build_entities(doc, ents.iter(), &cadcraft_render::Options { transparency: true, ..preview_options(1.0) });
         assert!(with.prims.iter().all(|p| p.transparency == 40));
-        let list = rebuilt_preview(doc, ents.iter(), 1.0);
+        let list = rebuilt_preview(doc, ents.iter(), 1.0, cadcraft_render::Orbit3d::default());
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
         s.cancel();
         // MOVE's base-to-cursor rubber band (a drag extra).
@@ -2927,7 +3092,7 @@ pub(crate) mod tests {
         s.cmdline("0,0").unwrap();
         let (_, extra) = s.drag(Vec2::new(4.0, 4.0)).unwrap();
         assert!(!extra.is_empty());
-        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0);
+        let list = rebuilt_preview(s.doc().unwrap(), extra.iter(), 1.0, cadcraft_render::Orbit3d::default());
         assert!(!list.prims.is_empty() && list.prims.iter().all(|p| p.transparency == 0));
     }
 
