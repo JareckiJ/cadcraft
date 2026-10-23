@@ -1237,7 +1237,13 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             if l.arrow
                 && let (Some(a), Some(n)) = (pts.first(), pts.get(1))
             {
-                let st = ctx.d.dim_style(&l.style);
+                // The leader's style with its own overrides (DSTYLE xdata, #1966).
+                let own = if l.overrides.is_empty() {
+                    None
+                } else {
+                    Some(ctx.d.dim_style(&l.style).cloned().unwrap_or_default().with_overrides(&l.overrides))
+                };
+                let st = own.as_ref().or_else(|| ctx.d.dim_style(&l.style));
                 // DIMASZ × DIMSCALE of the leader's style (the drawing's DIMSCALE when it is 0).
                 let size = st.map(|s| s.arrow_size).unwrap_or(0.18) * leader_scale(ctx.d, st);
                 // DIMLDRBLK ("" = closed filled).

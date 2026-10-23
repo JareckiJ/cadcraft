@@ -695,6 +695,10 @@ pub struct Leader {
     pub spline: bool,
     #[serde(default = "standard")]
     pub style: String,
+    /// Per-leader dimension style overrides (`ACAD` DSTYLE xdata, e.g. DIMASZ or DIMSCALE):
+    /// DimStyle field names → values, as on a dimension.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub overrides: serde_json::Map<String, serde_json::Value>,
 }
 fn yes() -> bool {
     true

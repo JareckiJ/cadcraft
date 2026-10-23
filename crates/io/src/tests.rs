@@ -2539,3 +2539,28 @@ fn drawing_without_insunits_stays_unitless() {
     assert_eq!(insunits(&write_dxf(&Drawing::new_metric())), Some("4".into()));
     assert_eq!(insunits(&write_dxf(&Drawing::new_imperial())), Some("1".into()));
 }
+
+/// Issue #1966: a LEADER's own DSTYLE overrides (here DIMASZ and DIMSCALE) are read, kept
+/// through a save and shrink its arrowhead, as in AutoCAD.
+#[test]
+fn leader_dstyle_overrides_are_read_kept_and_drawn() {
+    let mut d = Drawing::new_metric();
+    let ov = serde_json::json!({ "arrowSize": 2.5, "scale": 1.0 });
+    let l = Leader {
+        vertices: vec![Vec3::ZERO, Vec3::new(100.0, 100.0, 0.0)],
+        arrow: true,
+        spline: false,
+        style: "Standard".into(),
+        overrides: ov.as_object().unwrap().clone(),
+    };
+    d.add(&Space::Model, Common::default(), EntityKind::Leader(l)).unwrap();
+    let text = write_dxf(&d);
+    assert!(text.contains("DSTYLE"));
+    let back = read_dxf(text.as_bytes()).unwrap();
+    let got = first(&back, |k| if let EntityKind::Leader(x) = k { Some(x.clone()) } else { None });
+    let st = back.dim_style("Standard").cloned().unwrap_or_default().with_overrides(&got.overrides);
+    assert_eq!(st.arrow_size, 2.5, "{:?}", got.overrides);
+    let again = read_dxf(write_dxf(&back).as_bytes()).unwrap();
+    let got2 = first(&again, |k| if let EntityKind::Leader(x) = k { Some(x.clone()) } else { None });
+    assert_eq!(got2.overrides, got.overrides);
+}

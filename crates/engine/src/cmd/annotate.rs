@@ -480,6 +480,7 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         arrow: true,
         spline: false,
         style: st,
+        overrides: Default::default(),
     }))?;
     let mut out = vec![h.hex()];
     if let (Some(t), Some(last)) = (str_param(p, "text"), pts.last()) {
