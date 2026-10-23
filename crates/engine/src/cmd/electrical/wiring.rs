@@ -1,0 +1,358 @@
+//! Drawing wires: EWIREDRAW and ELADDER.
+//!
+//! EWIREDRAW draws a wire between two points, each snapped to the nearest symbol connection
+//! point (or onto a wire, making a T junction with a dot) within reach, and routed at right
+//! angles: leaving a pin the way its connection point faces. ELADDER lays out a ladder: two
+//! horizontal supply rails and a vertical rung in the middle of each column between them, ready
+//! for symbols to be dropped on (ESYMBOL cuts the rung at the symbol's pins).
+
+use cadcraft_doc::{EntityKind, Handle, Line, LwPolyline};
+use cadcraft_geom::{PolyVertex, Vec2, Vec3};
+use serde_json::{Value, json};
+
+use super::symbols::insert_connection_points;
+use super::wires::{WIRE_LAYERS, wire_layer_matches};
+use crate::cmd::{CommandSpec, bad, f64_or, point_req, str_param};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
+
+const WIRE_LAYER: &str = "WIRE";
+const JUNCTION_LAYER: &str = "JUNCTION";
+/// Most rungs one ladder may have.
+const MAX_RUNGS: usize = 500;
+
+pub(super) fn specs() -> Vec<CommandSpec> {
+    vec![
+        CommandSpec::new("ewiredraw", "Draw Wire", run_wiredraw)
+            .menu(&["Tools", "Electrical", "Draw Wire"])
+            .params(
+                "{from: [x, y], to: [x, y], snap? (reach, default 3), layer? (default \"WIRE\"), \
+                 verticalFirst? (default: from the start pin's direction)} → {handle, from, to, snappedFrom, snappedTo, junctions}",
+            )
+            .interactive(|_| Ok(Box::new(WireM::default()))),
+        CommandSpec::new("eladder", "Insert Ladder", run_ladder).menu(&["Tools", "Electrical", "Insert Ladder"]).params(
+            "{top: y, bottom: y, from? x (default 0), to? x (default from + 420), spacing? (default 42, a column), \
+                 layer? (default \"WIRE\")} → {rails: [handle], rungs: [handle]}",
+        ),
+    ]
+}
+
+/// What a point snapped to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Snap {
+    /// A symbol's connection point, with its direction digit.
+    Pin(Vec2, u8),
+    /// The middle of a wire (a T junction).
+    Wire(Vec2),
+    /// The end of a wire.
+    WireEnd(Vec2),
+    Free(Vec2),
+}
+
+impl Snap {
+    fn point(self) -> Vec2 {
+        match self {
+            Snap::Pin(p, _) | Snap::Wire(p) | Snap::WireEnd(p) | Snap::Free(p) => p,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Snap::Pin(..) => "pin",
+            Snap::Wire(_) => "wire",
+            Snap::WireEnd(_) => "wire end",
+            Snap::Free(_) => "none",
+        }
+    }
+}
+
+/// `p` snapped within `reach`: a connection point first, then a wire end, then onto a wire.
+fn snap(s: &Session, p: Vec2, reach: f64, layers: &str) -> Snap {
+    let Ok(d) = s.doc() else { return Snap::Free(p) };
+    let Some(store) = d.space(&s.space()) else { return Snap::Free(p) };
+    let pin = store
+        .iter()
+        .filter_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(insert_connection_points(i)) } else { None })
+        .flatten()
+        .map(|(q, dir)| (q.dist(p), q, dir))
+        .filter(|(dist, ..)| *dist <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some((_, q, dir)) = pin {
+        return Snap::Pin(q, dir);
+    }
+    let mut best_end: Option<(f64, Vec2)> = None;
+    let mut best_on: Option<(f64, Vec2)> = None;
+    for e in store.iter().filter(|e| wire_layer_matches(layers, &e.common.layer)) {
+        let pts: Vec<Vec2> = match &e.kind {
+            EntityKind::Line(l) => vec![l.a.xy(), l.b.xy()],
+            EntityKind::LwPolyline(pl) => pl.vertices.iter().map(|v| v.p).collect(),
+            _ => continue,
+        };
+        for q in [pts.first(), pts.last()].into_iter().flatten() {
+            let dist = q.dist(p);
+            if dist <= reach && best_end.is_none_or(|b| dist < b.0) {
+                best_end = Some((dist, *q));
+            }
+        }
+        for w in pts.windows(2) {
+            let [a, b] = w else { continue };
+            let l2 = (*b - *a).len2();
+            if l2.is_nan() || l2 <= 0.0 {
+                continue;
+            }
+            let t = ((p - *a).dot(*b - *a) / l2).clamp(0.0, 1.0);
+            let foot = a.lerp(*b, t);
+            let dist = foot.dist(p);
+            if dist <= reach && best_on.is_none_or(|b| dist < b.0) {
+                best_on = Some((dist, foot));
+            }
+        }
+    }
+    match (best_end, best_on) {
+        (Some((_, q)), _) => Snap::WireEnd(q),
+        (None, Some((_, q))) => Snap::Wire(q),
+        _ => Snap::Free(p),
+    }
+}
+
+/// The corner points of a right-angled route from `a` to `b`.
+fn route(a: Vec2, b: Vec2, vertical_first: bool) -> Vec<Vec2> {
+    if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
+        return vec![a, b];
+    }
+    let corner = if vertical_first { Vec2::new(a.x, b.y) } else { Vec2::new(b.x, a.y) };
+    vec![a, corner, b]
+}
+
+/// Add layer `name` with colour `color` (ACI) if the drawing hasn't got it.
+fn ensure_layer(s: &mut Session, name: &str, color: u8) -> Result<()> {
+    let d = s.doc_mut()?;
+    if d.ensure_layer(name)
+        && let Some(l) = d.layer_mut(name)
+    {
+        l.color = cadcraft_color::Color::Index(color);
+    }
+    Ok(())
+}
+
+/// Add a wire through `pts` on `layer`: a line for two points, else a polyline.
+fn add_wire(s: &mut Session, pts: &[Vec2], layer: &str) -> Result<Handle> {
+    ensure_layer(s, layer, 1)?;
+    let mut common = s.current_common();
+    common.layer = layer.to_string();
+    let kind = match pts {
+        [a, b] => EntityKind::Line(Line { a: Vec3::new(a.x, a.y, 0.0), b: Vec3::new(b.x, b.y, 0.0) }),
+        _ => EntityKind::LwPolyline(LwPolyline {
+            vertices: pts.iter().map(|p| PolyVertex { p: *p, ..Default::default() }).collect(),
+            closed: false,
+            const_width: 0.0,
+            elevation: 0.0,
+            plinegen: false,
+        }),
+    };
+    let space = s.space();
+    Ok(s.doc_mut()?.add(&space, common, kind)?)
+}
+
+/// A junction dot at `p`.
+fn add_dot(s: &mut Session, p: Vec2) -> Result<()> {
+    ensure_layer(s, JUNCTION_LAYER, 1)?;
+    let mut common = s.current_common();
+    common.layer = JUNCTION_LAYER.to_string();
+    let space = s.space();
+    // A filled dot: a donut, a closed polyline of two half-circles as wide as its radius.
+    let r = 0.5;
+    let dot = EntityKind::LwPolyline(LwPolyline {
+        vertices: vec![
+            PolyVertex { p: Vec2::new(p.x - r / 2.0, p.y), bulge: 1.0, ..Default::default() },
+            PolyVertex { p: Vec2::new(p.x + r / 2.0, p.y), bulge: 1.0, ..Default::default() },
+        ],
+        closed: true,
+        const_width: r,
+        elevation: 0.0,
+        plinegen: false,
+    });
+    s.doc_mut()?.add(&space, common, dot)?;
+    Ok(())
+}
+
+fn layer_param(cmd: &str, p: &Value) -> Result<String> {
+    let l = str_param(p, "layer").map(str::trim).filter(|l| !l.is_empty()).unwrap_or(WIRE_LAYER).to_string();
+    if l.chars().count() > 255 { Err(bad(cmd, "`layer` is too long")) } else { Ok(l) }
+}
+
+fn run_wiredraw(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "ewiredraw";
+    let from = point_req(CMD, p, "from")?;
+    let to = point_req(CMD, p, "to")?;
+    let reach = f64_or(p, "snap", 3.0);
+    if !(0.0..1e6).contains(&reach) {
+        return Err(bad(CMD, "`snap` must be zero or more"));
+    }
+    let layer = layer_param(CMD, p)?;
+    let layers = format!("{WIRE_LAYERS},{layer}");
+    let a = snap(s, from, reach, &layers);
+    let b = snap(s, to, reach, &layers);
+    let (pa, pb) = (a.point(), b.point());
+    if pa.near(pb, 1e-9) {
+        return Err(bad(CMD, "the wire's ends are the same point"));
+    }
+    let vertical_first = match p.get("verticalFirst").and_then(Value::as_bool) {
+        Some(v) => v,
+        None => match a {
+            Snap::Pin(_, dir) => matches!(dir, 1 | 4),
+            _ => matches!(b, Snap::Pin(_, 2 | 8)),
+        },
+    };
+    let pts = route(pa, pb, vertical_first);
+    let h = add_wire(s, &pts, &layer)?;
+    let mut junctions = 0;
+    for sn in [a, b] {
+        if let Snap::Wire(q) = sn {
+            add_dot(s, q)?;
+            junctions += 1;
+        }
+    }
+    Ok(json!({
+        "handle": h.hex(),
+        "from": [pa.x, pa.y],
+        "to": [pb.x, pb.y],
+        "snappedFrom": a.label(),
+        "snappedTo": b.label(),
+        "junctions": junctions,
+    }))
+}
+
+fn run_ladder(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "eladder";
+    let top = p.get("top").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "`top` (y of the upper rail) is required"))?;
+    let bottom =
+        p.get("bottom").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "`bottom` (y of the lower rail) is required"))?;
+    if top <= bottom {
+        return Err(bad(CMD, "`top` must be above `bottom`"));
+    }
+    let x0 = f64_or(p, "from", 0.0);
+    let x1 = f64_or(p, "to", x0 + 420.0);
+    let spacing = f64_or(p, "spacing", 42.0);
+    if x1 <= x0 || spacing <= 0.0 || (x1 - x0) / spacing > MAX_RUNGS as f64 {
+        return Err(bad(CMD, format!("`to` must be right of `from`, `spacing` positive, and at most {MAX_RUNGS} rungs")));
+    }
+    let layer = layer_param(CMD, p)?;
+    let rails = vec![
+        add_wire(s, &[Vec2::new(x0, top), Vec2::new(x1, top)], &layer)?.hex(),
+        add_wire(s, &[Vec2::new(x0, bottom), Vec2::new(x1, bottom)], &layer)?.hex(),
+    ];
+    let mut rungs = Vec::new();
+    let mut x = x0 + spacing / 2.0;
+    while x < x1 && rungs.len() < MAX_RUNGS {
+        rungs.push(add_wire(s, &[Vec2::new(x, top), Vec2::new(x, bottom)], &layer)?.hex());
+        add_dot(s, Vec2::new(x, top))?;
+        add_dot(s, Vec2::new(x, bottom))?;
+        x += spacing;
+    }
+    Ok(json!({ "rails": rails, "rungs": rungs }))
+}
+
+/// EWIREDRAW at the command line: a start point, then the next points; each wire leg ends the
+/// command when it lands on a pin or a wire, else the next leg starts where it ended.
+#[derive(Default)]
+struct WireM {
+    last: Option<Vec2>,
+}
+
+impl Interactive for WireM {
+    fn name(&self) -> &'static str {
+        "EWIREDRAW"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        let accept = Accept { point: true, number: false, text: false, select: false, enter: true };
+        if self.last.is_none() { Prompt::new("Wire start point", accept) } else { Prompt::new("Wire end point", accept) }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Input::Point(p) = i else {
+            return Ok(if matches!(i, Input::Enter | Input::Cancel) { Step::Done } else { Step::Continue });
+        };
+        let reach = s.pixel_size() * 12.0;
+        match self.last {
+            None => {
+                self.last = Some(snap(s, p, reach, WIRE_LAYERS).point());
+                Ok(Step::Continue)
+            }
+            Some(a) => {
+                let r = run_wiredraw(s, &json!({ "from": [a.x, a.y], "to": [p.x, p.y], "snap": reach.max(1e-9) }))?;
+                if r["snappedTo"] == "pin" || r["snappedTo"] == "wire" || r["snappedTo"] == "wire end" {
+                    return Ok(Step::Done);
+                }
+                let to = r["to"].as_array().and_then(|t| Some(Vec2::new(t.first()?.as_f64()?, t.get(1)?.as_f64()?)));
+                self.last = to;
+                Ok(Step::Continue)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn wires_snap_to_pins_and_route_at_right_angles() {
+        let mut s = Session::new();
+        let k = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [50, 100]})).unwrap();
+        let pb = s.execute("esymbol", &json!({"name": "IEC_PB_NO", "at": [80, 150]})).unwrap();
+        let k_top = k["pins"][0].clone();
+        let pb_bottom = pb["pins"][1].clone();
+        // Clicks near the pins snap onto them; the coil's top pin faces up, so the wire leaves upwards.
+        let r = s.execute("ewiredraw", &json!({"from": [50.8, 105.5], "to": [79.0, 144.2]})).unwrap();
+        assert_eq!(r["snappedFrom"], "pin");
+        assert_eq!(r["snappedTo"], "pin");
+        assert_eq!(r["from"], k_top);
+        assert_eq!(r["to"], pb_bottom);
+        let h = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+        let Some(EntityKind::LwPolyline(pl)) = s.doc().unwrap().entity(h).map(|e| &e.kind) else { panic!("a polyline") };
+        assert_eq!(pl.vertices.len(), 3);
+        assert_eq!(pl.vertices[1].p, Vec2::new(50.0, 145.0), "vertical first, out of the coil's top");
+        // Numbering sees one network joining the two pins.
+        let w = s.execute("ewire", &json!({})).unwrap();
+        assert_eq!(w["potentials"], 1);
+    }
+
+    #[test]
+    fn t_junction_onto_a_wire_gets_a_dot() {
+        let mut s = Session::new();
+        s.execute("ewiredraw", &json!({"from": [0, 100], "to": [200, 100]})).unwrap();
+        let r = s.execute("ewiredraw", &json!({"from": [60.5, 101.0], "to": [60.5, 20.0]})).unwrap();
+        assert_eq!(r["snappedFrom"], "wire");
+        assert_eq!(r["junctions"], 1);
+        assert_eq!(r["from"], json!([60.5, 100.0]));
+        assert_eq!(s.execute("ewire", &json!({})).unwrap()["potentials"], 1);
+    }
+
+    #[test]
+    fn ladder_then_symbols_make_rungs() {
+        let mut s = Session::new();
+        let r = s.execute("eladder", &json!({"top": 270, "bottom": 30, "from": 0, "to": 210})).unwrap();
+        assert_eq!(r["rungs"].as_array().unwrap().len(), 5);
+        // One network: both rails joined through the rungs.
+        assert_eq!(s.execute("ewire", &json!({})).unwrap()["potentials"], 1);
+        // A coil on the second rung splits it: top rail side and bottom rail side.
+        let c = s.execute("esymbol", &json!({"name": "IEC_COIL", "at": [63, 150]})).unwrap();
+        assert_eq!(c["wiresCut"], 1);
+        assert_eq!(s.execute("ewire", &json!({"mode": "all"})).unwrap()["potentials"], 1, "still joined by the other rungs");
+        assert!(s.execute("eladder", &json!({"top": 0, "bottom": 10})).is_err());
+        assert!(s.execute("eladder", &json!({"top": 10, "bottom": 0, "spacing": 0})).is_err());
+        assert!(s.execute("eladder", &json!({"top": 10, "bottom": 0, "to": 1e9, "spacing": 1})).is_err());
+    }
+
+    #[test]
+    fn interactive_wire_ends_on_a_pin() {
+        let mut s = Session::new();
+        s.execute("esymbol", &json!({"name": "IEC_LAMP", "at": [100, 100]})).unwrap();
+        s.start("ewiredraw").unwrap();
+        s.input(Input::Point(Vec2::new(0.0, 105.0))).unwrap();
+        s.input(Input::Point(Vec2::new(100.0, 105.0))).unwrap();
+        assert!(s.running.is_none(), "landing on the lamp's pin ends the command");
+        assert!(s.execute("ewiredraw", &json!({"from": [0, 0], "to": [0, 0]})).is_err());
+        assert!(s.execute("ewiredraw", &json!({"from": [0, 0]})).is_err());
+    }
+}

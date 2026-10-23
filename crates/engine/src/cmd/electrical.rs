@@ -15,6 +15,7 @@
 mod classes;
 mod symbols;
 mod wires;
+mod wiring;
 mod xref;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -68,6 +69,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(wires::specs());
     v.extend(xref::specs());
     v.extend(symbols::specs());
+    v.extend(wiring::specs());
     v
 }
 
