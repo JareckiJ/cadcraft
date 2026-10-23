@@ -164,10 +164,10 @@ fn terminal_plan_and_plc_list_cover_every_sheet() {
     s.execute("eplc", &json!({ "kind": "DI", "points": 4, "at": [100, 60] })).unwrap();
     s.execute("qsave", &json!({})).unwrap();
     switch_to(&mut s, "rep-01.dxf");
-    let t = s.execute("ereport", &json!({ "kind": "terminals" })).unwrap();
+    let t = s.execute("ereport", &json!({ "kind": "terminals", "project": project })).unwrap();
     let rows = t["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 2, "{t}");
     assert!(rows.iter().all(|r| r[0] == "-X2"));
-    let io = s.execute("ereport", &json!({ "kind": "plcio" })).unwrap();
+    let io = s.execute("ereport", &json!({ "kind": "plcio", "project": project })).unwrap();
     assert_eq!(io["rows"].as_array().unwrap().len(), 4, "the card is on sheet 2: {io}");
 }

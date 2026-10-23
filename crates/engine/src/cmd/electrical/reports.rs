@@ -19,7 +19,7 @@ const KINDS: &[&str] = &["bom", "devices", "wirelist", "terminals", "plcio", "ca
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec::new("ereport", "Electrical Report", run_report).menu(&["Tools", "Electrical", "Reports", "Report..."]).params(
         "{kind: bom | devices | wirelist | terminals | plcio | cables, csv?: bool (return CSV text), path? (save CSV there), \
-                 draw?: {at: [x, y]} (draw it as a table)} → {kind, columns, rows, csv?}",
+                 draw?: {at: [x, y]} (draw it as a table), project? (.ecproj; default: the open project — every sheet)} → {kind, columns, rows, csv?}",
     )]
 }
 
@@ -118,7 +118,7 @@ fn strs(v: &Value) -> String {
 }
 
 /// The columns and rows of report `kind`.
-pub(super) fn report(s: &mut Session, kind: &str) -> Result<(Vec<&'static str>, Vec<Vec<String>>)> {
+pub(super) fn report(s: &mut Session, kind: &str, project: Option<&str>) -> Result<(Vec<&'static str>, Vec<Vec<String>>)> {
     // The database first catches up with ordinary edits.
     super::sync::auto(s);
     let q = |s: &mut Session, what: &str| s.execute("edb.query", &json!({ "what": what }));
@@ -168,17 +168,17 @@ pub(super) fn report(s: &mut Session, kind: &str) -> Result<(Vec<&'static str>, 
                 .collect();
             (vec!["Wire", "From", "To", "Colour", "mm²"], rows)
         }
-        "terminals" => (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], per_sheet(s, terminal_rows)?),
-        "cables" => (vec!["Cable", "Type", "Core", "Wire", "From", "To"], per_sheet(s, cable_rows)?),
-        "plcio" => (vec!["Address", "Card", "Point", "Connected", "Wire"], per_sheet(s, plc_rows)?),
+        "terminals" => (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], per_sheet(s, project, terminal_rows)?),
+        "cables" => (vec!["Cable", "Type", "Core", "Wire", "From", "To"], per_sheet(s, project, cable_rows)?),
+        "plcio" => (vec!["Address", "Card", "Point", "Connected", "Wire"], per_sheet(s, project, plc_rows)?),
         _ => return Err(bad("ereport", format!("`kind` must be one of {}", KINDS.join(", ")))),
     })
 }
 
 /// Rows from the drawing-based reports: from every sheet of the open project (in sheet order),
 /// else from this drawing.
-fn per_sheet(s: &mut Session, rows: fn(&mut Session) -> Result<Vec<Vec<String>>>) -> Result<Vec<Vec<String>>> {
-    let Some(path) = super::project::current() else { return rows(s) };
+fn per_sheet(s: &mut Session, project: Option<&str>, rows: fn(&mut Session) -> Result<Vec<Vec<String>>>) -> Result<Vec<Vec<String>>> {
+    let Some(path) = project.map(str::to_string).or_else(super::project::current) else { return rows(s) };
     let pr = super::project::read_project(&path)?;
     let mut out = Vec::new();
     super::project::for_each(s, &path, &pr, false, |s, _, _| {
@@ -215,7 +215,7 @@ fn plc_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
 fn run_report(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "ereport";
     let kind = str_param(p, "kind").map(str::to_ascii_lowercase).ok_or_else(|| bad(CMD, format!("`kind` ({}) is required", KINDS.join(", "))))?;
-    let (headers, rows) = report(s, &kind)?;
+    let (headers, rows) = report(s, &kind, str_param(p, "project"))?;
     let mut out = json!({ "kind": kind, "columns": headers, "rows": rows });
     let csv = to_csv(&headers, &rows);
     if p.get("csv").and_then(Value::as_bool).unwrap_or(false) {
