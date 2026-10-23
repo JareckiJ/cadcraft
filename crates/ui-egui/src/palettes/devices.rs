@@ -217,10 +217,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 }
                 st.read(app);
             }
-            if ui.button(crate::tl!("Update Drawing")).clicked() {
-                if let Err(e) = app.run("edb.push", json!({})) {
-                    st.message = Some(e);
-                }
+            if ui.button(crate::tl!("Update Drawing")).clicked()
+                && let Err(e) = app.run("edb.push", json!({}))
+            {
+                st.message = Some(e);
             }
         });
         ui.add(egui::TextEdit::singleline(&mut st.filter).hint_text(crate::tl!("Filter")).desired_width(f32::INFINITY));
@@ -264,14 +264,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let kind = if e.child { crate::tl!("Contact") } else { crate::tl!("Device") };
         ui.label(RichText::new(format!("{kind} · {} · {}", e.block, e.reference)).color(t.text_dim).font(crate::theme::small()));
         egui::Grid::new("device-fields").num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
-            field(ui, &crate::tl!("Tag"), &mut e.tag);
-            field(ui, &crate::tl!("Manufacturer"), &mut e.manufacturer);
-            field(ui, &crate::tl!("Catalogue number"), &mut e.catalog);
+            field(ui, crate::tl!("Tag"), &mut e.tag);
+            field(ui, crate::tl!("Manufacturer"), &mut e.manufacturer);
+            field(ui, crate::tl!("Catalogue number"), &mut e.catalog);
             for (i, d) in e.desc.iter_mut().enumerate() {
                 field(ui, &format!("{} {}", crate::tl!("Description"), i + 1), d);
             }
-            field(ui, &crate::tl!("Location"), &mut e.location);
-            field(ui, &crate::tl!("Installation"), &mut e.installation);
+            field(ui, crate::tl!("Location"), &mut e.location);
+            field(ui, crate::tl!("Installation"), &mut e.installation);
         });
         ui.label(RichText::new(crate::tl!("Ratings")).strong());
         let mut remove = None;
