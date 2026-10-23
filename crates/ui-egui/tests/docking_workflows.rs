@@ -112,7 +112,7 @@ fn docking_renders_default_float_and_redocked_at_normal_and_narrow_sizes() {
                 harness.run_steps(5);
                 harness.state().ui.docking.validate().unwrap();
                 let content = harness.state().ui.docking.layout.panels();
-                assert_eq!(content.len(), 4);
+                assert_eq!(content.len(), 5, "canvas, tool sets, layers, storeys, properties");
                 assert!(content.contains(&&Panel::Canvas));
                 if let Ok(directory) = std::env::var("CRAFT_UI_DOCKING_DIR") {
                     std::fs::create_dir_all(&directory).unwrap();

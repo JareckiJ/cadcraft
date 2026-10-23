@@ -91,6 +91,56 @@ fn read_file(_path: &str) -> Result<Vec<u8>> {
     Err(bad("insert", "paths are not available on the web"))
 }
 
+/// STOREY.IMPORT: block `name` from the drawing file at `path`, like a file INSERT, except that
+/// every block of the file whose name this drawing already uses comes along under a name of its
+/// own (`DOOR$IMPORT1`): another office's DOOR neither replaces this drawing's nor is drawn with it.
+pub(crate) fn define_foreign(s: &mut Session, path: &str, name: &str) -> Result<String> {
+    let mut src = read_drawing(path)?;
+    rename_taken_blocks(s.doc()?, &mut src);
+    define_from(s, &src, name)
+}
+
+/// Rename `src`'s named blocks that `d` has too, and every reference to them in `src`.
+fn rename_taken_blocks(d: &Drawing, src: &mut Drawing) {
+    let up = |n: &str| n.to_uppercase();
+    let mut taken: BTreeSet<String> = d.blocks.keys().chain(src.blocks.keys()).map(|k| up(k)).collect();
+    let mut renames: BTreeMap<String, String> = BTreeMap::new();
+    for name in src.blocks.keys().filter(|k| !k.starts_with('*') && d.block(k).is_some()) {
+        let Some(to) = (1..=10_000).map(|n| format!("{name}$IMPORT{n}")).find(|n| !taken.contains(&up(n))) else { continue };
+        taken.insert(up(&to));
+        renames.insert(up(name), to);
+    }
+    if renames.is_empty() {
+        return;
+    }
+    // Block references: inserts, and the block a multileader shows in place of its text.
+    let rename = |e: &mut Entity| {
+        let block = match &mut e.kind {
+            EntityKind::Insert(i) => Some(&mut i.block),
+            EntityKind::MLeader(m) => m.block.as_mut().map(|i| &mut i.block),
+            _ => None,
+        };
+        if let Some(b) = block
+            && let Some(to) = renames.get(&up(b))
+        {
+            *b = to.clone();
+        }
+    };
+    for h in src.model.handles() {
+        src.model.modify(h, rename);
+    }
+    let blocks = std::mem::take(&mut src.blocks);
+    for (k, b) in blocks {
+        let mut b = Arc::unwrap_or_clone(b);
+        for h in b.entities.handles() {
+            b.entities.modify(h, rename);
+        }
+        let key = renames.get(&up(&k)).cloned().unwrap_or(k);
+        b.name = key.clone();
+        src.blocks.insert(key, Arc::new(b));
+    }
+}
+
 /// (Re)define block `name` from `src`'s model space with base point `$INSBASE`, adding the
 /// layers, linetypes, styles and blocks of `src` this drawing doesn't have. Nothing changes when
 /// the definition fails (an invalid name, or a block that would contain itself).

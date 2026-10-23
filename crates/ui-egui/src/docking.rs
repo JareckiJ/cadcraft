@@ -13,19 +13,22 @@ pub enum Panel {
     ToolSets,
     QuickCalc,
     Layers,
+    /// The storey navigator: a palette of its own, so a long layer list doesn't push it away.
+    Storeys,
     Properties,
     #[serde(rename = "externalReferences")]
     ExternalRefs,
 }
 
 impl Panel {
-    pub const ALL: &[Self] = &[Self::Canvas, Self::ToolSets, Self::Layers, Self::Properties, Self::ExternalRefs];
+    pub const ALL: &[Self] = &[Self::Canvas, Self::ToolSets, Self::Layers, Self::Storeys, Self::Properties, Self::ExternalRefs];
     pub fn id(self) -> &'static str {
         match self {
             Self::Canvas => "canvas",
             Self::ToolSets => "toolSets",
             Self::QuickCalc => "quickCalc",
             Self::Layers => "layers",
+            Self::Storeys => "storeys",
             Self::Properties => "properties",
             Self::ExternalRefs => "externalReferences",
         }
@@ -36,6 +39,7 @@ impl Panel {
             Self::ToolSets => "Tool Sets",
             Self::QuickCalc => "QuickCalc",
             Self::Layers => "Layers",
+            Self::Storeys => crate::storeys::term("Storeys"),
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
         }
@@ -46,6 +50,7 @@ impl Panel {
             Self::ToolSets => Zone::Left,
             Self::QuickCalc => Zone::Right,
             Self::Layers => Zone::Right,
+            Self::Storeys => Zone::Right,
             Self::Properties => Zone::Right,
             Self::ExternalRefs => Zone::Right,
         }
@@ -92,6 +97,7 @@ impl Default for Workspace {
                         Node::Stack {
                             entries: vec![
                                 craft_ui::docking::StackEntry { panel: Panel::Layers, open: true, height: Some(280.0) },
+                                craft_ui::docking::StackEntry { panel: Panel::Storeys, open: true, height: Some(200.0) },
                                 craft_ui::docking::StackEntry { panel: Panel::Properties, open: true, height: None },
                             ],
                         },
@@ -288,18 +294,41 @@ fn sync(workspace: &mut Workspace, app: &crate::CadApp) -> Result<(), String> {
     workspace.set_visible(Panel::ToolSets, app.ui.show_toolsets)?;
     if !app.ui.show_palettes {
         workspace.set_visible(Panel::Layers, false)?;
+        workspace.set_visible(Panel::Storeys, false)?;
         workspace.set_visible(Panel::Properties, false)?;
-    } else if !workspace.layout.contains(&Panel::Layers) && !workspace.layout.contains(&Panel::Properties) {
+    } else if ![Panel::Layers, Panel::Storeys, Panel::Properties].iter().any(|p| workspace.layout.contains(p)) {
         // Reopen the last surviving accordion entry before restoring its earlier sibling.
         workspace.set_visible(Panel::Properties, true)?;
+        workspace.set_visible(Panel::Storeys, true)?;
         workspace.set_visible(Panel::Layers, true)?;
     }
+    add_storeys(workspace);
     Ok(())
+}
+
+/// A layout saved before the Storeys palette existed gets it once, below Layers (in the same
+/// stack). One the user closed stays closed: it is among the hidden panels then.
+fn add_storeys(workspace: &mut Workspace) {
+    if workspace.layout.contains(&Panel::Storeys) || workspace.hidden.iter().any(|(p, _)| *p == Panel::Storeys) {
+        return;
+    }
+    let anchor = [Panel::Layers, Panel::Properties].into_iter().find(|p| workspace.layout.contains(p));
+    if let Some(anchor) = anchor {
+        let mut next = workspace.clone();
+        let placed = next
+            .layout
+            .apply_with_permissions(Action::OpenAt { panel: Panel::Storeys, anchor, placement: Placement::Split(Zone::Center) }, permissions)
+            .is_ok();
+        if placed && next.validate().is_ok() {
+            *workspace = next;
+        }
+    }
 }
 
 fn publish_visibility(app: &mut crate::CadApp, workspace: &Workspace) {
     app.ui.show_toolsets = workspace.layout.contains(&Panel::ToolSets);
-    app.ui.show_palettes = workspace.layout.contains(&Panel::Layers) || workspace.layout.contains(&Panel::Properties);
+    // Any of the palettes open counts: a Storeys palette left alone stays.
+    app.ui.show_palettes = [Panel::Layers, Panel::Storeys, Panel::Properties].iter().any(|p| workspace.layout.contains(p));
 }
 
 pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<Value, String> {
@@ -356,6 +385,12 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
                     .auto_shrink([false, false])
                     .show(ui, |ui| crate::palettes::layers_section(app, ui));
             }
+            Panel::Storeys => {
+                egui::ScrollArea::vertical()
+                    .id_salt("dock-storeys")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| crate::storeys::storeys_section(app, ui));
+            }
             Panel::Properties => {
                 egui::ScrollArea::vertical().id_salt("dock-properties").auto_shrink([false, false]).show(ui, |ui| {
                     crate::shortcut_menus::palette(app, ui, crate::palettes::properties_section, crate::shortcut_menus::properties_entries)
@@ -393,7 +428,7 @@ fn panel_limits(panel: &Panel) -> PanelLimits {
         Panel::Canvas => (egui::vec2(300.0, 180.0), 1_000_000.0),
         Panel::QuickCalc => (egui::vec2(240.0, 160.0), 600.0),
         Panel::ToolSets => (egui::vec2(220.0, 150.0), 480.0),
-        Panel::Layers | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
+        Panel::Layers | Panel::Storeys | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
     };
     PanelLimits { min, max: egui::vec2(max_width, 1_000_000.0) }
 }

@@ -44,6 +44,7 @@ pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
+pub mod storeys;
 pub mod theme;
 pub mod viewcube;
 pub mod vpscale;
@@ -97,6 +98,10 @@ pub struct UiState {
     pub start_tab: bool,
     pub dialog: Option<String>,
     pub history_lines: usize,
+    /// The user's storey shortcuts (see [`storeys::StoreyKeys`]).
+    pub storey_keys: storeys::StoreyKeys,
+    /// The storeys new drawings, and opened drawings without storeys, get.
+    pub storey_setup: storeys::StoreySetup,
     /// Interface theme: "system" (follow the OS light/dark appearance), "light" or "dark".
     pub theme: theme::ThemePref,
     /// Animation effects (dialog and menu fades, smoothed scrolling): "system" (follow the OS
@@ -175,6 +180,8 @@ impl Default for UiState {
             start_tab: false,
             dialog: None,
             history_lines: 3,
+            storey_keys: storeys::StoreyKeys::default(),
+            storey_setup: storeys::StoreySetup::default(),
             theme: theme::ThemePref::default(),
             animations: animation::AnimationPref::default(),
             save_format: SaveFormat::default(),

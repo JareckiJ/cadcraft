@@ -311,6 +311,10 @@ struct Builder<'a> {
     shared_budget: Option<&'a std::sync::atomic::AtomicUsize>,
     /// Transparency (percent) of the entity being drawn.
     transparency: u8,
+    /// The ghost colour while a ghost-storey object is drawn: everything it draws takes it.
+    ghost: Option<Rgb>,
+    /// Draw model space by storeys (spaces and viewports); off for loose objects.
+    storeys: bool,
 }
 
 /// Upper bound on the block contents drawn per display list (each block reference, MINSERT copy
@@ -322,6 +326,9 @@ pub const MAX_BLOCK_EXPANSION: usize = 2_000_000;
 impl Builder<'_> {
     /// `color` and `lw` as the plot style table prints them.
     fn styled(&self, color: Ink, lw: f32) -> (Ink, f32) {
+        if let Some(g) = self.ghost {
+            return (Ink { rgb: g, aci7: false, aci: 0 }, lw);
+        }
         match self.styles {
             Some(s) => s.apply(color, self.named, lw, self.opts.lineweights),
             None => (color, lw),
@@ -516,19 +523,30 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
 fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> DisplayList {
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, plotting).map(|t| plotstyle::Styler::new(d, t));
-    let mut b = Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        ghost: None,
+        storeys: true,
+    };
     if let Space::Paper(name) = space {
         b.list.sheet = paper::sheet(d, name);
     }
     if let Some(store) = d.space(space) {
         let paper = matches!(space, Space::Paper(_));
+        let ents = in_draw_order(d, store, !paper && !plotting);
         #[cfg(not(target_arch = "wasm32"))]
         if !paper && !plotting && b.styles.is_none() && store.len() >= 2 * PARALLEL_CHUNK {
-            build_parallel(&mut b, d, store);
+            build_parallel(&mut b, d, &ents);
             return b.list;
         }
         let mut viewports = 0usize;
-        for e in store.iter() {
+        for e in ents {
             if paper && let EntityKind::Viewport(vp) = &e.kind {
                 if viewports < MAX_VIEWPORTS {
                     viewports += 1;
@@ -549,6 +567,17 @@ fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> Di
     b.list
 }
 
+/// A space's entities in the order they are drawn: with a ghost storey shown (`ghosts`, model
+/// space on screen), its objects come first so the current storey is drawn over them.
+fn in_draw_order<'a>(d: &Drawing, store: &'a cadcraft_doc::EntityStore, ghosts: bool) -> Vec<&'a std::sync::Arc<Entity>> {
+    if !ghosts || d.ghost_storey.is_none() {
+        return store.iter().collect();
+    }
+    let (mut first, rest): (Vec<_>, Vec<_>) = store.iter().partition(|e| d.storey_view(e) == cadcraft_doc::StoreyView::Ghost);
+    first.extend(rest);
+    first
+}
+
 /// Top-level entities per task when a display list is built on all cores.
 #[cfg(not(target_arch = "wasm32"))]
 const PARALLEL_CHUNK: usize = 256;
@@ -559,16 +588,24 @@ const PARALLEL_CHUNK: usize = 256;
 /// stopped blocking the UI) and after every edit; one core made both slow on real drawings. Plots, layouts and plot styles keep the one-thread
 /// path (they run once, and their pens and per-primitive layers are built along the way).
 #[cfg(not(target_arch = "wasm32"))]
-fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStore) {
+fn build_parallel(b: &mut Builder, d: &Drawing, ents: &[&std::sync::Arc<Entity>]) {
     use rayon::prelude::*;
-    let ents: Vec<&std::sync::Arc<Entity>> = store.iter().collect();
     let budget = std::sync::atomic::AtomicUsize::new(0);
     let (opts, plotting) = (b.opts, b.plotting);
     let parts: Vec<DisplayList> = ents
         .par_chunks(PARALLEL_CHUNK)
         .map(|chunk| {
-            let mut part =
-                Builder { list: DisplayList::default(), opts, plotting, styles: None, named: None, shared_budget: Some(&budget), transparency: 0 };
+            let mut part = Builder {
+                list: DisplayList::default(),
+                opts,
+                plotting,
+                styles: None,
+                named: None,
+                shared_budget: Some(&budget),
+                transparency: 0,
+                ghost: None,
+                storeys: true,
+            };
             for e in chunk {
                 entity(&mut part, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
             }
@@ -695,8 +732,17 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
     }
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, false).map(|t| plotstyle::Styler::new(d, t));
-    let mut b =
-        Builder { list: DisplayList::default(), opts, plotting: false, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        ghost: None,
+        storeys: true,
+    };
     contents(&mut b, d, vp, area, &Clip::Rect(area), paper::unit_mm_of(d, handle));
     b.list
 }
@@ -747,6 +793,8 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         named: None,
         shared_budget: Some(&budget),
         transparency: 0,
+        ghost: None,
+        storeys: true,
     };
     #[cfg(not(target_arch = "wasm32"))]
     let parallel = !b.plotting && b.styles.is_none() && d.model.len() >= 2 * PARALLEL_CHUNK;
@@ -770,6 +818,8 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
                         named: None,
                         shared_budget: Some(&budget),
                         transparency: 0,
+                        ghost: None,
+                        storeys: true,
                     };
                     let c = ctx();
                     for me in chunk.iter().filter(|me| seen(me)) {
@@ -916,7 +966,19 @@ pub fn build_entities<'a, I: IntoIterator<Item = &'a Entity>>(d: &Drawing, ents:
     } else {
         opts
     };
-    let mut b = Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0 };
+    // Loose objects (previews, the clipboard, highlights) are drawn as they are, whatever storey
+    // their copies of model-space objects carry.
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: None,
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        ghost: None,
+        storeys: false,
+    };
     for e in ents {
         entity(&mut b, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
     }
@@ -1024,6 +1086,20 @@ fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     if ctx.d.is_hidden_object(e.handle) || b.opts.cancelled() {
         return;
     }
+    // A blueprint without hatches leaves out the hatches inside its blocks too.
+    if ctx.depth > 0 && b.ghost.is_some() && !ctx.d.ghost_hatches && matches!(e.kind, cadcraft_doc::EntityKind::Hatch(_)) {
+        return;
+    }
+    // Storeys: model-space objects of other storeys are not drawn; the ghost storey is, in the
+    // ghost colour, on screen only (not in plots and not through layout viewports).
+    if ctx.depth == 0 && b.storeys {
+        match ctx.d.storey_view(e) {
+            cadcraft_doc::StoreyView::Current => {}
+            cadcraft_doc::StoreyView::Hidden => return,
+            cadcraft_doc::StoreyView::Ghost if b.plotting || ctx.top == VIEWPORT_CONTENT => return,
+            cadcraft_doc::StoreyView::Ghost => b.ghost = Some(ctx.d.ghost_color),
+        }
+    }
     // The entity's named plot style and transparency (set by `entity_parts`), for everything it
     // draws (block contents set their own).
     let (saved, saved_transparency) = (b.named, b.transparency);
@@ -1031,6 +1107,9 @@ fn entity(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     entity_parts(b, ctx, e);
     b.named = saved;
     b.transparency = saved_transparency;
+    if ctx.depth == 0 {
+        b.ghost = None;
+    }
     if b.plotting && b.list.prim_layers.len() < b.list.prims.len() {
         // What it drew that its block contents didn't claim is on its own layer.
         let layer = entity_layer(ctx, e);

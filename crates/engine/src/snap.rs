@@ -363,7 +363,8 @@ fn gather_in(
     let mut count = 0usize;
     let mut budget = MAX_BLOCK_LEAVES;
     for (e, known) in crate::select::candidates(d, space, ix, &probe.expand(aperture), true, false)? {
-        if !d.is_visible(e) || frozen.iter().any(|l| l.eq_ignore_ascii_case(&e.common.layer)) {
+        // The ghost storey can be snapped to (and nothing else; it is not visible for selection).
+        if !(d.is_visible(e) || d.is_ghost(e)) || frozen.iter().any(|l| l.eq_ignore_ascii_case(&e.common.layer)) {
             continue;
         }
         let inf = crate::select::is_infinite(e);
@@ -396,7 +397,13 @@ fn gather_in(
         sink.object(&e.kind, None);
         // A block reference snaps to the objects inside it, placed by its transform.
         if let EntityKind::Insert(ins) = &e.kind {
-            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, frozen, &mut |k, m| sink.object(k, Some(m)));
+            // A blueprint without hatches: not the hatches inside its blocks either.
+            let no_hatches = !d.ghost_hatches && d.is_ghost(e);
+            block_leaves(d, ins, &Mat3::IDENTITY, 0, &mut budget, frozen, &mut |k, m| {
+                if !(no_hatches && matches!(k, EntityKind::Hatch(_))) {
+                    sink.object(k, Some(m));
+                }
+            });
         }
         if let EntityKind::Dimension(dm) = &e.kind {
             sink.dimension(d, dm, &mut budget, frozen);

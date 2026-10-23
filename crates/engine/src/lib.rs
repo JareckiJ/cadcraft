@@ -180,6 +180,21 @@ impl DocState {
     pub fn is_dirty(&self) -> bool {
         !Arc::ptr_eq(self.drawing(), &self.saved) || self.block_unsaved()
     }
+    /// After undo or redo: stay on the storey being looked at, with the same ghost. Which storey is
+    /// shown is a view, not an edit; undo takes back edits only.
+    fn follow_storeys(&mut self, before: &Drawing) {
+        let d = &self.doc;
+        let current = Some(before.storeys.current).filter(|c| d.storeys.contains(*c)).unwrap_or(d.storeys.current);
+        let ghost = before.ghost_storey.filter(|g| d.storeys.contains(*g));
+        if d.storeys.current != current || d.ghost_storey != ghost || d.ghost_color != before.ghost_color {
+            let d = Arc::make_mut(&mut self.doc);
+            d.storeys.current = current;
+            d.ghost_storey = ghost;
+            d.ghost_color = before.ghost_color;
+            d.fix_ghost();
+        }
+    }
+
     /// After undo/redo replaced the drawing (`before` is the one shown until then): if the current
     /// layout no longer exists, follow it to its other name when it was renamed (same tab order,
     /// a name `before` did not have), else go to the Model tab.
@@ -635,6 +650,9 @@ impl Default for MLeaderOptions {
 
 /// The editor session: open drawings, settings, the running command and the command log.
 pub struct Session {
+    /// The start setup new drawings and opened drawings without storeys get (the interface sets
+    /// it from the user's settings; `None`: no storeys unless made).
+    pub storey_template: Option<cadcraft_doc::StoreyTemplate>,
     pub docs: Vec<DocState>,
     pub active: usize,
     pub settings: Settings,
@@ -715,6 +733,7 @@ impl Session {
     /// A session with no open drawing (the Start tab).
     pub fn empty() -> Self {
         Session {
+            storey_template: None,
             docs: Vec::new(),
             active: 0,
             settings: Settings::default(),
@@ -751,7 +770,11 @@ impl Session {
     }
     pub fn new_drawing(&mut self, metric: bool) -> usize {
         self.untitled_counter += 1;
-        let d = if metric { Drawing::new_metric() } else { Drawing::new_imperial() };
+        let mut d = if metric { Drawing::new_metric() } else { Drawing::new_imperial() };
+        // A new drawing starts with the user's storey setup, on its start storey.
+        if let Some(t) = &self.storey_template {
+            d.apply_storey_template(t);
+        }
         let mut st = DocState::new(d, &format!("Drawing{}", self.untitled_counter), None);
         st.set_view_quiet(if metric { View { center: Vec2::new(210.0, 148.5), height: 297.0 } } else { View::default() });
         self.end_running();
@@ -759,7 +782,18 @@ impl Session {
         self.active = self.docs.len() - 1;
         self.active
     }
-    pub fn open_drawing(&mut self, d: Drawing, title: &str, path: Option<String>) -> usize {
+    pub fn open_drawing(&mut self, mut d: Drawing, title: &str, path: Option<String>) -> usize {
+        // Objects another program added have no storey: they belong to the storey the drawing was
+        // saved on, from the start (so no undo step ever shows them on another storey).
+        d.assign_storeys();
+        d.cut_all_storey_links();
+        // A drawing with storeys opens on its start storey; one without (another office's, an old
+        // one) gets the user's storey setup, everything on the start storey.
+        if d.storeys.active() {
+            d.go_home();
+        } else if let Some(t) = &self.storey_template {
+            d.apply_storey_template(t);
+        }
         let mut st = DocState::new(d, title, path);
         let ext = st.doc.extents(&Space::Model);
         if !ext.is_empty() {
@@ -831,7 +865,11 @@ impl Session {
     pub fn set_selection(&mut self, sel: Vec<Handle>) {
         if let Ok(st) = self.state_mut() {
             let mut seen = std::collections::HashSet::new();
-            st.selection = sel.into_iter().filter(|h| seen.insert(*h)).collect();
+            // Objects of storeys other than the current one are never selected (a script's
+            // pickfirst set, a group, a stale selection).
+            let d = &st.doc;
+            let sel: Vec<Handle> = sel.into_iter().filter(|h| seen.insert(*h) && cmd::storey::editable(d, *h)).collect();
+            st.selection = sel;
         }
     }
 
@@ -922,6 +960,12 @@ impl Session {
         if self.state().is_ok_and(|s| s.block_edit.is_some()) == editing {
             self.after_command(before.as_ref().map(|b| &b.0), before.as_ref().map(|b| b.2), spec.undoable && result.is_ok());
         }
+        // Storeys: checked last, over everything the command and the passes after it did.
+        let violation = before.as_ref().and_then(|b| cmd::storey::guard(self, &b.0, Some(b.2), spec.id));
+        let result = match (violation, result) {
+            (Some(m), Ok(_)) => Err(EngineError::Other(m)),
+            (_, r) => r,
+        };
         let result = match (result, &before) {
             (Ok(v), Some((doc, sel, uid))) if spec.undoable => self.refuse_non_finite(Some(*uid), doc, sel, spec.id).map(|()| v),
             (r, _) => r,
@@ -1160,8 +1204,10 @@ impl Session {
                 let store = d.space(&space);
                 let picked = match tl.as_str() {
                     "all" => store.map(|s| s.iter().filter(|e| d.is_visible(e)).map(|e| e.handle).collect()),
-                    "l" | "last" => store.and_then(|s| s.last()).map(|e| vec![e.handle]),
-                    "p" | "previous" => Some(self.state()?.previous_selection.clone()),
+                    // The last object there is to select (another storey's are not).
+                    "l" | "last" => store.and_then(|s| s.iter().filter(|e| d.is_visible(e)).last()).map(|e| vec![e.handle]),
+                    // Without objects of storeys other than the current one (it may have changed since).
+                    "p" | "previous" => Some(self.state()?.previous_selection.iter().copied().filter(|h| cmd::storey::editable(d, *h)).collect()),
                     _ => None,
                 };
                 match picked {
@@ -1307,6 +1353,10 @@ impl Session {
             self.echo(m);
         }
         self.after_command(Some(&run.before), None, true);
+        // Storeys: checked last, over everything the command and the passes after it did.
+        if let Some(m) = cmd::storey::guard(self, &run.before, None, &run.id) {
+            self.echo(m);
+        }
         // A transparent command's changes belong to the command it ran inside, and a command a
         // LISP routine ran belongs to the routine's single undo step.
         if self.suspended.is_some() || self.lisp_groups_undo() {
@@ -1337,6 +1387,7 @@ impl Session {
         cmd::groups::after_command(self, before);
         cmd::constraints::after_command(self, before, ok);
         assoc::after_command(self, before, uid);
+        cmd::storey::after_command(self, before);
     }
 
     fn resume_suspended(&mut self) {
@@ -1640,6 +1691,7 @@ impl Session {
         let cur = Snapshot { label: snap.label.clone(), doc: st.doc.clone(), selection: st.selection.clone() };
         st.doc = snap.doc;
         st.follow_layout(&cur.doc);
+        st.follow_storeys(&cur.doc);
         st.selection = Vec::new();
         st.redo.push(cur);
         st.revision += 1;
@@ -1651,6 +1703,7 @@ impl Session {
         let cur = Snapshot { label: snap.label.clone(), doc: st.doc.clone(), selection: st.selection.clone() };
         st.doc = snap.doc;
         st.follow_layout(&cur.doc);
+        st.follow_storeys(&cur.doc);
         st.selection = Vec::new();
         st.undo.push(cur);
         st.revision += 1;

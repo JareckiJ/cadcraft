@@ -27,6 +27,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.toggle.toolsets", "Tool Sets", &["Window", "Tool Sets"], Some("Cmd+3")),
     ("ui.panel.properties", "Properties Inspector", &["Window", "Properties Inspector"], Some("Cmd+1")),
     ("ui.panel.layers", "Layers Palette", &["Window", "Layers Palette"], None),
+    ("ui.panel.storeys", "Storeys Palette", &["Window", "Storeys Palette"], None),
     ("ui.panel.quickcalc", "QuickCalc", &["Window", "QuickCalc"], Some("Cmd+8")),
     ("ui.toggle.systemcursor", "Show System Cursor", &["View", "Accessibility", "Show System Cursor"], None),
     ("ui.animations.system", "Use System Setting", &["View", "Accessibility", "Animation Effects", "Use System Setting"], None),
@@ -64,6 +65,12 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
     ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
     ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
+    // Storeys: the choosers and the user's storey shortcuts (no fixed keys: see `storeys`).
+    ("ui.dialog.storeyghost", "Choose Blueprint...", &["Format", "Storeys", "Choose Blueprint..."], None),
+    ("ui.dialog.storeygoto", "Go to Storey...", &["Format", "Storeys", "Go to Storey..."], None),
+    ("ui.dialog.storeycopy", "Copy to Storey...", &["Format", "Storeys", "Copy to Storey..."], None),
+    ("ui.dialog.storeymove", "Move to Storey...", &["Format", "Storeys", "Move to Storey..."], None),
+    ("ui.storeysettings", "Storey Settings...", &["Format", "Storeys", "Storey Settings..."], None),
     ("ui.toggle.history", "Command History", &["Window", "Command History"], Some("F2")),
     ("ui.cmdline.lines", "Command Line History Lines", &[], None),
     ("ui.cmdline.clear", "Clear Command History", &[], None),
@@ -98,8 +105,8 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if matches!(id, "ui.dock" | "ui.dock.reset") {
         return Some(crate::docking::command(app, id == "ui.dock.reset", params));
     }
-    if matches!(id, "ui.panel.properties" | "ui.panel.layers") {
-        let panel = if id == "ui.panel.properties" { "properties" } else { "layers" };
+    if matches!(id, "ui.panel.properties" | "ui.panel.layers" | "ui.panel.storeys") {
+        let panel = id.trim_start_matches("ui.panel.");
         return Some(crate::docking::command(app, false, &json!({"operation":"open", "panel":panel})));
     }
     // QUICKCALC typed or from a menu opens the palette; with parameters it is CAL.
@@ -340,9 +347,18 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         | "ui.dialog.dsettings"
         | "ui.dialog.about"
         | "ui.dialog.commands"
+        | "ui.dialog.storeyghost"
+        | "ui.dialog.storeygoto"
+        | "ui.dialog.storeycopy"
+        | "ui.dialog.storeymove"
         | "ui.dialog.qselect"
         | "ui.dialog.parameters" => {
             app.ui.dialog = Some(id.trim_start_matches("ui.dialog.").to_string());
+            Ok(Value::Null)
+        }
+        // Options, opened on its Storeys tab (start setup and storey shortcuts).
+        "ui.storeysettings" => {
+            app.ui.dialog = Some("options:storeys".into());
             Ok(Value::Null)
         }
         "ui.dialog.close" => {
@@ -547,7 +563,7 @@ pub(crate) fn shortcut_label(s: &str, mac: bool) -> String {
 pub(crate) fn entry_ui(ui: &mut egui::Ui, e: &Entry, clicked: &mut Option<String>) {
     match e {
         Entry::Item { label, id, shortcut, enabled } => {
-            let mut b = egui::Button::new(crate::i18n::t(label));
+            let mut b = egui::Button::new(crate::i18n::t(crate::storeys::term(label)));
             if let Some(s) = shortcut {
                 b = b.shortcut_text(shortcut_label(s, ui.ctx().os().is_mac()));
             }
@@ -557,7 +573,7 @@ pub(crate) fn entry_ui(ui: &mut egui::Ui, e: &Entry, clicked: &mut Option<String
             }
         }
         Entry::Sub { label, children } => {
-            ui.menu_button(crate::i18n::menu(label), |ui| {
+            ui.menu_button(crate::i18n::menu(crate::storeys::term(label)), |ui| {
                 for c in children {
                     entry_ui(ui, c, clicked);
                 }
@@ -625,13 +641,14 @@ pub fn run_transparent(app: &mut CadApp, id: &str) {
     }
 }
 
-/// Keyboard shortcuts and function keys.
-pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
+/// CADCraft's own keyboard shortcuts and function keys (the user's storey shortcuts come on top and
+/// never take one of these over).
+pub(crate) fn builtin_shortcuts() -> Vec<(egui::KeyboardShortcut, &'static str)> {
     use egui::{Key, KeyboardShortcut, Modifiers};
     let sc = |m: Modifiers, k: Key| KeyboardShortcut::new(m, k);
     let cmd = Modifiers::COMMAND;
     let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
-    let pairs: &[(KeyboardShortcut, &str)] = &[
+    vec![
         (sc(cmd_shift, Key::A), "pickstyle"),
         (sc(cmd_shift, Key::Z), "redo"),
         (sc(cmd, Key::Z), "u"),
@@ -661,7 +678,27 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
         (sc(Modifiers::NONE, Key::F10), "polar"),
         (sc(Modifiers::NONE, Key::F11), "otrack"),
         (sc(Modifiers::NONE, Key::F12), "dynmode"),
-    ];
+    ]
+}
+
+/// Keyboard shortcuts and function keys.
+pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
+    let mut pairs = builtin_shortcuts();
+    crate::storeys::sync(app);
+    // A recording ends with the tab it was started on (left, or Options closed): it never keeps
+    // the shortcuts off.
+    if app.ui.dialog.as_deref() != Some("options:storeys") {
+        crate::storeys::stop_recording(ctx);
+    }
+    // The user's storey shortcuts; none at all while one is being recorded (the keys are the
+    // recording's then).
+    if crate::storeys::recording(ctx) {
+        return;
+    }
+    if app.ui.dialog.as_deref() != Some("options:storeys") {
+        pairs.extend(crate::storeys::active_cached(ctx, &app.ui.storey_keys));
+    }
+    crate::storeys::by_specificity(&mut pairs);
     crate::clipboard::mirror(app, ctx);
     if ctx.egui_wants_keyboard_input() || app.closing.is_some() {
         return;
@@ -669,7 +706,7 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
     // Cmd/Ctrl+C, X and V arrive as clipboard events, not key presses.
     let mut fire = crate::clipboard::shortcut_commands(app, ctx);
     ctx.input_mut(|i| {
-        for (s, id) in pairs {
+        for (s, id) in &pairs {
             if i.consume_shortcut(s) && !fire.contains(id) {
                 fire.push(*id);
             }
@@ -684,7 +721,8 @@ pub fn shortcuts(app: &mut CadApp, ctx: &egui::Context) {
             continue;
         }
         // Toggles run transparently (they don't cancel the active command).
-        let transparent = ["osnap", "grid", "ortho", "snap", "polar", "otrack", "dynmode", "pickstyle"].contains(&id);
+        // The ghost on or off doesn't end the command either: trace over another storey mid-command.
+        let transparent = ["osnap", "grid", "ortho", "snap", "polar", "otrack", "dynmode", "pickstyle", "storey.ghost.toggle"].contains(&id);
         if transparent || id.starts_with("ui.") {
             run_transparent(app, id);
         } else {
