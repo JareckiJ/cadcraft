@@ -52,6 +52,11 @@ impl HVal {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Header {
     pub vars: BTreeMap<String, HVal>,
+    /// The DXF group code each variable was read with from a file's HEADER section (`-2` and
+    /// `-3` for 2D and 3D points), so saving writes the variables CADCraft has no use for back as
+    /// they were.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub codes: BTreeMap<String, i32>,
 }
 
 impl Header {
@@ -60,6 +65,14 @@ impl Header {
     }
     pub fn set(&mut self, name: &str, v: HVal) {
         self.vars.insert(name.trim_start_matches('$').to_ascii_uppercase(), v);
+    }
+    /// The DXF group code `name` was read with (see [`Header::codes`]).
+    pub fn code(&self, name: &str) -> Option<i32> {
+        self.codes.get(&name.trim_start_matches('$').to_ascii_uppercase()).copied()
+    }
+    /// Note the DXF group code `name` was read with.
+    pub fn set_code(&mut self, name: &str, code: i32) {
+        self.codes.insert(name.trim_start_matches('$').to_ascii_uppercase(), code);
     }
     pub fn f64(&self, name: &str, default: f64) -> f64 {
         self.get(name).and_then(HVal::as_f64).filter(|v| v.is_finite()).unwrap_or(default)

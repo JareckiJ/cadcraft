@@ -308,6 +308,12 @@ fn dim_header_vars(w: &mut W, d: &Drawing) {
             continue;
         }
         let (Some(value), Some((_, _, kind))) = (v.get(*field), dxf_ext::DIM_CODES.iter().find(|(f, _, _)| f == field)) else { continue };
+        // A value read that overrides the style (see `forget_dim_header_codes`): as read.
+        if let Some(tag) = d.header.code(var).zip(d.header.get(var)).and_then(|(c, hv)| header_value_tag(var, c, hv)) {
+            w.s(9, format!("${var}"));
+            w.t.push(tag);
+            continue;
+        }
         match kind {
             // Names, not handles, in the header.
             K::TextStyle | K::Block => {
@@ -379,6 +385,118 @@ fn header_vars(w: &mut W, d: &Drawing) {
         }
     }
     dim_header_vars(w, d);
+}
+
+/// Header variables never written from the values read: the version, code page and handle seed
+/// (written for each save), the extents (computed), the current multileader style (written from
+/// the model) and the version's GUID (a new save is a new version).
+const OWN_HEADER_VARS: &[&str] = &["ACADVER", "DWGCODEPAGE", "HANDSEED", "EXTMIN", "EXTMAX", "CMLEADERSTYLE", "VERSIONGUID"];
+
+/// Every header variable read with a group code ([`Header::codes`]) that the header written
+/// since `from` doesn't have yet, with the code it was read with. A pointer is written as read
+/// when it names a record the drawing still knows (`dxf_raw::finish` points it at that record's
+/// new handle) and as the null handle otherwise.
+fn kept_header_vars(w: &mut W, d: &Drawing, from: usize) {
+    let written: std::collections::HashSet<String> =
+        w.t.get(from..)
+            .unwrap_or_default()
+            .iter()
+            .filter(|t| t.code == 9)
+            .map(|t| t.str().trim().trim_start_matches('$').to_ascii_uppercase())
+            .collect();
+    // Built at the first pointer.
+    let mut known: Option<std::collections::HashSet<Handle>> = None;
+    for (name, v) in &d.header.vars {
+        let Some(code) = d.header.code(name) else { continue };
+        if written.contains(name) || OWN_HEADER_VARS.contains(&name.as_str()) || name.is_empty() || !name.is_ascii() {
+            continue;
+        }
+        let var = format!("${name}");
+        match (code, v) {
+            (-2 | -3, HVal::Point(p)) if p.is_finite() => {
+                w.s(9, var);
+                w.f(10, p.x);
+                w.f(20, p.y);
+                if code == -3 {
+                    w.f(30, p.z);
+                }
+            }
+            (c, v) if crate::dxf_raw::is_pointer(c) => {
+                let known = v
+                    .as_str()
+                    .and_then(Handle::parse_hex)
+                    .filter(|h| h.0 != 0)
+                    .is_some_and(|h| known.get_or_insert_with(|| crate::dxf_raw::known_records(d)).contains(&h));
+                w.s(9, var);
+                w.s(c, if known { v.as_str().unwrap_or("0").trim().to_string() } else { "0".to_string() });
+            }
+            (c, v) => {
+                if let Some(tag) = header_value_tag(name, c, v) {
+                    w.s(9, var);
+                    w.t.push(tag);
+                }
+            }
+        }
+    }
+}
+
+/// The group of header variable `name` with value `v` under group code `code` (not a point),
+/// or `None` when the code can't hold it.
+fn header_value_tag(name: &str, code: i32, v: &HVal) -> Option<Tag> {
+    use cadcraft_dxf::{Kind, kind_of};
+    if code <= 0 || code >= 1000 || code == 9 {
+        return None;
+    }
+    // The variables the reader converts: $DIMJOGANG is in radians (the model holds degrees),
+    // $DIMDSEP a character code (the model holds the character).
+    match (name, v) {
+        ("DIMJOGANG", v) => v.as_f64().filter(|f| f.is_finite()).map(|f| Tag::f(code, f.to_radians())),
+        ("DIMDSEP", HVal::Str(s)) => s.chars().next().map(|ch| Tag::i(code, i64::from(u32::from(ch)))),
+        (_, HVal::Point(_)) => None,
+        (_, v) => match kind_of(code) {
+            Kind::Real => v.as_f64().filter(|f| f.is_finite()).map(|f| Tag::f(code, f)),
+            Kind::Int16 | Kind::Int32 | Kind::Int64 | Kind::Bool => v.as_i64().map(|i| Tag::i(code, i)),
+            Kind::Str | Kind::Hex => match v {
+                HVal::Str(s) => Some(Tag::s(code, s.clone())),
+                HVal::Int(i) => Some(Tag::s(code, i.to_string())),
+                _ => None,
+            },
+        },
+    }
+}
+
+/// Forget the group codes of the header's dimension variables that only repeat the current
+/// dimension style (they are written from the style, so a later change of the style shows);
+/// those that differ are overrides AutoCAD keeps in the header, written back as read.
+pub(crate) fn forget_dim_header_codes(d: &mut Drawing) {
+    let name = d.header.str("DIMSTYLE", "Standard");
+    let Some(style) = d.dim_styles.iter().find(|s| s.name.eq_ignore_ascii_case(&name)) else { return };
+    let v = serde_json::to_value(style).unwrap_or_default();
+    let none = |_: &str| None;
+    let same = |kind: K, sv: &serde_json::Value, hv: &HVal| match kind {
+        K::Real | K::Angle => {
+            matches!((sv.as_f64(), hv.as_f64()), (Some(a), Some(b)) if (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0))
+        }
+        K::Int | K::Bool | K::Color => match dxf_ext::encode(kind, sv, &none, &none, &none) {
+            Some(DimVal::Int(i)) => hv.as_i64() == Some(i),
+            _ => false,
+        },
+        K::Char => sv.as_str().and_then(|s| s.chars().next()) == hv.as_str().and_then(|s| s.chars().next()),
+        K::Str | K::TextStyle | K::Block | K::Linetype => sv.as_str().zip(hv.as_str()).is_some_and(|(a, b)| a.trim().eq_ignore_ascii_case(b.trim())),
+    };
+    let mut forget = Vec::new();
+    for (var, field) in cadcraft_doc::DIMVARS {
+        let (Some(sv), Some((_, _, kind)), Some(hv)) = (v.get(*field), dxf_ext::DIM_CODES.iter().find(|(f, _, _)| f == field), d.header.get(var))
+        else {
+            continue;
+        };
+        if same(*kind, sv, hv) {
+            forget.push(var.to_string());
+        }
+    }
+    for var in forget {
+        d.header.codes.remove(&var);
+    }
 }
 
 /// An entity's group 440 (DXF Reference): ByBlock is `0x01000000`, a fixed transparency its alpha
@@ -1714,13 +1832,13 @@ pub fn write(d: &Drawing) -> String {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`.
 pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
-    tags_for(d, version, version)
+    tags_for(d, version, version, false)
 }
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's (MULTILEADER from 2007).
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> String {
-    let mut tags = tags_for(d, Version::R2000, dwg);
+    let mut tags = tags_for(d, Version::R2000, dwg, true);
     bridge_markers(&mut tags);
     cadcraft_dxf::write_ascii(&tags)
 }
@@ -1738,8 +1856,9 @@ fn bridge_markers(tags: &mut [Tag]) {
 }
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`, with what `target` (the version the
-/// file ends up in: `version`, or the DWG version the bridge writes) has.
-fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
+/// file ends up in: `version`, or the DWG version the bridge writes) has. `bridge`: for the DWG
+/// bridge, which keeps the header variables CADCraft doesn't use itself.
+fn tags_for(d: &Drawing, version: Version, target: Version, bridge: bool) -> Vec<Tag> {
     // An in-place block edit in progress is not written: the drawing as before it.
     let committed = d.committed();
     let d: &Drawing = &committed;
@@ -1944,6 +2063,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     let layout_handles: Vec<String> = ps_brs.iter().map(|_| w.h()).collect();
 
     // ---------------- HEADER ----------------
+    let header_at = w.t.len();
     w.s(0, "SECTION");
     w.s(2, "HEADER");
     w.s(9, "$ACADVER");
@@ -1958,6 +2078,12 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.p(10, ext.max.to3(0.0));
     }
     header_vars(&mut w, d);
+    // The variables read that CADCraft doesn't write from its model, as read (not into an
+    // older version than the file's, which may not have them). The DWG bridge gets them too, so
+    // the DWG keeps them: its DXF declares R2000, but the DWG is written in `target`.
+    if (if bridge { target } else { version }) >= crate::save_version(d) {
+        kept_header_vars(&mut w, d, header_at);
+    }
     let seed_pos = w.t.len();
     w.s(9, "$HANDSEED");
     w.s(5, "0");
@@ -2631,6 +2757,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         *t = Tag::s(5, seed);
     }
     crate::dxf_raw::finish(&mut w.t, d);
+    crate::dxf_raw::null_dangling_header_refs(&mut w.t);
     crate::dxf_raw::data_store(&mut w.t, d, target >= Version::R2013);
     add_class_instance_counts(&mut w.t);
     mark_xrefs(&mut w.t, d);
