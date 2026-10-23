@@ -5,27 +5,46 @@ use serde_json::{Value, json};
 use crate::backend::Backend;
 
 /// Commands the MCP layer refuses in read-only mode (`cadcraft-cli mcp --readonly`): each writes
-/// files, or runs scripts/LISP, which can write files through the command line (#1931).
-const REFUSED_WHEN_READONLY: &[&str] =
-    &["saveas", "save", "qsave", "export", "exportpdf", "plot", "plotwindow", "plottermanager", "script", "lisp", "appload"];
+/// files (drawings, exports, plots, extracted CSVs, plot styles), or runs scripts/LISP, which can
+/// write files through the command line (#1931; wblock/publish/… from the CodeRabbit review).
+const REFUSED_WHEN_READONLY: &[&str] = &[
+    "saveas",
+    "save",
+    "qsave",
+    "wblock",
+    "publish",
+    "export",
+    "exportpdf",
+    "plot",
+    "plotwindow",
+    "plottermanager",
+    "plotstyle",
+    "stylesmanager",
+    "tableexport",
+    "dataextraction",
+    "eattext",
+    "script",
+    "lisp",
+    "appload",
+];
 
 /// A typed token that is a LISP expression (`(…)` or `!var`), which read-only mode refuses.
 fn lisp_token(t: &str) -> bool {
     t.starts_with('(') || t.starts_with('!') && t.len() > 1
 }
 
-/// Whether the text would write files or run LISP. Every token counts: at the `Command:` prompt
-/// each space-separated word can start a command, so `zoom e save out.dxf` reaches SAVE with its
-/// third token. Prompt answers that spell a refused command name are refused too — read-only
-/// mode fails closed.
+/// Whether the text would write files or run LISP. Every token counts twice over: at the
+/// `Command:` prompt each space-separated word can start a command, so `zoom e save out.dxf`
+/// reaches SAVE with its third token — and a LISP expression is evaluated wherever it appears,
+/// so `line (command "_.SAVE" "x.dwg")` runs LISP with its second (CodeRabbit review of #1973).
+/// Prompt answers that spell a refused command name are refused too — read-only mode fails
+/// closed.
 fn refused_text(text: &str) -> bool {
-    let t = text.trim_start();
-    if lisp_token(t.split([' ', '\t']).next().unwrap_or_default()) {
-        return true;
-    }
-    t.split([' ', '\t']).any(|tok| {
-        let stripped = tok.trim_start_matches(['\'', '_', '.', '-']).to_ascii_lowercase();
-        REFUSED_WHEN_READONLY.contains(&cadcraft_engine::cmd::resolve_alias(&stripped).as_str())
+    text.split([' ', '\t']).any(|tok| {
+        lisp_token(tok) || {
+            let stripped = tok.trim_start_matches(['\'', '_', '.', '-']).to_ascii_lowercase();
+            REFUSED_WHEN_READONLY.contains(&cadcraft_engine::cmd::resolve_alias(&stripped).as_str())
+        }
     })
 }
 

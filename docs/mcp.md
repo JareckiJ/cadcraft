@@ -37,10 +37,12 @@ never edits a separate drawing by mistake. If the app can't be reached, startup 
 ```
 
 Refused: the `save` tool; `render`/`screenshot` with a `path`; `execute` of a command that
-writes files or executes code (`save`, `saveas`, `qsave`, `export`, `exportpdf`, `plot`,
-`plotwindow`, `plottermanager`, `script`, `lisp`, `appload`); a `command_line` line whose text
-would reach any of those — every space-separated token counts, so `zoom e save out.dxf` is
-refused, and LISP expressions (`(…)`, `!var`) are refused wherever they start. A `script` is
+writes files or executes code (`save`, `saveas`, `qsave`, `wblock`, `publish`, `export`,
+`exportpdf`, `plot`, `plotwindow`, `plottermanager`, `plotstyle`, `stylesmanager`,
+`tableexport`, `dataextraction`, `eattext`, `script`, `lisp`, `appload`); a `command_line` line
+whose text would reach any of those — every space-separated token counts, so `zoom e save
+out.dxf` is refused, and LISP expressions (`(…)`, `!var`) are refused in any token, so
+`line 0,0 (command "_.SAVE" "x.dwg")` never runs. A `script` is
 refused whole when any line would be. Reading files (`open`), drawing edits, `inspect_drawing`,
 `query_entities`, `find_text`, `list_commands` and `render` without a `path` all still work; the
 refusal is the tool's `isError` result, so an agent sees it as the tool's own answer. The mode

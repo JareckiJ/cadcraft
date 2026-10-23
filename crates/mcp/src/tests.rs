@@ -278,6 +278,21 @@ fn readonly_refuses_file_writes_and_lisp() {
 }
 
 #[test]
+fn readonly_refuses_lisp_in_any_token_and_the_other_writers() {
+    let mut s = ro_server();
+    // LISP past the first token: the engine evaluates a parenthesised expression wherever
+    // it appears (CodeRabbit review of #1973).
+    assert!(refused(&mut s, "command_line", json!({"text": "line 0,0 (command \"_.SAVE\" \"x.dwg\")"})).contains("read-only mode"));
+    assert!(refused(&mut s, "script", json!({"text": "circle 0,0 1\n10,10 (setq x 1)"})).contains("read-only mode"));
+    // The other file writers the review found.
+    for cmd in ["wblock", "publish", "tableexport", "dataextraction", "eattext", "plotstyle", "stylesmanager"] {
+        assert!(refused(&mut s, "execute", json!({"command": cmd, "params": {}})).contains(cmd), "{cmd}");
+    }
+    // The `w` alias resolves to wblock.
+    assert!(refused(&mut s, "command_line", json!({"text": "w"})).contains("read-only mode"));
+}
+
+#[test]
 fn readonly_refuses_the_lisp_entry_points() {
     let mut s = ro_server();
     for cmd in ["lisp", "appload", "script"] {
