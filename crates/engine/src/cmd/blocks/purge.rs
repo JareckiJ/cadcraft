@@ -6,7 +6,7 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use cadcraft_doc::{Drawing, EntityKind, Handle, STANDARD_MLINE_STYLE};
+use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, STANDARD_MLINE_STYLE};
 use serde_json::{Map, Value, json};
 
 use super::super::qselect::wildcard;
@@ -117,18 +117,20 @@ fn entities(d: &Drawing) -> impl Iterator<Item = &std::sync::Arc<cadcraft_doc::E
     d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())).chain(d.blocks.values().flat_map(|b| b.entities.iter())).take(5_000_000)
 }
 
-/// Upper-case names of blocks reachable from model space, the layouts and dimensions.
-fn used_blocks(d: &Drawing) -> HashSet<String> {
-    let mut used = HashSet::new();
-    let mut frontier: Vec<String> = Vec::new();
-    for e in d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())) {
-        match &e.kind {
-            EntityKind::Insert(i) => frontier.push(i.block.clone()),
-            EntityKind::Dimension(dm) => frontier.extend(dm.block.clone()),
-            EntityKind::MLeader(m) => frontier.extend(m.block.as_ref().map(|b| b.block.clone())),
-            _ => {}
-        }
+/// Adds the names of the blocks `e` refers to directly (an insert's block, a dimension's geometry
+/// block, a multileader's block content) to `out`.
+pub(super) fn block_refs(e: &Entity, out: &mut Vec<String>) {
+    match &e.kind {
+        EntityKind::Insert(i) => out.push(i.block.clone()),
+        EntityKind::Dimension(dm) => out.extend(dm.block.clone()),
+        EntityKind::MLeader(m) => out.extend(m.block.as_ref().map(|b| b.block.clone())),
+        _ => {}
     }
+}
+
+/// Upper-case names of the blocks in `frontier` and of those they refer to, nested.
+pub(super) fn reachable_blocks(d: &Drawing, mut frontier: Vec<String>) -> HashSet<String> {
+    let mut used = HashSet::new();
     let mut guard = 0;
     while let Some(n) = frontier.pop() {
         guard += 1;
@@ -137,16 +139,20 @@ fn used_blocks(d: &Drawing) -> HashSet<String> {
         }
         if let Some(b) = d.block(&n) {
             for e in b.entities.iter() {
-                match &e.kind {
-                    EntityKind::Insert(i) => frontier.push(i.block.clone()),
-                    EntityKind::Dimension(dm) => frontier.extend(dm.block.clone()),
-                    EntityKind::MLeader(m) => frontier.extend(m.block.as_ref().map(|b| b.block.clone())),
-                    _ => {}
-                }
+                block_refs(e, &mut frontier);
             }
         }
     }
     used
+}
+
+/// Upper-case names of blocks reachable from model space, the layouts and dimensions.
+fn used_blocks(d: &Drawing) -> HashSet<String> {
+    let mut frontier: Vec<String> = Vec::new();
+    for e in d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())) {
+        block_refs(e, &mut frontier);
+    }
+    reachable_blocks(d, frontier)
 }
 
 fn is(name: &str, list: &[&str]) -> bool {

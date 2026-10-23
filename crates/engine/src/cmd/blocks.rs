@@ -341,6 +341,8 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     d.text_styles = src.text_styles.clone();
     d.dim_styles = src.dim_styles.clone();
     d.blocks = src.blocks.clone();
+    // The written drawing keeps the source's units, as AutoCAD's -WBLOCK does.
+    d.header.set_i64("INSUNITS", src.header.i64("INSUNITS", 1));
     // The base point becomes the written drawing's origin, its insertion base: by default 0,0 for
     // objects and the block's base point for a block (`base` is then in block coordinates).
     let base = point_param(p, "base");
@@ -368,6 +370,22 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     };
+    // Keep only the blocks the written objects use (nested references, dimension geometry and
+    // multileader content, as PURGE follows them) and the dimension styles' arrowhead blocks, and
+    // make new handles start above those of the blocks that stay.
+    let mut frontier: Vec<String> = Vec::new();
+    for e in &ents {
+        purge::block_refs(e, &mut frontier);
+    }
+    for st in &d.dim_styles {
+        frontier.extend([&st.arrow_block, &st.arrow_block1, &st.arrow_block2, &st.leader_arrow_block].into_iter().cloned());
+    }
+    let used = purge::reachable_blocks(&d, frontier);
+    d.blocks.retain(|_, b| used.contains(&b.name.to_ascii_uppercase()));
+    let kept: Vec<Handle> = d.blocks.values().flat_map(|b| b.entities.iter().map(|e| e.handle)).collect();
+    for h in kept {
+        d.bump_handseed(h);
+    }
     for mut e in ents {
         e.handle = d.new_handle();
         d.model.push(e);
