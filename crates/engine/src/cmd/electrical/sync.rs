@@ -597,16 +597,26 @@ fn run_query(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "bom" => {
             // Parts list: main devices grouped by part.
-            let mut rows: BTreeMap<(String, String), (Vec<String>, String)> = BTreeMap::new();
+            // A device with no catalogue number yet is grouped by its symbol, so the list still
+            // reads "3 × Relay coil" rather than one line of everything.
+            let mut rows: BTreeMap<(String, String, String), (Vec<String>, String)> = BTreeMap::new();
             // Main devices, not terminals (listed by strip in the terminal plan).
             for d in devices.iter().filter(|&d| !d.child && d.family != DeviceFamily::Terminal).cloned() {
-                let r =
-                    rows.entry((d.part.manufacturer.clone(), d.part.catalog.clone())).or_insert_with(|| (Vec::new(), d.part.description.join(" ")));
+                let block = if d.part.catalog.is_empty() { d.graphic.as_ref().map(|g| g.block.clone()).unwrap_or_default() } else { String::new() };
+                let mut desc = d.part.description.iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(" ");
+                if desc.is_empty() {
+                    let b = d.graphic.as_ref().map(|g| g.block.as_str()).unwrap_or("");
+                    desc = super::symbols::library()
+                        .iter()
+                        .find(|s| s.name.eq_ignore_ascii_case(b))
+                        .map_or_else(|| b.to_string(), |s| s.description.to_string());
+                }
+                let r = rows.entry((d.part.manufacturer.clone(), d.part.catalog.clone(), block)).or_insert_with(|| (Vec::new(), desc));
                 r.0.push(d.tag);
             }
             let list: Vec<Value> = rows
                 .into_iter()
-                .map(|((m, c), (mut tags, desc))| {
+                .map(|((m, c, _), (mut tags, desc))| {
                     tags.sort();
                     json!({ "manufacturer": m, "catalog": c, "description": desc, "quantity": tags.len(), "tags": tags })
                 })

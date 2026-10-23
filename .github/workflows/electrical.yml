@@ -71,10 +71,7 @@ jobs:
               target/debug/cadcraft-cli run --metric --cmd "eproject.open {\"path\": \"$PWD/demo-out/Demo.ecproj\"}" --cmd "ereport {\"kind\": \"$k\", \"path\": \"$PWD/demo-out/$k.csv\"}" > /dev/null 2>&1 || true
             done
             echo "::notice title=demo-log::$(tail -c 1500 t5.txt | tr '\n' '|')"
-            for f in demo-out/*.dxf; do echo "::notice title=$(basename $f)::$(target/debug/cadcraft-cli info $f 2>&1 | head -c 600 | tr '\n' '|')"; done
-            target/debug/cadcraft-cli run --metric --cmd "eproject.open {\"path\": \"$PWD/demo-out/Demo.ecproj\"}" --cmd "ereport {\"kind\": \"bom\"}" > t6.txt 2>&1 || true
-            echo "::notice title=report-run::$(tail -c 1500 t6.txt | tr '\n' '|')"
-            for f in demo-out/*.csv; do echo "::notice title=$(basename $f)::$(head -c 900 $f | tr '\n' '|')"; done
+            for f in demo-out/*.csv; do echo "::notice title=$(basename $f)::$(head -c 900 $f | tr -d '\r' | tr '\n' '|')"; done
           fi
           # On success, show the test counts so a passing run proves the tests ran.
           if [ $status -eq 0 ]; then
