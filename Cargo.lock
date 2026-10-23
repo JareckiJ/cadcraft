@@ -757,6 +757,8 @@ version = "0.12.0"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
+ "cadcraft-ecad",
+ "cadcraft-ecad-cloud",
  "cadcraft-engine",
  "cadcraft-fonts",
  "cadcraft-geom",
