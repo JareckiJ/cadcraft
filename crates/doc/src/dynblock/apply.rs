@@ -745,9 +745,14 @@ fn apply(
             continue;
         }
         // Rotate, flip and scale actions turn, mirror or scale their objects, and carry the
-        // parameters in their selection the same way.
+        // parameters in their selection the same way. A handle the selection repeats is handled
+        // once (twice would turn or scale it twice, or mirror it back).
         if let Some(t) = transform_of(&m, values, set, a)? {
+            let mut handled: HashSet<Handle> = HashSet::new();
             for h in &a.selection {
+                if !handled.insert(*h) {
+                    continue;
+                }
                 if let Some(node) = param_of.get(h) {
                     if set.contains_key(node) {
                         continue;
