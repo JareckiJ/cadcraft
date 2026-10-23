@@ -22,11 +22,14 @@ collabcraft-share = { workspace = true }
 # The share dialog needs the same ShareBackend trait craft-ui states, so the
 # feature set here matches the one cadcraft-ui-egui builds with.
 craft-ui = { workspace = true }
+# For the shared per-session control-token helper (control_server.rs authentication).
+cadcraft-mcp = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "persistence"] }
 egui = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 ureq = { version = "3.4.2", default-features = false, features = ["platform-verifier"] }
+chrono = { workspace = true }
 
 [build-dependencies]
 winresource = "0.1"
