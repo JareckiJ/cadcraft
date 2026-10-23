@@ -25,6 +25,7 @@ pub mod docking;
 pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
+pub mod text_editor;
 // The External References palette.
 pub mod xrefs;
 
