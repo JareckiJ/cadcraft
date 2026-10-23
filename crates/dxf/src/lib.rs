@@ -390,11 +390,44 @@ fn parse_binary_with_limit(b: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
 
 /// Format a real the way DXF writers usually do (shortest round-trip, with a decimal point).
 pub fn format_real(v: f64) -> String {
+    let mut s = String::new();
+    push_real(&mut s, v);
+    s
+}
+
+/// [`format_real`] appended to `out`, without a string of its own (a large drawing writes
+/// millions of reals).
+fn push_real(out: &mut String, v: f64) {
     if !v.is_finite() {
-        return "0.0".into();
+        out.push_str("0.0");
+        return;
     }
-    let s = format!("{v}");
-    if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") { s } else { format!("{s}.0") }
+    let start = out.len();
+    let _ = write!(out, "{v}");
+    // A finite real prints as an optional sign, digits, and an optional point and exponent.
+    if !out.get(start..).is_some_and(|s| s.contains(['.', 'e'])) {
+        out.push_str(".0");
+    }
+}
+
+/// A group code right-aligned to three characters and its line end, as `write!("{:>3}\r\n")`
+/// writes it, without the formatting machinery for the codes DXF has (0 to 9999).
+fn push_code(out: &mut String, code: i32) {
+    match u16::try_from(code) {
+        Ok(c) if c < 10_000 => {
+            let digits = [c / 1000, c / 100 % 10, c / 10 % 10, c % 10].map(|d| char::from(b'0' + (d % 10) as u8));
+            // The significant digits (at least one), padded to three.
+            let first = digits.iter().position(|&d| d != '0').unwrap_or(3);
+            for _ in 1..first {
+                out.push(' ');
+            }
+            out.extend(digits.get(first..).unwrap_or_default());
+            out.push_str("\r\n");
+        }
+        _ => {
+            let _ = write!(out, "{code:>3}\r\n");
+        }
+    }
 }
 
 /// Write tags as ASCII DXF (CRLF line ends, codes right-aligned to 3 as is conventional).
@@ -411,13 +444,17 @@ pub fn write_ascii(tags: &[Tag]) -> String {
 pub fn write_ascii_as(tags: &[Tag], utf8: bool) -> String {
     let mut out = String::with_capacity(tags.len() * 16);
     for t in tags {
-        let _ = write!(out, "{:>3}\r\n", t.code);
+        push_code(&mut out, t.code);
         match &t.value {
+            // Most text has no line breaks (and is ASCII): copied as it is.
+            Value::Str(s) if !s.contains(['\r', '\n']) && (utf8 || s.is_ascii()) => out.push_str(s),
             Value::Str(s) if utf8 => out.extend(s.chars().map(|c| if matches!(c, '\r' | '\n') { ' ' } else { c })),
             Value::Str(s) => escape_unicode(s, &mut out),
-            Value::Real(r) => out.push_str(&format_real(*r)),
-            Value::Int(i) => out.push_str(&i.to_string()),
-            Value::Bool(b) => out.push_str(&i64::from(*b).to_string()),
+            Value::Real(r) => push_real(&mut out, *r),
+            Value::Int(i) => {
+                let _ = write!(out, "{i}");
+            }
+            Value::Bool(b) => out.push(if *b { '1' } else { '0' }),
             Value::Hex(h) => out.push_str(h),
         }
         out.push_str("\r\n");
@@ -638,6 +675,29 @@ mod tests {
     fn surrogate_pair_escapes() {
         let t = parse(b"1\n\\U+D83D\\U+DE00 \\u+56fe\\U+53f7\n0\nEOF\n").unwrap();
         assert_eq!(t[0].str(), "😀 \\u+56fe号");
+    }
+
+    /// The writer's own code and real formatting (FF6) gives the text `format!` gave.
+    #[test]
+    fn fast_code_and_real_formatting_match_format() {
+        for code in [-1_000_000, -10, -1, 0, 1, 9, 10, 42, 99, 100, 330, 999, 1000, 1071, 9999, 10_000, 65_535, 1_000_000] {
+            let mut s = String::new();
+            push_code(&mut s, code);
+            assert_eq!(s, format!("{code:>3}\r\n"), "{code}");
+        }
+        let old = |v: f64| {
+            if !v.is_finite() {
+                return "0.0".to_string();
+            }
+            let s = format!("{v}");
+            if s.contains('.') || s.contains('e') { s } else { format!("{s}.0") }
+        };
+        for v in [0.0, -0.0, 1.0, -1.0, 0.1, 1.5e-7, 123456789.0, 1e21, 1e300, -1e-300, f64::MAX, f64::MIN_POSITIVE, f64::NAN, f64::INFINITY] {
+            assert_eq!(format_real(v), old(v), "{v}");
+        }
+        let tags = [Tag::f(10, 2.0), Tag::i(70, -3), Tag::new(290, Value::Bool(true)), Tag::s(1, "a\r\nb"), Tag::s(1, "é"), Tag::s(1, "plain")];
+        assert_eq!(write_ascii_as(&tags, true), " 10\r\n2.0\r\n 70\r\n-3\r\n290\r\n1\r\n  1\r\na  b\r\n  1\r\né\r\n  1\r\nplain\r\n");
+        assert_eq!(write_ascii_as(&tags, false).lines().nth(9), Some("\\U+00E9"));
     }
 
     #[test]

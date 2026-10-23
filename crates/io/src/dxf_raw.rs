@@ -14,11 +14,12 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use cadcraft_doc::foreign::{Foreign, ForeignExtra, ForeignKey, ForeignObject};
 use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, RawTag, Unknown};
-use cadcraft_dxf::{Section, Tag};
+use cadcraft_dxf::{Section, Tag, Value};
 
 /// Named object dictionary entries CADCraft writes itself from its model (plus every key that
 /// starts with `CADCRAFT`): they are read into the model, not kept raw. A change that starts
@@ -57,6 +58,15 @@ const STRUCTURAL: &[&str] = &["", "SECTION", "ENDSEC", "EOF", "TABLE", "ENDTAB",
 
 fn up(s: &str) -> String {
     s.trim().to_ascii_uppercase()
+}
+
+/// A group's value as text, borrowed when it is text already (handles, names, record types), so
+/// the passes over a whole written file don't copy every value they look at (FF6).
+fn text(t: &Tag) -> Cow<'_, str> {
+    match &t.value {
+        Value::Str(s) | Value::Hex(s) => Cow::Borrowed(s),
+        _ => Cow::Owned(t.str()),
+    }
 }
 
 /// A handle as text, normalised (`002a` → `2A`); other text upper-cased.
@@ -130,23 +140,36 @@ fn head(tags: &[Tag]) -> Head {
     for t in tags.iter().take_while(|t| t.code < 1000) {
         match (t.code, group.as_deref()) {
             (102, _) => {
-                let v = t.str();
+                let v = text(t);
                 group = v.trim().strip_prefix('{').map(str::to_string);
                 h.has_reactors |= group.as_deref() == Some("ACAD_REACTORS");
             }
-            (_, Some("ACAD_REACTORS")) => h.reactors.push(norm(&t.str())),
+            (_, Some("ACAD_REACTORS")) => h.reactors.push(norm(&text(t))),
             (_, Some("ACAD_XDICTIONARY")) => {
                 if h.xdict.is_none() {
-                    h.xdict = Some(norm(&t.str()));
+                    h.xdict = Some(norm(&text(t)));
                 }
             }
             (_, Some(_)) => {}
-            (5 | 105, None) if h.handle.is_none() => h.handle = Some(norm(&t.str())),
-            (330, None) if h.owner.is_none() => h.owner = Some(norm(&t.str())),
+            (5 | 105, None) if h.handle.is_none() => h.handle = Some(norm(&text(t))),
+            (330, None) if h.owner.is_none() => h.owner = Some(norm(&text(t))),
             _ => {}
         }
     }
     h
+}
+
+/// [`head`]'s handle as a number, without making its text.
+fn head_handle(tags: &[Tag]) -> Option<u64> {
+    let mut in_group = false;
+    for t in tags.iter().take_while(|t| t.code < 1000) {
+        match t.code {
+            102 => in_group = text(t).trim().starts_with('{'),
+            5 | 105 if !in_group => return Handle::parse_hex(&text(t)).map(|h| h.0),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn val(tags: &[Tag], code: i32) -> Option<String> {
@@ -162,7 +185,7 @@ fn entries(tags: &[Tag]) -> Vec<(String, String)> {
             3 => key = Some(t.str()),
             350 | 360 => {
                 if let Some(k) = key.take() {
-                    out.push((k, norm(&t.str())));
+                    out.push((k, norm(&text(t))));
                 }
             }
             _ => {}
@@ -233,7 +256,7 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let len = rest.get(i + 1..).map_or(0, |r| r.iter().position(|t| t.code == 1001).unwrap_or(r.len()));
         let chunk = rest.get(i..i + 1 + len).unwrap_or(&[]);
         i += 1 + len;
-        let app = up(&first.str());
+        let app = up(&text(first));
         let own = OWN_APPS.contains(&app.as_str()) || (app == "ACAD" && matches!(kind, "DIMENSION" | "DIMSTYLE"));
         if app.is_empty() || own || out.len() + chunk.len() > MAX_XDATA_GROUPS {
             continue;
@@ -241,7 +264,7 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
         let mut depth = 0i32;
         let mut ok = true;
         for t in chunk.iter().skip(1) {
-            match (t.code, t.str().trim()) {
+            match (t.code, text(t).trim()) {
                 (c, _) if c < 1000 => ok = false,
                 (1002, "{") => depth += 1,
                 (1002, "}") => {
@@ -260,7 +283,7 @@ fn foreign_xdata(kind: &str, tags: &[Tag]) -> Vec<RawTag> {
 
 /// The groups of an entity's AcDbEntity subclass (after `100 AcDbEntity`, up to the next `100`).
 fn entity_groups(tags: &[Tag]) -> &[Tag] {
-    let Some(start) = tags.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity") else { return &[] };
+    let Some(start) = tags.iter().position(|t| t.code == 100 && text(t).trim() == "AcDbEntity") else { return &[] };
     let rest = tags.get(start + 1..).unwrap_or(&[]);
     let end = rest.iter().position(|t| t.code == 100 || t.code >= 1000).unwrap_or(rest.len());
     rest.get(..end).unwrap_or(&[])
@@ -504,7 +527,7 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
     if !modern || ds.is_empty() {
         return;
     }
-    let written: HashSet<String> = tags.iter().filter(|t| t.code == 5).map(|t| norm(&t.str())).collect();
+    let written: HashSet<String> = tags.iter().filter(|t| t.code == 5).map(|t| norm(&text(t))).collect();
     // The section's own groups before its first record, then its schemas and records.
     let mut out: Vec<Tag> = vec![Tag::s(0, "SECTION"), Tag::s(2, "ACDSDATA")];
     let first = ds.iter().position(|t| t.code == 0).unwrap_or(ds.len());
@@ -526,7 +549,7 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
         return;
     }
     out.push(Tag::s(0, "ENDSEC"));
-    let at = tags.iter().rposition(|t| t.code == 0 && t.str() == "EOF").unwrap_or(tags.len());
+    let at = tags.iter().rposition(|t| t.code == 0 && text(t) == "EOF").unwrap_or(tags.len());
     tags.splice(at..at, out);
 }
 
@@ -597,7 +620,8 @@ pub(crate) fn unknown_entity(u: &Unknown, e: &Entity, owner: &str, paper: bool) 
 
 /// A written record: section, type, the index of its `0` group and the end of its groups.
 struct Rec {
-    sec: String,
+    /// Shared by the section's records (a copy per record cost an allocation each).
+    sec: Rc<str>,
     kind: String,
     start: usize,
     end: usize,
@@ -605,14 +629,15 @@ struct Rec {
 
 fn written_records(tags: &[Tag]) -> Vec<Rec> {
     let mut out: Vec<Rec> = Vec::new();
-    let mut sec = String::new();
+    let none: Rc<str> = Rc::from("");
+    let mut sec = none.clone();
     for (kind, start, body) in split(tags) {
         if kind == "SECTION" {
-            sec = body.iter().find(|t| t.code == 2).map(Tag::str).unwrap_or_default();
+            sec = Rc::from(body.iter().find(|t| t.code == 2).map(text).unwrap_or_default().as_ref());
         }
         out.push(Rec { sec: sec.clone(), kind, start, end: start + 1 + body.len() });
         if out.last().is_some_and(|r| r.kind == "ENDSEC") {
-            sec.clear();
+            sec = none.clone();
         }
     }
     out
@@ -723,10 +748,10 @@ impl Map<'_> {
 
 /// The extras of a written record, if the drawing keeps any for it.
 fn extra_for<'a>(f: &'a Foreign, xd: &XdataOf, rec: &Rec, body: &[Tag], block: &str) -> Option<Cow<'a, ForeignExtra>> {
-    match (rec.sec.as_str(), rec.kind.as_str()) {
+    match (rec.sec.as_ref(), rec.kind.as_str()) {
         ("BLOCKS", "BLOCK") => f.records.get(&("BLOCK".to_string(), block.to_string())).map(Cow::Borrowed),
         ("BLOCKS", "ENDBLK") => None,
-        ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, handle(&head(body).handle?)?),
+        ("ENTITIES" | "BLOCKS", _) => entity_extra(f, xd, head_handle(body).filter(|h| *h != 0 && *h <= MAX_HANDLE).map(Handle)?),
         ("TABLES", kind) => {
             let name = up(&val(body, 2).unwrap_or_default());
             f.records.get(&(kind.to_string(), name)).map(Cow::Borrowed)
@@ -767,7 +792,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
     let by_sec = |name: &str| -> Recs {
-        recs.iter().filter(|r| r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
+        recs.iter().filter(|r| &*r.sec == name && r.kind != "SECTION" && r.kind != "ENDSEC").map(|r| (r.kind.clone(), r.start, body(r))).collect()
     };
     let (tables, blocks, objects) = (by_sec("TABLES"), by_sec("BLOCKS"), by_sec("OBJECTS"));
     let mut roles: HashMap<ForeignKey, String> = HashMap::new();
@@ -853,33 +878,36 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let class_names: HashSet<String> = recs.iter().filter(|r| r.kind == "CLASS").filter_map(|r| val(body(r), 1)).map(|n| up(&n)).collect();
     let mut out: Vec<Tag> = Vec::with_capacity(tags.len() + f.objects.iter().map(|o| o.tags.len() + 1).sum::<usize>());
     let mut block = String::new();
+    // The written groups are moved into `out`, not copied: a large drawing's are gigabytes, and a
+    // copy made every group's text again (FF6). What is moved out leaves a group with no text.
+    let take = |t: &mut Tag| std::mem::replace(t, Tag::i(t.code, 0));
     for r in &recs {
-        let b = body(r);
         if r.kind == "BLOCK" {
-            block = up(&val(b, 2).unwrap_or_default());
+            block = up(&val(tags.get(r.start + 1..r.end).unwrap_or(&[]), 2).unwrap_or_default());
         }
-        if r.kind == "ENDSEC" && r.sec == "CLASSES" {
+        if r.kind == "ENDSEC" && &*r.sec == "CLASSES" {
             for c in f.classes.iter().filter(|c| c.iter().find(|t| t.code == 1).is_some_and(|n| !class_names.contains(&up(&n.value)))) {
                 out.push(Tag::s(0, "CLASS"));
                 out.extend(c.iter().map(tag));
             }
         }
-        if r.kind == "ENDSEC" && r.sec == "OBJECTS" {
+        if r.kind == "ENDSEC" && &*r.sec == "OBJECTS" {
             for o in f.objects.iter().filter(|o| map.alive.contains_key(&o.handle.hex())) {
                 map.object(o, &mut out);
             }
         }
         for (sec, t) in planned.get(&r.start).into_iter().flatten() {
             let (Some(zero), Some(ub)) = (t.first(), t.get(1..)) else { continue };
-            let ur = Rec { sec: sec.clone(), kind: zero.str(), start: 0, end: 0 };
+            let ur = Rec { sec: Rc::from(sec.as_str()), kind: zero.str(), start: 0, end: 0 };
             let x = head(ub).handle.and_then(|h| handle(&h)).and_then(|h| entity_extra(f, &xd, h));
             out.push(zero.clone());
             record(&map, &ur, ub, x.as_deref(), true, false, &mut out);
         }
-        out.extend(tags.get(r.start).cloned());
+        out.extend(tags.get_mut(r.start).map(take));
+        let b = tags.get(r.start + 1..r.end).unwrap_or(&[]);
         let x = extra_for(f, &xd, r, b, &block);
         if x.is_none() && Some(r.start) != root {
-            out.extend(b.iter().cloned());
+            out.extend(tags.get_mut(r.start + 1..r.end).into_iter().flatten().map(take));
             continue;
         }
         record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
@@ -887,7 +915,7 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     add_appids(&mut out);
     let top = max_handle(&out).saturating_add(1);
     if let Some(t) = seed_index(&out).and_then(|i| out.get_mut(i))
-        && Handle::parse_hex(&t.str()).is_none_or(|h| h.0 < top)
+        && Handle::parse_hex(&text(t)).is_none_or(|h| h.0 < top)
     {
         *t = Tag::s(5, format!("{top:X}"));
     }
@@ -901,16 +929,31 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
     let mut out: HashMap<usize, Vec<(String, Vec<Tag>)>> = HashMap::new();
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
     let mut at: HashMap<String, usize> = HashMap::new();
-    for r in recs.iter().filter(|r| matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && !matches!(r.kind.as_str(), "BLOCK" | "ENDBLK")) {
+    for r in recs.iter().filter(|r| matches!(r.sec.as_ref(), "ENTITIES" | "BLOCKS") && !matches!(r.kind.as_str(), "BLOCK" | "ENDBLK")) {
         if let Some(h) = head(body(r)).handle {
             at.entry(h).or_insert(r.start);
         }
     }
-    let ents_end = recs.iter().find(|r| r.sec == "ENTITIES" && r.kind == "ENDSEC").map(|r| r.start);
-    let endblk = |name: &str| {
-        let i = recs.iter().position(|r| r.sec == "BLOCKS" && r.kind == "BLOCK" && val(body(r), 2).is_some_and(|n| up(&n) == up(name)))?;
-        recs.iter().skip(i).find(|r| r.kind == "ENDBLK").map(|r| r.start)
-    };
+    let ents_end = recs.iter().find(|r| &*r.sec == "ENTITIES" && r.kind == "ENDSEC").map(|r| r.start);
+    // Each block's ENDBLK, by block name (upper case): the first ENDBLK after the block's first
+    // BLOCK record. One pass over the records; looking each block up by scanning them made
+    // saving a drawing of thousands of blocks quadratic (FF6, #57).
+    let mut endblks: HashMap<String, usize> = HashMap::new();
+    let mut open: Vec<String> = Vec::new();
+    for r in recs {
+        if &*r.sec == "BLOCKS" && r.kind == "BLOCK" {
+            if let Some(n) = val(body(r), 2).map(|n| up(&n))
+                && !endblks.contains_key(&n)
+            {
+                open.push(n);
+            }
+        } else if r.kind == "ENDBLK" {
+            for n in open.drain(..) {
+                endblks.entry(n).or_insert(r.start);
+            }
+        }
+    }
+    let endblk = |name: &str| endblks.get(&up(name)).copied();
     let br = |name: &str| roles.get(&("BLOCK_RECORD".to_string(), up(name))).cloned();
     let first_at = |s: &cadcraft_doc::EntityStore| s.iter().find_map(|e| at.get(&e.handle.hex()).copied());
     let mut layouts: Vec<&cadcraft_doc::Layout> = d.layouts.iter().collect();
@@ -961,12 +1004,12 @@ fn plan_unknown(d: &Drawing, recs: &[Rec], tags: &[Tag], roles: &HashMap<Foreign
 /// dictionary entries (the named object dictionary).
 fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool, root: bool, out: &mut Vec<Tag>) {
     let h = head(b);
-    let entity = matches!(r.sec.as_str(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
+    let entity = matches!(r.sec.as_ref(), "ENTITIES" | "BLOCKS") && r.kind != "BLOCK";
     let xdata_at = b.iter().position(|t| t.code == 1001).unwrap_or(b.len());
-    let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&t.str())).collect();
+    let own_apps: HashSet<String> = b.iter().filter(|t| t.code == 1001).map(|t| up(&text(t))).collect();
     // Where unmodelled properties go: the end of AcDbEntity, else before the xdata.
     let props_at = if entity {
-        b.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbEntity").and_then(|s| {
+        b.iter().position(|t| t.code == 100 && text(t).trim() == "AcDbEntity").and_then(|s| {
             let rest = b.get(s + 1..xdata_at)?;
             Some(s + 1 + rest.iter().position(|t| t.code == 100).unwrap_or(rest.len()))
         })
@@ -1000,7 +1043,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
             if t.code == 330 && !seen_owner {
                 seen_owner = true;
             } else {
-                t = Tag::s(t.code, map.get(&t.str()).unwrap_or_else(|| "0".into()));
+                t = Tag::s(t.code, map.get(&text(&t)).unwrap_or_else(|| "0".into()));
             }
         }
         out.push(t);
@@ -1035,7 +1078,7 @@ fn record(map: &Map, r: &Rec, b: &[Tag], x: Option<&ForeignExtra>, unknown: bool
     if root {
         for (key, h) in &map.f.dictionary {
             if let Some(nh) = map.alive.get(&h.hex())
-                && !b.iter().any(|t| t.code == 3 && up(&t.str()) == up(key))
+                && !b.iter().any(|t| t.code == 3 && up(&text(t)) == up(key))
             {
                 out.push(Tag::s(3, key.clone()));
                 out.push(Tag::s(350, nh.clone()));
@@ -1059,10 +1102,10 @@ fn xdata(map: &Map, x: &ForeignExtra, own: &HashSet<String>, out: &mut Vec<Tag>)
 
 /// APPID records for every application with xdata in the file, added to the APPID table.
 fn add_appids(out: &mut Vec<Tag>) {
-    let used: BTreeMap<String, String> = out.iter().filter(|t| t.code == 1001).map(|t| (up(&t.str()), t.str().trim().to_string())).collect();
+    let used: BTreeMap<String, String> = out.iter().filter(|t| t.code == 1001).map(|t| (up(&text(t)), text(t).trim().to_string())).collect();
     let recs = written_records(out);
     let Some(table) = recs.iter().position(|r| {
-        r.sec == "TABLES" && r.kind == "TABLE" && val(out.get(r.start + 1..r.end).unwrap_or(&[]), 2).is_some_and(|n| up(&n) == "APPID")
+        &*r.sec == "TABLES" && r.kind == "TABLE" && val(out.get(r.start + 1..r.end).unwrap_or(&[]), 2).is_some_and(|n| up(&n) == "APPID")
     }) else {
         return;
     };
@@ -1104,15 +1147,15 @@ fn add_appids(out: &mut Vec<Tag>) {
 
 /// The index of the `$HANDSEED` value in the header.
 fn seed_index(tags: &[Tag]) -> Option<usize> {
-    tags.windows(2).position(|w| matches!(w, [a, b] if a.code == 9 && a.str() == "$HANDSEED" && b.code == 5)).map(|i| i + 1)
+    tags.windows(2).position(|w| matches!(w, [a, b] if a.code == 9 && text(a) == "$HANDSEED" && b.code == 5)).map(|i| i + 1)
 }
 
 /// The header's next free handle.
 fn seed(tags: &[Tag]) -> u64 {
-    seed_index(tags).and_then(|i| tags.get(i)).and_then(|t| Handle::parse_hex(&t.str())).map_or(0, |h| h.0)
+    seed_index(tags).and_then(|i| tags.get(i)).and_then(|t| Handle::parse_hex(&text(t))).map_or(0, |h| h.0)
 }
 
 /// The largest handle of a record (groups 5 and 105).
 fn max_handle(tags: &[Tag]) -> u64 {
-    tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| Handle::parse_hex(&t.str())).map(|h| h.0).max().unwrap_or(0)
+    tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| Handle::parse_hex(&text(t))).map(|h| h.0).max().unwrap_or(0)
 }
