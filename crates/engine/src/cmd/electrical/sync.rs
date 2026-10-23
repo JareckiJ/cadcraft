@@ -585,7 +585,7 @@ fn run_query(s: &mut Session, p: &Value) -> Result<Value> {
             // Parts list: main devices grouped by part.
             let mut rows: BTreeMap<(String, String), (Vec<String>, String)> = BTreeMap::new();
             // Main devices, not terminals (listed by strip in the terminal plan).
-            for d in devices.iter().cloned().filter(|d| !d.child && d.family != DeviceFamily::Terminal) {
+            for d in devices.iter().filter(|&d| !d.child && d.family != DeviceFamily::Terminal).cloned() {
                 let r =
                     rows.entry((d.part.manufacturer.clone(), d.part.catalog.clone())).or_insert_with(|| (Vec::new(), d.part.description.join(" ")));
                 r.0.push(d.tag);
