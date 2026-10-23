@@ -98,6 +98,7 @@ pub enum Icon {
     LayerMatch,
     MakeCurrent,
     LayerPrev,
+    LayerNewSel,
     Bulb,
     BulbOff,
     Lock,
@@ -673,7 +674,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                 _ => pen.text(19.0, 19.0, "A", 9.0, a),
             }
         }
-        LayerOff | LayerIso | LayerFreeze | LayerLock | LayerMatch | MakeCurrent | LayerPrev => {
+        LayerOff | LayerIso | LayerFreeze | LayerLock | LayerMatch | MakeCurrent | LayerPrev | LayerNewSel => {
             pen.poly(&[(2.0, 9.0), (10.0, 5.0), (18.0, 9.0), (10.0, 13.0)], true, b);
             pen.poly(&[(2.0, 13.0), (10.0, 17.0), (18.0, 13.0)], false, b);
             let (x, y) = (18.0, 17.0);
@@ -684,6 +685,12 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                 LayerLock => pen.rect(x - 3.0, y - 1.0, 6.0, 5.0, Color32::from_rgb(0xe6, 0xb4, 0x3c)),
                 LayerMatch => pen.la(x - 4.0, y, x + 4.0, y),
                 MakeCurrent => pen.text(x, y, "✓", 9.0, Color32::from_rgb(0x6f, 0xe0, 0x6f)),
+                // A new layer with the selection on it: a green plus.
+                LayerNewSel => {
+                    let g = Color32::from_rgb(0x6f, 0xe0, 0x6f);
+                    pen.poly(&[(x, y - 4.5), (x, y + 4.5)], false, g);
+                    pen.poly(&[(x - 4.5, y), (x + 4.5, y)], false, g);
+                }
                 _ => {
                     pen.arc(x, y, 3.5, 90.0, 360.0, a);
                 }

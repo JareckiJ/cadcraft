@@ -1247,3 +1247,9 @@
 	Not a number or distance: {text}	Não é um número nem uma distância: {text}
 	Select using two clicks only	Selecionar apenas com dois cliques
 	Define each corner of the selection window with a separate click.	Defina cada canto da janela de seleção com um clique separado.
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Mover para nova camada
+	Move Selection to New Layer	Mover a seleção para nova camada
+	New layer name	Nome da nova camada
+	Delete Empty Layers	Excluir camadas vazias
+	Deletes every layer that has no objects on it	Exclui cada camada que não tem objetos

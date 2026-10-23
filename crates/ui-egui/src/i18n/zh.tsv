@@ -1146,3 +1146,9 @@
 	First corner	第一角点
 	Opposite corner	对角点
 	Window <	窗口 <
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	移动到新图层
+	Move Selection to New Layer	将选择移动到新图层
+	New layer name	新图层名称
+	Delete Empty Layers	删除空图层
+	Deletes every layer that has no objects on it	删除所有没有对象的图层

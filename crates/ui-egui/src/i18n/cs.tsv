@@ -1218,3 +1218,9 @@ menu	Modify	Modifikace
 	Not a number or distance: {text}	Není číslo ani vzdálenost: {text}
 	Query Texts	Dotaz na texty
 	Analyze Shapes	Analyzovat tvary
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Přesunout do nové hladiny
+	Move Selection to New Layer	Přesunout výběr do nové hladiny
+	New layer name	Název nové hladiny
+	Delete Empty Layers	Odstranit prázdné hladiny
+	Deletes every layer that has no objects on it	Odstraní každou hladinu, ve které nejsou žádné objekty

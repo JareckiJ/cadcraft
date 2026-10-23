@@ -1008,3 +1008,9 @@
 	Not a number or distance: {text}	Ni un nombre ni une distance : {text}
 	Query Texts	Interroger les textes
 	Analyze Shapes	Analyser les formes
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Déplacer vers un nouveau calque
+	Move Selection to New Layer	Déplacer la sélection vers un nouveau calque
+	New layer name	Nom du nouveau calque
+	Delete Empty Layers	Supprimer les calques vides
+	Deletes every layer that has no objects on it	Supprime chaque calque qui ne porte aucun objet

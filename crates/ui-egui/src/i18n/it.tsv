@@ -1259,3 +1259,9 @@ menu	Modify	Edita
 	Discard	Scarta
 	Customize	Personalizza
 	Edit Command Aliases (PGP)...	Modifica alias dei comandi (PGP)...
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Sposta su nuovo layer
+	Move Selection to New Layer	Sposta la selezione su un nuovo layer
+	New layer name	Nome del nuovo layer
+	Delete Empty Layers	Elimina layer vuoti
+	Deletes every layer that has no objects on it	Elimina ogni layer che non contiene oggetti

@@ -1342,3 +1342,9 @@ menu	Modify	Ändra
 	Groups	Grupper
 	Multiline text	Flerradstext
 	Hatches	Skrafferingar
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Flytta till nytt lager
+	Move Selection to New Layer	Flytta markeringen till ett nytt lager
+	New layer name	Namn på det nya lagret
+	Delete Empty Layers	Ta bort tomma lager
+	Deletes every layer that has no objects on it	Tar bort varje lager som saknar objekt

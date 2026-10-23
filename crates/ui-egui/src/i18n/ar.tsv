@@ -1233,3 +1233,9 @@ menu	Modify	تعديل
 menu	View	عرض
 @plural	{n} commit	{n} إيداع|{n} إيداع|{n} إيداعان|{n} إيداعات|{n} إيداعاً|{n} إيداع
 @plural	{n} contributor	{n} مساهم|{n} مساهم|{n} مساهمان|{n} مساهمين|{n} مساهماً|{n} مساهم
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	نقل إلى طبقة جديدة
+	Move Selection to New Layer	نقل التحديد إلى طبقة جديدة
+	New layer name	اسم الطبقة الجديدة
+	Delete Empty Layers	حذف الطبقات الفارغة
+	Deletes every layer that has no objects on it	يحذف كل طبقة لا تحتوي على كائنات

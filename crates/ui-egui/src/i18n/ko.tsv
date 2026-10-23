@@ -1238,3 +1238,9 @@ menu	View	보기
 menu	Draw	그리기
 menu	Dimension	치수
 menu	Modify	수정
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	새 도면층으로 이동
+	Move Selection to New Layer	선택 항목을 새 도면층으로 이동
+	New layer name	새 도면층 이름
+	Delete Empty Layers	빈 도면층 삭제
+	Deletes every layer that has no objects on it	객체가 없는 모든 도면층을 삭제합니다

@@ -1358,3 +1358,9 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Перемістити на новий шар
+	Move Selection to New Layer	Перемістити вибране на новий шар
+	New layer name	Назва нового шару
+	Delete Empty Layers	Видалити порожні шари
+	Deletes every layer that has no objects on it	Видаляє кожен шар, на якому немає об'єктів

@@ -277,6 +277,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 {
                     actions.push(("layer.current", json!({ "name": s })));
                 }
+                // PURGE for layers: every layer with nothing on it (and no block using it) goes.
+                if ui.button(crate::tl!("Delete Empty Layers")).on_hover_text(crate::tl!("Deletes every layer that has no objects on it")).clicked() {
+                    actions.push(("purge", json!({ "type": "layers" })));
+                }
                 ui.separator();
                 // Layer states.
                 ui.label(crate::tl!("Layer State"));
@@ -284,7 +288,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 egui::ComboBox::from_id_salt("lpm_states").selected_text(label).width(170.0).show_ui(ui, |ui| {
                     for s in &states {
                         if ui.selectable_label(st.state_sel.as_deref() == Some(s), s).clicked() {
+                            // Choosing a state switches the layers at once.
                             st.state_sel = Some(s.clone());
+                            actions.push(("layerstate.restore", json!({ "name": s })));
                         }
                     }
                     if states.is_empty() {

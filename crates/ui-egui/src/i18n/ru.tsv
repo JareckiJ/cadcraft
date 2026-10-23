@@ -1009,3 +1009,9 @@
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
 	Analyze Shapes	Анализ фигур
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Переместить на новый слой
+	Move Selection to New Layer	Переместить выбранное на новый слой
+	New layer name	Имя нового слоя
+	Delete Empty Layers	Удалить пустые слои
+	Deletes every layer that has no objects on it	Удаляет каждый слой, на котором нет объектов

@@ -1247,3 +1247,9 @@
 	Not a number or distance: {text}	No es un número ni una distancia: {text}
 	Query Texts	Consultar textos
 	Analyze Shapes	Analizar formas
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Desplazar a una capa nueva
+	Move Selection to New Layer	Desplazar la selección a una capa nueva
+	New layer name	Nombre de la capa nueva
+	Delete Empty Layers	Eliminar capas vacías
+	Deletes every layer that has no objects on it	Elimina cada capa que no contiene objetos

@@ -1330,3 +1330,9 @@ menu	Dimension	Διαστασιολόγηση
 menu	Draw	Σχεδίαση
 menu	Modify	Τροποποίηση
 menu	View	Προβολή
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Μετακίνηση σε νέο επίπεδο (Layer)
+	Move Selection to New Layer	Μετακίνηση της επιλογής σε νέο επίπεδο (Layer)
+	New layer name	Όνομα νέου επιπέδου
+	Delete Empty Layers	Διαγραφή κενών επιπέδων
+	Deletes every layer that has no objects on it	Διαγράφει κάθε επίπεδο που δεν έχει αντικείμενα

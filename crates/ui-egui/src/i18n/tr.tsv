@@ -1344,3 +1344,9 @@ menu	Dimension	Ölçülendirme
 menu	Draw	Çiz
 menu	Modify	Değiştir
 menu	View	Görünüm
+# Layers palette: move the selection to a new layer, delete empty layers.
+	Move to New Layer	Yeni Katmana Taşı
+	Move Selection to New Layer	Seçimi Yeni Katmana Taşı
+	New layer name	Yeni katman adı
+	Delete Empty Layers	Boş Katmanları Sil
+	Deletes every layer that has no objects on it	Üzerinde nesne olmayan her katmanı siler
