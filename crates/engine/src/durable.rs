@@ -11,8 +11,8 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// Write `bytes` to `path` so that `path` is always either the old or the new content, and the
-/// rename itself survives a power loss.
+/// Write `bytes` to `path` so that `path` is always either the old or the new content; on Unix the
+/// folder is flushed too, so the rename itself survives a power loss.
 pub fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
     crate::atomic_write::write_atomic(path, bytes)?;
     sync_parent(path);
