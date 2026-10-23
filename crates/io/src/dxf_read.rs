@@ -2131,6 +2131,9 @@ impl Objects {
             let def = MLeaderStyle::default();
             let num = |code: i32, d: f64, min: f64| t.f(code).filter(|v| v.is_finite() && *v >= min).unwrap_or(d);
             let text_style = t.s(342).and_then(|sh| rx.styles.get(&sh.trim().to_ascii_uppercase()).cloned()).filter(|n| !n.is_empty());
+            let leader_type = t.i(170).map(|v| (v as u8).min(2)).unwrap_or(def.leader_type);
+            let content_type = t.i(172).map(|v| (v as u8).min(2)).unwrap_or(def.content_type);
+            let block_name = t.s(344).and_then(|sh| self.names.get(&sh).cloned()).unwrap_or_default();
             let st = MLeaderStyle {
                 name: name.clone(),
                 arrow_size: num(44, def.arrow_size, 0.0),
@@ -2139,6 +2142,9 @@ impl Objects {
                 dogleg: num(43, def.dogleg, 0.0),
                 text_style: text_style.unwrap_or(def.text_style),
                 annotative: t.i(296).unwrap_or(0) != 0,
+                leader_type,
+                content_type,
+                block_name,
             };
             match d.mleader_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,

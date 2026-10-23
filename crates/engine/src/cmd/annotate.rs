@@ -1625,6 +1625,36 @@ impl MLeaderM {
     fn new(s: &Session) -> Self {
         let o = s.last_used.mleader;
         let max_points = o.max_points.clamp(2, MAX_LEADER_POINTS);
+        let cur_style = s
+            .doc()
+            .ok()
+            .and_then(|d| {
+                let cur = d.header.str("CMLEADERSTYLE", "Standard");
+                d.mleader_styles.iter().find(|m| m.name.eq_ignore_ascii_case(&cur)).or(d.mleader_styles.first()).cloned()
+            })
+            .unwrap_or_default();
+
+        let (leader_type, content, block, block_name) = if s.last_used.mleader == MLeaderOptions::default() {
+            let lt = match cur_style.leader_type {
+                0 => crate::LeaderType::None,
+                2 => crate::LeaderType::Spline,
+                _ => crate::LeaderType::Straight,
+            };
+            let (cnt, blk, bn) = match cur_style.content_type {
+                0 => (false, false, String::new()),
+                2 => (true, true, cur_style.block_name.clone()),
+                _ => (true, false, String::new()),
+            };
+            (lt, cnt, blk, bn)
+        } else {
+            (
+                o.leader_type,
+                o.content,
+                o.block && s.doc().is_ok_and(|d| d.block(&s.last_used.mleader_block).is_some()),
+                s.last_used.mleader_block.clone(),
+            )
+        };
+
         MLeaderM {
             order: o.order,
             pts: Vec::new(),
@@ -1634,11 +1664,10 @@ impl MLeaderM {
             max_points,
             angles: o.angles,
             landing: o.landing,
-            content: o.content,
-            leader_type: o.leader_type,
-            // Block content needs a block that still exists.
-            block: o.block && s.doc().is_ok_and(|d| d.block(&s.last_used.mleader_block).is_some()),
-            block_name: s.last_used.mleader_block.clone(),
+            content,
+            leader_type,
+            block,
+            block_name,
             block_center: o.block_center,
         }
     }

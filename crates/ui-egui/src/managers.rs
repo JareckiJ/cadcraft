@@ -400,15 +400,34 @@ fn mleader_style(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Acti
     let mut styles: Vec<Style> = d
         .mleader_styles
         .iter()
-        .map(|s| Style {
-            name: s.name.clone(),
-            fields: vec![
-                Field::Num("arrowSize", "Arrowhead size", s.arrow_size),
-                Field::Num("textHeight", "Text height", s.text_height),
-                Field::Num("landingGap", "Landing gap", s.landing_gap),
-                Field::Num("dogleg", "Landing length", s.dogleg),
-                Field::Choice("textStyle", "Text style", s.text_style.clone(), text_styles.clone()),
-            ],
+        .map(|s| {
+            let leader_choice = match s.leader_type {
+                0 => "None",
+                2 => "Spline",
+                _ => "Straight",
+            };
+            let content_choice = match s.content_type {
+                0 => "None",
+                2 => "Block",
+                _ => "MText",
+            };
+            Style {
+                name: s.name.clone(),
+                fields: vec![
+                    Field::Choice(
+                        "leaderType",
+                        "Leader line type",
+                        leader_choice.to_string(),
+                        vec!["Straight".into(), "Spline".into(), "None".into()],
+                    ),
+                    Field::Choice("contentType", "Content type", content_choice.to_string(), vec!["MText".into(), "Block".into(), "None".into()]),
+                    Field::Num("arrowSize", "Arrowhead size", s.arrow_size),
+                    Field::Num("textHeight", "Text height", s.text_height),
+                    Field::Num("landingGap", "Landing gap", s.landing_gap),
+                    Field::Num("dogleg", "Landing length", s.dogleg),
+                    Field::Choice("textStyle", "Text style", s.text_style.clone(), text_styles.clone()),
+                ],
+            }
         })
         .collect();
     if styles.is_empty() {

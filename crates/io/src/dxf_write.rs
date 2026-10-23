@@ -2610,9 +2610,9 @@ fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, byblock_l
     w.s(330, dict);
     w.s(100, "AcDbMLeaderStyle");
     w.i(179, 2);
-    w.i(170, 2);
+    w.i(170, i64::from(s.leader_type));
     w.i(171, 1);
-    w.i(172, 0);
+    w.i(172, i64::from(s.content_type));
     w.i(90, 2);
     w.f(40, 0.0);
     w.f(41, 0.0);

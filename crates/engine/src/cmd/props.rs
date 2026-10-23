@@ -936,6 +936,33 @@ fn run_mleaderstyle(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(a) = p.get("annotative").and_then(Value::as_bool) {
                 st.annotative = a;
             }
+            if let Some(lt) = p.get("leaderType") {
+                if let Some(s) = lt.as_str() {
+                    match s.to_ascii_lowercase().as_str() {
+                        "none" => st.leader_type = 0,
+                        "straight" => st.leader_type = 1,
+                        "spline" => st.leader_type = 2,
+                        _ => {}
+                    }
+                } else if let Some(n) = lt.as_u64() {
+                    st.leader_type = (n as u8).min(2);
+                }
+            }
+            if let Some(ct) = p.get("contentType") {
+                if let Some(s) = ct.as_str() {
+                    match s.to_ascii_lowercase().as_str() {
+                        "none" => st.content_type = 0,
+                        "mtext" => st.content_type = 1,
+                        "block" => st.content_type = 2,
+                        _ => {}
+                    }
+                } else if let Some(n) = ct.as_u64() {
+                    st.content_type = (n as u8).min(2);
+                }
+            }
+            if let Some(b) = str_param(p, "block") {
+                st.block_name = b.to_string();
+            }
         }
         if bool_or(p, "current", true) {
             d.header.set_str("CMLEADERSTYLE", name);
