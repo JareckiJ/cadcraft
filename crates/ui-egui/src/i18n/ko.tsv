@@ -1238,3 +1238,6 @@ menu	View	보기
 menu	Draw	그리기
 menu	Dimension	치수
 menu	Modify	수정
+	Layer state name	레이어 상태 이름
+	Switches layers on and off, frozen and locked	레이어를 켜고 끄며 동결하고 잠급니다
+	Rename	이름 바꾸기

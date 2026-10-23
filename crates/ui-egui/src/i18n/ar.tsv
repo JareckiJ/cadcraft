@@ -1233,3 +1233,6 @@ menu	Modify	تعديل
 menu	View	عرض
 @plural	{n} commit	{n} إيداع|{n} إيداع|{n} إيداعان|{n} إيداعات|{n} إيداعاً|{n} إيداع
 @plural	{n} contributor	{n} مساهم|{n} مساهم|{n} مساهمان|{n} مساهمين|{n} مساهماً|{n} مساهم
+	Layer state name	اسم حالة الطبقات
+	Switches layers on and off, frozen and locked	يشغّل الطبقات ويطفئها ويجمّدها ويقفلها
+	Rename	إعادة التسمية

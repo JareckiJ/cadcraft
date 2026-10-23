@@ -147,14 +147,23 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// The layers as the drawing was opened (or made): the layer state "At Open"
+    /// ([`AT_OPEN`]), kept for the session, never saved.
+    pub at_open: Vec<cadcraft_doc::Layer>,
 }
+
+/// The layer state every drawing has: its layers as it was opened (or made), kept for the session
+/// in [`DocState::at_open`]. A saved state of that name wins.
+pub const AT_OPEN: &str = "At Open";
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl DocState {
     pub fn new(doc: Drawing, title: &str, path: Option<String>) -> Self {
+        let at_open = doc.layers.clone();
         let doc = Arc::new(doc);
         DocState {
+            at_open,
             saved: doc.clone(),
             doc,
             undo: Vec::new(),

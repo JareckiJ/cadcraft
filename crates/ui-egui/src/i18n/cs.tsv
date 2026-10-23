@@ -1218,3 +1218,6 @@ menu	Modify	Modifikace
 	Not a number or distance: {text}	Není číslo ani vzdálenost: {text}
 	Query Texts	Dotaz na texty
 	Analyze Shapes	Analyzovat tvary
+	Layer state name	Název stavu hladin
+	Switches layers on and off, frozen and locked	Zapíná a vypíná hladiny, zmrazuje a zamyká
+	Rename	Přejmenovat

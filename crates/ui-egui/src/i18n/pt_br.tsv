@@ -1247,3 +1247,6 @@
 	Not a number or distance: {text}	Não é um número nem uma distância: {text}
 	Select using two clicks only	Selecionar apenas com dois cliques
 	Define each corner of the selection window with a separate click.	Defina cada canto da janela de seleção com um clique separado.
+	Layer state name	Nome do estado de camadas
+	Switches layers on and off, frozen and locked	Liga e desliga camadas, congela e bloqueia
+	Rename	Renomear

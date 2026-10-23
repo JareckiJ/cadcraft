@@ -1344,3 +1344,6 @@ menu	Dimension	Ölçülendirme
 menu	Draw	Çiz
 menu	Modify	Değiştir
 menu	View	Görünüm
+	Layer state name	Katman durumu adı
+	Switches layers on and off, frozen and locked	Katmanları açar ve kapatır, dondurur ve kilitler
+	Rename	Yeniden adlandır

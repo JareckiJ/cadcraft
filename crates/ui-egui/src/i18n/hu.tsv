@@ -1341,3 +1341,6 @@ menu	Dimension	Méretezés
 menu	Draw	Rajzolás
 menu	Modify	Módosítás
 menu	View	Nézet
+	Layer state name	Rétegállapot neve
+	Switches layers on and off, frozen and locked	Be- és kikapcsolja, fagyasztja és zárolja a rétegeket
+	Rename	Átnevezés

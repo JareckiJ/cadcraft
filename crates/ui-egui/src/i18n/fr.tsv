@@ -1008,3 +1008,6 @@
 	Not a number or distance: {text}	Ni un nombre ni une distance : {text}
 	Query Texts	Interroger les textes
 	Analyze Shapes	Analyser les formes
+	Layer state name	Nom de l'état des calques
+	Switches layers on and off, frozen and locked	Active et désactive les calques, les gèle et les verrouille
+	Rename	Renommer

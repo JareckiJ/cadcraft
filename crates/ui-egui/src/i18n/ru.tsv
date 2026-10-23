@@ -1009,3 +1009,6 @@
 	Not a number or distance: {text}	Не число и не расстояние: {text}
 	Query Texts	Запрос текстов
 	Analyze Shapes	Анализ фигур
+	Layer state name	Имя состояния слоев
+	Switches layers on and off, frozen and locked	Включает и выключает слои, замораживает и блокирует
+	Rename	Переименовать
