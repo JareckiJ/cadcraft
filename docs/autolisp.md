@@ -99,7 +99,7 @@ xref (flag 4), an invalid name, a block that inserts itself and a block being ed
 fails drops the one it began.
 
 Non-graphic objects (the named object dictionary and its dictionaries, layouts, table records)
-are listed as a DXF file of the drawing holds them, pointers as entity names and group 5 as the
+are listed as a DXF file of the drawing holds them, pointers as entity names and group 5 (105 for a DIMSTYLE) as the
 object's own name. An object read from a file keeps that file's handle as its name, so
 `(handent "112C")` with a layer's handle from the file finds it; one the file didn't have gets a
 name of its own (from `7F00000000000000` up). The names of table records, blocks, the named
