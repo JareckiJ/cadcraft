@@ -352,8 +352,16 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         return;
     }
     // Only the view moved: keep drawing the current list and build the new one in the background.
+    // While an orbit rotation build is already in flight for the same content, let it finish and
+    // install its orientation before starting the next step, rather than cancelling every frame.
     let view_only = app.canvas.list.is_some() && same_content(&app.canvas.key, &key);
-    if view_only && app.canvas.job.as_ref().is_some_and(|j| j.serves(&key, &visible)) {
+    if view_only
+        && app
+            .canvas
+            .job
+            .as_ref()
+            .is_some_and(|j| j.serves(&key, &visible) || (same_content(&j.key, &key) && j.key.8 != app.canvas.key.8))
+    {
         return;
     }
     // A build for another view, or for a drawing that has since changed, is no longer wanted:
@@ -1382,7 +1390,17 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
             app.session.tracking.clear();
         }
         if orbit.is_edge_on() && app.session.prompt_wants_work_point() {
-            return None;
+            let ap = app.session.settings.aperture / xf.scale;
+            let s = &app.session.settings;
+            let osmode = app.session.snap_override().unwrap_or(s.osmode) | if s.osnaphatch { snap::mode::HATCH } else { 0 };
+            let st = app.session.state().ok()?;
+            let hit = snap::osnap_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred)
+                .filter(|h| orbit.project(h.point.to3(0.0)).dist(raw) <= ap + 1e-6)?;
+            app.canvas.snap = Some(hit);
+            app.canvas.cursor = Some(hit.point);
+            app.session.cursor = hit.point;
+            app.session.cursor_deferred = hit.deferred;
+            return Some(hit.point);
         }
         return Some(raw);
     }
@@ -1651,7 +1669,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // While a command asks for a point, every click places one, however fast the drafting (#815).
     // egui drops a click whose button comes up a few pixels from where it went down (a drag to it),
     // and eframe hands a slow frame's clicks over together, which egui reports as one.
-    let point_prompt = app.session.accepts_work_point() && !app.session.realtime_zoom_active();
+    let point_prompt = app.session.prompt_wants_work_point() && !app.session.realtime_zoom_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
     if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
@@ -1715,6 +1733,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.cursor = None;
         app.canvas.snap = None;
         app.session.cursor_deferred = None;
+        if let Some(w) = raw_world
+            && dyn_frame.and_then(|f| crate::dyninput::parse(&app.cmd.buffer, &f)).is_none_or(|e| e.first_locked().is_none())
+        {
+            override_cursor(app, w, &xf, current_orbit);
+        }
     }
 
     // A click on the Dynamic Input options menu picks the keyword; elsewhere it closes the menu.
@@ -2388,13 +2411,11 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
     let ap = app.session.settings.aperture / xf.scale;
     let cycle = snap_cycle(app, raw, ap);
     let prompt = app.session.current_prompt();
-    let wants_point = app.session.accepts_work_point();
+    let wants_point = app.session.prompt_wants_work_point();
     if (over.is_none() && cycle.is_none()) || !wants_point {
         return;
     }
-    let Some(work_raw) = orbit.unproject_xy(raw) else {
-        return;
-    };
+    let work_raw = orbit.unproject_xy(raw);
     let base = prompt.as_ref().and_then(|p| p.base);
     let deferred = prompt.as_ref().is_some_and(|p| p.deferred);
     let s = &app.session.settings;
@@ -2406,17 +2427,24 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
             cands.get(i % cands.len().max(1)).copied()
         }
         None => snap::osnap_in_orbit(&st.doc, &st.edit_space(), orbit, raw, ap, osmode, base, deferred),
-    };
-    let p = match (hit, app.canvas.snap) {
-        (Some(h), _) => {
+    }
+    .filter(|h| !orbit.is_edge_on() || orbit.project(h.point.to3(0.0)).dist(raw) <= ap + 1e-6);
+    let p = match (hit, app.canvas.snap, work_raw) {
+        (Some(h), _, _) => {
             app.canvas.snap = Some(h);
             h.point
         }
-        (None, Some(_)) => {
+        (None, Some(_), Some(w)) => {
             app.canvas.snap = None;
-            work_raw
+            w
         }
-        (None, None) => return,
+        (None, Some(_), None) => {
+            app.canvas.snap = None;
+            app.canvas.cursor = None;
+            app.session.cursor_deferred = None;
+            return;
+        }
+        (None, None, _) => return,
     };
     app.canvas.cursor = Some(p);
     app.session.cursor = p;

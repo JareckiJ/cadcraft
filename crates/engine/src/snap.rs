@@ -450,7 +450,10 @@ pub fn osnap_in_orbit_with_proj(
                 return None;
             }
             let pr = orbit.project(w.to3(z));
-            (pr.is_finite() && pr.dist(view_cursor) <= aperture).then(|| (m, work_plane_point(orbit, w, z, pr), pr))
+            if !pr.is_finite() || pr.dist(view_cursor) > aperture {
+                return None;
+            }
+            Some((m, work_plane_point(orbit, w, z, pr)?, pr))
         })
         .min_by(|a, b| {
             let da = snap_score(a.0, a.2, view_cursor, aperture);
@@ -474,8 +477,11 @@ pub fn osnap_in_orbit_with_proj(
             }
             let pr = orbit.project(c.to3(z));
             let dd = pr.dist(view_cursor);
-            if dd <= aperture && nb.is_none_or(|(bd, ..)| dd < bd) {
-                nb = Some((dd, work_plane_point(orbit, c, z, pr), pr));
+            if dd <= aperture
+                && nb.is_none_or(|(bd, ..)| dd < bd)
+                && let Some(wp) = work_plane_point(orbit, c, z, pr)
+            {
+                nb = Some((dd, wp, pr));
             }
         };
         for (p, z) in &near_prims {
@@ -495,12 +501,13 @@ pub fn osnap_in_orbit_with_proj(
 }
 
 /// Convert a snapped point `w` at elevation `z` (with 2D view-plane projection `pr`) onto the
-/// `z = 0` work plane so `orbit.project(point.to3(0.0))` lands on `pr`.
-pub(crate) fn work_plane_point(orbit: cadcraft_render::Orbit3d, w: Vec2, z: f64, pr: Vec2) -> Vec2 {
+/// `z = 0` work plane so `orbit.project(point.to3(0.0))` lands on `pr`. Returns `None` when
+/// `z != 0` and the work plane is viewed edge-on.
+pub(crate) fn work_plane_point(orbit: cadcraft_render::Orbit3d, w: Vec2, z: f64, pr: Vec2) -> Option<Vec2> {
     if z.abs() <= 1e-12 {
-        w
+        Some(w)
     } else {
-        orbit.unproject_xy(pr).unwrap_or(w)
+        orbit.unproject_xy(pr)
     }
 }
 
@@ -1279,8 +1286,11 @@ fn deferred_hit_in_orbit(
         }
         let pr = orbit.project(at.to3(*z));
         let dd = pr.dist(view_cursor);
-        if pr.is_finite() && dd <= aperture && best.as_ref().is_none_or(|(bd, ..)| dd < *bd) {
-            let point = work_plane_point(orbit, at, *z, pr);
+        if pr.is_finite()
+            && dd <= aperture
+            && best.as_ref().is_none_or(|(bd, ..)| dd < *bd)
+            && let Some(point) = work_plane_point(orbit, at, *z, pr)
+        {
             best = Some((dd, SnapHit { point, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }) }, pr));
         }
     }
@@ -1830,5 +1840,31 @@ mod tests {
         let solved = resolve_deferred(LineEnd::Deferred(d_arc), LineEnd::Deferred(d_circle)).unwrap();
         assert!(solved.0.near(Vec2::new(0.0, 5.0), 1e-9), "expected the belt tangent on the top arc, got {:?}", solved.0);
         assert!(solved.1.near(Vec2::new(10.0, 5.0), 1e-9));
+    }
+
+    #[test]
+    fn edge_on_osnap_in_orbit_snaps_work_plane_points_and_rejects_off_plane() {
+        use cadcraft_doc::Common;
+        use cadcraft_geom::Vec3;
+        let mut d = Drawing::new_metric();
+        // Line on the z = 0 work plane from (0, 0, 0) to (10, 0, 0), and an elevated line at z = 8.
+        d.add(
+            &Space::Model,
+            Common::default(),
+            EntityKind::Line(cadcraft_doc::Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) }),
+        )
+        .unwrap();
+        d.add(
+            &Space::Model,
+            Common::default(),
+            EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 8.0), b: Vec3::new(10.0, 0.0, 8.0) }),
+        )
+        .unwrap();
+        let front = cadcraft_render::Orbit3d { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() };
+        assert!(front.is_edge_on());
+        let hit = osnap_in_orbit(&d, &Space::Model, front, front.project(Vec3::new(10.0, 0.0, 0.0)), 1.0, mode::END, None, false);
+        assert_eq!(hit.map(|h| h.point), Some(Vec2::new(10.0, 0.0)));
+        let off_plane = osnap_in_orbit(&d, &Space::Model, front, front.project(Vec3::new(10.0, 0.0, 8.0)), 1.0, mode::END, None, false);
+        assert!(off_plane.is_none(), "z != 0 endpoint cannot unproject onto an edge-on work plane");
     }
 }

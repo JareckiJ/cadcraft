@@ -120,6 +120,15 @@ impl PathShape {
             }
         }
     }
+
+    fn translated(self, delta: Vec2) -> Self {
+        match self {
+            PathShape::Ray { origin, dir } => PathShape::Ray { origin: origin + delta, dir },
+            PathShape::Line { origin, dir } => PathShape::Line { origin: origin + delta, dir },
+            PathShape::Circle { center, radius, gap } => PathShape::Circle { center: center + delta, radius, gap },
+            PathShape::Ellipse { center, major, ratio, gap } => PathShape::Ellipse { center: center + delta, major, ratio, gap },
+        }
+    }
 }
 
 /// The point of the ellipse `e` closest to `p`: the tessellated closest point, refined by a few
@@ -631,7 +640,9 @@ pub(crate) fn candidate_in_orbit(
         for (prim, z) in &prims {
             for (end, shape) in extension_ends(prim) {
                 let pr = orbit.project(end.to3(*z));
-                let work_end = super::work_plane_point(orbit, end, *z, pr);
+                let Some(work_end) = super::work_plane_point(orbit, end, *z, pr) else {
+                    continue;
+                };
                 let dd = match hit {
                     Some(h) => work_end.dist(h.point),
                     None => pr.dist(view_cursor),
@@ -639,6 +650,7 @@ pub(crate) fn candidate_in_orbit(
                 if !dd.is_finite() || dd > aperture || best.as_ref().is_some_and(|(bd, ..)| *bd <= dd) {
                     continue;
                 }
+                let shape = shape.translated(work_end - end);
                 if shape.is_finite() && work_end.is_finite() {
                     best = Some((dd, work_end, shape));
                 }
