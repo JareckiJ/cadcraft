@@ -2428,6 +2428,9 @@ fn pdf_strokes_overlapping_transparent_objects_one_by_one() {
     // 50 %: each line is its own stroke, so they build up where they cross.
     let glass = content(&crossing(50), true);
     assert!(pdf_read::count(&glass, "gs") > 0, "{glass}");
+    let page =
+        pdf_read::read(&plot(&crossing(50), &Space::Model, &serde_json::json!({"paper": "A4", "plotTransparency": true})).unwrap()).pages.remove(0);
+    assert!(page.alphas.contains(&(0.5, 1.0)), "strokes at half alpha: {:?}", page.alphas);
     assert_eq!(pdf_read::count(&glass, "S"), 2, "{glass}");
     // Opaque: one path as before, whether the option is on or off.
     let opaque = content(&crossing(0), true);
@@ -2469,6 +2472,10 @@ fn pdf_strokes_each_transparent_primitive_inside_a_block() {
     };
     let half = content(&crossing_block(50), true);
     assert!(pdf_read::count(&half, "gs") > 0, "{half}");
+    let page = pdf_read::read(&plot(&crossing_block(50), &Space::Model, &serde_json::json!({"paper": "A4", "plotTransparency": true})).unwrap())
+        .pages
+        .remove(0);
+    assert!(page.alphas.contains(&(0.5, 1.0)), "strokes at half alpha: {:?}", page.alphas);
     assert_eq!(pdf_read::count(&half, "S"), 2, "{half}");
     // Opaque: one path, the same with the option on or off.
     let opaque = content(&crossing_block(0), true);

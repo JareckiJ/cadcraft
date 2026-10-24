@@ -45,6 +45,8 @@ const MAX_SHEET_MM: f64 = 5080.0;
 pub const MAX_PAGES: usize = 256;
 /// Most PDF layers in one file; objects on further layers print without one.
 const MAX_LAYERS: usize = 4096;
+/// Longest PDF layer name, in characters.
+const MAX_LAYER_NAME: usize = 1000;
 /// Most link annotations in one file, and the longest link target (bytes).
 const MAX_LINKS: usize = 10_000;
 const MAX_URL: usize = 2048;
@@ -373,11 +375,20 @@ pub fn pdf_items(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions) -> 
         return Err(IoError::Format(format!("at most {MAX_PAGES} sheets fit in one PDF")));
     }
     match write_pdf(d, items, o, o.text_as_geometry) {
-        // A font the PDF writer can't embed after all: plot the text as outlines instead.
-        Err(Failure::Write(WriteError::Serialization(e))) if !o.text_as_geometry && matches!(*e, kr::error::KrillaError::Font(..)) => {
-            write_pdf(d, items, o, true).map_err(Failure::into_io)
-        }
+        // A font the PDF writer can't embed after all, or one that makes it fail internally:
+        // plot the text as outlines instead. Outlines embed no font, so this runs at most once.
+        Err(Failure::Write(e)) if !o.text_as_geometry && font_failure(&e) => write_pdf(d, items, o, true).map_err(Failure::into_io),
         r => r.map_err(Failure::into_io),
+    }
+}
+
+/// Whether a writer failure may come from embedding a font: a font the writer refused, or a
+/// panic inside the writer (caught by `guard`), which a malformed font can cause.
+fn font_failure(e: &WriteError) -> bool {
+    match e {
+        WriteError::Serialization(e) => matches!(**e, kr::error::KrillaError::Font(..)),
+        WriteError::BackendPanic(_) => true,
+        _ => false,
     }
 }
 
@@ -473,7 +484,8 @@ impl Groups {
                 continue;
             }
             let Some(layer) = d.layers.get(*l as usize) else { continue };
-            let id = doc.add_optional_content_group(layer.name.as_str(), layer.on);
+            let name: String = layer.name.chars().take(MAX_LAYER_NAME).collect();
+            let id = doc.add_optional_content_group(name, layer.on);
             self.ids.insert(*l, id);
         }
     }

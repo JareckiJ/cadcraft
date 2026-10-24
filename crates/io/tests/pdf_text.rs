@@ -331,6 +331,11 @@ fn text_seen_through_a_viewport_and_on_layers() {
     // glyph the edge cuts stays a (clipped) outline.
     assert_eq!(pdf_read::count(p.content(), "Tj"), 4, "{}", p.content());
     assert!(fills(&p) > 0, "the cut glyph is an outline");
+    // Text seen through the viewport sits in its layer's marked content.
+    let ops = pdf_read::ops(p.content());
+    let first_bt = ops.iter().position(|o| o.op == "BT").unwrap();
+    let layer0 = p.pages[0].properties.iter().find(|(_, g)| g == "0").map(|(k, _)| k.clone()).unwrap();
+    assert!(ops[..first_bt].iter().any(|o| o.op == "BDC" && o.names.get(1) == Some(&layer0)));
 }
 
 #[test]
