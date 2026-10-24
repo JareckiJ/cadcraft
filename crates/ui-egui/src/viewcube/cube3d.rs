@@ -300,10 +300,8 @@ impl CubeProjector {
                 Stroke::new(1.1, Color32::from_rgb(0x4b, 0x50, 0x58)),
             ));
 
-            // Draw subtle inner subdivision lines (AutoCAD-style edge/corner bands) when hovered.
-            if hovered_zone.is_some() {
-                self.paint_face_subdivisions(painter, face);
-            }
+            // Draw AutoCAD-style dashed subdivision lines along the edges/corners of visible faces.
+            self.paint_face_subdivisions(painter, face);
 
             // Highlight hovered edge or corner sub-patch on this face.
             if let Some(hz) = hovered_zone
@@ -312,16 +310,16 @@ impl CubeProjector {
                 self.paint_zone_highlight_on_face(painter, face, hz);
             }
 
-            // Render the localized face label as a 3D surface-mapped mesh ("sticker") on the cube face
-            // so it foreshortens, skews, and rotates upside-down with the face in 3D space.
+            // Render the localized face label using 3D surface-projected vector strokes so it is
+            // always centered, bold, skewed with the face parallelogram, and upside-down from behind.
             if ndot > 0.16 {
-                self.paint_face_label(painter, face);
+                self.paint_face_label(painter, face, ndot);
             }
         }
     }
 
-    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef) {
-        let label = match face.key {
+    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, ndot: f64) {
+        let raw_label = match face.key {
             "TOP" => crate::tl!("TOP"),
             "BOTTOM" => crate::tl!("BOTTOM"),
             "FRONT" => crate::tl!("FRONT"),
@@ -330,55 +328,60 @@ impl CubeProjector {
             "RIGHT" => crate::tl!("RIGHT"),
             other => other,
         };
-        let color = Color32::from_rgb(0x1f, 0x23, 0x28);
-        // Layout the text at high resolution so its glyph quads are crisp, then map the galley's
-        // centered 2D coordinates directly onto the face's `(u, v)` surface coordinates `[-1, 1]^2`.
-        let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(18.0), color);
-        let size = galley.size();
-        if size.x <= 1e-3 || size.y <= 1e-3 {
+        let label = raw_label.to_uppercase();
+        let chars: Vec<char> = label.chars().filter(|c| !c.is_whitespace()).collect();
+        if chars.is_empty() {
             return;
         }
-        let cx = size.x * 0.5;
-        let cy = size.y * 0.5;
-        // Fit the label comfortably inside the cube face (`max_u = 1.48` out of `2.0` total face width),
-        // while capping the vertical scale so short labels like "TOP" stay the same height as "BOTTOM".
-        let scale_u = (1.48 / f64::from(size.x)).min(0.62 / f64::from(size.y));
-        let scale_v = (0.64 / f64::from(size.y)).min(scale_u * 1.15);
 
-        // Emit a faux-bold pass (two slight horizontal offsets in face `u`-space) so the label looks
-        // bold and clear like AutoCAD's ViewCube face textures.
-        let mut mesh = egui::Mesh::with_texture(egui::TextureId::default());
-        for du_bold in [-0.018_f64, 0.018_f64, 0.0_f64] {
-            for row in &galley.rows {
-                let row_y = row.rect().min.y;
-                for vtx in &row.visuals.mesh.vertices {
-                    let gx = f64::from(vtx.pos.x - cx);
-                    let gy = f64::from(row_y + vtx.pos.y - cy);
-                    let u = gx * scale_u + du_bold;
-                    // Galley +Y is downward; face +v is upward.
-                    let v = -gy * scale_v;
-                    let screen_pos = self.project_unit(face.point(u, v)).0;
-                    mesh.vertices.push(egui::epaint::Vertex { pos: screen_pos, uv: vtx.uv, color });
-                }
-                let base = (mesh.vertices.len() - row.visuals.mesh.vertices.len()) as u32;
-                for &idx in &row.visuals.mesh.indices {
-                    mesh.indices.push(base + idx);
+        // Character metrics in normalized glyph coordinates (`x in [0, 1]`, `y in [0, 1]`).
+        let char_w = 1.0_f64;
+        let gap = 0.34_f64;
+        let total_w = (chars.len() as f64) * char_w + ((chars.len().saturating_sub(1)) as f64) * gap;
+        // Fit within `[-0.64, 0.64]` in face `u`-space (inside the `[-0.56, 0.56]` inner band when possible)
+        // and cap vertical height to `0.42` in `v`-space so short words ("TOP") match longer words ("RIGHT").
+        let scale_u = (1.16 / total_w).min(0.28);
+        let scale_v = (scale_u * 1.45).min(0.42);
+        let stroke_px = (1.85 * (ndot as f32).powf(0.25)).clamp(1.35, 2.0);
+        let stroke = Stroke::new(stroke_px, Color32::from_rgb(0x22, 0x26, 0x2c));
+
+        let start_x = -0.5 * total_w;
+        for (i, ch) in chars.into_iter().enumerate() {
+            let x0 = start_x + (i as f64) * (char_w + gap);
+            for poly in glyph_polylines(ch) {
+                let pts: Vec<Pos2> = poly
+                    .iter()
+                    .map(|&(gx, gy)| {
+                        let u = (x0 + f64::from(gx) * char_w) * scale_u;
+                        let v = (f64::from(gy) - 0.5) * scale_v;
+                        self.project_unit(face.point(u, v)).0
+                    })
+                    .collect();
+                if pts.len() == 2 {
+                    painter.line_segment([pts[0], pts[1]], stroke);
+                } else if pts.len() > 2 {
+                    painter.add(Shape::line(pts, stroke));
                 }
             }
         }
-        painter.add(Shape::mesh(mesh));
     }
 
     fn paint_face_subdivisions(&self, painter: &egui::Painter, face: FaceDef) {
         const B: f64 = 0.56;
-        let st = Stroke::new(0.7, Color32::from_rgba_unmultiplied(0x52, 0x57, 0x60, 110));
+        const SEGMENTS: usize = 7;
+        let st = Stroke::new(0.85, Color32::from_rgba_unmultiplied(0x38, 0x3d, 0x45, 135));
         for c in [-B, B] {
-            let a = self.project_unit(face.point(c, -1.0)).0;
-            let b = self.project_unit(face.point(c, 1.0)).0;
-            painter.line_segment([a, b], st);
-            let c0 = self.project_unit(face.point(-1.0, c)).0;
-            let c1 = self.project_unit(face.point(1.0, c)).0;
-            painter.line_segment([c0, c1], st);
+            // Dashed line along v from -1 to 1 at u = c, and along u from -1 to 1 at v = c.
+            for k in (0..SEGMENTS).step_by(2) {
+                let t0 = -1.0 + 2.0 * (k as f64) / (SEGMENTS as f64);
+                let t1 = -1.0 + 2.0 * ((k + 1) as f64) / (SEGMENTS as f64);
+                let a = self.project_unit(face.point(c, t0)).0;
+                let b = self.project_unit(face.point(c, t1)).0;
+                painter.line_segment([a, b], st);
+                let c0 = self.project_unit(face.point(t0, c)).0;
+                let c1 = self.project_unit(face.point(t1, c)).0;
+                painter.line_segment([c0, c1], st);
+            }
         }
     }
 
@@ -439,3 +442,91 @@ fn dist_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let t = ((p - a).dot(ab) / len2).clamp(0.0, 1.0);
     p.distance(a + vec2(ab.x * t, ab.y * t))
 }
+
+/// Normalized vector-stroke polylines (`x in [0, 1]`, `y in [0, 1]` from bottom to top) for uppercase
+/// characters on the ViewCube faces.
+fn glyph_polylines(ch: char) -> &'static [&'static [(f32, f32)]] {
+    match ch {
+        'A' | 'Ä' | 'Á' | 'À' | 'Â' => &[&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)], &[(0.18, 0.36), (0.82, 0.36)]],
+        'B' => &[
+            &[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (0.95, 0.85), (0.95, 0.62), (0.72, 0.5), (0.0, 0.5)],
+            &[(0.72, 0.5), (1.0, 0.38), (1.0, 0.15), (0.75, 0.0), (0.0, 0.0)],
+        ],
+        'C' | 'Ç' | 'Č' => &[&[(0.96, 0.82), (0.72, 1.0), (0.28, 1.0), (0.0, 0.75), (0.0, 0.25), (0.28, 0.0), (0.72, 0.0), (0.96, 0.18)]],
+        'D' => &[&[(0.0, 0.0), (0.0, 1.0), (0.65, 1.0), (1.0, 0.72), (1.0, 0.28), (0.65, 0.0), (0.0, 0.0)]],
+        'E' | 'É' | 'È' | 'Ê' | 'Ë' => &[&[(0.95, 1.0), (0.0, 1.0), (0.0, 0.0), (0.95, 0.0)], &[(0.0, 0.5), (0.78, 0.5)]],
+        'F' => &[&[(0.0, 0.0), (0.0, 1.0), (0.95, 1.0)], &[(0.0, 0.5), (0.78, 0.5)]],
+        'G' => &[&[
+            (0.96, 0.82),
+            (0.72, 1.0),
+            (0.28, 1.0),
+            (0.0, 0.75),
+            (0.0, 0.25),
+            (0.28, 0.0),
+            (0.78, 0.0),
+            (1.0, 0.22),
+            (1.0, 0.46),
+            (0.52, 0.46),
+        ]],
+        'H' => &[&[(0.0, 0.0), (0.0, 1.0)], &[(1.0, 0.0), (1.0, 1.0)], &[(0.0, 0.5), (1.0, 0.5)]],
+        'I' | 'Í' | 'Ì' | 'Î' => &[&[(0.18, 1.0), (0.82, 1.0)], &[(0.5, 0.0), (0.5, 1.0)], &[(0.18, 0.0), (0.82, 0.0)]],
+        'J' => &[&[(0.2, 1.0), (0.9, 1.0)], &[(0.65, 1.0), (0.65, 0.22), (0.42, 0.0), (0.15, 0.0), (0.0, 0.2)]],
+        'K' => &[&[(0.0, 0.0), (0.0, 1.0)], &[(0.96, 1.0), (0.0, 0.45)], &[(0.28, 0.6), (1.0, 0.0)]],
+        'L' => &[&[(0.0, 1.0), (0.0, 0.0), (0.95, 0.0)]],
+        'M' => &[&[(0.0, 0.0), (0.0, 1.0), (0.5, 0.35), (1.0, 1.0), (1.0, 0.0)]],
+        'N' | 'Ñ' => &[&[(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)]],
+        'O' | 'Ö' | 'Ó' | 'Ò' | 'Ô' => &[&[
+            (0.28, 1.0),
+            (0.72, 1.0),
+            (1.0, 0.74),
+            (1.0, 0.26),
+            (0.72, 0.0),
+            (0.28, 0.0),
+            (0.0, 0.26),
+            (0.0, 0.74),
+            (0.28, 1.0),
+        ]],
+        'P' => &[&[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (1.0, 0.82), (1.0, 0.62), (0.72, 0.45), (0.0, 0.45)]],
+        'Q' => &[
+            &[
+                (0.28, 1.0),
+                (0.72, 1.0),
+                (1.0, 0.74),
+                (1.0, 0.26),
+                (0.72, 0.0),
+                (0.28, 0.0),
+                (0.0, 0.26),
+                (0.0, 0.74),
+                (0.28, 1.0),
+            ],
+            &[(0.55, 0.28), (1.0, 0.0)],
+        ],
+        'R' | 'Ř' => &[
+            &[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (1.0, 0.82), (1.0, 0.62), (0.72, 0.48), (0.0, 0.48)],
+            &[(0.52, 0.48), (1.0, 0.0)],
+        ],
+        'S' | 'Š' => &[&[
+            (0.95, 0.84),
+            (0.72, 1.0),
+            (0.25, 1.0),
+            (0.0, 0.82),
+            (0.0, 0.64),
+            (0.25, 0.52),
+            (0.75, 0.46),
+            (1.0, 0.32),
+            (1.0, 0.16),
+            (0.75, 0.0),
+            (0.22, 0.0),
+            (0.0, 0.16),
+        ]],
+        'T' => &[&[(0.0, 1.0), (1.0, 1.0)], &[(0.5, 0.0), (0.5, 1.0)]],
+        'U' | 'Ü' | 'Ú' | 'Ù' | 'Û' => &[&[(0.0, 1.0), (0.0, 0.24), (0.28, 0.0), (0.72, 0.0), (1.0, 0.24), (1.0, 1.0)]],
+        'V' => &[&[(0.0, 1.0), (0.5, 0.0), (1.0, 1.0)]],
+        'W' => &[&[(0.0, 1.0), (0.24, 0.0), (0.5, 0.65), (0.76, 0.0), (1.0, 1.0)]],
+        'X' => &[&[(0.0, 0.0), (1.0, 1.0)], &[(0.0, 1.0), (1.0, 0.0)]],
+        'Y' => &[&[(0.0, 1.0), (0.5, 0.5), (1.0, 1.0)], &[(0.5, 0.5), (0.5, 0.0)]],
+        'Z' | 'Ž' => &[&[(0.0, 1.0), (1.0, 1.0), (0.0, 0.0), (1.0, 0.0)]],
+        _ => &[&[(0.15, 0.15), (0.85, 0.15), (0.85, 0.85), (0.15, 0.85), (0.15, 0.15)]],
+    }
+}
+
