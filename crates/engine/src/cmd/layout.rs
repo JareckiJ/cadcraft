@@ -234,7 +234,8 @@ impl Interactive for NewLayoutM {
             (Some(_), None) => {
                 Prompt::new("Specify first corner of the model area to show in the layout, or press ENTER for the whole drawing", Accept::POINT)
             }
-            (Some(_), Some(a)) => Prompt::new("Specify opposite corner", Accept::POINT).base(a),
+            // A window's first corner: with ortho on, the opposite corner is not bent onto it.
+            (Some(_), Some(a)) => Prompt::new("Specify opposite corner", Accept::POINT).corner(a),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -252,6 +253,12 @@ impl Interactive for NewLayoutM {
             self.name = Some(name);
             return Ok(Step::Continue);
         };
+        // The corners are model points. If another tab was shown meanwhile (a tab click, `layout.set`),
+        // a point would be read in that space, so the command ends and leaves that choice alone.
+        if s.layout_space() != Space::Model {
+            self.from = None;
+            return Ok(Step::Cancel);
+        }
         let window = match (i, self.first) {
             (Input::Point(p), None) => {
                 self.first = Some(p);
@@ -1154,6 +1161,31 @@ mod tests {
         assert!(v.view_center.dist(Vec2::new(20.0, 15.0)) < 1e-9, "{:?}", v.view_center);
         s.undo().unwrap();
         assert!(s.doc().unwrap().layout("Sheet P").is_none(), "one undo step");
+    }
+
+    #[test]
+    fn new_layout_ends_if_another_tab_is_shown_while_picking() {
+        let mut s = session_with_model();
+        let before = s.doc().unwrap().layouts.len();
+        s.start("layout.new").unwrap();
+        s.cmdline("Sheet T").unwrap();
+        assert_eq!(s.space(), Space::Model);
+        // A tab shown meanwhile: the next point must not be taken for a model corner.
+        s.execute("layout.set", &json!({"name": "Layout1"})).unwrap();
+        s.cmdline("10,10").unwrap();
+        assert!(s.running.is_none(), "the command ended");
+        assert_eq!(s.layout_space(), Space::Paper("Layout1".into()), "the tab that was shown stays");
+        assert_eq!(s.doc().unwrap().layouts.len(), before, "no layout was added");
+    }
+
+    #[test]
+    fn the_opposite_corner_is_not_bent_by_ortho() {
+        let mut s = session_with_model();
+        s.start("layout.new").unwrap();
+        s.cmdline("Sheet O").unwrap();
+        s.cmdline("10,10").unwrap();
+        let p = s.current_prompt().unwrap();
+        assert!(p.corner && p.base == Some(Vec2::new(10.0, 10.0)), "a window's opposite corner prompt");
     }
 
     #[test]
