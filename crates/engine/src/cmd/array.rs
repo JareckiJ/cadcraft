@@ -546,7 +546,10 @@ impl RectM {
         let d = match i {
             Input::Enter => return Ok(Some(cur)),
             Input::Text(t) => number(t),
-            Input::Point(p) => Some(self.base.dist(*p)),
+            Input::Point(pi) => {
+                let p = pi.point();
+                Some(self.base.dist(p))
+            }
             _ => return Ok(None),
         };
         d.filter(|d| d.is_finite() && d.abs() > 1e-12).map(Some).ok_or_else(|| other("Requires a nonzero distance."))
@@ -567,7 +570,10 @@ impl RectM {
         let k = match i {
             Input::Enter => return self.finish(s),
             Input::Keyword(k) => k,
-            Input::Point(_) => return Err(other("Editing the array with grips is not available yet; choose an option.")),
+            Input::Point(pi) => {
+                let _ = pi.point();
+                return Err(other("Editing the array with grips is not available yet; choose an option."));
+            }
             _ => return Err(other("Invalid option keyword.")),
         };
         self.stage = match k.as_str() {
@@ -661,8 +667,9 @@ impl Interactive for RectM {
                 }
                 None => return Err(other("Requires Yes or No.")),
             },
-            (Base, Input::Point(p)) => {
-                self.base = *p;
+            (Base, Input::Point(pi)) => {
+                let p = pi.point();
+                self.base = p;
                 Main
             }
             (Base, Input::Enter) => {
@@ -757,12 +764,13 @@ impl Interactive for RectM {
                 }
                 _ => return Err(other("Requires a number.")),
             },
-            (UnitCell, Input::Point(p)) => match self.corner {
+            (UnitCell, Input::Point(pi)) => match self.corner {
                 None => {
-                    self.corner = Some(*p);
+                    self.corner = Some(pi.point());
                     UnitCell
                 }
                 Some(c) => {
+                    let p = pi.point();
                     let (dx, dy) = (p.x - c.x, p.y - c.y);
                     if dx.abs() <= 1e-12 || dy.abs() <= 1e-12 {
                         return Err(other("The unit cell must have a width and a height."));
@@ -940,7 +948,10 @@ impl PolarM {
         let k = match i {
             Input::Enter => return self.finish(s),
             Input::Keyword(k) => k,
-            Input::Point(_) => return Err(other("Editing the array with grips is not available yet; choose an option.")),
+            Input::Point(pi) => {
+                let _ = pi.point();
+                return Err(other("Editing the array with grips is not available yet; choose an option."));
+            }
             _ => return Err(other("Invalid option keyword.")),
         };
         self.stage = match k.as_str() {
@@ -963,7 +974,10 @@ impl PolarM {
         let d = match i {
             Input::Enter => return Ok(Some(cur)),
             Input::Text(t) => number(t),
-            Input::Point(p) => Some(self.center.dist(*p)),
+            Input::Point(pi) => {
+                let p = pi.point();
+                Some(self.center.dist(p))
+            }
             _ => return Ok(None),
         };
         d.filter(|d| d.is_finite() && d.abs() > 1e-12).map(Some).ok_or_else(|| other("Requires a nonzero distance."))
@@ -1031,8 +1045,9 @@ impl Interactive for PolarM {
                 }
                 None => return Err(other("Requires Yes or No.")),
             },
-            (Center, Input::Point(p)) => {
-                self.center = *p;
+            (Center, Input::Point(pi)) => {
+                let p = pi.point();
+                self.center = p;
                 Main
             }
             (Center, Input::Keyword(k)) if k == "Base point" => CenterBase,
@@ -1041,8 +1056,9 @@ impl Interactive for PolarM {
                 Center
             }
             (Center, _) => return Err(other("Requires a point or an option keyword.")),
-            (CenterBase | Base, Input::Point(p)) => {
-                self.base = Some(*p);
+            (CenterBase | Base, Input::Point(pi)) => {
+                let p = pi.point();
+                self.base = Some(p);
                 if stage == CenterBase { Center } else { Main }
             }
             (CenterBase | Base, Input::Enter) => {

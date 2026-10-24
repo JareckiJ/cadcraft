@@ -269,9 +269,10 @@ impl Interactive for BreaklineM {
                     _ => Ask::Points,
                 };
             }
-            (Ask::Points, Input::Point(p)) => match (self.p1, self.p2) {
-                (None, _) => self.p1 = Some(p),
+            (Ask::Points, Input::Point(pi)) => match (self.p1, self.p2) {
+                (None, _) => self.p1 = Some(pi.point()),
                 (Some(a), None) => {
+                    let p = pi.point();
                     let span = symbol(s, &self.opts.block)?.span() * self.opts.size * dimscale(s);
                     let len = a.dist(p);
                     if len.is_nan() || len < span {
@@ -279,7 +280,7 @@ impl Interactive for BreaklineM {
                     }
                     self.p2 = Some(p);
                 }
-                (Some(_), Some(_)) => return self.finish(s, Some(p)),
+                (Some(_), Some(_)) => return self.finish(s, Some(pi.point())),
             },
             (Ask::Points, Input::Enter) if self.p2.is_some() => return self.finish(s, None),
             (Ask::Points, Input::Enter) => return Ok(Step::Cancel),

@@ -3,7 +3,7 @@
 
 use cadcraft_engine::doc::Handle;
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use serde_json::json;
 
 /// Four horizontal lines at y = 0, 5, 10, 15; their handles.
@@ -71,7 +71,7 @@ fn select_objects_prompts_pick_groups() {
     let (mut s, hs) = lines();
     s.execute("group", &json!({ "name": "A", "handles": hex(&hs[..2]) })).unwrap();
     s.cmdline("erase").unwrap();
-    s.input(Input::Point(on(0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(on(0)))).unwrap();
     s.cmdline("").unwrap();
     assert!(s.running.is_none());
     let left: Vec<Handle> = s.doc().unwrap().model.iter().map(|e| e.handle).collect();
@@ -80,7 +80,7 @@ fn select_objects_prompts_pick_groups() {
     s.execute("u", &json!({})).unwrap();
     // GROUPEDIT picks single members while removing.
     s.cmdline("groupedit n a r").unwrap();
-    s.input(Input::Point(on(1))).unwrap();
+    s.input(Input::Point(PointInput::Picked(on(1)))).unwrap();
     s.cmdline("").unwrap();
     assert_eq!(members(&s, "A"), vec![hs[0]]);
 }
@@ -105,11 +105,11 @@ fn dash_group_options_typed() {
     assert_eq!(members(&s, "Doors"), vec![hs[2], hs[0], hs[1]]);
     // Add and Remove pick single objects.
     s.cmdline("-group a doors").unwrap();
-    s.input(Input::Point(on(3))).unwrap();
+    s.input(Input::Point(PointInput::Picked(on(3)))).unwrap();
     s.cmdline("").unwrap();
     assert_eq!(members(&s, "Doors").len(), 4);
     s.cmdline("-group r doors").unwrap();
-    s.input(Input::Point(on(0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(on(0)))).unwrap();
     s.cmdline("").unwrap();
     assert_eq!(members(&s, "Doors"), vec![hs[2], hs[1], hs[3]]);
     // Selectable: Enter accepts the toggle.

@@ -5,7 +5,7 @@ use cadcraft_engine::Session;
 use cadcraft_engine::doc::{EntityKind, Handle};
 use cadcraft_engine::geom::Vec2;
 use cadcraft_engine::grip_dims::{GripDimKind, grip_dims, resolve};
-use cadcraft_engine::{Input, sysvars};
+use cadcraft_engine::{Input, PointInput, sysvars};
 use serde_json::json;
 
 fn handle(r: serde_json::Value) -> Handle {
@@ -24,7 +24,7 @@ fn kinds(s: &Session) -> Vec<GripDimKind> {
 fn place(s: &mut Session, values: &[(usize, f64)], cursor: Vec2) {
     let dims = grip_dims(s);
     let p = resolve(&dims, values, cursor);
-    s.input(Input::Point(p)).unwrap();
+    s.input(Input::Point(PointInput::Picked(p))).unwrap();
 }
 
 #[test]

@@ -2,7 +2,7 @@
 //! angle override `<a`, from the command line and in scripts.
 
 use cadcraft_doc::EntityKind;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use cadcraft_geom::Vec2;
 
 /// The lines of model space as (start, end).
@@ -56,7 +56,7 @@ fn point_filters_take_coordinates_from_two_points() {
     assert!(s.prompt_text().ends_with("(need YZ):"), "{}", s.prompt_text());
     s.cmdline("3,4").unwrap();
     s.cmdline(".Y 99,6").unwrap();
-    s.input(Input::Point(Vec2::new(1.0, 99.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(1.0, 99.0)))).unwrap();
     s.cmdline(".xy 8,9 0,0,5").unwrap();
     s.cmdline("").unwrap();
     let l = lines(&s);
@@ -84,9 +84,9 @@ fn angle_override_locks_the_direction_of_the_next_point() {
     s.cmdline("5").unwrap();
     // A picked point is brought onto the locked line.
     s.cmdline("<0").unwrap();
-    s.input(Input::Point(Vec2::new(4.0, 9.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(4.0, 9.0)))).unwrap();
     // The lock lasts one point only.
-    s.input(Input::Point(Vec2::new(4.0, 9.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(4.0, 9.0)))).unwrap();
     s.cmdline("").unwrap();
     let l = lines(&s);
     assert!(line_is(l.first(), (1.0, 1.0), (1.0, 6.0)), "{l:?}");

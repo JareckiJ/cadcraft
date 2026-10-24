@@ -11,8 +11,8 @@
 //! Enter sends the typed value to the command as a number.
 
 use cadcraft_doc::Handle;
-use cadcraft_engine::Input;
 use cadcraft_engine::grip_dims::{GripDim, GripDimKind, grip_dims, resolve};
+use cadcraft_engine::{Input, PointInput};
 use cadcraft_geom::Vec2;
 use egui::{Color32, Pos2, Rect, Shape, Stroke, pos2, vec2};
 
@@ -129,7 +129,7 @@ pub fn submit(app: &mut CadApp) -> bool {
     let p = resolve(&dims, &vals, cursor);
     app.cmd.buffer.clear();
     app.canvas.grip_dyn = GripDyn::default();
-    if let Err(e) = app.session.input(Input::Point(p)) {
+    if let Err(e) = app.session.input(Input::Point(PointInput::Picked(p))) {
         app.session.echo(e.to_string());
     }
     true
@@ -297,7 +297,7 @@ mod tests {
         run_frame(&mut app, &ctx, vec![Event::Text("c".into())]);
         run_frame(&mut app, &ctx, key(egui::Key::Enter));
         assert!(app.session.running.is_some());
-        app.session.input(Input::Point(Vec2::new(10.0, 10.0))).unwrap();
+        app.session.input(Input::Point(PointInput::Picked(Vec2::new(10.0, 10.0)))).unwrap();
         let lines = app.session.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
         assert_eq!(lines, 2, "Copy mode stretched a copy");
     }
@@ -321,7 +321,7 @@ mod tests {
             let text = crate::canvas::tests::painted_text(&mut app, &ctx, at);
             assert_eq!(labels(&text), ["X", "Y"], "the centre is a point:\n{text}");
 
-            app.session.input(Input::Point(Vec2::ZERO)).unwrap();
+            app.session.input(Input::Point(PointInput::Picked(Vec2::ZERO))).unwrap();
             crate::canvas::tests::painted_text(&mut app, &ctx, at);
             let text = crate::canvas::tests::painted_text(&mut app, &ctx, at);
             assert!(labels(&text).is_empty(), "pointer boxes at the radius prompt (DYNPIFORMAT {cartesian}):\n{text}");

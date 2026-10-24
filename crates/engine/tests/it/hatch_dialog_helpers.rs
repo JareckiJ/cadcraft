@@ -137,7 +137,7 @@ fn hatchedit_refuses_a_bad_gradient_and_changes_nothing() {
 }
 
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, PickMode};
+use cadcraft_engine::{Input, PickMode, PointInput};
 
 fn h(hex: &str) -> Handle {
     Handle::parse_hex(hex).unwrap()
@@ -151,12 +151,12 @@ fn hatchpick_keeps_points_inside_boundaries_and_changes_nothing() {
     s.start("hatchpick").unwrap();
     s.input(Input::Keyword("Points".into())).unwrap();
     assert!(s.prompt_text().contains("Pick internal point"), "{}", s.prompt_text());
-    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(5.0, 5.0)))).unwrap();
     assert!(!s.preview(Vec2::new(6.0, 6.0)).is_empty(), "the found boundary is previewed");
     // Outside every boundary: reported, not kept.
-    s.input(Input::Point(Vec2::new(50.0, 50.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(50.0, 50.0)))).unwrap();
     assert!(s.log.iter().any(|l| l.contains("Valid hatch boundary not found")), "{:?}", s.log);
-    s.input(Input::Point(Vec2::new(2.0, 2.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(2.0, 2.0)))).unwrap();
     s.input(Input::Keyword("Undo".into())).unwrap();
     s.input(Input::Enter).unwrap();
     assert!(s.running.is_none());
@@ -187,7 +187,7 @@ fn hatchpick_origin_and_hatch_modes() {
     let hx = handle(&s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap());
     s.start("hatchpick").unwrap();
     s.input(Input::Keyword("oRigin".into())).unwrap();
-    s.input(Input::Point(Vec2::new(1.0, 2.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(1.0, 2.0)))).unwrap();
     assert!(s.running.is_none());
     assert_eq!(s.hatch_picks.clone().unwrap().origin, Some(Vec2::new(1.0, 2.0)));
     s.hatch_picks = None;
@@ -208,7 +208,7 @@ fn hatchpick_typed_mode_and_escape_keeps_nothing() {
     rect(&mut s, [0.0, 0.0], [10.0, 10.0]);
     s.cmdline("hatchpick points").unwrap();
     assert!(s.prompt_text().contains("Pick internal point"), "{}", s.prompt_text());
-    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(5.0, 5.0)))).unwrap();
     s.cancel();
     assert!(s.running.is_none());
     assert!(s.hatch_picks.is_none());

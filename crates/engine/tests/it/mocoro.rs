@@ -3,7 +3,7 @@
 
 use cadcraft_engine::doc::{EntityKind, Handle};
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use serde_json::{Value, json};
 
 fn line(s: &mut Session, a: [f64; 2], b: [f64; 2]) -> String {
@@ -140,7 +140,7 @@ fn a_point_at_the_option_prompt_is_not_an_option() {
     let l = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
     let undo = undo_len(&s);
     s.script("MOCORO ALL  0,0\n").unwrap();
-    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(5.0, 5.0)))).unwrap();
     assert!(s.log.iter().any(|m| m.contains("Invalid option keyword")), "{:?}", s.log);
     assert!(s.running.is_some());
     assert!(near(ends(&s, &l), ((0.0, 0.0), (10.0, 0.0))));

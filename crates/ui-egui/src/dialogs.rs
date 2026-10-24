@@ -428,7 +428,7 @@ fn language(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 mod tests {
     use cadcraft_engine::doc::EntityKind;
     use cadcraft_engine::geom::Vec2;
-    use cadcraft_engine::{Input, Session};
+    use cadcraft_engine::{Input, PointInput, Session};
     use serde_json::json;
 
     use crate::{CadApp, Services};
@@ -446,7 +446,7 @@ mod tests {
         assert!(app.session.running.as_ref().is_some_and(|r| r.id == "insert"));
         assert_eq!(app.session.current_prompt().map(|p| p.message), Some("Specify insertion point".to_string()));
 
-        app.session.input(Input::Point(Vec2::new(5.0, 6.0))).unwrap();
+        app.session.input(Input::Point(PointInput::Picked(Vec2::new(5.0, 6.0)))).unwrap();
         // X scale, Y scale and rotation take their defaults.
         for _ in 0..3 {
             app.session.input(Input::Enter).unwrap();

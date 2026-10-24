@@ -2,7 +2,7 @@ use cadcraft_doc::{EntityKind, Handle, Space};
 use cadcraft_geom::{Arc, Polyline, Vec2};
 use serde_json::{Value, json};
 
-use crate::Session;
+use crate::{PointInput, Session};
 
 fn last(s: &Session) -> EntityKind {
     s.doc().unwrap().model.last().unwrap().kind.clone()
@@ -707,7 +707,7 @@ fn editing_commands_leave_locked_layer_objects_alone() {
     // The interactive STRETCH (crossing window, base point, second point) too.
     s.start("stretch").unwrap();
     for (x, y) in [(-1.0, -1.0), (11.0, 1.0), (0.0, 0.0), (10.0, 0.0)] {
-        s.input(crate::Input::Point(Vec2::new(x, y))).unwrap();
+        s.input(crate::Input::Point(PointInput::Picked(Vec2::new(x, y)))).unwrap();
     }
     assert_eq!(model_dump(&s), before);
     // Unlocked, the same edits work.

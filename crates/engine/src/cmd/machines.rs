@@ -223,7 +223,7 @@ mod tests {
     use cadcraft_geom::Vec2;
     use serde_json::json;
 
-    use crate::{Input, Session};
+    use crate::{Input, PointInput, Session};
 
     /// Menu/typed invocation of selection commands prompts "Select objects" when nothing is selected
     /// (#126), and acts on the picked objects in one undo step.
@@ -249,7 +249,7 @@ mod tests {
         // COPYBASE asks for the base point first, then for objects.
         s.start("copybase").unwrap();
         assert!(s.prompt_text().contains("Specify base point"), "{}", s.prompt_text());
-        s.input(Input::Point(Vec2::new(3.0, 4.0))).unwrap();
+        s.input(Input::Point(PointInput::Picked(Vec2::new(3.0, 4.0)))).unwrap();
         assert!(s.prompt_text().contains("Select objects"), "{}", s.prompt_text());
         s.input(Input::Pick(vec![hs[0]])).unwrap();
         s.input(Input::Enter).unwrap();

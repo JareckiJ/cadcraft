@@ -1,7 +1,7 @@
 //! The canvas's right-click menu (#325): Repeat, the Clipboard commands with AutoCAD's rules for
 //! what is available, and the selection commands.
 
-use cadcraft_engine::Session;
+use cadcraft_engine::{PointInput, Session};
 use cadcraft_ui_egui::menus::Entry;
 use cadcraft_ui_egui::{CadApp, Services, context_menu};
 use serde_json::json;
@@ -146,7 +146,7 @@ fn snap_menu_types_point_modifiers_and_snap_overrides() {
     context_menu::choose_snap(&mut app, "_endp");
     assert_eq!(app.session.snap_override(), Some(cadcraft_engine::snap::mode::END));
     assert!(app.session.prompt_text().ends_with("Endpoint of:"), "{}", app.session.prompt_text());
-    app.session.input(cadcraft_engine::Input::Point(cadcraft_geom::Vec2::new(9.98, 0.02))).unwrap();
+    app.session.input(cadcraft_engine::Input::Point(PointInput::Picked(cadcraft_geom::Vec2::new(9.98, 0.02)))).unwrap();
     assert_eq!(app.session.last_point, cadcraft_geom::Vec2::new(10.0, 0.0));
     context_menu::choose_snap(&mut app, "_non");
     assert_eq!(app.session.snap_override(), Some(0));

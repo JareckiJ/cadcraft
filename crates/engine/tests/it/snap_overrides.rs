@@ -4,7 +4,7 @@
 use cadcraft_doc::EntityKind;
 use cadcraft_engine::pointmod::snap_candidates;
 use cadcraft_engine::snap::{self, mode};
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use cadcraft_geom::Vec2;
 
 /// A session with a line 0,0–10,0, a line 10,0–10,10 and a circle at 20,20 radius 3. The
@@ -75,7 +75,7 @@ fn nothing_to_snap_to_rejects_the_point() {
     assert!(s.prompt_text().contains("Specify first point"), "{}", s.prompt_text());
     // A picked point goes through the same override.
     s.cmdline("end").unwrap();
-    s.input(Input::Point(Vec2::new(10.04, 9.96))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(10.04, 9.96)))).unwrap();
     assert!(s.prompt_text().contains("Specify next point"), "{}", s.prompt_text());
     assert!(near(s.last_point, 10.0, 10.0));
 }

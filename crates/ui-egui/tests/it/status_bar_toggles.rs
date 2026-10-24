@@ -3,7 +3,7 @@
 
 use cadcraft_engine::doc::{Drawing, EntityKind, Space};
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use cadcraft_ui_egui::{CadApp, Services};
 use egui::vec2;
 use egui_kittest::Harness;
@@ -35,7 +35,7 @@ fn clicking_grid_and_snap_on_the_status_bar_keeps_line_running() {
     {
         let s = &mut h.state_mut().session;
         s.start("line").unwrap();
-        s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
+        s.input(Input::Point(PointInput::Picked(Vec2::new(0.0, 0.0)))).unwrap();
     }
     h.run_steps(2);
     h.get_by_label("Grid (F7)").click();
@@ -45,7 +45,7 @@ fn clicking_grid_and_snap_on_the_status_bar_keeps_line_running() {
     assert_eq!(h.state().session.settings.gridmode, !grid);
     assert_eq!(h.state().session.settings.snapmode, !snap);
     assert_eq!(running(&h).as_deref(), Some("line"));
-    h.state_mut().session.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
+    h.state_mut().session.input(Input::Point(PointInput::Picked(Vec2::new(10.0, 0.0)))).unwrap();
     let lines: Vec<_> = h
         .state()
         .session

@@ -370,12 +370,12 @@ impl Interactive for PlotWindowM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match (i, self.first) {
-            (Input::Point(p), None) => {
-                self.first = Some(p);
+            (Input::Point(pi), None) => {
+                self.first = Some(pi.point());
                 Ok(Step::Continue)
             }
-            (Input::Point(p), Some(a)) => {
-                set_plot_window(s, a, p)?;
+            (Input::Point(pi), Some(a)) => {
+                set_plot_window(s, a, pi.point())?;
                 Ok(Step::Done)
             }
             (Input::Cancel, _) => Ok(Step::Cancel),
