@@ -800,6 +800,14 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             return Err(bad(cmd, "`offset` must contain exactly two finite millimetre values within ±100000"));
         }
     }
+    // A printer takes the PDF (before the output's own checks: an SVG asked for is not what prints).
+    if printer.is_some()
+        && let Some(o) = opts.as_object_mut()
+    {
+        o.insert("output".into(), json!("pdf"));
+        // Printers feed portrait sheets: a landscape plot comes already turned.
+        o.insert("portraitMedia".into(), json!(true));
+    }
     if matches!(space, Space::Model)
         && opts.get("output").and_then(Value::as_str).is_some_and(|output| output.eq_ignore_ascii_case("svg"))
         && opts.get("center").and_then(Value::as_bool) == Some(false)
@@ -807,12 +815,6 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         return Err(bad(cmd, "model-space plot offsets are not supported for SVG; choose PDF/PNG or center the plot"));
     }
     if let Some(o) = opts.as_object_mut() {
-        // A printer takes the PDF.
-        if printer.is_some() {
-            o.insert("output".into(), json!("pdf"));
-            // Printers feed portrait sheets: a landscape plot comes already turned.
-            o.insert("portraitMedia".into(), json!(true));
-        }
         if let Some(v) = p.get("scale") {
             let k = parse_scale(v).ok_or_else(|| bad(cmd, "`scale` must be positive: paper units per drawing unit, or a ratio such as \"1:50\""))?;
             o.insert("scale".into(), json!(k));

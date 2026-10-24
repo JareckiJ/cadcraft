@@ -69,6 +69,12 @@ fn system_printers_are_devices_and_plot_prints_on_them() {
     assert!(r.get("data").is_some() && r.get("job").is_none());
     assert!(JOBS.lock().unwrap().is_empty());
 
+    // A printer takes the PDF before the output's own checks: an SVG with a model-space offset
+    // (which SVG refuses) still prints.
+    let r = s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "output": "svg", "center": false, "offset": [5, 5] })).unwrap();
+    assert_eq!(r["job"], "Office_T120-7", "{r}");
+    assert_eq!(JOBS.lock().unwrap().pop().unwrap().4["output"], "pdf");
+
     // A `printer` passed with the call never prints: EXPORTPDF and PLOT without a printer
     // device write their file.
     let r = s.execute("exportpdf", &json!({ "layout": "Model", "printer": "Office_T120" })).unwrap();
