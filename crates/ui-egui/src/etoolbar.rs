@@ -151,21 +151,29 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                     }
                     ui.vertical(|ui| {
                         ui.add_space(2.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
-                            for (icon, act, caption, tip) in group.iter() {
-                                let enabled = has_doc || !needs_drawing(*act);
-                                let r = ui.add_enabled_ui(enabled, |ui| ribbon_button(ui, *icon, caption, tip)).inner;
-                                if r.clicked() {
-                                    clicked = Some(*act);
+                        let row = ui
+                            .horizontal(|ui| {
+                                ui.spacing_mut().item_spacing = vec2(1.0, 0.0);
+                                for (icon, act, caption, tip) in group.iter() {
+                                    let enabled = has_doc || !needs_drawing(*act);
+                                    let r = ui.add_enabled_ui(enabled, |ui| ribbon_button(ui, *icon, caption, tip)).inner;
+                                    if r.clicked() {
+                                        clicked = Some(*act);
+                                    }
                                 }
-                            }
-                        });
+                            })
+                            .response
+                            .rect;
                         // The group's title under its buttons, like a ribbon panel.
                         let title = TITLES.get(gi).copied().unwrap_or("");
-                        ui.vertical_centered(|ui| {
-                            ui.label(egui::RichText::new(crate::i18n::t(title)).size(10.0).color(t.text_dim));
-                        });
+                        let (r, _) = ui.allocate_exact_size(vec2(row.width(), 11.0), Sense::hover());
+                        ui.painter().text(
+                            r.center(),
+                            egui::Align2::CENTER_CENTER,
+                            crate::i18n::t(title),
+                            egui::FontId::proportional(10.0),
+                            t.text_dim,
+                        );
                     });
                 }
                 ui.add_space(6.0);

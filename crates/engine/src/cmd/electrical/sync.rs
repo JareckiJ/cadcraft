@@ -380,6 +380,26 @@ pub(super) fn active_grid(s: &Session) -> Result<Grid> {
     grid_for(&place_of_active(s)?)
 }
 
+/// Parameters that make ETAG on the active drawing project-aware: its sheet number in the open
+/// project, and the main-device tags already used on the project's other sheets (from the
+/// database). Outside a project: none.
+pub(super) fn tag_context(s: &Session) -> Value {
+    let Ok(place) = place_of_active(s) else { return json!({}) };
+    let Some((proj, pr)) = &place.project else { return json!({}) };
+    let mut v = sheet_params(pr, u64::from(place.page.sheet));
+    if let Ok(db) = open_db(Some(proj))
+        && let Ok(devs) = db.devices()
+    {
+        let reserved: Vec<String> = devs
+            .into_iter()
+            .filter(|d| !d.child && d.graphic.as_ref().is_some_and(|g| g.page != place.page.id) && !d.tag.is_empty())
+            .map(|d| d.tag)
+            .collect();
+        v["reserved"] = json!(reserved);
+    }
+    v
+}
+
 /// The devices on the other pages of the active drawing's project, as cross-referencing sees
 /// them (from the database, as last synchronised). Empty outside a project.
 pub(super) fn devices_elsewhere(s: &Session) -> Result<Vec<super::xref::RefDev>> {

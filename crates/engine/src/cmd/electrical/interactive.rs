@@ -177,38 +177,6 @@ impl Interactive for WireTypeM {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn command_line_forms() {
-        let mut s = Session::new();
-        s.start("eladder").unwrap();
-        s.input(Input::Point(Vec2::new(0.0, 240.0))).unwrap();
-        s.input(Input::Point(Vec2::new(210.0, 40.0))).unwrap();
-        assert!(s.running.is_none());
-        s.start("ewiretype").unwrap();
-        s.input(Input::Keyword("BU".into())).unwrap();
-        s.input(Input::Text("1.5".into())).unwrap();
-        assert_eq!(s.doc().unwrap().header.str("CLAYER", ""), "WIRE_BU_1.5");
-        s.start("eplc").unwrap();
-        s.input(Input::Keyword("DO".into())).unwrap();
-        s.input(Input::Text("4".into())).unwrap();
-        s.input(Input::Point(Vec2::new(300.0, 100.0))).unwrap();
-        assert!(s.doc().unwrap().block("PLC_DO4").is_some());
-        s.start("ecable").unwrap();
-        s.input(Input::Point(Vec2::new(10.0, 150.0))).unwrap();
-        s.input(Input::Point(Vec2::new(60.0, 150.0))).unwrap();
-        assert!(s.running.is_none());
-        // A wrong keyword is reported and the prompt stays.
-        s.start("eplc").unwrap();
-        let _ = s.input(Input::Keyword("ZZ".into()));
-        assert!(s.running.is_some());
-        s.cancel();
-    }
-}
-
 /// Commands EPLACE may place.
 pub(super) const PLACEABLE: &[&str] = &["esymbol", "eplc"];
 
@@ -273,5 +241,37 @@ impl Interactive for PlaceM {
             }
             _ => Ok(Step::Continue),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_line_forms() {
+        let mut s = Session::new();
+        s.start("eladder").unwrap();
+        s.input(Input::Point(Vec2::new(0.0, 240.0))).unwrap();
+        s.input(Input::Point(Vec2::new(210.0, 40.0))).unwrap();
+        assert!(s.running.is_none());
+        s.start("ewiretype").unwrap();
+        s.input(Input::Keyword("BU".into())).unwrap();
+        s.input(Input::Text("1.5".into())).unwrap();
+        assert_eq!(s.doc().unwrap().header.str("CLAYER", ""), "WIRE_BU_1.5");
+        s.start("eplc").unwrap();
+        s.input(Input::Keyword("DO".into())).unwrap();
+        s.input(Input::Text("4".into())).unwrap();
+        s.input(Input::Point(Vec2::new(300.0, 100.0))).unwrap();
+        assert!(s.doc().unwrap().block("PLC_DO4").is_some());
+        s.start("ecable").unwrap();
+        s.input(Input::Point(Vec2::new(10.0, 150.0))).unwrap();
+        s.input(Input::Point(Vec2::new(60.0, 150.0))).unwrap();
+        assert!(s.running.is_none());
+        // A wrong keyword is reported and the prompt stays.
+        s.start("eplc").unwrap();
+        let _ = s.input(Input::Keyword("ZZ".into()));
+        assert!(s.running.is_some());
+        s.cancel();
     }
 }

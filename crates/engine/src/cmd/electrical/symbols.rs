@@ -1121,7 +1121,10 @@ fn run_esymbol_inner(s: &mut Session, p: &Value) -> Result<Value> {
     let has_tag1 =
         matches!(s.doc()?.entity(h).map(|e| &e.kind), Some(EntityKind::Insert(i)) if i.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("TAG1")));
     if has_tag1 && str_param(p, "tag").is_none() {
-        super::run_etag(s, &json!({ "handles": [h.hex()] }))?;
+        // In a project: from this sheet's number, unique across the project.
+        let mut params = super::sync::tag_context(s);
+        params["handles"] = json!([h.hex()]);
+        super::run_etag(s, &params)?;
     }
     // A terminal joins its strip (-X1 by default) with the next free number.
     let terminal = matches!(s.doc()?.entity(h).map(|e| &e.kind), Some(EntityKind::Insert(i))
