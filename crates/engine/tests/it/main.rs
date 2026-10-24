@@ -109,6 +109,7 @@ mod select_similar;
 mod select_underscore_keywords;
 mod selection_cycling;
 mod selection_modes;
+mod setvar_cecolor;
 mod setvar_coverage;
 mod shapes;
 mod snap_annotations;
