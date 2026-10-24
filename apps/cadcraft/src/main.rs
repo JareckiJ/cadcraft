@@ -37,8 +37,6 @@ struct App {
     system_animations: system_animations::SystemAnimations,
     workspace: workspace::Workspace,
     workspace_error: Option<String>,
-    /// The system cursor is hidden over the drawing area (see `update_system_cursor`).
-    system_cursor_hidden: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
 }
@@ -49,18 +47,29 @@ impl App {
     /// has focus, so it never stays hidden over other apps.
     fn update_system_cursor(&mut self, ctx: &egui::Context) {
         let hide = self.cad.canvas.hide_system_cursor && ctx.input(|i| i.focused);
-        self.apply_system_cursor(hide);
-    }
-
-    fn apply_system_cursor(&mut self, hide: bool) {
-        if hide != self.system_cursor_hidden {
-            set_system_cursor_hidden(hide);
-            self.system_cursor_hidden = hide;
-        }
+        apply_system_cursor(hide);
     }
 }
 
-/// Each hide is matched by one unhide: `App::apply_system_cursor` calls this only when the state changes.
+/// The system cursor is hidden over the drawing area (see `App::update_system_cursor`). Global, so the native file
+/// dialogs (`services`) can show it while they are open.
+static SYSTEM_CURSOR_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn apply_system_cursor(hide: bool) {
+    if SYSTEM_CURSOR_HIDDEN.swap(hide, std::sync::atomic::Ordering::Relaxed) != hide {
+        set_system_cursor_hidden(hide);
+    }
+}
+
+/// Run a native file dialog with the system cursor shown: it is modal and blocks the frame loop, so a cursor hidden
+/// over the drawing area would stay hidden over the dialog. The next frame hides it again if the pointer is still
+/// over the drawing area.
+fn with_system_cursor<T>(dialog: impl FnOnce() -> T) -> T {
+    apply_system_cursor(false);
+    dialog()
+}
+
+/// Each hide is matched by one unhide: `apply_system_cursor` calls this only when the state changes.
 #[cfg(target_os = "macos")]
 fn set_system_cursor_hidden(hide: bool) {
     if hide {
@@ -129,7 +138,7 @@ impl eframe::App for App {
     /// A normal exit: the workspace is saved, and this run's autosave files are not needed (a
     /// crash leaves them for recovery).
     fn on_exit(&mut self) {
-        self.apply_system_cursor(false);
+        apply_system_cursor(false);
         self.persist_workspace(true);
         self.cad.shutdown_autosave();
     }
@@ -164,19 +173,23 @@ pub fn install_io() {
 fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
-                .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
-                .add_filter(i18n::t("All files"), &["*"])
-                .pick_file()
-                .map(|p| p.to_string_lossy().to_string())
+            with_system_cursor(|| {
+                rfd::FileDialog::new()
+                    .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
+                    .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
+                    .add_filter(i18n::t("All files"), &["*"])
+                    .pick_file()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
         })),
         pick_save: Some(Box::new(|name: &str| {
-            filters_for_save(name)
-                .iter()
-                .fold(rfd::FileDialog::new().set_file_name(name), |d, (label, ext)| d.add_filter(i18n::t(label), &[*ext]))
-                .save_file()
-                .map(|p| p.to_string_lossy().to_string())
+            with_system_cursor(|| {
+                filters_for_save(name)
+                    .iter()
+                    .fold(rfd::FileDialog::new().set_file_name(name), |d, (label, ext)| d.add_filter(i18n::t(label), &[*ext]))
+                    .save_file()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
         })),
     }
 }
@@ -405,7 +418,6 @@ fn main() -> eframe::Result {
                 spacemouse: spacemouse::SpaceMouse::start(cc.egui_ctx.clone()),
                 workspace,
                 workspace_error,
-                system_cursor_hidden: false,
                 #[cfg(target_os = "macos")]
                 native_menu: None,
             }))
