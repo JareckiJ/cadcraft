@@ -19,6 +19,7 @@ mod conductors;
 pub mod generate;
 mod interactive;
 mod manager;
+mod parts;
 mod pins;
 mod plc;
 mod project;
@@ -150,6 +151,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(generate::specs());
     v.extend(terminals::specs());
     v.extend(plc::specs());
+    v.extend(parts::specs());
     v.extend(reports::specs());
     v.extend(conductors::specs());
     v.extend(titleblock::specs());
@@ -379,6 +381,8 @@ fn is_child(d: &Device, overrides: &HashMap<String, String>) -> bool {
 /// `NO` or `NC` for a contact: its `EFAMILY`, else what its block's name says.
 fn kind_of(d: &Device) -> &'static str {
     match d.family.as_deref() {
+        // Groups of a PLC module or a drive placed apart: a plain page reference.
+        Some("PLC" | "VFD") => "",
         Some("NC") => "NC",
         Some("NO") => "NO",
         _ => contact_kind(&d.block),

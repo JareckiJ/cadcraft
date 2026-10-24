@@ -14,11 +14,11 @@ const TEXT_HEIGHT: f64 = 2.5;
 const ROW: f64 = 6.0;
 /// Most rows drawn in one table.
 const MAX_DRAWN_ROWS: usize = 2_000;
-const KINDS: &[&str] = &["bom", "devices", "wirelist", "terminals", "plcio", "cables"];
+const KINDS: &[&str] = &["bom", "devices", "wirelist", "terminals", "plcio", "plcmodules", "cables"];
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec::new("ereport", "Electrical Report", run_report).menu(&["Tools", "Electrical", "Reports", "Report..."]).params(
-        "{kind: bom | devices | wirelist | terminals | plcio | cables, csv?: bool (return CSV text), path? (save CSV there), \
+        "{kind: bom | devices | wirelist | terminals | plcio | plcmodules | cables, csv?: bool (return CSV text), path? (save CSV there), \
                  draw?: {at: [x, y]} (draw it as a table), project? (.ecproj; default: the open project — every sheet)} → {kind, columns, rows, csv?}",
     )]
 }
@@ -171,6 +171,9 @@ pub(super) fn report(s: &mut Session, kind: &str, project: Option<&str>) -> Resu
         "terminals" => (vec!["Strip", "Terminal", "Wire", "Target (top)", "Target (bottom)", "Wire"], per_sheet(s, project, terminal_rows)?),
         "cables" => (vec!["Cable", "Type", "Core", "Wire", "From", "To"], per_sheet(s, project, cable_rows)?),
         "plcio" => (vec!["Address", "Card", "Point", "Connected", "Wire"], per_sheet(s, project, plc_rows)?),
+        "plcmodules" => {
+            (vec!["Tag", "Manufacturer", "Catalogue no.", "Line 1", "Line 2", "First address", "Last address"], per_sheet(s, project, module_rows)?)
+        }
         _ => return Err(bad("ereport", format!("`kind` must be one of {}", KINDS.join(", ")))),
     })
 }
@@ -206,6 +209,10 @@ fn cable_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
         }
     }
     Ok(rows)
+}
+
+fn module_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {
+    super::parts::modules(s)
 }
 
 fn plc_rows(s: &mut Session) -> Result<Vec<Vec<String>>> {

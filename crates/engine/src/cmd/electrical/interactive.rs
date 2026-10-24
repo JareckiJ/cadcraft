@@ -178,7 +178,7 @@ impl Interactive for WireTypeM {
 }
 
 /// Commands EPLACE may place.
-pub(super) const PLACEABLE: &[&str] = &["esymbol", "eplc"];
+pub(super) const PLACEABLE: &[&str] = &["esymbol", "eplc", "epart"];
 
 /// EPLACE at the command line: the insertion point for what a dialog prepared
 /// ([`Session::place_preset`]); each click places one more, Enter ends.

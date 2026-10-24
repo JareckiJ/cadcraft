@@ -173,6 +173,10 @@ pub(super) fn io_list(s: &Session) -> Result<Vec<IoPoint>> {
                 .find(|a| a.tag.eq_ignore_ascii_case(&format!("ADDR{:02}", i + 1)))
                 .map(|a| a.text.value.clone())
                 .unwrap_or_default();
+            // A manufacturer part's supply and common terminals have no address.
+            if addr.is_empty() && ins.attribs.iter().any(|a| a.tag.eq_ignore_ascii_case("EPART")) {
+                continue;
+            }
             let at = Vec2::new(pin.position[0], pin.position[1]);
             let net = nets.iter().find(|n| n.pins.iter().any(|(h, _, q)| *h == e.handle && q.near(at, 1e-6)));
             let connected = net

@@ -97,11 +97,12 @@ fn facts(s: &mut Session, sheet: Option<u64>, unconnected: bool) -> Result<Sheet
                 })
                 .unwrap_or_default()
         };
-        // Spare PLC points and cable symbols are not expected to be wired.
+        // Spare PLC points and drive terminals, and cable symbols are not expected to be wired.
         let mut open: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for p in &ix.pins {
             let block = blocks.get(&p.insert).map(String::as_str).unwrap_or("");
-            if block.starts_with("PLC_") || block.starts_with("ECABLE") || wired.contains(&(p.insert, p.number.clone())) {
+            if block.starts_with("PLC_") || block.starts_with("VFD_") || block.starts_with("ECABLE") || wired.contains(&(p.insert, p.number.clone()))
+            {
                 continue;
             }
             let tag = tags.get(&p.insert).cloned().unwrap_or_else(|| "?".into());

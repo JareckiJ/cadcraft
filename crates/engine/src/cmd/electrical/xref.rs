@@ -153,6 +153,9 @@ pub(super) fn place_text(p: (u64, u64)) -> String {
 
 /// A main device's line for one of its contacts: `NO 13-14 /2.5`.
 fn contact_line(c: &RefDev, p: (u64, u64)) -> String {
+    if c.kind.is_empty() {
+        return place_text(p);
+    }
     if c.pins.is_empty() { format!("{} {}", c.kind, place_text(p)) } else { format!("{} {} {}", c.kind, c.pins, place_text(p)) }
 }
 
