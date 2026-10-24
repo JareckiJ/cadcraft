@@ -2261,7 +2261,15 @@ fn infer_snap(d: &Drawing, osnap: i64, main: Handle, other: Option<Handle>, at: 
     Some(match osnap {
         1 | 13 => match &e.kind {
             // AutoCAD names a curve's start with 13 and its end with 1 (the stored point is 0,0,0).
-            EntityKind::Line(_) | EntityKind::Arc(_) => {
+            // Other writers use 1 for either end of a line with the point stored: take the nearer.
+            EntityKind::Line(l) => {
+                if osnap == 13 || (at != Vec2::ZERO && l.a.xy().dist(at) <= l.b.xy().dist(at)) {
+                    AssocSnap::Start
+                } else {
+                    AssocSnap::End
+                }
+            }
+            EntityKind::Arc(_) => {
                 if osnap == 13 {
                     AssocSnap::Start
                 } else {
