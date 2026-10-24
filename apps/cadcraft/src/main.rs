@@ -42,6 +42,47 @@ struct App {
 }
 
 impl App {
+    /// The system cursor is hidden over the drawing area, where the drawn crosshair is the pointer (as in games). macOS
+    /// shake-to-locate reveals a cursor that is only made transparent, so it is hidden with AppKit. Only while the window
+    /// has focus, so it never stays hidden over other apps.
+    fn update_system_cursor(&mut self, ctx: &egui::Context) {
+        let hide = self.cad.canvas.hide_system_cursor && ctx.input(|i| i.focused);
+        apply_system_cursor(hide);
+    }
+}
+
+/// The system cursor is hidden over the drawing area (see `App::update_system_cursor`). Global, so the native file
+/// dialogs (`services`) can show it while they are open.
+static SYSTEM_CURSOR_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn apply_system_cursor(hide: bool) {
+    if SYSTEM_CURSOR_HIDDEN.swap(hide, std::sync::atomic::Ordering::Relaxed) != hide {
+        set_system_cursor_hidden(hide);
+    }
+}
+
+/// Run a native file dialog with the system cursor shown: it is modal and blocks the frame loop, so a cursor hidden
+/// over the drawing area would stay hidden over the dialog. The next frame hides it again if the pointer is still
+/// over the drawing area.
+fn with_system_cursor<T>(dialog: impl FnOnce() -> T) -> T {
+    apply_system_cursor(false);
+    dialog()
+}
+
+/// Each hide is matched by one unhide: `apply_system_cursor` calls this only when the state changes.
+#[cfg(target_os = "macos")]
+fn set_system_cursor_hidden(hide: bool) {
+    if hide {
+        objc2_app_kit::NSCursor::hide();
+    } else {
+        objc2_app_kit::NSCursor::unhide();
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_system_cursor_hidden(_hide: bool) {}
+
+impl App {
     fn persist_workspace(&mut self, final_attempt: bool) {
         let result = if final_attempt { self.workspace.save_on_exit(&self.cad.ui) } else { self.workspace.save_if_changed(&self.cad.ui) };
         if let Err(error) = result {
@@ -89,12 +130,15 @@ impl eframe::App for App {
         cadcraft_ui_egui::cmdline::capture_tab(ctx, raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.cad.canvas.hide_system_cursor = false;
         self.cad.ui(ui);
+        self.update_system_cursor(ui.ctx());
         self.persist_workspace(false);
     }
     /// A normal exit: the workspace is saved, and this run's autosave files are not needed (a
     /// crash leaves them for recovery).
     fn on_exit(&mut self) {
+        apply_system_cursor(false);
         self.persist_workspace(true);
         self.cad.shutdown_autosave();
     }
@@ -129,19 +173,23 @@ pub fn install_io() {
 fn services() -> Services {
     Services {
         pick_open: Some(Box::new(|| {
-            rfd::FileDialog::new()
-                .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
-                .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
-                .add_filter(i18n::t("All files"), &["*"])
-                .pick_file()
-                .map(|p| p.to_string_lossy().to_string())
+            with_system_cursor(|| {
+                rfd::FileDialog::new()
+                    .add_filter(i18n::t("Drawings (DWG, DXF)"), &["dwg", "dxf", "dwt"])
+                    .add_filter(i18n::t("SVG drawings (SVG, SVGZ)"), &["svg", "svgz"])
+                    .add_filter(i18n::t("All files"), &["*"])
+                    .pick_file()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
         })),
         pick_save: Some(Box::new(|name: &str| {
-            filters_for_save(name)
-                .iter()
-                .fold(rfd::FileDialog::new().set_file_name(name), |d, (label, ext)| d.add_filter(i18n::t(label), &[*ext]))
-                .save_file()
-                .map(|p| p.to_string_lossy().to_string())
+            with_system_cursor(|| {
+                filters_for_save(name)
+                    .iter()
+                    .fold(rfd::FileDialog::new().set_file_name(name), |d, (label, ext)| d.add_filter(i18n::t(label), &[*ext]))
+                    .save_file()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
         })),
     }
 }
