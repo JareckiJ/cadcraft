@@ -1249,7 +1249,7 @@ pub(crate) fn attributes_section(app: &mut CadApp, ui: &mut egui::Ui) {
     for (tag, value, editable) in &rows {
         prop_row_literal(ui, tag, |ui| {
             if *editable {
-                if let Some(v) = edit_field(ui, ui.id().with(("attrib", uid, h, tag)), value.clone()) {
+                if let Some(v) = edit_field(ui, ui.scope_id().with(("attrib", uid, h, tag)), value.clone()) {
                     set = Some((tag.clone(), v));
                 }
             } else {

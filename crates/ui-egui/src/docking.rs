@@ -224,7 +224,7 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
 /// the same handle in another drawing counts as a new selection. A panel restored open with no
 /// target to show is closed.
 fn follow_selection(workspace: &mut Workspace, app: &crate::CadApp, ui: &egui::Ui) {
-    let id = egui::Id::new("attributes-panel-target");
+    let id = egui::Id::unique("attributes-panel-target");
     let target = if app.ui.show_palettes { crate::palettes::attributes_key(app) } else { None };
     let last = ui.data(|d| d.get_temp::<Option<(u64, cadcraft_engine::doc::Handle)>>(id)).flatten();
     if target == last {
