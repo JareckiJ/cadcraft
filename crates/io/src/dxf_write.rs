@@ -19,6 +19,8 @@ struct W {
     pstyles: HashMap<String, String>,
     /// Upper-case layer name → its LAYER table record handle (group 341 of viewports).
     layers: HashMap<String, String>,
+    /// Upper-case UCS name → its UCS table record handle (groups 345 and 346 of viewports).
+    ucss: HashMap<String, String>,
     /// Persistent reactors of boundary objects: each source object of an associative hatch →
     /// the hatches (groups `{ACAD_REACTORS 330 …}`), from [`hatch_reactors`].
     reactors: HashMap<Handle, Vec<String>>,
@@ -204,7 +206,7 @@ fn annotative_xdata(w: &mut W) {
 
 /// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
 fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
-    let mut ov = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
+    let mut ov = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), ucss: HashMap::new(), reactors: HashMap::new() };
     let mut sah = false;
     for (k, v) in &dm.overrides {
         let Some(field) = DimStyle::field_name(k) else { continue };
@@ -1177,14 +1179,42 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                     w.s(341, h);
                 }
             }
-            // One CADCraft xdata group holds both lists: readers stop at the first group of an app.
-            if !v.frozen_layers.is_empty() || !v.layer_colors.is_empty() {
+            // The viewport's own UCS. Its other unmodelled groups (`extra`) go in after this, just
+            // before the xdata (dxf_raw::finish).
+            if v.ucs.is_some() || v.ucs_per_viewport {
+                w.i(71, i64::from(v.ucs_per_viewport));
+            }
+            // The named and base UCS that are still in the UCS table.
+            let mut ucs_names = (None, None);
+            if let Some(u) = &v.ucs {
+                w.p(110, u.origin);
+                w.p(111, u.x_axis);
+                w.p(112, u.y_axis);
+                w.i(79, i64::from(u.ortho));
+                w.f(146, u.elevation);
+                ucs_names = (live_ucs(&w.ucss, &u.named), live_ucs(&w.ucss, &u.base));
+                for (code, name) in [(345, &ucs_names.0), (346, &ucs_names.1)] {
+                    if let Some((_, h)) = name {
+                        w.s(code, h.clone());
+                    }
+                }
+            }
+            let has_ucs_names = ucs_names.0.is_some() || ucs_names.1.is_some();
+            let has_extra = v.extra.iter().any(|t| !crate::dxf_raw::is_pointer(t.code));
+            // One CADCraft xdata group holds all the lists: readers stop at the first group of an app.
+            if !v.frozen_layers.is_empty() || !v.layer_colors.is_empty() || has_ucs_names || has_extra {
                 w.s(1001, dxf_ext::APP);
                 if !v.frozen_layers.is_empty() {
                     w.xdata(dxf_ext::frozen_xdata(&v.frozen_layers));
                 }
                 if !v.layer_colors.is_empty() {
                     w.xdata(dxf_ext::layer_colors_xdata(&v.layer_colors));
+                }
+                if has_ucs_names {
+                    w.xdata(dxf_ext::ucs_xdata(ucs_names.0.map(|(n, _)| n), ucs_names.1.map(|(n, _)| n)));
+                }
+                if has_extra {
+                    w.xdata(dxf_ext::extra_xdata(&v.extra));
                 }
             }
         }
@@ -1596,6 +1626,12 @@ fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
     (flags, refs)
 }
 
+/// A viewport's named or base UCS with its record handle, if the UCS table still has it.
+fn live_ucs<'a>(ucss: &HashMap<String, String>, name: &'a Option<String>) -> Option<(&'a str, String)> {
+    let n = name.as_deref()?;
+    Some((n, ucss.get(&n.to_ascii_uppercase())?.clone()))
+}
+
 /// Layouts with viewports but without the paper-space viewport (id 1, the sheet itself), keyed
 /// by their first viewport. AutoCAD and DWG take a layout's first viewport as its paper-space
 /// viewport (DWG does not store viewport ids; readers number them in order), so a layout made in
@@ -1749,6 +1785,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         next: d.handseed.max(0x100).saturating_add(0x1000),
         pstyles: HashMap::new(),
         layers: HashMap::new(),
+        ucss: HashMap::new(),
         reactors: hatch_reactors(d),
     };
     // Pre-allocate handles for block records.
@@ -2180,7 +2217,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // UCS: named user coordinate systems (DXF Reference, UCS).
     let th = table_head(&mut w, "UCS", d.ucss.len());
     for u in &d.ucss {
-        record_head(&mut w, "UCS", &th, "AcDbUCSTableRecord");
+        let h = record_head(&mut w, "UCS", &th, "AcDbUCSTableRecord");
+        w.ucss.insert(u.name.to_ascii_uppercase(), h);
         w.s(2, &u.name);
         w.i(70, 0);
         w.p(10, u.origin);
@@ -2217,7 +2255,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.i(70, 0);
         let v = serde_json::to_value(s).unwrap_or_default();
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
-        let mut newer = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
+        let mut newer = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), ucss: HashMap::new(), reactors: HashMap::new() };
         for (field, code, kind) in dxf_ext::DIM_CODES {
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(*kind, x)) else { continue };
             // DIMPOST is written even when empty: a reader that defaults a missing one to "<>"
@@ -2843,6 +2881,7 @@ pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
         next: d.handseed.max(0x100).saturating_add(0x1000),
         pstyles: HashMap::new(),
         layers: HashMap::new(),
+        ucss: HashMap::new(),
         reactors: HashMap::new(),
     };
     let cx = Ctx { target: Version::R2018, ..Ctx::default() };
