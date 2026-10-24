@@ -293,6 +293,14 @@ fn extra(kind: &str, tags: &[Tag], entity: bool, unknown: bool, kept: &HashSet<S
     x
 }
 
+/// The extension dictionary of the record with handle `h` when its own groups don't name one but the
+/// dictionary was found by its owner (see `xdict_of` in [`read`]), and it is kept.
+fn found_xdict(x: &mut ForeignExtra, h: &str, xdict_of: &HashMap<String, String>, kept: &HashSet<String>) {
+    if x.xdict.is_none() {
+        x.xdict = xdict_of.get(h).filter(|d| kept.contains(*d)).and_then(|d| handle(d));
+    }
+}
+
 /// Every entity of the drawing (model space, layouts, blocks).
 fn all_entities(d: &Drawing) -> impl Iterator<Item = &Entity> {
     std::iter::once(&d.model)
@@ -355,6 +363,22 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
     let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
+    // An extension dictionary its owner's record doesn't name (some converters leave the link out:
+    // acadrust's table styles): a dictionary that names an entity or record as its owner and that
+    // no dictionary lists as an entry is that owner's extension dictionary.
+    let listed: HashSet<String> =
+        objects.iter().filter(|(k, _, _)| is_dictionary(k)).flat_map(|(_, _, t)| entries(t).into_iter().map(|(_, h)| h)).collect();
+    for (kind, _, t) in &objects {
+        let hd = head(t);
+        if let (true, Some(h), Some(o)) = (is_dictionary(kind), hd.handle, hd.owner)
+            && Some(&o) != root.as_ref()
+            && !listed.contains(&h)
+            && (ents.contains_key(&o) || ids.contains_key(&o))
+            && !xdict_of.contains_key(&o)
+        {
+            xdict_of.insert(o, h);
+        }
+    }
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
     // An extension dictionary of an entity or record (not of another object).
     let is_xdict = |k: usize| {
@@ -462,6 +486,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(h) = head(t).handle else { continue };
         let Some(&unknown) = ents.get(&h) else { continue };
         let mut x = extra(kind, t, true, unknown, &kept);
+        found_xdict(&mut x, &h, &xdict_of, &kept);
         let Some(hh) = handle(&h) else { continue };
         // Xdata belongs to the entity itself (it follows the entity's copies).
         let xd = std::mem::take(&mut x.xdata);
@@ -474,8 +499,10 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     }
     put_xdata(d, xdata_of);
     for (kind, _, t) in tables.iter().chain(blocks.iter().filter(|(k, _, _)| k == "BLOCK")) {
-        let Some(key) = head(t).handle.and_then(|h| ids.get(&h).cloned()) else { continue };
-        let x = extra(kind, t, kind == "BLOCK", false, &kept);
+        let Some(h) = head(t).handle else { continue };
+        let Some(key) = ids.get(&h).cloned() else { continue };
+        let mut x = extra(kind, t, kind == "BLOCK", false, &kept);
+        found_xdict(&mut x, &h, &xdict_of, &kept);
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
         }
@@ -487,7 +514,8 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             continue;
         }
         let Some(key) = ids.get(&h).cloned() else { continue };
-        let x = extra(kind, t, false, false, &kept);
+        let mut x = extra(kind, t, false, false, &kept);
+        found_xdict(&mut x, &h, &xdict_of, &kept);
         if !x.is_empty() {
             f.records.entry(key).or_insert(x);
         }

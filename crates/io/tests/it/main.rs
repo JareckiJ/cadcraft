@@ -15,10 +15,14 @@ mod dim_marks_roundtrip;
 mod dimstyle_vars_roundtrip;
 mod drafting_spacing;
 #[cfg(not(target_arch = "wasm32"))]
+mod dwg_corpus_handles;
+#[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
 mod dwg_layout_owner;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_roundtrip_losses;
+#[cfg(not(target_arch = "wasm32"))]
+mod dwg_space_markers;
 mod dwt_template;
 mod dxf_versions;
 mod dynblock_read;
@@ -69,4 +73,5 @@ mod tolerance_roundtrip;
 mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
+mod xdict_by_owner;
 mod xref_roundtrip;
