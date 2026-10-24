@@ -188,7 +188,7 @@ Select a language with `engine.execute` and the UI command `ui.language`:
 {"id":1,"method":"engine.execute","params":{"command":"ui.language","params":{"lang":"uk"}}}
 ```
 
-Supported values are `auto`, `en`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `it`, `ko`, `sv`, `ar` and `hu`.
+Supported values are `auto`, `en`, `el`, `uk`, `pt-BR`, `de`, `es`, `cs`, `ru`, `fr`, `zh`, `zh-Hant`, `it`, `ko`, `sv`, `ar`, `hu` and `tr`.
 Chinese needs an installed CJK font, Arabic an installed Arabic font; Korean needs a font covering the Korean interface from the
 optional craft-fonts input or the operating system. Without a suitable font, the saved choice is
 retained and the result's `shown` is `en`. `ui.set` also accepts
@@ -196,5 +196,4 @@ retained and the result's `shown` is `en`. `ui.set` also accepts
 Invalid choices leave the current language unchanged. Menus, command labels and prompt text
 returned by the control channel retain their English source text. See [localization.md](localization.md).
 
-Traditional Chinese prototype: the same language controls also accept `zh-Hant`. This adds
-only a preference value; command IDs and all automation output remain English.
+Traditional Chinese remains a prototype.

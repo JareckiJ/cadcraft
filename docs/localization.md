@@ -164,8 +164,10 @@ wins over the system locale. Auto recognizes `zh-Hant` and unscripted `zh-TW`, `
 region and does not select Traditional Chinese; bare `zh` and explicit `Hans` select Simplified Chinese (`zh`). BCP 47
 extensions do not change script selection.
 
-The catalog covers all 1350 entries in the current Ukrainian reference catalog. This
-integration adds 29 keys and removes the obsolete `WCS ⌄` key. Commands, accepted English
+The Traditional Chinese catalog contains 1350 entries; the Ukrainian reference catalog
+contains 1357. Seven reference keys are missing and fall back to English. The earlier
+integration from `b275021` to `9bfecc7` added 29 keys and removed the obsolete `WCS ⌄`
+key, increasing the catalog from 1322 to 1350 entries. Commands, accepted English
 keywords, CLI/MCP/control labels, drawing text and user names retain their source spelling.
 Traditional Chinese count entries have one plural form.
 
@@ -184,7 +186,7 @@ Chinese preference remains intact. No font files are added by this contribution.
 
 Regression tests cover script/region selection, saved preferences, plural templates,
 unchanged automation/user data, font ordering and stale reference keys. Missing translations
-remain non-fatal under `REPORTED`, matching the other optional catalogs.
+remain non-fatal and are reported by `translation_gaps` through `cargo xtask i18n`.
 The integration received static catalog checks only in the Windows editing environment:
 Rust tooling was unavailable. Compilation, cargo xtask ci, native/embedded-font rendering,
 DPI, layout and persistence still require validation before claiming release support.
