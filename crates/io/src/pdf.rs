@@ -680,6 +680,24 @@ fn rect_path(min: Vec2, max: Vec2) -> Option<Path> {
     pb.finish()
 }
 
+/// Diameter (points) of the dot a zero-length hairline plots: a hairline has no width of its
+/// own, and this is about the thinnest mark that still prints.
+const HAIRLINE_DOT_PT: f32 = 0.25;
+
+/// A circle path (points) around `(x, y)`: four cubic arcs.
+fn circle_path(x: f32, y: f32, r: f32) -> Option<Path> {
+    // Control-point distance of a quarter-circle cubic, as a fraction of the radius.
+    let k = r * 0.552_284_8;
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + r, y);
+    pb.cubic_to(x + r, y + k, x + k, y + r, x, y + r);
+    pb.cubic_to(x - k, y + r, x - r, y + k, x - r, y);
+    pb.cubic_to(x - r, y - k, x - k, y - r, x, y - r);
+    pb.cubic_to(x + k, y - r, x + r, y - k, x + r, y);
+    pb.close();
+    pb.finish()
+}
+
 /// Write one sheet as a page: its size, label, link annotations and marks.
 fn write_page(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mut fonts::Fonts) -> std::result::Result<(), Failure> {
     let (w, h) = (p.media.x as f32, p.media.y as f32);
@@ -817,6 +835,18 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
                 };
                 let Some(pts) = pts.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { continue };
                 if pts.len() < 2 {
+                    continue;
+                }
+                // The writer leaves out a path without extent, so a zero-length line is
+                // painted as the round-cap dot its stroke would make.
+                if let Some(&(x, y)) = pts.first()
+                    && pts.iter().all(|q| *q == (x, y))
+                {
+                    flush(s, &mut batch);
+                    let d = if w > 0.0 { w as f32 } else { HAIRLINE_DOT_PT };
+                    if let Some(path) = circle_path(x, y, d / 2.0) {
+                        fill_path(s, &path, rgb, t);
+                    }
                     continue;
                 }
                 let style = StrokeStyle { rgb, width: w as f32, transparency: t };

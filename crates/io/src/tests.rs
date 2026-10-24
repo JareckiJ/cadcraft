@@ -2516,3 +2516,30 @@ fn drawing_without_insunits_stays_unitless() {
     assert_eq!(insunits(&write_dxf(&Drawing::new_metric())), Some("4".into()));
     assert_eq!(insunits(&write_dxf(&Drawing::new_imperial())), Some("1".into()));
 }
+
+#[test]
+fn pdf_plots_a_zero_length_line_as_a_dot() {
+    let mut d = Drawing::new_metric();
+    let red = |lw| Common { color: Color::Index(1), lineweight: lw, ..Common::default() };
+    // Points at 1:1 on A4, so the dot sits away from the clip edges.
+    let at = Vec3::new(50.0, 50.0, 0.0);
+    d.add(&Space::Model, red(Lineweight::Mm100(100)), EntityKind::Line(Line { a: at, b: at })).unwrap();
+    // The x extent of what the content fills in red: the dot's diameter.
+    let red_fill_width = |o: serde_json::Value| {
+        let content = check_pdf(&plot(&d, &Space::Model, &o).unwrap());
+        let ops = pdf_read::ops(&content);
+        let start = ops.iter().position(|o| o.op == "rg" && o.nums == [1.0, 0.0, 0.0]).expect("a red fill");
+        let end = start + ops[start..].iter().position(|o| o.op == "f").expect("filled");
+        assert!(ops[start..end].iter().filter(|o| o.op == "c").count() == 4, "{content}");
+        let xs: Vec<f64> =
+            ops[start..end].iter().filter(|o| matches!(o.op.as_str(), "m" | "c")).flat_map(|o| o.nums.iter().step_by(2).copied()).collect();
+        xs.iter().copied().fold(f64::MIN, f64::max) - xs.iter().copied().fold(f64::MAX, f64::min)
+    };
+    let opts = |lineweights: bool| serde_json::json!({"paper": "A4", "fit": false, "scale": 1.0, "compress": false, "lineweights": lineweights});
+    // 1 mm lineweight: a dot 1 mm across.
+    let w = red_fill_width(opts(true));
+    assert!((w - 72.0 / 25.4).abs() < 0.01, "{w}");
+    // A hairline still leaves a mark.
+    let w = red_fill_width(opts(false));
+    assert!((w - 0.25).abs() < 0.01, "{w}");
+}
