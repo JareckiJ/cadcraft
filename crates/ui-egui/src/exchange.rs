@@ -490,46 +490,39 @@ mod tests {
         assert_eq!(visible_crop(area(), away), None);
     }
 
-    /// The pixels of a plotted PNG (the `data` of a `plot` result) that look red.
-    fn red_pixels(r: &serde_json::Value) -> (usize, u32, u32) {
-        let png = r["data"].as_str().and_then(cadcraft_engine::cmd::file::base64_decode).unwrap();
-        let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap().to_rgba8();
+    /// The red-looking pixels of a plotted PNG, and its size.
+    fn red_pixels(png: &[u8]) -> (usize, u32, u32) {
+        let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).unwrap().to_rgba8();
         let red = img.pixels().filter(|p| p.0[0] > 180 && p.0[1] < 90 && p.0[2] < 90).count();
         (red, img.width(), img.height())
     }
 
     #[test]
     fn the_preview_draws_the_plot_style_table_of_the_page_setup() {
-        use cadcraft_engine::cmd::file::{IoHooks, set_io};
-        set_io(IoHooks {
-            read: |_, _| Err("no".into()),
-            write: |_, _| Err("no".into()),
-            plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),
-        });
         let (mut app, _) = app();
         app.run("color", json!({ "color": 1 })).unwrap();
         app.run("line", json!({ "points": [[0, 0], [100, 60]] })).unwrap();
         app.run("mview", json!({ "layout": "Layout1" })).unwrap();
         app.run("layout.set", json!({ "name": "Layout1" })).unwrap();
-        let shown = |app: &mut CadApp| {
-            let (params, info) = crate::managers::current_preview(app).unwrap();
-            assert!(info.starts_with("Layout1"), "{info}");
-            app.run("plot", params).unwrap()
+        // The real plotter is called directly: the plot hook is global to the test process, which
+        // other tests replace.
+        let plot = |app: &CadApp, params: &serde_json::Value| {
+            cadcraft_io::plotter::plot(app.session.doc().unwrap(), &cadcraft_doc::Space::Paper("Layout1".into()), params).unwrap()
         };
-        let (plain, w, h) = red_pixels(&shown(&mut app));
+        let (params, info) = crate::managers::current_preview(&app).unwrap();
+        assert!(info.starts_with("Layout1"), "{info}");
+        let (plain, w, h) = red_pixels(&plot(&app, &params));
         assert!(plain > 50, "without a table the red line is drawn red ({plain} red pixels)");
         // The page setup's table is what the preview shows, as it is what plots.
         app.run("pagesetup", json!({ "layout": "Layout1", "plotStyleTable": "monochrome.ctb" })).unwrap();
-        assert_eq!(red_pixels(&shown(&mut app)).0, 0, "monochrome.ctb prints it black");
+        let (mut params, _) = crate::managers::current_preview(&app).unwrap();
+        assert_eq!(red_pixels(&plot(&app, &params)).0, 0, "monochrome.ctb prints it black");
         // The Plot dialog's "None" is sent as such, so it overrides the layout's own table.
-        let (mut params, _) = crate::managers::current_preview(&app).unwrap();
         params["plotStyleTable"] = json!("None");
-        assert!(red_pixels(&app.run("plot", params).unwrap()).0 > 50, "None overrides the page setup's table");
+        assert!(red_pixels(&plot(&app, &params)).0 > 50, "None overrides the page setup's table");
         // A crop is that part of the sheet, at the same scale.
-        let (mut params, _) = crate::managers::current_preview(&app).unwrap();
-        params["plotStyleTable"] = json!("None");
         params["crop"] = json!([0.25, 0.25, 0.75, 0.75]);
-        let (_, cw, ch) = red_pixels(&app.run("plot", params).unwrap());
+        let (_, cw, ch) = red_pixels(&plot(&app, &params));
         assert!((i64::from(cw) - i64::from(w) / 2).abs() <= 1 && (i64::from(ch) - i64::from(h) / 2).abs() <= 1, "{cw}x{ch} of {w}x{h}");
     }
 }

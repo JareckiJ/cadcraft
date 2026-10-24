@@ -21,8 +21,9 @@ fn recording_plot(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>, S
     cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())
 }
 
+/// The PNG plots so far: other tests in this process also plot (to PDF) through the global hook.
 fn plots() -> Vec<Value> {
-    PLOTS.lock().map(|p| p.clone()).unwrap_or_default()
+    PLOTS.lock().map(|p| p.iter().filter(|o| o["output"] == "png").cloned().collect()).unwrap_or_default()
 }
 
 #[test]
