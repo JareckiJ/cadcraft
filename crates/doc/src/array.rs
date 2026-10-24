@@ -62,6 +62,87 @@ pub struct SourceEdit {
 pub enum ArrayKind {
     Rect(RectArray),
     Polar(PolarArray),
+    Path(PathArray),
+}
+
+/// The most vertices a path array keeps of its path.
+pub const MAX_PATH_POINTS: usize = 20_000;
+
+/// A path array: items along a curve. The curve is kept as the polyline it was flattened to
+/// (arcs and splines in short chords), starting at the array's base point, so the items stay
+/// where they were put when the original curve is edited or erased.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathArray {
+    /// The path from its start, relative to the first vertex (so the first is the origin).
+    pub points: Vec<Vec2>,
+    /// The path returns to its start (a segment joins the last vertex to the first).
+    #[serde(default)]
+    pub closed: bool,
+    /// Items along the path, the first at its start.
+    pub count: u32,
+    /// Items divide the path evenly; otherwise they are `spacing` apart along it.
+    pub divide: bool,
+    #[serde(default)]
+    pub spacing: f64,
+    /// Items turn with the path (else they keep their orientation).
+    pub align: bool,
+}
+
+impl PathArray {
+    /// The path's segments with the length up to the end of each, and the total length;
+    /// `None` when a vertex is not finite or the path has no length.
+    fn segments(&self) -> Option<(Vec<(Vec2, Vec2, f64)>, f64)> {
+        let closing = if self.closed { self.points.last().copied().zip(self.points.first().copied()) } else { None };
+        let pairs = self.points.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).chain(closing);
+        let mut out = Vec::new();
+        let mut total = 0.0;
+        for (a, b) in pairs {
+            let l = a.dist(b);
+            if l > 1e-12 {
+                total += l;
+                out.push((a, b, total));
+            }
+        }
+        (total.is_finite() && total > 1e-12).then_some((out, total))
+    }
+
+    /// Whether the path can carry items: 2 to [`MAX_PATH_POINTS`] finite vertices with a
+    /// length, a finite spacing (above zero unless the items divide the path).
+    pub fn is_valid(&self) -> bool {
+        (2..=MAX_PATH_POINTS).contains(&self.points.len())
+            && self.count >= 1
+            && self.points.iter().all(|p| p.x.is_finite() && p.y.is_finite())
+            && self.spacing.is_finite()
+            && (self.divide || (self.spacing > 0.0 && (self.spacing * f64::from(self.count)).is_finite()))
+            && self.segments().is_some()
+    }
+
+    /// Each item's offset from the first and its turn (radians), in order.
+    fn placed(&self) -> Option<Vec<(Vec2, f64)>> {
+        let (segs, total) = self.segments()?;
+        let step = if self.divide {
+            let gaps = if self.closed { self.count } else { self.count.max(2) - 1 };
+            total / f64::from(gaps)
+        } else {
+            self.spacing
+        };
+        let at = |d: f64| {
+            let d = if self.closed { d.rem_euclid(total) } else { d.clamp(0.0, total) };
+            let k = segs.partition_point(|s| s.2 < d).min(segs.len().saturating_sub(1));
+            let (a, b, end) = *segs.get(k)?;
+            let l = a.dist(b);
+            let t = if l > 0.0 { (1.0 - (end - d) / l).clamp(0.0, 1.0) } else { 0.0 };
+            Some((a + (b - a) * t, (b - a).angle()))
+        };
+        let (p0, a0) = at(0.0)?;
+        (0..self.count)
+            .map(|i| {
+                let (p, a) = at(step * f64::from(i))?;
+                Some((p - p0, if self.align { a - a0 } else { 0.0 }))
+            })
+            .collect()
+    }
 }
 
 /// A rectangular array: columns along the axis angle, rows across it.
@@ -128,6 +209,7 @@ impl ArrayParams {
         match &self.kind {
             ArrayKind::Rect(r) => (r.cols, r.rows),
             ArrayKind::Polar(p) => (p.items, p.rows),
+            ArrayKind::Path(p) => (p.count, 1),
         }
     }
 
@@ -145,7 +227,11 @@ impl ArrayParams {
         let nums = match &self.kind {
             ArrayKind::Rect(r) => [r.col_spacing, r.row_spacing, r.axis_angle, r.row_elevation, 0.0, 0.0],
             ArrayKind::Polar(p) => [p.center.x, p.center.y, p.fill, p.row_spacing, p.row_elevation, 0.0],
+            ArrayKind::Path(_) => [0.0; 6],
         };
+        if matches!(&self.kind, ArrayKind::Path(p) if !p.is_valid()) {
+            return false;
+        }
         a >= 1
             && b >= 1
             && self.levels >= 1
@@ -163,6 +249,11 @@ impl ArrayParams {
         }
         let n = usize::try_from(self.item_count()).ok()?;
         let mut out = Vec::with_capacity(n);
+        // A path's placement does not depend on the level: build it once, not once per level.
+        let path_placed = match &self.kind {
+            ArrayKind::Path(p) => Some(p.placed()?),
+            _ => None,
+        };
         for level in 0..self.levels {
             let lz = self.level_spacing * f64::from(level);
             match &self.kind {
@@ -173,6 +264,11 @@ impl ArrayParams {
                             let p = ux * (r.col_spacing * f64::from(i)) + uy * (r.row_spacing * f64::from(j));
                             out.push(ArrayItem { i, j, level, insert: p.to3(lz + r.row_elevation * f64::from(j)), rotation: 0.0 });
                         }
+                    }
+                }
+                ArrayKind::Path(_) => {
+                    for (i, (at, rotation)) in path_placed.iter().flatten().enumerate() {
+                        out.push(ArrayItem { i: u32::try_from(i).ok()?, j: 0, level, insert: at.to3(lz), rotation: *rotation });
                     }
                 }
                 ArrayKind::Polar(p) => {
@@ -343,5 +439,100 @@ mod tests {
         p = rect(2, 2);
         p.level_spacing = f64::NAN;
         assert!(!p.is_valid());
+    }
+
+    fn path(points: &[(f64, f64)], closed: bool, count: u32, divide: bool, spacing: f64, align: bool) -> ArrayParams {
+        let first = points.first().map_or(Vec2::ZERO, |p| Vec2::new(p.0, p.1));
+        let points = points.iter().map(|p| Vec2::new(p.0, p.1) - first).collect();
+        ArrayParams {
+            source: "*U1".into(),
+            kind: ArrayKind::Path(PathArray { points, closed, count, divide, spacing, align }),
+            levels: 1,
+            level_spacing: 0.0,
+            replaced: Vec::new(),
+            editing: None,
+        }
+    }
+
+    #[test]
+    fn path_items_divide_the_path_and_turn_with_it() {
+        // An L: 10 along +X, then 10 along +Y; 5 items divide its 20 units into steps of 5.
+        let items = path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], false, 5, true, 0.0, true).items().unwrap_or_default();
+        let at: Vec<(Vec2, f64)> = items.iter().map(|i| (i.insert.xy(), i.rotation)).collect();
+        assert_eq!(at.len(), 5);
+        assert!(at[1].0.near(Vec2::new(5.0, 0.0), 1e-9) && at[1].1.abs() < 1e-9);
+        assert!(at[2].0.near(Vec2::new(10.0, 0.0), 1e-9));
+        assert!(at[3].0.near(Vec2::new(10.0, 5.0), 1e-9) && (at[3].1 - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        assert!(at[4].0.near(Vec2::new(10.0, 10.0), 1e-9));
+        // Without alignment the items keep their orientation.
+        let flat = path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], false, 5, true, 0.0, false).items().unwrap_or_default();
+        assert!(flat.iter().all(|i| i.rotation == 0.0));
+    }
+
+    #[test]
+    fn closed_path_items_do_not_repeat_the_start() {
+        let sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)];
+        let items = path(&sq, true, 4, true, 0.0, true).items().unwrap_or_default();
+        assert_eq!(items.len(), 4);
+        assert!(items[1].insert.xy().near(Vec2::new(4.0, 0.0), 1e-9));
+        assert!(items[3].insert.xy().near(Vec2::new(0.0, 4.0), 1e-9));
+    }
+
+    #[test]
+    fn path_items_at_a_fixed_spacing_stop_on_the_path() {
+        let items = path(&[(0.0, 0.0), (10.0, 0.0)], false, 3, false, 4.0, true).items().unwrap_or_default();
+        assert!(items[2].insert.xy().near(Vec2::new(8.0, 0.0), 1e-9));
+        // More items than fit stay on the end of an open path.
+        let items = path(&[(0.0, 0.0), (10.0, 0.0)], false, 5, false, 4.0, true).items().unwrap_or_default();
+        assert!(items[4].insert.xy().near(Vec2::new(10.0, 0.0), 1e-9));
+    }
+
+    #[test]
+    fn hostile_paths_are_invalid() {
+        assert!(!path(&[(0.0, 0.0), (0.0, 0.0)], false, 3, true, 0.0, true).is_valid(), "no length");
+        assert!(!path(&[(0.0, 0.0), (f64::NAN, 1.0)], false, 3, true, 0.0, true).is_valid());
+        assert!(!path(&[(0.0, 0.0), (1.0, 0.0)], false, 0, true, 0.0, true).is_valid());
+        assert!(!path(&[(0.0, 0.0), (1.0, 0.0)], false, 3, false, 0.0, true).is_valid(), "spacing needs a length");
+        assert!(!path(&[(0.0, 0.0), (1.0, 0.0)], false, 3, false, f64::NAN, true).is_valid());
+        assert!(path(&[(0.0, 0.0), (1.0, 0.0)], false, u32::MAX, true, 0.0, true).items().is_none());
+        let long: Vec<(f64, f64)> = (0..=MAX_PATH_POINTS).map(|i| (i as f64, 0.0)).collect();
+        assert!(!path(&long, false, 3, true, 0.0, true).is_valid());
+    }
+
+    #[test]
+    fn hostile_path_with_many_levels_places_the_path_once() {
+        // 20,000 vertices, one item per level, 100,000 levels: every limit holds on its own,
+        // and rebuilding the path for each level would visit about 2e9 segments.
+        let long: Vec<(f64, f64)> = (0..MAX_PATH_POINTS).map(|i| (i as f64, 0.0)).collect();
+        let mut p = path(&long, false, 1, true, 0.0, true);
+        p.levels = 100_000;
+        p.level_spacing = 1.0;
+        let started = std::time::Instant::now();
+        let items = p.items().unwrap_or_default();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
+        assert_eq!(items.len(), 100_000);
+        assert!(items.iter().enumerate().all(|(l, i)| i.level as usize == l && i.insert.xy() == Vec2::ZERO));
+    }
+
+    #[test]
+    fn spacing_that_overflows_the_item_distance_is_invalid() {
+        let sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)];
+        let p = path(&sq, true, 3, false, 1e308, true);
+        assert!(!p.is_valid() && p.items().is_none(), "1e308 x 2 is infinity, which rem_euclid turns into NaN");
+        assert!(path(&sq, true, 3, false, 1e300, true).is_valid());
+    }
+
+    #[test]
+    fn path_levels_repeat_the_same_placement() {
+        let mut p = path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], false, 3, true, 0.0, true);
+        p.levels = 3;
+        p.level_spacing = 2.0;
+        let items = p.items().unwrap_or_default();
+        assert_eq!(items.len(), 9);
+        for (k, item) in items.iter().enumerate() {
+            let first = items.get(k % 3).copied();
+            assert_eq!(Some((item.insert.xy(), item.rotation)), first.map(|f| (f.insert.xy(), f.rotation)));
+            assert_eq!(item.insert.z, 2.0 * (k / 3) as f64);
+        }
     }
 }

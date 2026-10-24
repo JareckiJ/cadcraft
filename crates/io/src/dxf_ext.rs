@@ -663,9 +663,15 @@ fn json_chunks(json: &str) -> Vec<String> {
     chars.chunks(250).map(|c| c.iter().collect()).collect()
 }
 
+/// Most bytes of array parameters written as xdata. Other programs keep at most 16 KB of xdata
+/// per object, and a path array's path can pass that.
+pub(crate) const MAX_ARRAY_XDATA_BYTES: usize = 12_000;
+
 /// An associative array's parameters as CADCraft xdata on its block record: `1000 ARRAY`,
 /// `1002 {`, the JSON text in `1000` strings short enough for the 255-byte limit even when
-/// characters are written as `\U+XXXX` escapes, `1002 }`.
+/// characters are written as `\U+XXXX` escapes, `1002 }`. Empty when the xdata, measured as
+/// written with those escapes, passes [`MAX_ARRAY_XDATA_BYTES`]: the array is then saved as a
+/// plain block of its items.
 pub(crate) fn array_xdata(p: &ArrayParams) -> Vec<Tag> {
     let Ok(json) = serde_json::to_string(p) else { return Vec::new() };
     let safe = json_chunks(&json).concat();
@@ -684,6 +690,11 @@ pub(crate) fn array_xdata(p: &ArrayParams) -> Vec<Tag> {
         v.push(Tag::s(1000, cur));
     }
     v.push(Tag::s(1002, "}"));
+    let mut all = vec![Tag::s(1001, APP)];
+    all.extend(v.iter().cloned());
+    if cadcraft_dxf::write_ascii(&all).len() > MAX_ARRAY_XDATA_BYTES {
+        return Vec::new();
+    }
     v
 }
 

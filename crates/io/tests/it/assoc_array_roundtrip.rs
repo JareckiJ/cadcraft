@@ -129,3 +129,98 @@ fn renamed_blocks_are_followed() {
     assert!(back.block("*U2").unwrap().array.is_none());
     assert_eq!(back.block("*U2").unwrap().entities.len(), 19);
 }
+
+#[test]
+fn path_array_parameters_survive_a_dxf_round_trip() {
+    let mut d = drawing();
+    let path = PathArray {
+        points: vec![Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(10.0, 7.5)],
+        closed: false,
+        count: 4,
+        divide: false,
+        spacing: 3.25,
+        align: true,
+    };
+    let p = ArrayParams { kind: ArrayKind::Path(path), levels: 1, level_spacing: 0.0, replaced: Vec::new(), ..params("*U1") };
+    let items = p.item_entities(&mut d).unwrap();
+    assert_eq!(items.len(), 4);
+    let mut arr = Block::new("*U3");
+    for e in items {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p.clone());
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert_eq!(back.block("*U3").unwrap().array.as_ref(), Some(&p));
+    // A path array whose stored path has no length is read as a plain block.
+    let mut bad = p.clone();
+    if let ArrayKind::Path(k) = &mut bad.kind {
+        k.points = vec![Vec2::ZERO, Vec2::ZERO];
+    }
+    let mut blk = (**d.block("*U3").unwrap()).clone();
+    blk.array = Some(bad);
+    d.blocks.insert("*U3".into(), Arc::new(blk));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 4);
+}
+
+/// A drawing whose block "*U3" is a path array along `points`, with `count` items.
+fn path_array_drawing(points: Vec<Vec2>, count: u32) -> (Drawing, ArrayParams) {
+    let mut d = drawing();
+    let path = PathArray { points, closed: false, count, divide: true, spacing: 0.0, align: true };
+    let p = ArrayParams { kind: ArrayKind::Path(path), levels: 1, level_spacing: 0.0, replaced: Vec::new(), ..params("*U1") };
+    let mut arr = Block::new("*U3");
+    for e in p.item_entities(&mut d).unwrap() {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p.clone());
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    (d, p)
+}
+
+#[test]
+fn path_arrays_too_large_for_xdata_are_saved_as_plain_blocks() {
+    // A circle flattened as ARRAYPATH does (2-degree chords, 180 vertices) fits.
+    let circle: Vec<Vec2> = (0..180)
+        .map(|i| Vec2::new(7.123456789 * (f64::from(i) * 2f64).to_radians().cos(), 7.123456789 * (f64::from(i) * 2f64).to_radians().sin()))
+        .collect();
+    let (d, p) = path_array_drawing(circle, 6);
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert_eq!(back.block("*U3").unwrap().array.as_ref(), Some(&p));
+    // A path past the xdata budget is left out: no orphaned CADCRAFT group on the record, and the
+    // array reopens as a plain block that still has every item.
+    let long: Vec<Vec2> = (0..2_000).map(|i| Vec2::new(f64::from(i) * 0.123456789, (f64::from(i) * 0.1).sin())).collect();
+    let (d, _) = path_array_drawing(long, 9);
+    let text = write_dxf(&d).replace("\r\n", "\n");
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 9);
+    assert!(!text.contains("\n1001\nCADCRAFT\n  0\n"), "an empty CADCRAFT xdata group was written");
+    // The other array in the drawing keeps its parameters.
+    assert!(back.block("*U2").unwrap().array.is_some());
+}
+
+#[test]
+fn the_xdata_budget_counts_escaped_characters() {
+    // Every item replaced by a block with a 40-character CJK name: about 9 KB of UTF-8 JSON, but
+    // each character is written as a 7-byte \U+XXXX escape, so the xdata passes the budget.
+    let name: String = "图块".repeat(20);
+    let (mut d, mut p) = path_array_drawing(vec![Vec2::ZERO, Vec2::new(100.0, 0.0)], 60);
+    let mut other = Block::new(&name);
+    let h = d.new_handle();
+    other.entities.push(Entity::new(h, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) })));
+    d.blocks.insert(name.clone(), Arc::new(other));
+    p.replaced = (0..60).map(|i| ReplacedItem { i, j: 0, level: 0, block: name.clone() }).collect();
+    let json_bytes = serde_json::to_string(&p).unwrap().len();
+    assert!(json_bytes < 12_000, "{json_bytes}");
+    let mut arr = Block::new("*U3");
+    for e in p.item_entities(&mut d).unwrap() {
+        arr.entities.push(e);
+    }
+    arr.array = Some(p);
+    d.blocks.insert("*U3".into(), Arc::new(arr));
+    let back = read_dxf(write_dxf(&d).as_bytes()).unwrap();
+    assert!(back.block("*U3").unwrap().array.is_none());
+    assert_eq!(back.block("*U3").unwrap().entities.len(), 60);
+}
