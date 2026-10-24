@@ -1,6 +1,6 @@
 # Geometry parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (bounded constraint expression and parameter depth) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (exact conic kernel: ellipse intersections and closest points) · **Target:** Autodesk AutoCAD 2027
 
 CAD users trust numbers: a trimmed endpoint, an offset, an intersection or an area is either right
 to the last displayed digit or the tool is unusable for production drawings. This document
@@ -59,9 +59,10 @@ constraints 10%.
 | Pair | AutoCAD | CADCraft |
 |---|---|---|
 | line–line, line–circle/arc, circle–circle | exact | closed form, exact; tangency decided by a fixed `|disc| ≤ 1e-12·a`, so near-tangent cases depend on scale |
-| line/arc–ellipse | exact (quartic) | **tessellated**: 1e-4 world units in TRIM, 1e-3 in snaps; TRIM refines with 720 samples + 60-step bisection, near-exact against line/arc cutters (`modify2.rs:1946-1995`) |
+| line/arc–ellipse | exact (quartic) | exact in the kernel (`geom/src/conic.rs`: `line_ellipse`, `circle_ellipse`, with parameters on both curves); commands still **tessellate**: 1e-4 world units in TRIM, 1e-3 in snaps; TRIM refines with 720 samples + 60-step bisection, near-exact against line/arc cutters (`modify2.rs:1946-1995`) |
 | line/arc–spline | exact to tolerance (subdivision + Newton) | tessellated as above |
-| ellipse–ellipse, ellipse–spline, spline–spline | exact to tolerance | **polygon approximations** only |
+| ellipse–ellipse | exact | exact in the kernel (`ellipse_ellipse`, `ellipse_arcs`: pencil of conics, degenerate member split into lines, Newton polish; checked against brute force on 1,480 random pairs); commands still use **polygon approximations** |
+| ellipse–spline, spline–spline | exact to tolerance | **polygon approximations** only |
 | Self-intersections (curves, offset loops) | yes | **no routine** |
 | Apparent intersection (projected) | yes | treated as plain intersection |
 
@@ -97,7 +98,8 @@ Where line and arc are supported the results are exact.
 | Quantity | AutoCAD | CADCraft |
 |---|---|---|
 | Closest point: line, arc, circle, polyline | exact | exact |
-| Closest point: ellipse, spline | exact to tolerance | **sampled** (`curve.rs:264`, `curves.rs:637`) |
+| Closest point: ellipse, elliptical arc | exact | exact: `Ellipse::closest` (robust bisection for the full ellipse; on an arc, the other feet of the normals from the Apollonius hyperbola and the arc ends) |
+| Closest point: spline | exact to tolerance | **sampled** (`curves.rs:637`) |
 | Tangent points, common tangents | every curve | circles and arcs only (`curve.rs:170-183`) |
 | AREA: circle, ellipse | exact | exact area (ellipse perimeter by Ramanujan, not exact); an open elliptical arc has no area, like an arc |
 | AREA: polyline with arcs | exact (bulge segments) | **tessellated at 1e-4** (`curve.rs:491`) |
@@ -140,8 +142,9 @@ coordinates to 1e-9 relative.
 
 ## What to do first (ranked)
 
-1. Exact ellipse and spline intersection and closest point (subdivision + Newton with a
-   relative tolerance); use them in snaps, TRIM, EXTEND, BREAK. 15–25 h.
+1. Exact spline intersection and closest point (subdivision + Newton with a relative
+   tolerance); use them and the exact ellipse routines (`geom/src/conic.rs`, landed) in snaps,
+   TRIM, EXTEND, BREAK. 12–20 h.
 2. Polyline offset with bulge recomputation, self-intersection cleanup and OFFSETGAPTYPE;
    spline/ellipse offset as fitted splines within a tolerance. 15–25 h.
 3. A tolerance context relative to the drawing's extents, and a known-answer test suite at
@@ -157,6 +160,7 @@ Total ≈ 90–140 h; items 1–6 parallelise across two or three agents.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | minor | Exact conic kernel (`crates/geom/src/conic.rs`): implicit conics and pencils, line–, circle– and ellipse–ellipse intersections, exact closest point on ellipses and elliptical arcs (`Ellipse::closest` no longer samples); commands not yet switched over |
 | 2026-10-22 | minor | Constraint expressions count operator chains toward the syntax-tree depth limit; evaluation shares one depth limit across operators and parameter references, with a 1 MiB-stack regression (#1936) |
 | 2026-10-14 | trivial | JOIN Close: a single arc becomes its circle, a single elliptical arc its full ellipse (#1175) |
 | 2026-10-12 | trivial | TRIM on a closed polyline keeps only the complementary run when the pick lies past the last cut (#726) |
