@@ -23,7 +23,7 @@ use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, St
 /// Largest project file read.
 const MAX_PROJECT_BYTES: usize = 4 << 20;
 /// Most drawings in a project.
-const MAX_DRAWINGS: usize = 999;
+pub(super) const MAX_DRAWINGS: usize = 999;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -33,11 +33,13 @@ pub(super) struct Project {
     pub drawings: Vec<String>,
     pub sheet_width: f64,
     pub columns: u64,
+    /// Title block fields shared by every sheet (CUSTOMER, DRAWNBY, CHECKEDBY, DATE, REV…).
+    pub properties: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Project {
     fn default() -> Self {
-        Project { name: String::new(), drawings: Vec::new(), sheet_width: 420.0, columns: 10 }
+        Project { name: String::new(), drawings: Vec::new(), sheet_width: 420.0, columns: 10, properties: Default::default() }
     }
 }
 
@@ -51,14 +53,14 @@ pub(super) fn current() -> Option<String> {
     }
 }
 
-fn set_current(path: Option<String>) {
+pub(super) fn set_current(path: Option<String>) {
     match CURRENT.lock() {
         Ok(mut g) => *g = path,
         Err(e) => *e.into_inner() = path,
     }
 }
 
-fn project_path(cmd: &str, p: &Value) -> Result<String> {
+pub(super) fn project_path(cmd: &str, p: &Value) -> Result<String> {
     str_param(p, "project")
         .map(str::to_string)
         .or_else(current)
@@ -85,13 +87,13 @@ pub(super) fn read_project(_path: &str) -> Result<Project> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn write_project(path: &str, pr: &Project) -> Result<()> {
+pub(super) fn write_project(path: &str, pr: &Project) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(pr).map_err(|e| EngineError::Other(e.to_string()))?;
     crate::atomic_write::write_atomic(Path::new(path), &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn write_project(_path: &str, _pr: &Project) -> Result<()> {
+pub(super) fn write_project(_path: &str, _pr: &Project) -> Result<()> {
     Err(EngineError::Other("Projects need files, which the web version cannot reach.".into()))
 }
 
@@ -294,10 +296,10 @@ pub(super) fn specs() -> Vec<CommandSpec> {
     ]
 }
 
-fn opened_json(path: &str, pr: &Project) -> Value {
+pub(super) fn opened_json(path: &str, pr: &Project) -> Value {
     let list: Vec<Value> =
         pr.drawings.iter().enumerate().map(|(i, d)| json!({ "sheet": i + 1, "drawing": d, "exists": drawing_path(path, d).exists() })).collect();
-    json!({ "project": path, "name": pr.name, "drawings": list })
+    json!({ "project": path, "name": pr.name, "drawings": list, "properties": pr.properties })
 }
 
 fn run_new(s: &mut Session, p: &Value) -> Result<Value> {

@@ -18,6 +18,7 @@ mod classes;
 mod conductors;
 pub mod generate;
 mod interactive;
+mod manager;
 mod pins;
 mod plc;
 mod project;
@@ -155,6 +156,7 @@ pub fn specs() -> Vec<CommandSpec> {
     v.extend(project::specs());
     v.extend(sync::specs());
     v.extend(check::specs());
+    v.extend(manager::specs());
     v
 }
 

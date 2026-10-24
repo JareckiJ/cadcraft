@@ -171,3 +171,46 @@ fn terminal_plan_and_plc_list_cover_every_sheet() {
     let io = s.execute("ereport", &json!({ "kind": "plcio", "project": project })).unwrap();
     assert_eq!(io["rows"].as_array().unwrap().len(), 4, "the card is on sheet 2: {io}");
 }
+
+#[test]
+fn project_manager_reorders_renames_and_removes_sheets() {
+    hooks();
+    let dir = folder("manager");
+    let project = dir.join("mgr.ecproj").to_string_lossy().to_string();
+    let mut s = Session::new();
+    s.execute("eproject.new", &json!({ "path": project, "sheets": 3 })).unwrap();
+    for (n, title) in [(1, "Power"), (2, "Control"), (3, "PLC")] {
+        let r = s.execute("eproject.sheet", &json!({ "project": project, "sheet": n, "set": { "TITLE": title } })).unwrap();
+        assert_eq!(r["fields"]["TITLE"], title);
+    }
+    let r = s.execute("eproject.move", &json!({ "project": project, "sheet": 3, "to": 1 })).unwrap();
+    assert_eq!(r["renumberSuggested"], true);
+    let list = s.execute("eproject.sheets", &json!({ "project": project })).unwrap();
+    let rows: Vec<(String, String)> = list["sheets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| (x["fields"]["TITLE"].as_str().unwrap().to_string(), x["fields"]["SHEET"].as_str().unwrap().to_string()))
+        .collect();
+    assert_eq!(rows, vec![("PLC".into(), "1".into()), ("Power".into(), "2".into()), ("Control".into(), "3".into())]);
+
+    let r = s.execute("eproject.rename", &json!({ "project": project, "sheet": 1, "name": "plc-io" })).unwrap();
+    assert_eq!(r["drawing"], "plc-io.dxf");
+    assert!(dir.join("plc-io.dxf").exists() && !dir.join("mgr-03.dxf").exists());
+    assert!(s.execute("eproject.rename", &json!({ "project": project, "sheet": 1, "name": "../x" })).is_err());
+    assert!(s.execute("eproject.rename", &json!({ "project": project, "sheet": 2, "name": "plc-io.dxf" })).is_err());
+
+    let r = s.execute("eproject.remove", &json!({ "project": project, "sheet": 2 })).unwrap();
+    assert_eq!(r["drawings"].as_array().unwrap().len(), 2);
+    assert!(dir.join("mgr-01.dxf").exists(), "the file is kept");
+    let list = s.execute("eproject.sheets", &json!({ "project": project })).unwrap();
+    assert_eq!(list["sheets"][1]["fields"]["SHEET"], "2");
+    assert_eq!(list["sheets"][1]["fields"]["SHEETS"], "2");
+
+    let r = s.execute("eproject.props", &json!({ "project": project, "name": "Pump station", "set": { "CUSTOMER": "ACME", "REV": "B" } })).unwrap();
+    assert_eq!(r["properties"]["CUSTOMER"], "ACME");
+    let list = s.execute("eproject.sheets", &json!({ "project": project })).unwrap();
+    assert!(list["sheets"].as_array().unwrap().iter().all(|x| x["fields"]["CUSTOMER"] == "ACME" && x["fields"]["PROJECT"] == "Pump station"));
+    assert!(s.execute("eproject.move", &json!({ "project": project, "sheet": 0, "to": 1 })).is_err());
+    assert!(s.execute("eproject.sheet", &json!({ "project": project, "sheet": 9 })).is_err());
+}

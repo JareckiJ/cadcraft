@@ -123,6 +123,23 @@ pub(super) fn add_to(d: &mut Drawing, corner: Vec2, values: &Map<String, Value>)
     let _ = d.add(&Space::Model, Common { layer: "FRAME".into(), ..Common::default() }, EntityKind::Insert(ins));
 }
 
+/// The fields of the active drawing's (first) title block, or `None` when it has none.
+pub(super) fn values(s: &Session) -> Result<Option<Map<String, Value>>> {
+    let d = s.doc()?;
+    let Some(store) = d.space(&s.space()) else { return Ok(None) };
+    Ok(store.iter().find_map(|e| match &e.kind {
+        EntityKind::Insert(i) if i.block.eq_ignore_ascii_case(TITLE_BLOCK) => {
+            Some(i.attribs.iter().map(|a| (a.tag.to_ascii_uppercase(), json!(a.text.value))).collect())
+        }
+        _ => None,
+    }))
+}
+
+/// The fields a person may set (all but the sheet numbers, which are the project's).
+pub(super) fn editable_fields() -> Vec<&'static str> {
+    FIELDS.iter().map(|f| f.0).filter(|f| !f.starts_with("SHEET")).collect()
+}
+
 /// Set fields of every title block in the active drawing; returns how many blocks changed.
 pub(super) fn set_fields(s: &mut Session, values: &Map<String, Value>) -> Result<usize> {
     let d = s.doc()?;
@@ -140,7 +157,7 @@ pub(super) fn set_fields(s: &mut Session, values: &Map<String, Value>) -> Result
 }
 
 /// The `set` parameter: known fields only, values as text.
-fn fields_param(p: &Value) -> Result<Map<String, Value>> {
+pub(super) fn fields_param(p: &Value) -> Result<Map<String, Value>> {
     let mut out = Map::new();
     match p.get("set") {
         None | Some(Value::Null) => {}
