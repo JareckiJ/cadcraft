@@ -2,8 +2,8 @@
 //! Document contents remain owned by their existing view implementations.
 
 use craft_ui::docking::{
-    Action, DockArea, DockCommand, DockOperation, DockStyle, FloatSpace, Layout, Location, Node, PanelLimits, Permissions, Placement, StackEntry,
-    UiDock, Zone,
+    DockArea, DockCommand, DockOperation, DockStyle, FloatSpace, Layout, Location, Node, PanelLimits, Permissions, Placement, StackEntry, UiDock,
+    Zone,
 };
 use craft_ui::layout::{SplitAxis, SplitSize};
 use serde::{Deserialize, Serialize};
@@ -41,16 +41,6 @@ impl Panel {
             Self::Layers => "Layers",
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
-        }
-    }
-    fn default_side(self) -> Zone {
-        match self {
-            Self::Canvas => Zone::Right,
-            Self::ToolSets => Zone::Left,
-            Self::QuickCalc => Zone::Right,
-            Self::Layers => Zone::Right,
-            Self::Properties => Zone::Right,
-            Self::ExternalRefs => Zone::Right,
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
@@ -134,35 +124,14 @@ pub fn validate(workspace: &Workspace) -> Result<(), String> {
     Ok(())
 }
 
-/// Show a panel and select it: at its recorded place, else beside the drawing on its default side.
-/// Hidden panels it was recorded beside come back first, so a group closed one panel at a time
-/// reopens as one group in either order.
+/// Show a panel and select it at its recorded place (craft-ui places a panel it has no place
+/// for), keeping the drawing view's rules.
 pub fn reveal_panel(workspace: &mut Workspace, panel: Panel) -> Result<(), String> {
-    let mut chain = vec![panel];
-    while let Some(anchor) = chain.last().and_then(|last| hidden_anchor(workspace, *last))
-        && !chain.contains(&anchor)
-    {
-        chain.push(anchor);
-    }
     let mut next = workspace.clone();
-    for member in chain.into_iter().rev() {
-        let mut shown = next.clone();
-        if shown.set_visible(member, true, None, permissions).is_err() {
-            shown = next.clone();
-            let open = Action::OpenAt { panel: member, anchor: Panel::Canvas, placement: Placement::Split(member.default_side()) };
-            shown.apply_all([open, Action::Activate { panel: member }], permissions).map_err(|error| error.to_string())?;
-        }
-        next = shown;
-    }
+    next.set_visible(panel, true, None, permissions).map_err(|error| error.to_string())?;
     validate(&next)?;
     *workspace = next;
     Ok(())
-}
-
-/// The recorded anchor of a hidden panel, when that anchor is hidden too.
-fn hidden_anchor(workspace: &Workspace, panel: Panel) -> Option<Panel> {
-    let (_, location) = workspace.hidden.iter().find(|(id, _)| *id == panel)?;
-    location.anchor.filter(|anchor| workspace.hidden.iter().any(|(id, _)| id == anchor))
 }
 
 /// Show or hide a panel for the Tool Sets and palette switches. Showing restores the recorded
