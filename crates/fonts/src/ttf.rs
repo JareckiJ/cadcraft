@@ -14,7 +14,7 @@
 //! On native builds both start from the `CADCRAFT_FONTALT` / `CADCRAFT_FONTFALLBACK`
 //! environment variables.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 
@@ -231,7 +231,6 @@ fn lock() -> MutexGuard<'static, Db> {
 /// the BSDs, wherever fontconfig looks: [`dirs`]).
 #[cfg(not(target_arch = "wasm32"))]
 fn scan() -> HashMap<String, PathBuf> {
-    let mut out = HashMap::new();
     let mut dirs: Vec<PathBuf> = Vec::new();
     if cfg!(target_os = "macos") {
         dirs.extend(["/System/Library/Fonts", "/System/Library/Fonts/Supplemental", "/Library/Fonts"].map(Into::into));
@@ -258,9 +257,23 @@ fn scan() -> HashMap<String, PathBuf> {
         }
         dirs.extend(found.into_iter().rev());
     }
+    walk_font_dirs(dirs)
+}
+
+/// Font files by lower-case stem under `dirs`, the last directory first. Each directory is read
+/// once by its resolved path, so a symlink back up the tree cannot use up the entry budget
+/// before the other directories are reached.
+#[cfg(not(target_arch = "wasm32"))]
+fn walk_font_dirs(dirs: Vec<PathBuf>) -> HashMap<String, PathBuf> {
+    let mut out = HashMap::new();
     let mut stack = dirs;
+    let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut seen = 0usize;
     while let Some(d) = stack.pop() {
+        let Ok(c) = std::fs::canonicalize(&d) else { continue };
+        if !visited.insert(c) {
+            continue;
+        }
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             seen += 1;
@@ -1023,5 +1036,30 @@ mod geometry_budget_tests {
         assert!(!shaped.is_empty());
         assert_eq!(shaped.glyphs, vec![contours]);
         assert!(shaped.text.is_empty());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod scan_tests {
+    use super::*;
+
+    #[test]
+    fn a_symlink_back_up_the_tree_does_not_hide_the_other_font_directories() {
+        let root = std::env::temp_dir().join(format!("cadcraft-font-walk-{}", std::process::id()));
+        let (looped, other) = (root.join("looped"), root.join("other"));
+        std::fs::create_dir_all(&looped).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(looped.join("a.ttf"), b"").unwrap();
+        // The kernel gives up on a symlink chain after about 40 hops; with this many entries,
+        // reading the directory at every hop would still run past the 20 000 entry budget.
+        for i in 0..600 {
+            std::fs::write(looped.join(format!("readme{i}.txt")), b"").unwrap();
+        }
+        std::fs::write(other.join("b.ttf"), b"").unwrap();
+        std::os::unix::fs::symlink(&looped, looped.join("again")).unwrap();
+        // The looped directory is walked first.
+        let found = walk_font_dirs(vec![other.clone(), looped.clone()]);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(found.contains_key("a") && found.contains_key("b"), "{found:?}");
     }
 }
