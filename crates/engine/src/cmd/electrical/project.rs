@@ -35,11 +35,27 @@ pub(super) struct Project {
     pub columns: u64,
     /// Title block fields shared by every sheet (CUSTOMER, DRAWNBY, CHECKEDBY, DATE, REV…).
     pub properties: std::collections::BTreeMap<String, String>,
+    /// The sheets' title block: `ETITLE` (default), `ETITLE_A3`, or a drawing file of your own.
+    pub title_block: String,
+}
+
+impl Project {
+    /// The title block new sheets get.
+    pub fn title_block(&self) -> &str {
+        if self.title_block.trim().is_empty() { super::titleblock::TITLE_BLOCK } else { self.title_block.trim() }
+    }
 }
 
 impl Default for Project {
     fn default() -> Self {
-        Project { name: String::new(), drawings: Vec::new(), sheet_width: 420.0, columns: 10, properties: Default::default() }
+        Project {
+            name: String::new(),
+            drawings: Vec::new(),
+            sheet_width: 420.0,
+            columns: 10,
+            properties: Default::default(),
+            title_block: String::new(),
+        }
     }
 }
 
@@ -211,13 +227,33 @@ pub(super) fn sheet_drawing(pr: &Project, sheet: u64, total: u64) -> Drawing {
     for k in kinds {
         let _ = d.add(&Space::Model, frame.clone(), k);
     }
-    // The title block, with the project's name and the sheet's number.
-    let mut values = serde_json::Map::new();
+    // The title block, with the project's name, its properties and the sheet's number (a title
+    // block of your own is put in when the sheet is opened: see `apply_own_title_block`).
+    let mut values: serde_json::Map<String, Value> = pr.properties.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
     values.insert("PROJECT".into(), json!(pr.name));
     values.insert("SHEET".into(), json!(sheet.to_string()));
     values.insert("SHEETS".into(), json!(total.max(sheet).to_string()));
-    super::titleblock::add_to(&mut d, Vec2::new(w, 0.0), &values);
+    let template = pr.title_block();
+    let template = if super::titleblock::is_template(template) { template } else { super::titleblock::TITLE_BLOCK };
+    super::titleblock::add_template(&mut d, template, w, &values);
     d
+}
+
+/// A new sheet: its title block filled in from the project (references resolved), and a title
+/// block of the project's own put in first (new sheets are made with a built-in one).
+pub(super) fn apply_own_title_block(s: &mut Session, path: &str, pr: &Project, index: usize) -> Result<()> {
+    let template = pr.title_block().to_string();
+    let own = !super::titleblock::is_template(&template);
+    let total = pr.drawings.len();
+    let file = pr.drawings.get(index).cloned().unwrap_or_default();
+    let one = Project { drawings: vec![file.clone()], ..pr.clone() };
+    for_each(s, path, &one, true, |s, _, _| {
+        if own {
+            super::titleblock::replace(s, &template, pr.sheet_width, false)?;
+        }
+        super::titleblock::write_project_fields(s, &pr.name, &pr.properties, index as u64 + 1, total, &file).map(|n| json!(n))
+    })?;
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -411,6 +447,7 @@ fn run_addsheet(s: &mut Session, p: &Value) -> Result<Value> {
         let rf = crate::cmd::file::read_file(&full.to_string_lossy()).map_err(EngineError::Other)?;
         crate::cmd::file::finish_open(s, rf)?;
     }
+    apply_own_title_block(s, &path, &pr, pr.drawings.len() - 1)?;
     s.log.push(format!("Sheet {sheet} ({file}) added."));
     Ok(json!({ "drawing": file, "sheet": sheet }))
 }

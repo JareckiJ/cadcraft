@@ -165,6 +165,7 @@ pub enum Icon {
     EBreaker,
     EMotor,
     EPlc,
+    EParts,
     ETag,
     EWireNum,
     EXref,
@@ -1065,6 +1066,17 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
                 pen.fill_c(x, 4.0, 0.9, b);
             }
             pen.text(12.0, 13.5, "PLC", 5.0, b);
+        }
+        EParts => {
+            // A drive and a module from the catalogue: two boxes with terminals.
+            pen.rect(2.0, 5.0, 9.0, 14.0, a);
+            pen.rect(13.0, 5.0, 9.0, 14.0, a);
+            for x in [4.5, 8.5, 15.5, 19.5] {
+                pen.fill_c(x, 7.0, 0.8, b);
+                pen.fill_c(x, 17.0, 0.8, b);
+            }
+            pen.text(6.5, 12.0, "~", 6.0, b);
+            pen.text(17.5, 12.0, "IO", 4.5, b);
         }
         ETag => {
             pen.poly(&[(3.0, 8.0), (15.0, 8.0), (21.0, 12.0), (15.0, 16.0), (3.0, 16.0)], true, b);

@@ -1,10 +1,10 @@
 //! Dialogs for the electrical tools that otherwise prompt on the command line: Insert Ladder,
-//! Wire Type and PLC I/O Card. Each fills in the command's parameters with clicks; the PLC card
+//! Wire Type, PLC I/O Card and the Parts Catalogue (manufacturer PLC modules and drives). Each fills in the command's parameters with clicks; the PLC card
 //! is then placed with one click in the drawing (EPLACE). Symbols from the tool bar are placed
 //! the same way, click after click until Enter, like AutoCAD Electrical.
 
 use egui::{Color32, RichText, vec2};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::CadApp;
 use crate::theme::Tokens;
@@ -251,7 +251,202 @@ pub fn plc(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
+/// The Parts Catalogue's state: the filters, the part chosen and how it is placed.
+#[derive(Clone, Default)]
+struct Parts {
+    list: Vec<Value>,
+    mfg: String,
+    family: String,
+    search: String,
+    selected: String,
+    info: Option<Value>,
+    group: String,
+    rack: String,
+    slot: String,
+    start: String,
+    tag: String,
+}
+
+fn s(v: &Value) -> &str {
+    v.as_str().unwrap_or("")
+}
+
+/// The Parts Catalogue: PLC modules and drives by manufacturer, like the EPLAN Data Portal. The
+/// part chosen is placed with a click in the drawing (EPLACE), drawn from its real terminals.
+pub fn parts(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
+    let t = Tokens::get();
+    let mut f: Parts = get(ctx, "parts");
+    if f.list.is_empty()
+        && let Ok(v) = app.session.execute("epart", &json!({ "list": true }))
+    {
+        f.list = v["parts"].as_array().cloned().unwrap_or_default();
+    }
+    let mut done = false;
+    egui::Window::new(crate::tl!("Parts Catalogue"))
+        .id(egui::Id::new("edialog-parts"))
+        .collapsible(false)
+        .resizable(true)
+        .default_width(720.0)
+        .open(open)
+        .show(ctx, |ui| {
+            let mut mfgs: Vec<String> = f.list.iter().map(|p| s(&p["mfg"]).to_string()).collect();
+            mfgs.dedup();
+            mfgs.sort();
+            mfgs.dedup();
+            ui.horizontal(|ui| {
+                ui.label(crate::tl!("Manufacturer"));
+                let shown = if f.mfg.is_empty() { crate::tl!("All").to_string() } else { f.mfg.clone() };
+                egui::ComboBox::from_id_salt("parts-mfg").selected_text(shown).width(150.0).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut f.mfg, String::new(), crate::tl!("All"));
+                    for m in &mfgs {
+                        ui.selectable_value(&mut f.mfg, m.clone(), m.as_str());
+                    }
+                });
+                for (k, label) in [("", crate::tl!("All")), ("PLC", crate::tl!("PLC modules")), ("VFD", crate::tl!("Drives"))] {
+                    if ui.selectable_label(f.family == k, label).clicked() {
+                        f.family = k.to_string();
+                    }
+                }
+                ui.add(egui::TextEdit::singleline(&mut f.search).hint_text(crate::tl!("Search")).desired_width(160.0));
+            });
+            ui.separator();
+            let words: Vec<String> = f.search.to_ascii_uppercase().split_whitespace().map(str::to_string).collect();
+            let shown: Vec<Value> = f
+                .list
+                .iter()
+                .filter(|p| f.mfg.is_empty() || s(&p["mfg"]) == f.mfg)
+                .filter(|p| f.family.is_empty() || s(&p["family"]) == f.family)
+                .filter(|p| {
+                    let hay = format!("{} {} {} {} {}", s(&p["mfg"]), s(&p["cat"]), s(&p["series"]), s(&p["description"]), s(&p["rating"]))
+                        .to_ascii_uppercase();
+                    words.iter().all(|w| hay.contains(w.as_str()))
+                })
+                .cloned()
+                .collect();
+            ui.columns(2, |cols| {
+                egui::ScrollArea::vertical().id_salt("parts-list").max_height(360.0).auto_shrink([false, false]).show(&mut cols[0], |ui| {
+                    for p in &shown {
+                        let cat = s(&p["cat"]).to_string();
+                        let rating = s(&p["rating"]);
+                        let line = if rating.is_empty() { format!("{cat}  {}", s(&p["description"])) } else { format!("{cat}  {rating}") };
+                        let r = ui.selectable_label(f.selected == cat, line).on_hover_text(format!("{} · {}", s(&p["mfg"]), s(&p["series"])));
+                        if r.clicked() && f.selected != cat {
+                            f.selected = cat.clone();
+                            f.group.clear();
+                            f.info = app.session.execute("epart", &json!({ "cat": cat, "info": true })).ok();
+                        }
+                    }
+                    if shown.is_empty() {
+                        ui.label(RichText::new(crate::tl!("No parts match.")).color(t.text_dim));
+                    }
+                });
+                let ui = &mut cols[1];
+                let Some(info) = f.info.clone() else {
+                    ui.label(RichText::new(crate::tl!("Pick a part on the left.")).color(t.text_dim));
+                    return;
+                };
+                ui.label(RichText::new(s(&info["cat"])).strong().size(16.0));
+                ui.label(format!("{} · {}", s(&info["mfg"]), s(&info["series"])));
+                ui.label(s(&info["description"]));
+                if !s(&info["rating"]).is_empty() {
+                    ui.label(s(&info["rating"]));
+                }
+                let io = &info["io"];
+                let counts: Vec<String> =
+                    ["DI", "DO", "AI", "AO"].iter().filter_map(|k| io[*k].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {k}"))).collect();
+                ui.label(format!(
+                    "{} {}{}",
+                    info["terminals"].as_u64().unwrap_or(0),
+                    crate::tl!("terminals"),
+                    if counts.is_empty() { String::new() } else { format!(" · {}", counts.join(", ")) }
+                ));
+                if !info["checked"].as_bool().unwrap_or(false) {
+                    ui.label(
+                        RichText::new(crate::tl!("Check the terminals against the manufacturer's manual before issuing."))
+                            .color(t.warn)
+                            .font(crate::theme::small()),
+                    );
+                }
+                ui.add_space(4.0);
+                egui::Grid::new("parts-opts").num_columns(2).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
+                    let groups: Vec<String> = info["groups"].as_array().into_iter().flatten().map(|g| s(&g["name"]).to_string()).collect();
+                    if groups.len() > 1 {
+                        ui.label(crate::tl!("Place"));
+                        let shown = if f.group.is_empty() { crate::tl!("Whole part").to_string() } else { f.group.clone() };
+                        egui::ComboBox::from_id_salt("parts-group").selected_text(shown).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut f.group, String::new(), crate::tl!("Whole part"));
+                            for g in &groups {
+                                ui.selectable_value(&mut f.group, g.clone(), g.as_str());
+                            }
+                        });
+                        ui.end_row();
+                    }
+                    if s(&info["family"]) == "PLC" {
+                        ui.label(crate::tl!("Rack prefix"));
+                        ui.add(egui::TextEdit::singleline(&mut f.rack).hint_text("A2:").desired_width(80.0));
+                        ui.end_row();
+                        ui.label(crate::tl!("Slot"));
+                        ui.add(egui::TextEdit::singleline(&mut f.slot).hint_text("1").desired_width(80.0));
+                        ui.end_row();
+                        ui.label(crate::tl!("First address"));
+                        ui.add(egui::TextEdit::singleline(&mut f.start).hint_text("0").desired_width(80.0));
+                        ui.end_row();
+                    }
+                    ui.label(crate::tl!("Tag"));
+                    ui.add(egui::TextEdit::singleline(&mut f.tag).hint_text(crate::tl!("automatic")).desired_width(120.0));
+                    ui.end_row();
+                });
+                egui::CollapsingHeader::new(crate::tl!("Terminals")).id_salt("parts-terms").show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("parts-terms-scroll").max_height(160.0).show(ui, |ui| {
+                        for g in info["groups"].as_array().into_iter().flatten() {
+                            ui.label(RichText::new(s(&g["name"])).strong());
+                            for side in ["top", "bottom"] {
+                                let ts: Vec<String> = g[side]
+                                    .as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .map(|x| {
+                                        if s(&x["label"]).is_empty() {
+                                            s(&x["num"]).to_string()
+                                        } else {
+                                            format!("{} {}", s(&x["num"]), s(&x["label"]))
+                                        }
+                                    })
+                                    .collect();
+                                if !ts.is_empty() {
+                                    ui.label(RichText::new(ts.join(" · ")).font(crate::theme::small()));
+                                }
+                            }
+                        }
+                    });
+                });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                let can = !f.selected.is_empty();
+                if ui.add_enabled(can, egui::Button::new(crate::tl!("Place"))).on_hover_text(crate::tl!("Then click where the part goes")).clicked() {
+                    let mut params = json!({ "cat": f.selected });
+                    for (key, v) in [("group", &f.group), ("rack", &f.rack), ("slot", &f.slot), ("start", &f.start), ("tag", &f.tag)] {
+                        if !v.trim().is_empty() {
+                            params[key] = json!(v.trim());
+                        }
+                    }
+                    app.session.place_preset = Some(json!({ "command": "epart", "params": params, "label": f.selected }));
+                    app.start("eplace");
+                    done = true;
+                }
+                if ui.button(crate::tl!("Cancel")).clicked() {
+                    done = true;
+                }
+            });
+        });
+    put(ctx, "parts", f);
+    if done {
+        *open = false;
+    }
+}
+
 /// Whether `v` is one of these dialogs' names.
 pub fn is_dialog(name: &str) -> bool {
-    matches!(name, "eladder" | "ewiretype" | "eplc")
+    matches!(name, "eladder" | "ewiretype" | "eplc" | "epart")
 }

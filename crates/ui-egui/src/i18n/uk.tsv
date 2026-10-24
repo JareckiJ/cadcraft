@@ -1641,3 +1641,27 @@
 	Grey	Сірий
 	Pink	Рожевий
 	Green-yellow	Зелено-жовтий
+	Insert Part	Вставити виріб
+	Insert PLC / Drive Part...	Вставити модуль ПЛК / привод...
+	Title Block Template	Шаблон основного напису
+	Title Block Template...	Шаблон основного напису...
+	Parts Catalogue	Каталог виробів
+	PLC modules	Модулі ПЛК
+	Drives	Приводи
+	No parts match.	Немає відповідних виробів.
+	Pick a part on the left.	Виберіть виріб ліворуч.
+	terminals	клем
+	Check the terminals against the manufacturer's manual before issuing.	Перед випуском звірте клеми з посібником виробника.
+	Whole part	Увесь виріб
+	Rack prefix	Префікс стійки
+	Slot	Слот
+	automatic	автоматично
+	Then click where the part goes	Потім клацніть, де розмістити виріб
+	Title block	Основний напис
+	A3 strip (full width)	Смуга A3 (на всю ширину)
+	My own (drawing file)	Власний (файл креслення)
+	Compact (corner)	Компактний (у куті)
+	Path to a DXF title block	Шлях до основного напису DXF
+	Its attributes are the fields (CUSTOMER1, DESCRIPTION…); it replaces the sheet border.	Його атрибути є полями (CUSTOMER1, DESCRIPTION…); він замінює рамку аркуша.
+	Use on every sheet	Застосувати до всіх аркушів
+	Written into every sheet's title block. {JOBNO} in a value is replaced by that field.	Записується в основний напис кожного аркуша. {JOBNO} у значенні замінюється цим полем.

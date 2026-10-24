@@ -34,6 +34,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "eladder" => crate::edialogs::ladder(app, ctx, &mut open),
         "ewiretype" => crate::edialogs::wire_type(app, ctx, &mut open),
         "eplc" => crate::edialogs::plc(app, ctx, &mut open),
+        "epart" => crate::edialogs::parts(app, ctx, &mut open),
         o if o.starts_with("ecomponent:") => crate::ecomponent::dialog(app, ctx, o.trim_start_matches("ecomponent:"), &mut open),
         other => crate::managers::dialog(app, ctx, other, &mut open),
     }

@@ -22,6 +22,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "rename" => &["Tools", "Electrical", "Project", "Rename Sheet..."],
             "remove" => &["Tools", "Electrical", "Project", "Remove Sheet from Project..."],
             "sheet" => &["Tools", "Electrical", "Project", "Sheet Properties..."],
+            "titleblock" => &["Tools", "Electrical", "Project", "Title Block Template..."],
             _ => &["Tools", "Electrical", "Project", "Project Properties..."],
         }
     };
@@ -47,7 +48,16 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("eproject.sheet", "Sheet Properties", run_sheet)
             .menu(menu("sheet"))
-            .params("{sheet (1-based), set?: {TITLE, DRAWINGNO, DATE, REV, DRAWNBY, CHECKEDBY, CUSTOMER, PROJECT}, project?} → {sheet, fields}")
+            .params("{sheet (1-based), set?: {FIELD: value} (any field of the title block: TITLE, DESCRIPTION, LOC…), project?} → {sheet, fields}")
+            .enabled(always)
+            .noundo(),
+        CommandSpec::new("eproject.titleblock", "Title Block Template", run_titleblock)
+            .menu(menu("titleblock"))
+            .params(
+                "{template?: ETITLE | ETITLE_A3, file? (a DXF/DWG of your own title block, its attributes named after the fields), \
+                 keepBorder?: bool (keep the sheet's own frame under a block of your own; default false), project?} \
+                 → {titleBlock, sheets, fields: [{tag, label, scope, shown}]}",
+            )
             .enabled(always)
             .noundo(),
         CommandSpec::new("eproject.props", "Project Properties", run_props)
@@ -93,11 +103,9 @@ fn refresh(s: &mut Session, path: &str) -> Result<()> {
     let total = pr.drawings.len();
     let present: Vec<usize> = (0..total).filter(|i| pr.drawings.get(*i).is_some_and(|d| drawing_path(path, d).exists())).collect();
     for i in present {
+        let file = pr.drawings.get(i).cloned().unwrap_or_default();
         on_sheet(s, path, &pr, i, true, |s, _, sheet| {
-            let mut v = Map::new();
-            v.insert("SHEET".into(), json!(sheet.to_string()));
-            v.insert("SHEETS".into(), json!(total.to_string()));
-            super::titleblock::set_fields(s, &v).map(|n| json!(n))
+            super::titleblock::write_project_fields(s, &pr.name, &pr.properties, sheet, total, &file).map(|n| json!(n))
         })?;
     }
     if total > 0 {
@@ -125,9 +133,78 @@ fn run_sheets(s: &mut Session, p: &Value) -> Result<Value> {
         };
         sheets.push(json!({ "sheet": i + 1, "drawing": rel, "path": full.to_string_lossy(), "exists": exists, "open": is_open, "dirty": dirty, "fields": fields }));
     }
-    Ok(
-        json!({ "project": path, "name": pr.name, "properties": pr.properties, "sheetWidth": pr.sheet_width, "columns": pr.columns, "sheets": sheets }),
-    )
+    let template = pr.title_block().to_string();
+    let fields = title_fields(s, &path, &pr, &template);
+    Ok(json!({
+        "project": path, "name": pr.name, "properties": pr.properties, "sheetWidth": pr.sheet_width, "columns": pr.columns, "sheets": sheets,
+        "titleBlock": template, "titleFields": fields,
+    }))
+}
+
+/// The fields of the project's title block: a built-in one's, or those of the block of your own
+/// on the first sheet that has it.
+fn title_fields(s: &mut Session, path: &str, pr: &Project, template: &str) -> Vec<Value> {
+    if super::titleblock::is_template(template) {
+        return super::titleblock::field_list(s, template);
+    }
+    for i in 0..pr.drawings.len() {
+        if !pr.drawings.get(i).is_some_and(|d| drawing_path(path, d).exists()) {
+            continue;
+        }
+        let r = on_sheet(s, path, pr, i, false, |s, _, _| Ok(json!(super::titleblock::field_list(s, template))));
+        if let Ok(Value::Array(v)) = r
+            && !v.is_empty()
+        {
+            return v;
+        }
+    }
+    Vec::new()
+}
+
+fn run_titleblock(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "eproject.titleblock";
+    let path = project_path(CMD, p)?;
+    let mut pr = read_project(&path)?;
+    let template =
+        match (str_param(p, "template").map(str::trim).filter(|t| !t.is_empty()), str_param(p, "file").map(str::trim).filter(|t| !t.is_empty())) {
+            (Some(t), None) if super::titleblock::is_template(t) => t.to_ascii_uppercase(),
+            (Some(t), None) => {
+                return Err(bad(CMD, format!("`template` must be ETITLE or ETITLE_A3, not \"{t}\" (a file of your own goes in `file`)")));
+            }
+            (None, Some(f)) => {
+                let ext = Path::new(f).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                if !matches!(ext.as_str(), "dxf" | "dwg") {
+                    return Err(bad(CMD, "`file` must be a .dxf or .dwg drawing"));
+                }
+                if !Path::new(f).exists() {
+                    return Err(EngineError::Other(format!("{f} does not exist.")));
+                }
+                f.to_string()
+            }
+            _ => return Err(bad(CMD, "give either `template` (ETITLE, ETITLE_A3) or `file`")),
+        };
+    let keep_border = p.get("keepBorder").and_then(Value::as_bool).unwrap_or(false);
+    for (k, v) in super::titleblock::template_defaults(&template) {
+        pr.properties.entry((*k).to_string()).or_insert_with(|| (*v).to_string());
+    }
+    pr.title_block = template.clone();
+    write_project(&path, &pr)?;
+    let total = pr.drawings.len();
+    let present = Project { drawings: pr.drawings.iter().filter(|d| drawing_path(&path, d).exists()).cloned().collect(), ..pr.clone() };
+    let mut done = 0usize;
+    for (i, file) in pr.drawings.iter().enumerate() {
+        if !present.drawings.contains(file) {
+            continue;
+        }
+        on_sheet(s, &path, &pr, i, true, |s, _, sheet| {
+            super::titleblock::replace(s, &template, pr.sheet_width, keep_border)?;
+            super::titleblock::write_project_fields(s, &pr.name, &pr.properties, sheet, total, file).map(|n| json!(n))
+        })?;
+        done += 1;
+    }
+    s.log.push(format!("Title block {template} on {done} sheet(s)."));
+    let fields = title_fields(s, &path, &pr, &template);
+    Ok(json!({ "titleBlock": template, "sheets": done, "fields": fields }))
 }
 
 fn run_move(s: &mut Session, p: &Value) -> Result<Value> {
@@ -264,17 +341,25 @@ fn run_props(s: &mut Session, p: &Value) -> Result<Value> {
             pr.properties.insert(k.clone(), v.to_string());
         }
     }
-    if pr.properties.len() > 64 {
+    if pr.properties.len() > 128 {
         return Err(bad(CMD, "too many project properties"));
     }
     if changed {
         write_project(&path, &pr)?;
-        // Every sheet's title block shows the project's name and shared fields.
-        let mut fields = set.clone();
-        fields.insert("PROJECT".into(), json!(pr.name));
+        // Every sheet's title block shows the project's name and shared fields (references
+        // such as {JOBNO} resolved for each sheet); a field just cleared is cleared there too.
+        let cleared: Map<String, Value> =
+            set.iter().filter(|(_, v)| v.as_str().is_some_and(str::is_empty)).map(|(k, v)| (k.clone(), v.clone())).collect();
         let total = pr.drawings.len();
-        let present = Project { drawings: pr.drawings.iter().filter(|d| drawing_path(&path, d).exists()).cloned().collect(), ..pr.clone() };
-        for_each(s, &path, &present, true, |s, _, _| super::titleblock::set_fields(s, &fields).map(|n| json!(n)))?;
+        for (i, file) in pr.drawings.iter().enumerate() {
+            if !drawing_path(&path, file).exists() {
+                continue;
+            }
+            on_sheet(s, &path, &pr, i, true, |s, _, sheet| {
+                super::titleblock::set_fields(s, &cleared)?;
+                super::titleblock::write_project_fields(s, &pr.name, &pr.properties, sheet, total, file).map(|n| json!(n))
+            })?;
+        }
         s.log.push(format!("Project properties written to {total} sheet(s)."));
     }
     Ok(

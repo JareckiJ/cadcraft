@@ -214,3 +214,36 @@ fn project_manager_reorders_renames_and_removes_sheets() {
     assert!(s.execute("eproject.move", &json!({ "project": project, "sheet": 0, "to": 1 })).is_err());
     assert!(s.execute("eproject.sheet", &json!({ "project": project, "sheet": 9 })).is_err());
 }
+
+#[test]
+fn title_block_template_follows_project_properties() {
+    hooks();
+    let dir = folder("titleblock");
+    let project = dir.join("tb.ecproj").to_string_lossy().to_string();
+    let mut s = Session::new();
+    s.execute("eproject.new", &json!({ "path": project, "sheets": 2 })).unwrap();
+    let r = s.execute("eproject.titleblock", &json!({ "project": project, "template": "ETITLE_A3" })).unwrap();
+    assert_eq!(r["sheets"], 2);
+    assert!(r["fields"].as_array().unwrap().iter().any(|f| f["tag"] == "DESCRIPTION" && f["scope"] == "sheet"));
+    s.execute(
+        "eproject.props",
+        &json!({ "project": project, "set": { "JOBNO": "7477", "REV": "B", "CUSTOMER1": "WARBURTONS", "COMPANY1": "ACME" } }),
+    )
+    .unwrap();
+    s.execute("eproject.sheet", &json!({ "project": project, "sheet": 2, "set": { "DESCRIPTION": "DIGITAL INPUT", "LOC": "A1" } })).unwrap();
+    let list = s.execute("eproject.sheets", &json!({ "project": project })).unwrap();
+    assert_eq!(list["titleBlock"], "ETITLE_A3");
+    let second = &list["sheets"][1]["fields"];
+    assert_eq!(second["DRAWINGREF"], "7477 / tb-02 - B");
+    assert_eq!(second["CUSTOMER1"], "WARBURTONS");
+    assert_eq!(second["NOTE4"], "ACME");
+    assert_eq!(second["DESCRIPTION"], "DIGITAL INPUT");
+    assert_eq!((second["SHEET"].as_str(), second["SHEETS"].as_str()), (Some("2"), Some("2")));
+    // A new sheet gets the template and the project's fields.
+    s.execute("eproject.addsheet", &json!({ "project": project, "open": false })).unwrap();
+    let list = s.execute("eproject.sheets", &json!({ "project": project })).unwrap();
+    assert_eq!(list["sheets"][2]["fields"]["CUSTOMER1"], "WARBURTONS");
+    assert!(s.execute("eproject.titleblock", &json!({ "project": project, "template": "NOPE" })).is_err());
+    assert!(s.execute("eproject.titleblock", &json!({ "project": project, "file": "missing.dxf" })).is_err());
+    assert!(s.execute("eproject.titleblock", &json!({ "project": project })).is_err());
+}

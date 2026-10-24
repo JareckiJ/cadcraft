@@ -48,6 +48,7 @@ const GROUPS: &[&[(Icon, Act, &str, &str)]] = &[
         (Icon::EBreaker, Act::Symbol("IEC_MCB_3P"), "Breaker", "Circuit-breaker, 3 poles (-Q)"),
         (Icon::EMotor, Act::Symbol("IEC_MOTOR_3PH"), "Motor", "Three-phase motor (-M)"),
         (Icon::EPlc, Act::Dialog("eplc"), "PLC card", "PLC I/O card (DI, DO, AI, AO)"),
+        (Icon::EParts, Act::Dialog("epart"), "Parts", "Parts Catalogue: PLC modules and drives by manufacturer (Allen-Bradley, Siemens, Mitsubishi)"),
     ],
     &[
         (Icon::ETag, Act::Scoped("etag", "eproject.tag"), "Tag", "Tag Devices (IEC 81346): whole project when one is open"),

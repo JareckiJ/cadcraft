@@ -31,6 +31,13 @@ struct Sheet {
 
 #[derive(Clone, Default)]
 struct State {
+    /// The title block's fields edited per sheet and for the project (tag, label).
+    sheet_fields: Vec<(String, String)>,
+    project_fields: Vec<(String, String)>,
+    /// The project's title block (`ETITLE`, `ETITLE_A3` or a file), and the one being chosen.
+    title_block: String,
+    tb_choice: String,
+    tb_file: String,
     project: Option<String>,
     name: String,
     sheets: Vec<Sheet>,
@@ -87,6 +94,30 @@ impl State {
                 self.name = text(&v["name"]);
                 self.project_name = self.name.clone();
                 self.project_edit = v["properties"].as_object().cloned().unwrap_or_default();
+                self.title_block = text(&v["titleBlock"]);
+                if self.tb_choice.is_empty() || !matches!(self.tb_choice.as_str(), "ETITLE" | "ETITLE_A3" | "FILE") {
+                    self.tb_choice = match self.title_block.as_str() {
+                        "ETITLE" | "ETITLE_A3" | "" => self.title_block.clone(),
+                        _ => "FILE".into(),
+                    };
+                }
+                if !matches!(self.title_block.as_str(), "ETITLE" | "ETITLE_A3" | "") {
+                    self.tb_file = self.title_block.clone();
+                }
+                let fields: Vec<(String, String, String)> = v["titleFields"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|f| (text(&f["tag"]), text(&f["label"]), text(&f["scope"])))
+                    .filter(|f| !f.0.is_empty())
+                    .collect();
+                if fields.is_empty() {
+                    self.sheet_fields = SHEET_FIELDS.iter().map(|(k, l)| ((*k).to_string(), (*l).to_string())).collect();
+                    self.project_fields = PROJECT_FIELDS.iter().map(|(k, l)| ((*k).to_string(), (*l).to_string())).collect();
+                } else {
+                    self.sheet_fields = fields.iter().filter(|f| f.2 != "project").map(|f| (f.0.clone(), f.1.clone())).collect();
+                    self.project_fields = fields.iter().filter(|f| f.2 != "sheet").map(|f| (f.0.clone(), f.1.clone())).collect();
+                }
                 self.sheets = v["sheets"]
                     .as_array()
                     .into_iter()
@@ -139,13 +170,13 @@ fn open_sheet(app: &mut CadApp, path: &str) {
 }
 
 /// Text boxes for `fields` of `values`.
-fn field_grid(ui: &mut egui::Ui, salt: &str, fields: &[(&str, &str)], values: &mut Map<String, Value>) {
+fn field_grid(ui: &mut egui::Ui, salt: &str, fields: &[(String, String)], values: &mut Map<String, Value>) {
     egui::Grid::new(salt).num_columns(2).spacing(vec2(6.0, 3.0)).show(ui, |ui| {
         for (key, label) in fields {
             ui.label(crate::i18n::t(label));
-            let mut v = values.get(*key).and_then(Value::as_str).unwrap_or("").to_string();
+            let mut v = values.get(key.as_str()).and_then(Value::as_str).unwrap_or("").to_string();
             if ui.add(egui::TextEdit::singleline(&mut v).desired_width((ui.available_width() - 8.0).clamp(80.0, 260.0))).changed() {
-                values.insert((*key).to_string(), json!(v));
+                values.insert(key.clone(), json!(v));
             }
             ui.end_row();
         }
@@ -343,11 +374,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                         return;
                     }
                     let mut edit = std::mem::take(&mut st.sheet_edit);
-                    field_grid(ui, "pm-sheet-grid", SHEET_FIELDS, &mut edit);
-                    let changed: Map<String, Value> = SHEET_FIELDS
+                    let fields = st.sheet_fields.clone();
+                    field_grid(ui, "pm-sheet-grid", &fields, &mut edit);
+                    let changed: Map<String, Value> = fields
                         .iter()
-                        .filter(|(k, _)| edit.get(*k) != sh.fields.get(*k) && edit.get(*k).is_some())
-                        .filter_map(|(k, _)| edit.get(*k).map(|v| ((*k).to_string(), v.clone())))
+                        .filter(|(k, _)| edit.get(k.as_str()) != sh.fields.get(k.as_str()) && edit.get(k.as_str()).is_some())
+                        .filter_map(|(k, _)| edit.get(k.as_str()).map(|v| (k.clone(), v.clone())))
                         .collect();
                     st.sheet_edit = edit;
                     if ui.add_enabled(!changed.is_empty(), egui::Button::new(crate::tl!("Apply"))).clicked() {
@@ -364,13 +396,49 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                     ui.label(crate::tl!("Name"));
                     ui.add(egui::TextEdit::singleline(&mut st.project_name).desired_width(f32::INFINITY));
                 });
+                // The title block every sheet uses.
+                ui.horizontal(|ui| {
+                    ui.label(crate::tl!("Title block"));
+                    let label = |c: &str| match c {
+                        "ETITLE_A3" => crate::tl!("A3 strip (full width)").to_string(),
+                        "FILE" => crate::tl!("My own (drawing file)").to_string(),
+                        _ => crate::tl!("Compact (corner)").to_string(),
+                    };
+                    egui::ComboBox::from_id_salt("pm-titleblock").selected_text(label(&st.tb_choice)).show_ui(ui, |ui| {
+                        for c in ["ETITLE", "ETITLE_A3", "FILE"] {
+                            ui.selectable_value(&mut st.tb_choice, c.to_string(), label(c));
+                        }
+                    });
+                });
+                if st.tb_choice == "FILE" {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut st.tb_file).hint_text(crate::tl!("Path to a DXF title block")).desired_width(f32::INFINITY),
+                    );
+                    ui.label(
+                        RichText::new(crate::tl!("Its attributes are the fields (CUSTOMER1, DESCRIPTION…); it replaces the sheet border."))
+                            .color(t.text_dim)
+                            .font(crate::theme::small()),
+                    );
+                }
+                let wanted = if st.tb_choice == "FILE" { st.tb_file.trim().to_string() } else { st.tb_choice.clone() };
+                let differs = !wanted.is_empty() && wanted != st.title_block && !(st.title_block.is_empty() && wanted == "ETITLE");
+                if ui.add_enabled(differs, egui::Button::new(crate::tl!("Use on every sheet"))).clicked() {
+                    let params = if st.tb_choice == "FILE" { json!({ "file": wanted }) } else { json!({ "template": wanted }) };
+                    let _ = st.act(app, "eproject.titleblock", params);
+                }
+                ui.separator();
                 let mut edit = std::mem::take(&mut st.project_edit);
-                field_grid(ui, "pm-project-grid", PROJECT_FIELDS, &mut edit);
+                let fields = st.project_fields.clone();
+                field_grid(ui, "pm-project-grid", &fields, &mut edit);
                 st.project_edit = edit;
-                ui.label(RichText::new(crate::tl!("Written into every sheet's title block.")).color(t.text_dim).font(crate::theme::small()));
+                ui.label(
+                    RichText::new(crate::tl!("Written into every sheet's title block. {JOBNO} in a value is replaced by that field."))
+                        .color(t.text_dim)
+                        .font(crate::theme::small()),
+                );
                 if ui.button(crate::tl!("Apply")).clicked() {
                     let set: Map<String, Value> =
-                        PROJECT_FIELDS.iter().map(|(k, _)| ((*k).to_string(), st.project_edit.get(*k).cloned().unwrap_or(json!("")))).collect();
+                        fields.iter().map(|(k, _)| (k.clone(), st.project_edit.get(k.as_str()).cloned().unwrap_or(json!("")))).collect();
                     let name = st.project_name.trim().to_string();
                     let mut params = json!({ "set": set });
                     if !name.is_empty() && name != st.name {
