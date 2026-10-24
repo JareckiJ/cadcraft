@@ -338,7 +338,12 @@ fn align_distribute(mut items: Vec<(Handle, MLeader)>, line: Option<(Vec2, Vec2)
     Ok(moves)
 }
 
-fn align_directional(items: &[(Handle, MLeader)], reference: Option<&MLeader>, line: Option<(Vec2, Vec2)>, spacing: Spacing) -> Result<Vec<(Handle, Vec2)>> {
+fn align_directional(
+    items: &[(Handle, MLeader)],
+    reference: Option<&MLeader>,
+    line: Option<(Vec2, Vec2)>,
+    spacing: Spacing,
+) -> Result<Vec<(Handle, Vec2)>> {
     let (a, b) = line.ok_or_else(|| bad("mleaderalign", "`direction` (two points or an angle) is required"))?;
     let d = b - a;
     if d.len() < 1e-12 {
