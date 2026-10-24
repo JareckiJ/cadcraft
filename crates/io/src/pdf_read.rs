@@ -19,7 +19,9 @@ mod cmap;
 pub const MAX_BYTES: usize = 64 << 20;
 const MAX_DECODED: usize = 64 << 20;
 const MAX_STREAM: usize = 16 << 20;
-const MAX_OPS: usize = 500_000;
+// CAD plots repeat many style operators for every short stroke. Bound that work
+// separately from the stricter entity, vertex, decoded-byte and clipping budgets.
+const MAX_OPS: usize = 2_000_000;
 const MAX_ENTITIES: usize = 200_000;
 const MAX_DEPTH: usize = 64;
 const MAX_CLIP_EDGES: usize = 2048;
@@ -391,6 +393,9 @@ struct PdfFont {
     cid_map: Option<Vec<u8>>,
 }
 impl PdfFont {
+    fn covers(&self, codes: &[u32]) -> bool {
+        cid_mapping_covers(self.cid_map.as_deref(), codes)
+    }
     fn glyph(&self, code: u32) -> Result<Arc<[Vec<Vec2>]>> {
         let gid = if let Some(map) = &self.cid_map {
             let offset = usize::try_from(code).ok().and_then(|n| n.checked_mul(2)).ok_or_else(|| error("invalid CID code"))?;
@@ -403,6 +408,20 @@ impl PdfFont {
         Ok(cadcraft_fonts::ttf::glyph_contours(&self.face, gid))
     }
 }
+
+fn cid_mapping_covers(map: Option<&[u8]>, codes: &[u32]) -> bool {
+    codes.iter().all(|code| {
+        u16::try_from(*code).is_ok()
+            && map.is_none_or(|bytes| {
+                usize::try_from(*code)
+                    .ok()
+                    .and_then(|index| index.checked_mul(2))
+                    .and_then(|offset| offset.checked_add(1))
+                    .is_some_and(|end| end < bytes.len())
+            })
+    })
+}
+
 enum OwnedEncoding {
     Single(Vec<String>),
     Simple(Vec<u8>),
@@ -595,7 +614,7 @@ impl<'a> Reader<'a> {
         let content = Content::decode_strict(bytes).map_err(error)?;
         self.ops = self.ops.saturating_add(content.operations.len());
         if self.ops > MAX_OPS {
-            return Err(error("more than 500000 drawing operations"));
+            return Err(error(format!("more than {MAX_OPS} drawing operations")));
         }
         let mut saved = Vec::new();
         let mut paths: Vec<Subpath> = Vec::new();
@@ -1012,7 +1031,11 @@ impl<'a> Reader<'a> {
         } else {
             bytes.iter().map(|b| u32::from(*b)).collect()
         };
-        let outlines = self.fonts.get(&key).and_then(|f| f.outline.clone());
+        let mut outlines = self.fonts.get(&key).and_then(|f| f.outline.clone());
+        if outlines.as_ref().is_some_and(|font| !font.covers(&codes)) {
+            self.warn("Some embedded CID glyphs have no mapping; the affected text was imported as editable TEXT with a substitute font.");
+            outlines = None;
+        }
         let text_matrix = state.text.matrix.then(state.matrix);
         for code in codes {
             let cached = self.fonts.get(&key).and_then(|f| f.widths.get(&code)).copied();
@@ -1199,4 +1222,20 @@ fn font_width(doc: &Document, font: &Dictionary, code: u32, composite: bool, wor
         }
     }
     font.get(b"DW").ok().map(number).transpose().map(|v| v.unwrap_or(1000.0))
+}
+
+#[cfg(test)]
+mod font_mapping_tests {
+    use super::cid_mapping_covers;
+
+    #[test]
+    fn short_cid_maps_request_text_fallback_instead_of_aborting_the_page() {
+        let map = [0, 0, 0, 7, 0, 11];
+        assert!(cid_mapping_covers(Some(&map), &[0, 1, 2]));
+        assert!(!cid_mapping_covers(Some(&map), &[1, 57424]));
+        assert!(!cid_mapping_covers(Some(&map[..5]), &[2]));
+        assert!(!cid_mapping_covers(Some(&[]), &[0]));
+        assert!(cid_mapping_covers(None, &[0, 57424, 65535]));
+        assert!(!cid_mapping_covers(None, &[65536, u32::MAX]));
+    }
 }

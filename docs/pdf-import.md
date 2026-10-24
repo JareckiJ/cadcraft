@@ -23,6 +23,8 @@ The command is `IMPORTPDF`. `PDFIMPORT` remains a typed alias for existing workf
    removes the complete import. The new entities are selected and the view fits the drawing.
    Embedded TrueType text becomes vector outlines by default, preserving glyph shapes and
    their PDF spacing. Uncheck Convert embedded text to vector outlines for editable TEXT.
+   If a CID is missing from an embedded glyph map, only its text string falls back to
+   editable TEXT with a warning; the other vectors and valid glyph outlines still import.
 5. Check a known dimension, then use MOVE/ROTATE/SCALE/ALIGN as needed to match survey points.
    Save As `.dxf` or `.dwg`.
 
@@ -70,11 +72,12 @@ use IMPORTPDF when page choice, scale or conversion warnings matter.
   mirrored text and text clipping are not reproduced. The preview reports these limits.
 - RGB/gray/CMYK and basic stroke widths are read; black/white use CAD's contrasting colour 7.
   Filled areas become boundary outlines. Dash patterns become continuous paths. PDF layer
-  groups are flattened into `PDF_PAGE_<page>`. Raster images, gradients, soft masks and special
+  groups are flattened into `PDF_PAGE_<page>`. Optional-content visibility (BDC/EMC) is not
+  evaluated, so hidden PDF layers can still be imported. Raster images, gradients, soft masks and special
   graphics-state effects are skipped or simplified with explicit warnings. No OCR or tracing.
 - A password-protected file needs an unencrypted copy. No PDF scripts, links or embedded
   applications are executed, and no file content is sent to an online converter.
-- Input ≤64 MiB; any decoded stream ≤16 MiB; total content decoding ≤64 MiB; ≤500000 PDF
+- Input ≤64 MiB; any decoded stream ≤16 MiB; total content decoding ≤64 MiB; ≤2000000 PDF
   operations, ≤200000 imported entities, ≤2000000 geometry vertices, ≤10000 pages, nesting ≤64, clipping ≤2048 edges and
   a bounded intersection budget. Coordinates and final placement must be finite within ±1e12.
   Expanded Unicode maps are limited to 8 MiB per font and 32 MiB for the font mapping cache.

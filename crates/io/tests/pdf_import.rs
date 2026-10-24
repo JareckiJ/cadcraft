@@ -14,6 +14,31 @@ fn xy(a: Vec2, b: Vec2) {
 const K: f64 = 25.4 / 72.0;
 
 #[test]
+fn dense_cad_style_operations_do_not_reject_a_small_drawing() {
+    let mut content = b"0 J 0 j 10 M 0.1 w [] 0 d 0 0 1 RG\n".repeat(100_000);
+    content.extend_from_slice(b"10 20 m 30 40 l S");
+    let imported = pdf_read::read(&fixture::page(&content, "", ""), 1).unwrap();
+    assert_eq!(imported.drawing.model.len(), 1);
+    let bounds = imported.drawing.extents(&Space::Model);
+    xy(bounds.min, Vec2::new(10.0, 20.0) * K);
+    xy(bounds.max, Vec2::new(30.0, 40.0) * K);
+}
+
+#[test]
+fn operation_budget_still_limits_repeated_form_execution() {
+    let content = b"0 J\n".repeat(400_000);
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /XObject << /F 5 0 R >> >> >>".to_vec(),
+        fixture::stream(b"/F Do /F Do /F Do /F Do /F Do /F Do", ""),
+        fixture::stream(&content, "/Type /XObject /Subtype /Form /BBox [0 0 100 100]"),
+    ];
+    let error = pdf_read::read(&fixture::file(&objects), 1).err().unwrap().to_string();
+    assert!(error.contains("2000000 drawing operations"), "{error}");
+}
+
+#[test]
 fn automatic_overview_has_all_pages_and_keeps_unsupported_pages_in_place() {
     let previews = pdf_read::page_previews(&fixture::sample(), true).unwrap();
     assert_eq!(previews.len(), 2);
