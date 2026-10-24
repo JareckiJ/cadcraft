@@ -4,6 +4,9 @@ use cadcraft_geom::{PolyVertex, Vec2, Vec3};
 
 use crate::*;
 
+#[path = "../tests/support/pdf_read.rs"]
+mod pdf_read;
+
 fn sample() -> Drawing {
     let mut d = Drawing::new_imperial();
     d.layers.push(Layer { name: "Walls".into(), color: Color::Index(1), ..Layer::default() });
@@ -418,50 +421,22 @@ fn hostile_export_window_is_an_error() {
     assert!(check_window(&raw(0.0, 0.0, 1e-3, 1e-3)).is_ok());
 }
 
-/// Structural sanity check of a PDF: header, object count, xref offsets pointing at `n 0 obj`.
+/// Read a PDF back (its structure checked by the reader) and return the first page's decoded
+/// content.
 fn check_pdf(bytes: &[u8]) -> String {
-    assert!(bytes.starts_with(b"%PDF-1.4"));
-    let find = |pat: &[u8]| bytes.windows(pat.len()).position(|w| w == pat);
-    let rfind = |pat: &[u8]| bytes.windows(pat.len()).rposition(|w| w == pat);
-    let tail = String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(64)..]).to_string();
-    assert!(tail.trim_end().ends_with("%%EOF"));
-    let sx = rfind(b"startxref\n").unwrap();
-    let after = String::from_utf8_lossy(&bytes[sx + 10..]).to_string();
-    let xref_off: usize = after.lines().next().unwrap().trim().parse().unwrap();
-    assert!(bytes[xref_off..].starts_with(b"xref\n"));
-    let xref = String::from_utf8_lossy(&bytes[xref_off..]).to_string();
-    let mut lines = xref.lines().skip(1);
-    let count: usize = lines.next().unwrap().split_whitespace().nth(1).unwrap().parse().unwrap();
-    let objs = bytes.windows(7).filter(|w| w == b" 0 obj\n").count();
-    assert_eq!(count, objs + 1, "xref size = objects + free entry");
-    assert_eq!(bytes.windows(6).filter(|w| w == b"endobj").count(), objs);
-    let entries: Vec<&str> = lines.take(count).collect();
-    assert!(entries[0].starts_with("0000000000 65535 f"));
-    for (i, e) in entries.iter().enumerate().skip(1) {
-        let off: usize = e[..10].parse().unwrap();
-        assert!(bytes[off..].starts_with(format!("{i} 0 obj").as_bytes()), "object {i} offset");
-    }
-    assert!(xref.contains(&format!("/Size {count}")));
-    // The content stream's /Length matches its data.
-    let sp = find(b"/Length ").unwrap();
-    let after = String::from_utf8_lossy(&bytes[sp + 8..sp + 30]).to_string();
-    let len: usize = after.split(|c: char| !c.is_ascii_digit()).next().unwrap().parse().unwrap();
-    let start = find(b"stream\n").unwrap() + 7;
-    assert!(bytes[start + len..].starts_with(b"\nendstream"));
-    let compressed = find(b"/FlateDecode").is_some();
-    let data = &bytes[start..start + len];
-    if compressed {
-        String::from_utf8(miniz_oxide::inflate::decompress_to_vec_zlib(data).unwrap()).unwrap()
-    } else {
-        String::from_utf8(data.to_vec()).unwrap()
-    }
+    assert!(String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(64)..]).trim_end().ends_with("%%EOF"));
+    let doc = pdf_read::read(bytes);
+    assert!(!doc.pages.is_empty());
+    doc.content().to_string()
 }
 
 fn media_box(bytes: &[u8]) -> (f64, f64) {
-    let text = String::from_utf8_lossy(bytes).to_string();
-    let i = text.find("/MediaBox [0 0 ").unwrap() + 15;
-    let v: Vec<f64> = text[i..].split(']').next().unwrap().split_whitespace().map(|x| x.parse().unwrap()).collect();
-    (v[0], v[1])
+    pdf_read::read(bytes).media()
+}
+
+/// The line widths (`w`) the content sets.
+fn widths(content: &str) -> Vec<f64> {
+    pdf_read::ops(content).iter().filter(|o| o.op == "w").filter_map(|o| o.nums.first().copied()).collect()
 }
 
 #[test]
@@ -471,16 +446,17 @@ fn pdf_model_fitted_to_sheet() {
     let content = check_pdf(&bytes);
     let (w, h) = media_box(&bytes);
     assert!((w - 841.89).abs() < 0.01 && (h - 595.276).abs() < 0.01, "A4 landscape in points: {w} x {h}");
-    assert!(content.contains(" m\n") && content.contains(" l\n") && content.contains("S\n"));
+    assert!(pdf_read::count(&content, "m") > 0 && pdf_read::count(&content, "l") > 0 && pdf_read::count(&content, "S") > 0);
     // Walls layer is red; colour 7 prints black.
     assert!(content.contains("1 0 0 RG"));
     assert!(content.contains("0 0 0 RG"));
     // Uncompressed output is plain text and also valid.
     let raw = plot(&d, &Space::Model, &serde_json::json!({"paper": "Letter", "compress": false, "landscape": false})).unwrap();
     let c2 = check_pdf(&raw);
-    assert!(!String::from_utf8_lossy(&raw).contains("FlateDecode"));
+    assert!(!pdf_read::read(&raw).pages[0].compressed);
+    assert!(pdf_read::read(&bytes).pages[0].compressed);
     assert_eq!(media_box(&raw), (612.0, 792.0));
-    assert!(c2.contains("re W n"));
+    assert!(pdf_read::clip_rect(&c2).is_some(), "clipped to the plot area: {c2}");
     // write() picks PDF by extension.
     assert!(write(&d, "x.pdf").unwrap().starts_with(b"%PDF"));
 }
@@ -515,9 +491,9 @@ fn pdf_layout_one_to_one_with_viewport() {
     // Viewport border at 1:1: x from 1in to 9in = 72pt..648pt.
     assert!(content.contains("72 72 m") || content.contains("72 72 l"), "{content}");
     // Lineweights on: default 0.25 mm = 0.709 pt.
-    assert!(content.contains("0.709 w"));
+    assert!(widths(&content).iter().any(|w| (w - 0.709).abs() < 0.001), "{content}");
     let off = plot(&d, &paper, &serde_json::json!({"lineweights": false})).unwrap();
-    assert!(check_pdf(&off).contains("0 w"));
+    assert!(widths(&check_pdf(&off)).contains(&0.0));
     assert!(plot(&d, &Space::Paper("Nope".into()), &serde_json::json!({})).is_err());
     assert!(plot(&d, &paper, &serde_json::json!({"paper": "Z9"})).is_err());
 }
@@ -2362,15 +2338,16 @@ fn pdf_plots_transparency_only_when_asked() {
     };
     let on = plot(&d, &Space::Model, &opts(serde_json::json!({"plotTransparency": true}))).unwrap();
     let content = check_pdf(&on);
-    let text = String::from_utf8_lossy(&on).to_string();
-    assert!(text.contains("/ExtGState << /T50 << /Type /ExtGState /CA 0.5 /ca 0.5 >> >>"), "{text}");
+    // One graphics state: fill alpha 0.5 (strokes stay opaque).
+    assert_eq!(pdf_read::read(&on).pages[0].alphas, [(1.0, 0.5)]);
     // The line is opaque, the solid at half alpha.
-    assert!(content.contains("/T50 gs\n1 0 0 rg"), "{content}");
+    let ops = pdf_read::ops(&content);
+    assert!(ops.windows(2).any(|w| w[0].op == "gs" && w[1].op == "rg" && w[1].nums == [1.0, 0.0, 0.0]), "{content}");
+    assert_eq!(pdf_read::count(&content, "gs"), 1, "{content}");
     // Off (the default, and explicitly): no graphics states, and the same bytes either way.
     let off = plot(&d, &Space::Model, &opts(serde_json::json!({}))).unwrap();
     assert_eq!(off, plot(&d, &Space::Model, &opts(serde_json::json!({"plotTransparency": false}))).unwrap());
-    let off_text = String::from_utf8_lossy(&off).to_string();
-    assert!(!off_text.contains("ExtGState") && !off_text.contains(" gs\n"));
+    assert!(pdf_read::read(&off).pages[0].alphas.is_empty() && pdf_read::count(&check_pdf(&off), "gs") == 0);
     // On, but nothing transparent: the same bytes as off.
     let opaque = transparent_over_line(0);
     assert_eq!(
@@ -2389,13 +2366,13 @@ fn layout_page_setup_plot_transparency_is_used() {
     let faint = Common { color: Color::Index(5), transparency: Transparency::Percent(90), ..Common::default() };
     d.add(&paper, faint, EntityKind::Solid(Solid { corners })).unwrap();
     let raw = serde_json::json!({"compress": false});
-    assert!(!String::from_utf8_lossy(&plot(&d, &paper, &raw).unwrap()).contains("ExtGState"));
+    let alphas = |d: &Drawing, o: &serde_json::Value| pdf_read::read(&plot(d, &paper, o).unwrap()).pages[0].alphas.clone();
+    assert!(alphas(&d, &raw).is_empty());
     d.layouts[0].page.plot_transparency = true;
-    let text = String::from_utf8_lossy(&plot(&d, &paper, &raw).unwrap()).to_string();
-    assert!(text.contains("/T90 << /Type /ExtGState /CA 0.1 /ca 0.1 >>"), "{text}");
+    let on = alphas(&d, &raw);
+    assert!(on.iter().any(|(_, f)| (f - 0.1).abs() < 1e-6), "the faint solid fills at alpha 0.1: {on:?}");
     // The plot's own option wins over the page setup.
-    let off = serde_json::json!({"compress": false, "plotTransparency": false});
-    assert!(!String::from_utf8_lossy(&plot(&d, &paper, &off).unwrap()).contains("ExtGState"));
+    assert!(alphas(&d, &serde_json::json!({"compress": false, "plotTransparency": false})).is_empty());
 }
 
 #[test]
@@ -2450,11 +2427,11 @@ fn pdf_strokes_overlapping_transparent_objects_one_by_one() {
     };
     // 50 %: each line is its own stroke, so they build up where they cross.
     let glass = content(&crossing(50), true);
-    assert!(glass.contains("/T50 gs"), "{glass}");
-    assert_eq!(glass.matches("S\n").count(), 2, "{glass}");
+    assert!(pdf_read::count(&glass, "gs") > 0, "{glass}");
+    assert_eq!(pdf_read::count(&glass, "S"), 2, "{glass}");
     // Opaque: one path as before, whether the option is on or off.
     let opaque = content(&crossing(0), true);
-    assert_eq!(opaque.matches("S\n").count(), 1, "{opaque}");
+    assert_eq!(pdf_read::count(&opaque, "S"), 1, "{opaque}");
     assert_eq!(opaque, content(&crossing(0), false));
     // Transparency off: the transparent layer plots as before too.
     assert_eq!(content(&crossing(50), false), opaque);
@@ -2491,11 +2468,11 @@ fn pdf_strokes_each_transparent_primitive_inside_a_block() {
         check_pdf(&plot(d, &Space::Model, &serde_json::json!({"paper": "A4", "compress": false, "plotTransparency": on})).unwrap())
     };
     let half = content(&crossing_block(50), true);
-    assert!(half.contains("/T50 gs"), "{half}");
-    assert_eq!(half.matches("S\n").count(), 2, "{half}");
+    assert!(pdf_read::count(&half, "gs") > 0, "{half}");
+    assert_eq!(pdf_read::count(&half, "S"), 2, "{half}");
     // Opaque: one path, the same with the option on or off.
     let opaque = content(&crossing_block(0), true);
-    assert_eq!(opaque.matches("S\n").count(), 1, "{opaque}");
+    assert_eq!(pdf_read::count(&opaque, "S"), 1, "{opaque}");
     assert_eq!(opaque, content(&crossing_block(0), false));
     assert_eq!(content(&crossing_block(50), false), opaque);
 }
