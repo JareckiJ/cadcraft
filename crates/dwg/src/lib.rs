@@ -124,7 +124,7 @@ mod native {
             ));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
-        Ok((add_header_vars(out.buf, &doc.header), notes))
+        Ok((add_purge_preventers(add_header_vars(out.buf, &doc.header), &doc), notes))
     }
 
     /// Most record types named in the skipped-records note.
@@ -429,6 +429,73 @@ mod native {
             }
         }
         dxf.splice(end..end, add.into_bytes());
+        dxf
+    }
+
+    /// Dynamic block purge preventers (`ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION`, in a dynamic
+    /// block record's extension dictionary) into the DXF. acadrust 0.6.5's DXF writer leaves them
+    /// out, entry and object, though its DXF reader and DWG writer handle them; without them a DWG
+    /// saved by CADCraft lets AutoCAD's PURGE remove a dynamic block's representations after a
+    /// round trip through an older version. Each goes back (groups after the DXF Reference's
+    /// common object groups: 70 version, 340 block record) with its entry in its dictionary, which
+    /// must be in the text without xdata; one whose handle is already there is left alone.
+    fn add_purge_preventers(mut dxf: Vec<u8>, doc: &acadrust::CadDocument) -> Vec<u8> {
+        use acadrust::objects::{DynamicBlockData, ObjectType};
+        let preventer = |name: &str| {
+            let n: String = name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect();
+            n.starts_with("ACDBDYNAMICBLOCKPURGEPREVENTER")
+        };
+        let mut found: Vec<(acadrust::Handle, &str, &acadrust::objects::DynamicBlockObject)> = Vec::new();
+        for (h, o) in &doc.objects {
+            let ObjectType::Dictionary(d) = o else { continue };
+            for (key, e) in &d.entries {
+                if let Some(ObjectType::DynamicBlock(p)) = doc.objects.get(e)
+                    && preventer(&p.dxf_name)
+                    && p.owner == *h
+                {
+                    found.push((*h, key.as_str(), p));
+                }
+            }
+        }
+        if found.is_empty() {
+            return dxf;
+        }
+        let find = |dxf: &[u8], pat: &[u8], from: usize| dxf.get(from..).and_then(|t| t.windows(pat.len()).position(|w| w == pat)).map(|p| p + from);
+        let Some(objects) = find(&dxf, b"  2\r\nOBJECTS\r\n", 0) else { return dxf };
+        let Some(objects_end) = find(&dxf, b"  0\r\nENDSEC\r\n", objects) else { return dxf };
+        // (where, groups): dictionary entries, then the objects at the section's end.
+        let mut inserts: Vec<(usize, String)> = Vec::new();
+        let mut records = String::new();
+        for (dict, key, p) in found {
+            let DynamicBlockData::Representation(r) = &p.data else { continue };
+            let hex = |h: acadrust::Handle| format!("{:X}", h.value());
+            if find(&dxf, format!("  5\r\n{}\r\n", hex(p.handle)).as_bytes(), objects).is_some() || key.contains(['\r', '\n']) {
+                continue;
+            }
+            let Some(start) = find(&dxf, format!("  0\r\nDICTIONARY\r\n  5\r\n{}\r\n", hex(dict)).as_bytes(), objects) else { continue };
+            let Some(end) = find(&dxf, b"\r\n  0\r\n", start + 1).map(|e| e + 2) else { continue };
+            if dxf.get(start..end).is_some_and(|rec| rec.windows(6).any(|w| w == b"\n1001\r")) {
+                continue;
+            }
+            inserts.push((end, format!("  3\r\n{key}\r\n360\r\n{}\r\n", hex(p.handle))));
+            let reactors: String = p.reactors.iter().map(|h| format!("330\r\n{}\r\n", hex(*h))).collect();
+            let reactors = if reactors.is_empty() { String::new() } else { format!("102\r\n{{ACAD_REACTORS\r\n{reactors}102\r\n}}\r\n") };
+            records.push_str(&format!(
+                "  0\r\n{name}\r\n  5\r\n{h}\r\n{reactors}330\r\n{owner}\r\n100\r\nAcDbDynamicBlockPurgePreventer\r\n 70\r\n{flags}\r\n340\r\n{block}\r\n",
+                name = p.dxf_name,
+                h = hex(p.handle),
+                owner = hex(p.owner),
+                flags = r.flags,
+                block = hex(r.block),
+            ));
+        }
+        // First among insertions at the same place (stable sort; one spliced later goes before it):
+        // an entry for the section's last dictionary stays in it, ahead of the new objects.
+        inserts.insert(0, (objects_end, records));
+        inserts.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+        for (at, text) in inserts {
+            dxf.splice(at..at, text.into_bytes());
+        }
         dxf
     }
 
