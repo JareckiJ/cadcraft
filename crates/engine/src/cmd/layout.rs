@@ -673,6 +673,7 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "layouts": done }))
 }
 
+/// PAGESETUP for one layout: the changes the options ask for, reported with the resulting page setup.
 fn pagesetup_one(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "pagesetup";
     let keys = [
@@ -1108,6 +1109,7 @@ mod tests {
         s.doc().unwrap().layout(name).unwrap().page.paper.clone()
     }
 
+    /// One change given to several layouts is applied to each, as one undo step.
     #[test]
     fn pagesetup_applies_one_change_to_several_layouts_in_one_step() {
         let mut s = Session::new();
@@ -1128,6 +1130,7 @@ mod tests {
         assert!(s.doc().unwrap().layouts.iter().any(|l| l.page.landscape), "the whole change is one undo step");
     }
 
+    /// A change a layout refuses leaves every layout as it was.
     #[test]
     fn pagesetup_for_several_layouts_is_all_or_nothing() {
         let mut s = Session::new();

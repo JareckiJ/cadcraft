@@ -8,6 +8,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
+/// An app in a window, as the other integration tests build it.
 fn harness(app: CadApp) -> Harness<'static, CadApp> {
     let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(
         |ui, app: &mut CadApp| {
@@ -20,10 +21,12 @@ fn harness(app: CadApp) -> Harness<'static, CadApp> {
     h
 }
 
+/// Whether layout `layout` is landscape.
 fn landscape(app: &CadApp, layout: &str) -> bool {
     app.session.doc().unwrap().layout(layout).unwrap().page.landscape
 }
 
+/// Choosing the value the shown layout has makes the other picked layouts match.
 #[test]
 fn picking_the_value_shown_makes_the_other_picked_layouts_match() {
     let mut app = CadApp::new(Session::default(), Services::default());

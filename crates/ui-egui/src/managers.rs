@@ -1318,10 +1318,12 @@ mod page_setup_selection_tests {
 
     const ORDER: [&str; 5] = ["Layout1", "Layout2", "Sheet 3", "Sheet 4", "Sheet 5"];
 
+    /// Modifier keys for a click.
     fn mods(shift: bool, command: bool) -> egui::Modifiers {
         egui::Modifiers { shift, command, ..Default::default() }
     }
 
+    /// Ctrl alone counts like Cmd, as some key events set only `ctrl`.
     #[test]
     fn ctrl_alone_counts_like_command() {
         // Synthetic and some platforms' key events set `ctrl` without `command`.
@@ -1331,10 +1333,12 @@ mod page_setup_selection_tests {
         assert_eq!(picked, ["Layout1", "Sheet 3"]);
     }
 
+    /// A click on layout `name` with modifiers `m`.
     fn click(picked: &mut Vec<String>, sel: &mut String, name: &str, m: egui::Modifiers) {
         click_layout(picked, sel, &ORDER, name, m);
     }
 
+    /// Plain, Ctrl and Shift clicks pick one, toggle, and take a range.
     #[test]
     fn click_picks_one_ctrl_toggles_shift_takes_a_range() {
         let (mut picked, mut sel) = (vec!["Layout1".to_string()], "Layout1".to_string());
@@ -1359,6 +1363,7 @@ mod page_setup_selection_tests {
         assert_eq!(picked, ["Layout2", "Sheet 3"], "from the shown layout (Sheet 3) back to Layout2");
     }
 
+    /// A change for several picked layouts is one `pagesetup` with `layouts`.
     #[test]
     fn a_change_goes_to_all_picked_layouts_in_one_command() {
         let one = pagesetup_change(&["Layout1".to_string()], "Layout1", "paper", json!("A3"));
