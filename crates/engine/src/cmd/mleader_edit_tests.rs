@@ -122,9 +122,9 @@ fn hostile_mleader_edit_params_never_panic() {
 }
 
 mod units {
+    use super::super::{Spacing, align_directional, align_distribute, align_parallel};
     use cadcraft_doc::{Handle, MLeader};
     use cadcraft_geom::{Vec2, Vec3};
-    use super::super::{Spacing, align_distribute, align_directional, align_parallel};
 
     fn unit_ml(arrow: [f64; 2], land: [f64; 2]) -> MLeader {
         MLeader {
@@ -173,10 +173,7 @@ mod units {
     fn distribute_orders_landings_along_the_line() {
         let mk = |h: u64, land: [f64; 2]| (Handle(h), unit_ml([0.0, 0.0], land));
         assert!(align_distribute(vec![mk(1, [2.0, 0.0])], None).is_err(), "needs two points");
-        assert!(
-            align_distribute(Vec::new(), Some((Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)))).is_err(),
-            "coinciding points give no direction"
-        );
+        assert!(align_distribute(Vec::new(), Some((Vec2::new(0.0, 0.0), Vec2::new(0.0, 0.0)))).is_err(), "coinciding points give no direction");
         let items = vec![mk(1, [2.0, 0.0]), mk(2, [0.0, 0.0])];
         let d = align_distribute(items, Some((Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0)))).unwrap();
         assert_eq!(d[0].0, Handle(2), "sorted by projection onto the line");
@@ -194,26 +191,17 @@ mod units {
             "a zero direction is an error"
         );
         // Without a reference the origin is the first point: the landing is projected onto it.
-        let d = align_directional(
-            &[(Handle(7), unit_ml([0.0, 0.0], [1.0, 5.0]))],
-            None,
-            line,
-            Spacing::Current,
-        )
-        .unwrap();
+        let d = align_directional(&[(Handle(7), unit_ml([0.0, 0.0], [1.0, 5.0]))], None, line, Spacing::Current).unwrap();
         assert_eq!(d.len(), 1);
         assert!((d[0].1.x - 0.0).abs() < 1e-9);
         assert!((d[0].1.y + 5.0).abs() < 1e-9);
         // With a reference as origin, given spacing counts outward on both sides of it.
-        let items = vec![
-            (Handle(1), unit_ml([0.0, 0.0], [4.0, 0.0])),
-            (Handle(2), unit_ml([0.0, 0.0], [-4.0, 0.0])),
-        ];
+        let items = vec![(Handle(1), unit_ml([0.0, 0.0], [4.0, 0.0])), (Handle(2), unit_ml([0.0, 0.0], [-4.0, 0.0]))];
         let d = align_directional(&items, Some(&unit_ml([0.0, 0.0], [0.0, 4.0])), line, Spacing::Value(2.0)).unwrap();
         assert_eq!(d.len(), 2);
         assert_eq!(d[0].0, Handle(1));
-        assert!((d[0].1.x + 2.0).abs() < 1e-9 && (d[0].1.y - 0.0).abs() < 1e-9);
+        assert!((d[0].1.x + 2.0).abs() < 1e-9 && (d[0].1.y - 4.0).abs() < 1e-9);
         assert_eq!(d[1].0, Handle(2));
-        assert!((d[1].1.x - 2.0).abs() < 1e-9 && (d[1].1.y - 0.0).abs() < 1e-9);
+        assert!((d[1].1.x - 2.0).abs() < 1e-9 && (d[1].1.y - 4.0).abs() < 1e-9);
     }
 }

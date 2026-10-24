@@ -178,7 +178,7 @@ mod tests {
         }
         assert_eq!(decode(&bytes), Some(Report::Axes { values, mask: 3 }));
         bytes[0] = 2;
-        assert_eq!(decode(&bytes), Some(Report::Axes { values, mask: 2 }));
+        assert_eq!(decode(&bytes), Some(Report::Axes { values: [0, 0, 0, 1, -2, 3], mask: 2 }));
         assert_eq!(decode(&[2, 1, 2, 3]), None, "too short for a rotation report");
     }
 
@@ -199,16 +199,20 @@ mod tests {
     fn axes_deflect_and_expire() {
         let t0 = Instant::now();
         let mut f = calibrated(t0);
-        let at = t0 + Duration::from_secs(1);
-        let m = f.update([500, 500, 500, 0, 0, 0], 1, at);
+        let at = t0 + Duration::from_secs(2);
+        let ms = Duration::from_millis;
+        let m = f.update([500, 500, 0, 0, 0, 0], 1, at);
         assert!((m.pan[0] - 1.0).abs() < 1e-9);
         assert!((m.pan[1] - 1.0).abs() < 1e-9);
-        assert_eq!(m.zoom, 0.0, "the rotation report is long stale");
-        // The rotation axes went quiet for over 250 ms, so the zoom must not hold.
-        let m = f.update([500, 500, 500, 0, 0, 0], 1, at + Duration::from_millis(300));
+        assert_eq!(m.zoom, 0.0, "no rotation input");
+        // A fresh rotation report drives the zoom.
+        let m = f.update([0, 0, 0, 0, 0, 500], 2, at + ms(100));
+        assert!((m.zoom - 1.0).abs() < 1e-9);
+        // The rotation axes went quiet for over 250 ms while translations still arrive.
+        let m = f.update([500, 500, 0, 0, 0, 0], 1, at + ms(400));
         assert_eq!(m.zoom, 0.0);
         // A fresh rotation report puts the zoom back.
-        let m = f.update([500, 500, 500, 0, 0, 0], 2, at + Duration::from_millis(400));
+        let m = f.update([500, 500, 0, 0, 0, 500], 2, at + ms(500));
         assert!((m.zoom - 1.0).abs() < 1e-9);
     }
 
