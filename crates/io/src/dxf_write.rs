@@ -196,9 +196,11 @@ fn hatch_reactors(d: &Drawing) -> HashMap<Handle, Vec<String>> {
 
 /// The jog angle (degrees) a style gets as AutoCAD's own xdata ([`dxf_ext::JOG_APP`]) in a file
 /// of `version`: R2000 DIMSTYLE records have no group for it. Like the style's `DIMVARS`, only a
-/// jog angle other than the default is written.
+/// jog angle other than the default is written, and only one a style takes (the reader drops
+/// any other, so the style would come back at the default anyway).
 fn jog_xdata(s: &DimStyle, version: Version) -> Option<f64> {
-    (version < dxf_ext::NEWER_SINCE && s.jog_angle.is_finite() && s.jog_angle != DimStyle::default().jog_angle).then_some(s.jog_angle)
+    (version < dxf_ext::NEWER_SINCE && dxf_ext::JOG_DEGREES.contains(&s.jog_angle) && s.jog_angle != DimStyle::default().jog_angle)
+        .then_some(s.jog_angle)
 }
 
 /// `AcadAnnotative` xdata marking an annotative style.

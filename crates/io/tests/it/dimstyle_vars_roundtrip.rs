@@ -306,6 +306,14 @@ fn r2000_jog_angle_also_goes_in_autocad_xdata() {
     // 2004 and later have group 50 instead; drawings with default jog angles are unchanged.
     assert!(!dxf(&drawing(), Version::R2018).contains(JOG_APP));
     assert!(!write_dxf(&Drawing::new_imperial()).contains(JOG_APP));
+    // A jog angle no style takes (set without `apply_fields`) isn't written anywhere: it would be
+    // dropped on reading anyway.
+    let mut d = drawing();
+    d.dim_styles.iter_mut().filter(|s| s.name == "Detail").for_each(|s| s.jog_angle = 100.0);
+    for text in [write_dxf(&d), dxf(&d, Version::R2018)] {
+        assert!(!record_of(&text, "Detail").contains(&JOG_APP));
+        assert_eq!(read_dxf(text.as_bytes()).unwrap().dim_style("Detail").unwrap(), &DimStyle { jog_angle: 45.0, ..styled() });
+    }
 }
 
 #[test]

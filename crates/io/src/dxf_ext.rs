@@ -220,12 +220,13 @@ pub(crate) fn encode(kind: K, v: &Value, style: Lookup, block: Lookup, ltype: Lo
             DimVal::Handle(if name.trim().is_empty() { "0".to_string() } else { block(name)? })
         }
         K::Linetype => DimVal::Handle(ltype(v.as_str().filter(|n| !n.trim().is_empty())?)?),
-        K::Angle => DimVal::Angle(v.as_f64().filter(|x| x.is_finite())?),
+        // A jog angle no style takes (the reader drops it) isn't written.
+        K::Angle => DimVal::Angle(v.as_f64().filter(|x| JOG_DEGREES.contains(x))?),
     })
 }
 
 /// The jog angles (degrees) a [`DimStyle`] takes.
-const JOG_DEGREES: std::ops::RangeInclusive<f64> = 5.0..=90.0;
+pub(crate) const JOG_DEGREES: std::ops::RangeInclusive<f64> = 5.0..=90.0;
 
 /// A DIMJOGANG value from a file in degrees, or `None` when it is no jog angle a style takes.
 /// The DIMSTYLE group (50) holds degrees (AutoCAD and the DWG bridge, acadrust, read and write it
