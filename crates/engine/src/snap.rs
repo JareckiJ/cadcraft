@@ -120,9 +120,7 @@ impl SnapCurve {
                     [*center + u * *radius, *center - u * *radius].into_iter().filter(|q| self.contains(*q)).collect()
                 }
             }
-            SnapCurve::Line { a, b } => {
-                line_dir(*a, *b).map(|_| vec![cadcraft_geom::Line::new(*a, *b).project(p)]).unwrap_or_default()
-            }
+            SnapCurve::Line { a, b } => line_dir(*a, *b).map(|_| vec![cadcraft_geom::Line::new(*a, *b).project(p)]).unwrap_or_default(),
         }
     }
 }
@@ -873,9 +871,7 @@ fn deferred_hit(prims: &[Prim], cursor: Vec2, aperture: f64, osmode: u32, clip: 
     for p in prims {
         let curve = match p {
             Prim::Circle(c) => SnapCurve::Circle { center: c.center, radius: c.radius },
-            Prim::Seg(Segment::Arc { arc, .. }) => {
-                SnapCurve::Arc { center: arc.center, radius: arc.radius, start: arc.start, end: arc.end }
-            }
+            Prim::Seg(Segment::Arc { arc, .. }) => SnapCurve::Arc { center: arc.center, radius: arc.radius, start: arc.start, end: arc.end },
             Prim::Seg(Segment::Line(l)) => SnapCurve::Line { a: l.a, b: l.b },
             Prim::Infinite { base, dir, .. } => SnapCurve::Line { a: *base, b: *base + *dir },
             _ => continue,
@@ -1265,12 +1261,7 @@ mod tests {
         d.add(
             &Space::Model,
             Common::default(),
-            EntityKind::Arc(cadcraft_doc::Arc {
-                center: Vec3::new(20.0, 0.0, 0.0),
-                radius: 2.0,
-                start: 0.0,
-                end: std::f64::consts::FRAC_PI_2,
-            }),
+            EntityKind::Arc(cadcraft_doc::Arc { center: Vec3::new(20.0, 0.0, 0.0), radius: 2.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 }),
         )
         .unwrap();
         d
@@ -1303,7 +1294,8 @@ mod tests {
         // The foot of the perpendicular from below lands at 270°, in the gap. The opposite
         // antipode at (20,2) is on the arc. The cursor is 5 units away from it, so the aperture
         // is a little larger to keep the distance test off the boundary.
-        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.5, mode::PER, Some(Vec2::new(20.0, -6.0)), false).expect("the perpendicular on the arc");
+        let h = osnap(&d, &Space::Model, Vec2::new(20.0, -3.0), 5.5, mode::PER, Some(Vec2::new(20.0, -6.0)), false)
+            .expect("the perpendicular on the arc");
         assert!(on_arc(h.point), "perpendicular must stay on the arc, got {:?}", h.point);
         assert!(h.point.near(Vec2::new(20.0, 2.0), 1e-9), "the opposite antipode on the arc, got {:?}", h.point);
     }
