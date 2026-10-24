@@ -480,6 +480,13 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
         .or(shown)
         .or_else(|| layouts.first().map(|l| l.1.clone()))
         .unwrap_or_default();
+    // The layouts a change applies to: `sel` (the one whose settings are shown) and the others
+    // picked with Ctrl / Shift.
+    let mut picked = temp::<Vec<String>>(ctx, "pagesetup_picked").unwrap_or_default();
+    picked.retain(|n| layouts.iter().any(|l| l.1 == *n));
+    if !picked.contains(&sel) {
+        picked = vec![sel.clone()];
+    }
     let mut action = None;
     let choices = PageChoices::new(ctx, d);
     egui::Window::new("Page Setup Manager").open(open).default_size(vec2(560.0, 300.0)).resizable(true).show(ctx, |ui| {
@@ -492,18 +499,28 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
             left.label(RichText::new("Layouts").strong());
             egui::ScrollArea::vertical().id_salt("pagesetup_list").max_height(200.0).auto_shrink([false, true]).show(left, |ui| {
                 for (_, name, _) in &layouts {
-                    if ui.selectable_label(*name == sel, name).clicked() {
-                        sel = name.clone();
+                    let resp = ui.selectable_label(picked.contains(name), name);
+                    if resp.clicked() {
+                        let order: Vec<&str> = layouts.iter().map(|l| l.1.as_str()).collect();
+                        click_layout(&mut picked, &mut sel, &order, name, ui.input(|i| i.modifiers));
                     }
+                }
+            });
+            left.horizontal(|ui| {
+                if ui.small_button("Select all").on_hover_text("Ctrl+click or Shift+click pick several layouts").clicked() {
+                    picked = layouts.iter().map(|l| l.1.clone()).collect();
                 }
             });
             let Some((_, name, page)) = layouts.iter().find(|l| l.1 == sel) else { return };
             right.label(RichText::new(format!("Page setup of {name}")).strong());
+            if picked.len() > 1 {
+                right.label(RichText::new(crate::tf!("{n} layouts selected: a change applies to all of them", n = picked.len())).color(t.text_dim));
+            }
             // Layout plotting always prints the whole sheet, so only that area is offered.
             let rows = PageRows { areas: &["layout"], scale: true, center: true };
             egui::Grid::new("pagesetup_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
                 if let Some((k, v)) = page_rows(ui, egui::Id::new(("pagesetup", name)), page, &rows, &choices, None) {
-                    action = Some(("pagesetup", json!({ "layout": name, k: v })));
+                    action = Some(("pagesetup", pagesetup_change(&picked, name, k, v)));
                 }
             });
             let (w, h) = if page.landscape { (page.height_mm, page.width_mm) } else { (page.width_mm, page.height_mm) };
@@ -511,7 +528,43 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
         });
     });
     set_temp(ctx, "pagesetup_sel", sel);
+    set_temp(ctx, "pagesetup_picked", picked);
     action
+}
+
+/// A click on layout `name` in the Page Setup Manager's list: Ctrl (or Cmd) adds or removes it,
+/// Shift picks the range from the layout shown to it, a plain click picks just that one. `sel` is
+/// the layout whose settings are shown, `order` the layouts in tab order.
+fn click_layout(picked: &mut Vec<String>, sel: &mut String, order: &[&str], name: &str, modifiers: egui::Modifiers) {
+    if modifiers.shift {
+        let (a, b) = (order.iter().position(|n| *n == sel.as_str()), order.iter().position(|n| *n == name));
+        if let (Some(a), Some(b)) = (a, b) {
+            let (lo, hi) = (a.min(b), a.max(b));
+            *picked = order.get(lo..=hi).unwrap_or_default().iter().map(|n| n.to_string()).collect();
+        }
+    } else if modifiers.command || modifiers.ctrl {
+        if let Some(i) = picked.iter().position(|n| n == name) {
+            // The last one stays: something must be shown.
+            if picked.len() > 1 {
+                picked.remove(i);
+                if sel == name {
+                    *sel = picked.last().cloned().unwrap_or_default();
+                }
+            }
+        } else {
+            picked.push(name.to_string());
+            *sel = name.to_string();
+        }
+    } else {
+        *picked = vec![name.to_string()];
+        *sel = name.to_string();
+    }
+}
+
+/// The `pagesetup` parameters for one changed setting: for the layout shown, or, with several
+/// picked, for all of them in one step.
+fn pagesetup_change(picked: &[String], shown: &str, key: &str, value: Value) -> Value {
+    if picked.len() > 1 { json!({ "layouts": picked, key: value }) } else { json!({ "layout": shown, key: value }) }
 }
 
 /// Which page-setup rows a dialog shows.
@@ -1254,5 +1307,69 @@ mod plot_dialog_tests {
         plot_window_resume(&mut app, &ctx);
         assert_eq!(app.ui.dialog.as_deref(), Some("plot"));
         assert_eq!(temp::<PlotState>(&ctx, "plot_state").unwrap().window, [2.0, 3.0, 12.0, 9.0]);
+    }
+}
+
+#[cfg(test)]
+mod page_setup_selection_tests {
+    use super::*;
+
+    const ORDER: [&str; 5] = ["Layout1", "Layout2", "Sheet 3", "Sheet 4", "Sheet 5"];
+
+    fn mods(shift: bool, command: bool) -> egui::Modifiers {
+        egui::Modifiers { shift, command, ..Default::default() }
+    }
+
+    #[test]
+    fn ctrl_alone_counts_like_command() {
+        // Synthetic and some platforms' key events set `ctrl` without `command`.
+        let ctrl = egui::Modifiers { ctrl: true, ..Default::default() };
+        let (mut picked, mut sel) = (vec!["Layout1".to_string()], "Layout1".to_string());
+        click_layout(&mut picked, &mut sel, &ORDER, "Sheet 3", ctrl);
+        assert_eq!(picked, ["Layout1", "Sheet 3"]);
+    }
+
+    fn click(picked: &mut Vec<String>, sel: &mut String, name: &str, m: egui::Modifiers) {
+        click_layout(picked, sel, &ORDER, name, m);
+    }
+
+    #[test]
+    fn click_picks_one_ctrl_toggles_shift_takes_a_range() {
+        let (mut picked, mut sel) = (vec!["Layout1".to_string()], "Layout1".to_string());
+        click(&mut picked, &mut sel, "Sheet 3", mods(false, false));
+        assert_eq!((picked.as_slice(), sel.as_str()), (&["Sheet 3".to_string()][..], "Sheet 3"));
+        // Ctrl adds and shows the one just added.
+        click(&mut picked, &mut sel, "Layout1", mods(false, true));
+        click(&mut picked, &mut sel, "Sheet 5", mods(false, true));
+        assert_eq!(picked, ["Sheet 3", "Layout1", "Sheet 5"]);
+        assert_eq!(sel, "Sheet 5");
+        // Ctrl on a picked layout removes it; the shown one moves to another picked.
+        click(&mut picked, &mut sel, "Sheet 5", mods(false, true));
+        assert_eq!((picked.as_slice(), sel.as_str()), (&["Sheet 3".to_string(), "Layout1".to_string()][..], "Layout1"));
+        // The last picked layout can't be removed.
+        click(&mut picked, &mut sel, "Layout1", mods(false, true));
+        click(&mut picked, &mut sel, "Sheet 3", mods(false, true));
+        assert_eq!(picked, ["Sheet 3"], "{picked:?}");
+        // Shift takes the range from the shown layout, in tab order, whichever way it goes.
+        click(&mut picked, &mut sel, "Sheet 5", mods(true, false));
+        assert_eq!(picked, ["Sheet 3", "Sheet 4", "Sheet 5"]);
+        click(&mut picked, &mut sel, "Layout2", mods(true, false));
+        assert_eq!(picked, ["Layout2", "Sheet 3"], "from the shown layout (Sheet 3) back to Layout2");
+    }
+
+    #[test]
+    fn a_change_goes_to_all_picked_layouts_in_one_command() {
+        let one = pagesetup_change(&["Layout1".to_string()], "Layout1", "paper", json!("A3"));
+        assert_eq!(one, json!({ "layout": "Layout1", "paper": "A3" }));
+        let many = pagesetup_change(&["Layout1".to_string(), "Sheet 3".to_string()], "Sheet 3", "plotStyleTable", json!("monochrome.ctb"));
+        assert_eq!(many, json!({ "layouts": ["Layout1", "Sheet 3"], "plotStyleTable": "monochrome.ctb" }));
+        // And the engine takes exactly that.
+        let mut app = crate::CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
+        app.run("layout.new", json!({ "name": "Sheet 3" })).unwrap();
+        app.run("pagesetup", many).unwrap();
+        let d = app.session.doc().unwrap();
+        assert_eq!(d.layout("Layout1").map(|l| l.page.plot_style_table.as_str()), Some("monochrome.ctb"));
+        assert_eq!(d.layout("Sheet 3").map(|l| l.page.plot_style_table.as_str()), Some("monochrome.ctb"));
+        assert_ne!(d.layout("Layout2").map(|l| l.page.plot_style_table.as_str()), Some("monochrome.ctb"), "an unpicked layout is untouched");
     }
 }
