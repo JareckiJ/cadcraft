@@ -107,9 +107,11 @@ impl Cache {
 
 fn rectangles<'a>(d: &'a Drawing, sel: &'a [Handle], xf: Xf, gs: f32) -> impl Iterator<Item = ((Handle, usize), Rect)> + 'a {
     sel.iter().take(200).filter_map(move |h| Some((*h, d.entity(*h)?))).flat_map(move |(h, e)| {
-        e.kind.grips().into_iter().enumerate().filter_map(move |(i, g)| {
+        let grips = e.kind.grips();
+        let count = grips.len();
+        grips.into_iter().enumerate().filter_map(move |(i, g)| {
             let p = xf.to_screen(g);
-            xf.rect.contains(p).then(|| ((h, i), Rect::from_center_size(p, vec2(gs * 2.0, gs * 2.0))))
+            xf.rect.contains(p).then(|| ((h, i), super::grip_rect(&e.kind, count, i, p, gs)))
         })
     })
 }
@@ -169,7 +171,7 @@ mod tests {
                 tess.set_clip_rect(xf().rect);
                 let t = Tokens::get();
                 for (i, g) in d.entity(h).unwrap().kind.grips().into_iter().enumerate() {
-                    let r = Rect::from_center_size(xf().to_screen(g), vec2(10.0, 10.0));
+                    let r = super::grip_rect(&d.entity(h).unwrap().kind, 5, i, xf().to_screen(g), 5.0);
                     let color = if hot.contains(&(h, i)) {
                         t.grip_hot
                     } else if r.expand(2.0).contains(hover) {
