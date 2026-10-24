@@ -18,6 +18,8 @@ pub enum Panel {
     Community,
     /// The Electrical palette (project sheets, symbols, tools).
     Electrical,
+    /// The Project Manager (sheets, their order and title blocks, project properties).
+    Projects,
     Layers,
     Properties,
     #[serde(rename = "externalReferences")]
@@ -34,6 +36,7 @@ impl Panel {
             Self::Devices => "electricalDevices",
             Self::Community => "ecadCommunity",
             Self::Electrical => "electrical",
+            Self::Projects => "projectManager",
             Self::Layers => "layers",
             Self::Properties => "properties",
             Self::ExternalRefs => "externalReferences",
@@ -47,6 +50,7 @@ impl Panel {
             Self::Devices => "Electrical Devices",
             Self::Community => "ECAD Community Hub",
             Self::Electrical => "Electrical",
+            Self::Projects => "Project Manager",
             Self::Layers => "Layers",
             Self::Properties => "Properties",
             Self::ExternalRefs => "External References",
@@ -60,13 +64,14 @@ impl Panel {
             Self::Devices => Zone::Right,
             Self::Community => Zone::Right,
             Self::Electrical => Zone::Left,
+            Self::Projects => Zone::Left,
             Self::Layers => Zone::Right,
             Self::Properties => Zone::Right,
             Self::ExternalRefs => Zone::Right,
         }
     }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC).
-    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Devices, Self::Community, Self::Electrical];
+    pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Devices, Self::Community, Self::Electrical, Self::Projects];
     fn parse(id: &str) -> Result<Self, String> {
         Self::ALL.iter().chain(Self::ON_DEMAND).copied().find(|panel| panel.id() == id).ok_or_else(|| format!("Unknown panel: {id}"))
     }
@@ -368,6 +373,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::Devices => crate::palettes::devices::show(app, ui),
             Panel::Community => crate::palettes::community::show(app, ui),
             Panel::Electrical => crate::palettes::electrical::show(app, ui),
+            Panel::Projects => crate::palettes::project::show(app, ui),
             Panel::Layers => {
                 egui::ScrollArea::vertical()
                     .id_salt("dock-layers")
@@ -410,7 +416,7 @@ fn panel_limits(panel: &Panel) -> PanelLimits {
     let (min, max_width) = match panel {
         Panel::Canvas => (egui::vec2(300.0, 180.0), 1_000_000.0),
         Panel::QuickCalc => (egui::vec2(240.0, 160.0), 600.0),
-        Panel::Devices | Panel::Community | Panel::Electrical => (egui::vec2(240.0, 200.0), 720.0),
+        Panel::Devices | Panel::Community | Panel::Electrical | Panel::Projects => (egui::vec2(240.0, 200.0), 720.0),
         Panel::ToolSets => (egui::vec2(220.0, 150.0), 480.0),
         Panel::Layers | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
     };

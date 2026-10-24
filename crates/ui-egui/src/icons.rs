@@ -149,6 +149,32 @@ pub enum Icon {
     PickAdd,
     SelectObjects,
     QuickSelect,
+    // Electrical (IEC 60617-style pictograms).
+    EWire,
+    EWireType,
+    ELadder,
+    ECleanRungs,
+    ECable,
+    ECoil,
+    ENo,
+    ENc,
+    EPbNo,
+    EPbNc,
+    ELamp,
+    ETerminal,
+    EBreaker,
+    EMotor,
+    EPlc,
+    ETag,
+    EWireNum,
+    EXref,
+    ECheck,
+    EReportBom,
+    EReportWires,
+    EReportTerminals,
+    EReportPlc,
+    EReportCables,
+    EProject,
 }
 
 struct Pen<'a> {
@@ -937,6 +963,147 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             // A filter funnel with a spark.
             pen.poly(&[(3.0, 4.0), (19.0, 4.0), (13.0, 11.0), (13.0, 19.0), (9.0, 17.0), (9.0, 11.0)], true, b);
             pen.poly(&[(20.0, 10.0), (16.5, 15.5), (20.0, 15.5), (17.0, 21.0)], false, a);
+        }
+        EWire => {
+            // A wire routed at right angles from a pin (dot) to a pin.
+            pen.poly(&[(4.0, 18.0), (4.0, 8.0), (20.0, 8.0), (20.0, 14.0)], false, a);
+            pen.dot(4.0, 18.0);
+            pen.dot(20.0, 14.0);
+            pen.l(2.0, 21.0, 6.0, 21.0);
+            pen.l(18.0, 17.0, 22.0, 17.0);
+        }
+        EWireType => {
+            // Three wires in colours, with a size label.
+            pen.p.line_segment([pen.at(3.0, 6.0), pen.at(21.0, 6.0)], Stroke::new(pen.w * 1.6, Color32::from_rgb(150, 90, 40)));
+            pen.p.line_segment([pen.at(3.0, 11.0), pen.at(21.0, 11.0)], Stroke::new(pen.w * 1.6, Color32::from_rgb(40, 110, 220)));
+            pen.p.line_segment([pen.at(3.0, 16.0), pen.at(21.0, 16.0)], Stroke::new(pen.w * 1.6, Color32::from_rgb(60, 170, 70)));
+            pen.text(12.0, 20.5, "mm²", 6.0, b);
+        }
+        ELadder => {
+            pen.l(3.0, 4.0, 21.0, 4.0);
+            pen.l(3.0, 20.0, 21.0, 20.0);
+            for x in [6.0, 12.0, 18.0] {
+                pen.la(x, 4.0, x, 20.0);
+                pen.dot(x, 4.0);
+            }
+        }
+        ECleanRungs => {
+            pen.l(3.0, 4.0, 21.0, 4.0);
+            pen.l(3.0, 20.0, 21.0, 20.0);
+            pen.l(7.0, 4.0, 7.0, 9.0);
+            pen.rect(5.0, 9.0, 4.0, 6.0, b);
+            pen.l(7.0, 15.0, 7.0, 20.0);
+            // The empty rung, struck out.
+            pen.l(16.0, 4.0, 16.0, 20.0);
+            pen.p.line_segment([pen.at(12.5, 9.0), pen.at(19.5, 15.0)], Stroke::new(pen.w * 1.3, Color32::from_rgb(220, 70, 60)));
+            pen.p.line_segment([pen.at(19.5, 9.0), pen.at(12.5, 15.0)], Stroke::new(pen.w * 1.3, Color32::from_rgb(220, 70, 60)));
+        }
+        ECable => {
+            for x in [7.0, 12.0, 17.0] {
+                pen.l(x, 3.0, x, 21.0);
+            }
+            pen.la(3.0, 16.0, 21.0, 8.0);
+            pen.text(5.0, 6.0, "W", 7.0, a);
+        }
+        ECoil => {
+            pen.l(12.0, 2.0, 12.0, 7.0);
+            pen.rect(6.0, 7.0, 12.0, 10.0, a);
+            pen.l(12.0, 17.0, 12.0, 22.0);
+            pen.text(12.0, 12.0, "K", 7.0, b);
+        }
+        ENo | EPbNo => {
+            pen.l(12.0, 2.0, 12.0, 8.0);
+            pen.la(12.0, 16.0, 8.0, 7.0);
+            pen.l(12.0, 16.0, 12.0, 22.0);
+            if icon == EPbNo {
+                pen.l(10.0, 11.5, 4.0, 11.5);
+                pen.l(4.0, 9.0, 4.0, 14.0);
+            }
+        }
+        ENc | EPbNc => {
+            pen.l(12.0, 2.0, 12.0, 8.0);
+            pen.l(12.0, 8.0, 15.0, 8.0);
+            pen.la(12.0, 16.0, 15.5, 6.5);
+            pen.l(12.0, 16.0, 12.0, 22.0);
+            if icon == EPbNc {
+                pen.l(13.0, 11.5, 5.0, 11.5);
+                pen.l(5.0, 9.0, 5.0, 14.0);
+            }
+        }
+        ELamp => {
+            pen.l(12.0, 2.0, 12.0, 6.0);
+            pen.c(12.0, 12.0, 6.0, a);
+            pen.la(7.8, 7.8, 16.2, 16.2);
+            pen.la(16.2, 7.8, 7.8, 16.2);
+            pen.l(12.0, 18.0, 12.0, 22.0);
+        }
+        ETerminal => {
+            pen.l(12.0, 2.0, 12.0, 9.0);
+            pen.c(12.0, 12.0, 3.0, a);
+            pen.la(9.5, 14.0, 14.5, 10.0);
+            pen.l(12.0, 15.0, 12.0, 22.0);
+            pen.text(19.0, 12.0, "X", 6.0, b);
+        }
+        EBreaker => {
+            pen.l(12.0, 2.0, 12.0, 7.0);
+            pen.la(10.5, 5.5, 13.5, 8.5);
+            pen.la(13.5, 5.5, 10.5, 8.5);
+            pen.la(12.0, 17.0, 7.5, 8.0);
+            pen.l(12.0, 17.0, 12.0, 22.0);
+            pen.rect(15.0, 11.0, 5.0, 4.0, b);
+        }
+        EMotor => {
+            pen.l(12.0, 2.0, 12.0, 5.0);
+            pen.c(12.0, 13.0, 8.0, a);
+            pen.text(12.0, 11.5, "M", 7.5, b);
+            pen.text(12.0, 17.5, "3~", 4.5, b);
+        }
+        EPlc => {
+            pen.rect(3.0, 9.0, 18.0, 9.0, a);
+            for x in [6.0, 10.0, 14.0, 18.0] {
+                pen.l(x, 4.0, x, 9.0);
+                pen.fill_c(x, 4.0, 0.9, b);
+            }
+            pen.text(12.0, 13.5, "PLC", 5.0, b);
+        }
+        ETag => {
+            pen.poly(&[(3.0, 8.0), (15.0, 8.0), (21.0, 12.0), (15.0, 16.0), (3.0, 16.0)], true, b);
+            pen.text(9.5, 12.0, "-K1", 5.5, a);
+        }
+        EWireNum => {
+            pen.l(3.0, 16.0, 21.0, 16.0);
+            pen.text(11.0, 11.0, "101", 7.0, a);
+        }
+        EXref => {
+            pen.rect(3.0, 4.0, 7.0, 8.0, b);
+            pen.l(14.0, 4.0, 14.0, 8.0);
+            pen.l(14.0, 12.0, 17.0, 6.0);
+            pen.l(14.0, 12.0, 14.0, 15.0);
+            pen.text(12.0, 19.5, "/2.5", 6.5, a);
+        }
+        ECheck => {
+            pen.rect(3.0, 3.0, 18.0, 18.0, b);
+            pen.p.line(vec![pen.at(7.0, 12.5), pen.at(10.5, 16.0), pen.at(17.5, 7.5)], Stroke::new(pen.w * 1.4, Color32::from_rgb(60, 170, 80)));
+        }
+        EReportBom | EReportWires | EReportTerminals | EReportPlc | EReportCables => {
+            // A sheet with rows, and what it lists.
+            pen.rect(4.0, 3.0, 16.0, 18.0, b);
+            for y in [12.0, 15.0, 18.0] {
+                pen.l(7.0, y, 17.0, y);
+            }
+            let label = match icon {
+                EReportBom => "BOM",
+                EReportWires => "W",
+                EReportTerminals => "X",
+                EReportPlc => "I/O",
+                _ => "C",
+            };
+            pen.text(12.0, 7.5, label, 5.5, a);
+        }
+        EProject => {
+            pen.poly(&[(3.0, 6.0), (9.0, 6.0), (11.0, 8.0), (21.0, 8.0), (21.0, 20.0), (3.0, 20.0)], true, b);
+            pen.rect(7.0, 11.0, 6.0, 6.0, a);
+            pen.rect(11.0, 13.0, 6.0, 6.0, a);
         }
     }
 }

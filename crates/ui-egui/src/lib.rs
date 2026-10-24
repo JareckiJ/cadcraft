@@ -30,6 +30,7 @@ pub mod xrefs;
 
 pub mod dyngrips;
 pub mod dyninput;
+pub mod etoolbar;
 pub mod gpu;
 pub mod grip_dyn;
 pub mod i18n;
@@ -74,6 +75,8 @@ pub struct UiState {
     pub show_toolsets: bool,
     pub show_palettes: bool,
     pub show_toolbar: bool,
+    /// The electrical tool bar (wiring, symbols, numbering, reports) under the tool bar.
+    pub show_etoolbar: bool,
     pub show_file_tabs: bool,
     pub show_status_bar: bool,
     pub show_command_line: bool,
@@ -109,6 +112,8 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// Electrical projects (.ecproj) opened, newest first (the Project Manager's Recent list).
+    pub recent_projects: Vec<String>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -160,6 +165,7 @@ impl Default for UiState {
             show_toolsets: true,
             show_palettes: true,
             show_toolbar: true,
+            show_etoolbar: true,
             show_file_tabs: true,
             show_status_bar: true,
             show_command_line: true,
@@ -180,6 +186,7 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            recent_projects: Vec::new(),
         }
     }
 }
@@ -386,6 +393,12 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if !self.ui.recent_projects.is_empty() {
+            prefs["recentProjects"] = json!(self.ui.recent_projects);
+        }
+        if !self.ui.show_etoolbar {
+            prefs["electricalToolBar"] = json!(false);
+        }
         prefs.to_string()
     }
 
@@ -409,6 +422,13 @@ impl CadApp {
         }
         if let Some(v) = v.get("saveVersion").and_then(Value::as_str).and_then(SaveVersion::parse) {
             self.ui.save_version = v.year().to_string();
+        }
+        if let Some(files) = v.get("recentProjects").and_then(Value::as_array) {
+            self.ui.recent_projects =
+                files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(on) = v.get("electricalToolBar").and_then(Value::as_bool) {
+            self.ui.show_etoolbar = on;
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
@@ -527,6 +547,17 @@ impl CadApp {
         }
     }
 
+    /// Put project `path` first in the Project Manager's Recent list.
+    pub fn remember_project(&mut self, path: &str) {
+        if self.ui.recent_projects.first().map(String::as_str) == Some(path) {
+            return;
+        }
+        let recent = &mut self.ui.recent_projects;
+        recent.retain(|p| p != path);
+        recent.insert(0, path.to_string());
+        recent.truncate(RECENT_FILES);
+    }
+
     /// Put `path` first in File ▸ Open Recent and on the Start page.
     fn remember_recent(&mut self, path: String) {
         let recent = &mut self.ui.recent_files;
@@ -638,6 +669,9 @@ impl CadApp {
         chrome::title_and_toolbar(self, ui);
         if self.ui.in_window_menu {
             menus::menu_bar(self, ui);
+        }
+        if self.ui.show_etoolbar {
+            etoolbar::show(self, ui);
         }
         if self.ui.show_status_bar {
             chrome::status_bar(self, ui);

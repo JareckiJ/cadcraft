@@ -86,6 +86,21 @@ fn project_cmd(app: &mut CadApp, ui: &mut egui::Ui, label: &str, cmd: &str, hint
     }
 }
 
+/// Save report `kind` as a CSV file the person picks (`file` is the suggested name); without a
+/// file picker the report goes to the command line.
+pub fn save_report(app: &mut CadApp, kind: &str, file: &str) {
+    match app.services.pick_save.as_ref().and_then(|f| f(file)) {
+        Some(path) => {
+            if let Ok(r) = app.run("ereport", json!({ "kind": kind, "path": path })) {
+                app.set_status(format!("{} {} → {path}", r["rows"].as_array().map_or(0, Vec::len), crate::tl!("rows saved")));
+            }
+        }
+        None => {
+            let _ = app.run("ereport", json!({ "kind": kind }));
+        }
+    }
+}
+
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let mut st: State = ui.ctx().data_mut(|d| d.get_temp(id())).unwrap_or_default();
@@ -222,16 +237,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                     ("devices", crate::tl!("Device list"), "devices.csv"),
                 ] {
                     if ui.button(label).clicked() {
-                        match app.services.pick_save.as_ref().and_then(|f| f(file)) {
-                            Some(path) => {
-                                if let Ok(r) = app.run("ereport", json!({ "kind": kind, "path": path })) {
-                                    app.set_status(format!("{} {} → {path}", r["rows"].as_array().map_or(0, Vec::len), crate::tl!("rows saved")));
-                                }
-                            }
-                            None => {
-                                let _ = app.run("ereport", json!({ "kind": kind }));
-                            }
-                        }
+                        save_report(app, kind, file);
                     }
                 }
             });

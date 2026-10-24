@@ -17,6 +17,7 @@ pub mod electrical;
 mod layer_menu_tests;
 /// The hatch pattern picker.
 pub mod patterns;
+pub mod project;
 pub mod quickcalc;
 
 type Tool = (Icon, &'static str, &'static str);

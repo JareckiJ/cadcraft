@@ -1531,3 +1531,52 @@
 	Sheet Properties...	Властивості аркуша...
 	Project Properties	Властивості проєкту
 	Project Properties...	Властивості проєкту...
+	Keep tags	Залишити позначення
+	Move Down	Перемістити вниз
+	Move Up	Перемістити вгору
+	New file name	Нова назва файлу
+	Project properties	Властивості проєкту
+	Refresh	Оновити
+	Remove sheet	Вилучити аркуш
+	Remove...	Вилучити...
+	Rename	Перейменувати
+	Renumber	Перенумерувати
+	Sheet	Аркуш
+	Sheets	Аркуші
+	The file is kept on disk.	Файл залишається на диску.
+	The sheet order changed. Renumber device tags and wire numbers for the new sheet numbers?	Порядок аркушів змінився. Перенумерувати позначення пристроїв і номери проводів за новими номерами аркушів?
+	This sheet has no title block.	На цьому аркуші немає основного напису.
+	Written into every sheet's title block.	Записується в основний напис кожного аркуша.
+	Project Manager	Менеджер проєкту
+	Electrical Tool Bar	Електрична панель інструментів
+	Title	Назва
+	Drawing no.	№ креслення
+	Date	Дата
+	Rev.	Ред.
+	Drawn	Розробив
+	Checked	Перевірив
+	Customer	Замовник
+	Draw Wire (EWIRE): click a pin or wire, then the next	Провід (EWIRE): клацніть вивід або провід, потім наступний
+	Wire Type: colour and cross-section of new wires	Тип проводу: колір і переріз нових проводів
+	Insert Ladder: supply rails with a rung in every column	Сходова схема: шини живлення зі східцем у кожному стовпці
+	Remove Empty Rungs (they would short the rails)	Видалити порожні східці (вони закорочують шини)
+	Insert Cable: draw a line across its wires	Кабель: проведіть лінію через його проводи
+	Relay coil (-K)	Котушка реле (-K)
+	Normally open contact	Замикальний контакт
+	Normally closed contact	Розмикальний контакт
+	Push-button, normally open (-S)	Кнопка, замикальна (-S)
+	Push-button, normally closed (-S)	Кнопка, розмикальна (-S)
+	Indicator lamp (-P)	Сигнальна лампа (-P)
+	Terminal (-X)	Клема (-X)
+	Circuit-breaker, 3 poles (-Q)	Автоматичний вимикач, 3 полюси (-Q)
+	Three-phase motor (-M)	Трифазний двигун (-M)
+	PLC I/O card (DI, DO, AI, AO)	Модуль вводу/виводу ПЛК (DI, DO, AI, AO)
+	Tag Devices (IEC 81346): whole project when one is open	Позначити пристрої (IEC 81346): увесь проєкт, якщо він відкритий
+	Number Wires: one number per network, at its start	Нумерація проводів: один номер на мережу, на її початку
+	Cross-References: contacts and coils	Перехресні посилання: контакти й котушки
+	Check Project: duplicate tags, shorts, contacts without a coil, open pins	Перевірка проєкту: дублікати, замикання, контакти без котушки, вільні виводи
+	Parts list (CSV)	Специфікація (CSV)
+	Wire list (CSV)	Перелік проводів (CSV)
+	Terminal plan (CSV)	План клем (CSV)
+	PLC I/O list (CSV)	Перелік входів/виходів ПЛК (CSV)
+	Cable list (CSV)	Перелік кабелів (CSV)
