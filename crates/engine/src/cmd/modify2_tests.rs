@@ -111,6 +111,7 @@ fn join_keeps_selected_objects_outside_the_chain() {
     assert!(d.entity(Handle::parse_hex(&c).unwrap()).is_some(), "unrelated circle stays");
 }
 
+/// Test joining multiple polygons and open polyline strips simultaneously.
 #[test]
 fn join_multiple_polygons_simultaneously() {
     let mut s = Session::new();
@@ -177,6 +178,25 @@ fn join_multiple_polygons_simultaneously() {
     }
     assert_eq!(closed_count, 2);
     assert_eq!(open_count, 1);
+}
+
+/// Test that partial-owner chains (e.g. self-touching open polyline with a tail) are rejected
+/// to avoid deleting the source entity and losing unconsumed segments.
+#[test]
+fn join_partial_owner_rejected_to_prevent_loss() {
+    let mut s = Session::new();
+    // Open polyline with loop (0,0 -> 10,0 -> 10,10 -> 0,0) and tail (0,0 -> 0,-10)
+    let p = pline(&mut s, json!([[0, 0], [10, 0], [10, 10], [0, 0], [0, -10]]), false);
+    let far = h(&s.execute("line", &json!({"points": [[100, 100], [110, 110]]})).unwrap());
+
+    // JOIN should reject because the polyline is not fully consumed into a clean chain
+    let r = s.execute("join", &json!({"handles": [p.clone(), far.clone()]}));
+    assert!(r.is_err());
+
+    // Both entities remain intact in document
+    let d = s.doc().unwrap();
+    assert!(d.entity(Handle::parse_hex(&p).unwrap()).is_some());
+    assert!(d.entity(Handle::parse_hex(&far).unwrap()).is_some());
 }
 
 #[test]

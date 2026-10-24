@@ -1652,6 +1652,11 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
     }
 
     let tol = 1e-6;
+    let mut total: std::collections::HashMap<Handle, usize> = std::collections::HashMap::new();
+    for (_, owner) in &pool {
+        *total.entry(*owner).or_default() += 1;
+    }
+
     let mut chains: Vec<(Vec<Segment>, Vec<Handle>)> = Vec::new();
 
     while !pool.is_empty() {
@@ -1693,7 +1698,13 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
         unique_owners.sort();
         unique_owners.dedup();
 
-        if unique_owners.len() >= 2 || (chain.len() >= 2 && closed) {
+        let mut used_counts: std::collections::HashMap<Handle, usize> = std::collections::HashMap::new();
+        for owner in &used {
+            *used_counts.entry(*owner).or_default() += 1;
+        }
+        let fully_consumed = used_counts.iter().all(|(owner, count)| total.get(owner) == Some(count));
+
+        if fully_consumed && (unique_owners.len() >= 2 || (chain.len() >= 2 && closed)) {
             chains.push((chain, used));
         }
     }
@@ -1744,6 +1755,7 @@ pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
     Ok(out)
 }
 
+/// Run the JOIN command with JSON arguments.
 fn run_join(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     if p.get("close").and_then(Value::as_bool) == Some(true) {
