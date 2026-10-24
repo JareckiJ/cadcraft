@@ -54,6 +54,7 @@ fn preventer(bytes: &[u8]) -> TestResult<Option<(i16, bool)>> {
     })
 }
 
+/// The preventer (flags and block) survives two DWG saves through CADCraft.
 #[test]
 fn a_purge_preventer_survives_two_dwg_saves() -> TestResult {
     let mut bytes = source()?;
