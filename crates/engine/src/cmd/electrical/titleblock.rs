@@ -135,11 +135,6 @@ pub(super) fn values(s: &Session) -> Result<Option<Map<String, Value>>> {
     }))
 }
 
-/// The fields a person may set (all but the sheet numbers, which are the project's).
-pub(super) fn editable_fields() -> Vec<&'static str> {
-    FIELDS.iter().map(|f| f.0).filter(|f| !f.starts_with("SHEET")).collect()
-}
-
 /// Set fields of every title block in the active drawing; returns how many blocks changed.
 pub(super) fn set_fields(s: &mut Session, values: &Map<String, Value>) -> Result<usize> {
     let d = s.doc()?;
