@@ -1028,8 +1028,10 @@ pub fn is_system_xdata_app(app: &str) -> bool {
 
 fn run_xdedit(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
-    let Some(&h) = hs.first() else {
-        return Err(bad("xdedit", "nothing selected"));
+    let h = match hs.as_slice() {
+        [] => return Err(bad("xdedit", "nothing selected")),
+        [h] => *h,
+        _ => return Err(bad("xdedit", "XDEDIT edits one object; pass a single `handle`")),
     };
     let Some(arr) = p.get("xdata").and_then(Value::as_array) else {
         return Ok(json!({ "handle": h.hex() }));
@@ -1068,10 +1070,13 @@ fn run_xdedit(s: &mut Session, p: &Value) -> Result<Value> {
             }
             in_app = true;
             let app_name = val.trim().to_string();
+            if app_name.is_empty() {
+                return Err(bad("xdedit", format!("xdata[{i}]: application name is empty")));
+            }
             if is_system_xdata_app(&app_name) {
                 return Err(bad("xdedit", format!("xdata[{i}]: system application `{app_name}` cannot be edited")));
             }
-            if !app_name.is_empty() && !apps.iter().any(|a| a.eq_ignore_ascii_case(&app_name)) {
+            if !apps.iter().any(|a| a.eq_ignore_ascii_case(&app_name)) {
                 apps.push(app_name);
             }
         } else if !in_app {
@@ -1323,6 +1328,23 @@ mod tests {
         let h_str = line
             .and_then(|v| v["handles"][0].as_str().map(str::to_string))
             .unwrap_or_default();
+        let line2 = s.execute("line", &json!({ "points": [[0.0, 5.0], [10.0, 5.0]] })).ok();
+        let h2_str = line2
+            .and_then(|v| v["handles"][0].as_str().map(str::to_string))
+            .unwrap_or_default();
+
+        // Multi-handle request or empty 1001 application name is rejected.
+        assert!(
+            s.execute(
+                "xdedit",
+                &json!({ "handles": [&h_str, &h2_str], "xdata": [{ "code": 1001, "value": "Lumi_KLIC" }] })
+            )
+            .is_err()
+        );
+        assert!(
+            s.execute("xdedit", &json!({ "handles": [&h_str], "xdata": [{ "code": 1001, "value": "   " }] }))
+                .is_err()
+        );
 
         // Missing or invalid code/value, system app, or orphan tag before 1001 is rejected.
         assert!(

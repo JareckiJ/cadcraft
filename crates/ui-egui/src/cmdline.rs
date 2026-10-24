@@ -638,17 +638,32 @@ fn history_window(app: &mut CadApp, ui: &mut egui::Ui, r: Rect) {
     let mut open_xdedit = None;
     let mut close_hist = false;
     child.horizontal(|ui| {
-        ui.label(egui::RichText::new("Command & XData Output (select text + Ctrl+C to copy)").font(crate::theme::small()).color(t.text_dim));
+        ui.label(
+            egui::RichText::new(crate::tl!("Command & XData Output (select text + Ctrl+C to copy)"))
+                .font(crate::theme::small())
+                .color(t.text_dim),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("✕").on_hover_text("Close History Window (F2)").clicked() {
+            if ui
+                .small_button("✕")
+                .on_hover_text(crate::tl!("Close History Window (F2)"))
+                .clicked()
+            {
                 close_hist = true;
             }
             if let Some(&h) = app.session.selection().first()
-                && ui.small_button("✏ Edit XData (XDEDIT)").on_hover_text("Open visual XData Editor for selected object").clicked()
+                && ui
+                    .small_button(crate::tl!("✏ Edit XData (XDEDIT)"))
+                    .on_hover_text(crate::tl!("Open visual XData Editor for selected object"))
+                    .clicked()
             {
                 open_xdedit = Some(h);
             }
-            if ui.small_button("📋 Copy All").on_hover_text("Copy history output to clipboard").clicked() {
+            if ui
+                .small_button(crate::tl!("📋 Copy All"))
+                .on_hover_text(crate::tl!("Copy history output to clipboard"))
+                .clicked()
+            {
                 ui.ctx().copy_text(app.session.log.join("\n"));
             }
         });
