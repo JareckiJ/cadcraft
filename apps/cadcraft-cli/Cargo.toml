@@ -15,3 +15,8 @@ cadcraft-io = { workspace = true }
 cadcraft-mcp = { workspace = true }
 cadcraft-render = { workspace = true }
 serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Original generated FF1 sources and direct native/tag assertions, at the bridge's locked version.
+acadrust = "=0.6.5"
+cadcraft-dxf = { workspace = true }

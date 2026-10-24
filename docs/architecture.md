@@ -1,6 +1,6 @@
 # CADCraft architecture
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (first committed architecture doc, written from the code on main at bd2412f) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-24 (file preservation) · **Last updated:** 2026-10-24 · **Change:** minor (native carry of other programs' DWG objects; loss reports instead of refused saves) · **Target:** Autodesk AutoCAD 2027
 
 How CADCraft is built today. This describes the code on `main`, not plans; plans live in
 [roadmap.md](roadmap.md). Agents: the rules that keep this shape (layering, never-crash,
@@ -69,6 +69,34 @@ read through the same path; saving DWG writes our DXF and converts it back. CADC
 (constraints, associativity details, table flags) travels in xdata under our own application
 name. Detail and gaps: [file-format-parity.md](file-format-parity.md).
 
+The standalone `dwg` bridge returns a detailed read report before native custom records,
+decoder skips/pruning or BLOCK-marker XDATA can disappear during conversion. `io` maps typed
+issues into CADCraft-owned `doc::foreign::PreservationState`; no dependency types cross into
+the drawing. Its bounded immutable `Arc` context carries provenance, issue counts and capped
+diagnostics through drawing clones and engine edit/undo/redo/saved snapshots, plus an opaque
+`NativeCarry` the `dwg` bridge fills (doc never interprets it): every opaque record's own DWG
+bytes, and the subtrees of the named object dictionary that can go back into a DWG of the
+source's version (`crates/dwg/src/carry.rs`). Human read notes are presentation, never the
+source of save decisions; DXF-origin notes/skips do not acquire native state.
+
+**Saves never refuse for what the drawing lacks, and never lose it silently.**
+`io::write_with_report` / `write_framed_report` return the bytes with a `LossReport`: each
+record of the source the file lacks (import losses, other programs' records the format can't
+hold, BLOCK-marker XDATA a DWG can't hold), with its own DWG bytes or DXF groups where they were
+kept. A DWG in the source's own version puts the carried subtrees back: their handles are kept
+(CADCraft's own new handles start above `$HANDSEED`), references out of them (layer, linetype,
+style, application, block, named object dictionary, entity) are re-encoded in the record's
+handle stream and extended data to what has the same role in the written document, and the
+classes section keeps the source's order (type codes are positional). The written DWG is read
+back and checked; if a carried record doesn't come back byte for byte it is written again
+without them and they are reported. Hosts (desktop, web, CLI) install the engine's
+`set_write_report` hook: saves keep the report as `<file>.lost.json` beside the file, echo its
+summary, and back up a file they overwrite with less than it holds (`<name>.orig.<ext>`).
+`cadcraft-cli audit` (and `io::audit`) saves in memory and adds an independent per-kind record
+count of the file and the saved file. Engine saves commit path/title/saved state only after
+storage succeeds; byte delivery returns the report in its result. See the [FF1 matrix and
+limits](file-format-parity.md#preservation-and-safe-save-contract-ff1).
+
 ## Agent control
 
 - **Control channel:** `cadcraft --control PORT` accepts JSON lines (`cmdline.input`,
@@ -91,4 +119,5 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | minor | FF1 carry and loss reports: other programs' DWG objects go back into a same-version DWG with references re-encoded by role; saves report what the file lacks (`<file>.lost.json`, record bytes kept) instead of refusing, back up an overwritten richer file; `cadcraft-cli audit` |
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |

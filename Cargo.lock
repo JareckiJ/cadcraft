@@ -579,6 +579,8 @@ dependencies = [
 name = "cadcraft-cli"
 version = "0.12.0"
 dependencies = [
+ "acadrust",
+ "cadcraft-dxf",
  "cadcraft-engine",
  "cadcraft-io",
  "cadcraft-mcp",
@@ -634,6 +636,7 @@ dependencies = [
 name = "cadcraft-engine"
 version = "0.12.0"
 dependencies = [
+ "acadrust",
  "cadcraft-color",
  "cadcraft-constraints",
  "cadcraft-doc",

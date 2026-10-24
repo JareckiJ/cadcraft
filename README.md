@@ -214,6 +214,8 @@ cadcraft-cli mcp --connect 127.0.0.1:7979
 cadcraft-cli run --sample --script 'CIRCLE 22,3 1\n' --save out.dxf --export out.png
 cadcraft-cli info drawing.dxf
 cadcraft-cli convert drawing.dxf drawing.svg
+# What saving a drawing would keep and lose, without writing anything:
+cadcraft-cli audit drawing.dwg --report audit.json
 
 # Frame part of the drawing (model space, drawing units, lower-left corner first):
 cadcraft-cli convert drawing.dwg detail.png --window 0,0,20000,15000
@@ -235,6 +237,12 @@ MCP tools include `command_line` (type at the prompt), `execute` (any command wi
 `inspect_drawing`, `query_entities`, `render` (returns a PNG) and, when connected to the app,
 `screenshot` and `ui_click`. The desktop app's JSON control channel is documented in
 [docs/control-protocol.md](docs/control-protocol.md).
+
+Saving never drops part of a drawing silently: when the saved file lacks records of the source
+(other programs' objects the format can't hold, records the reader couldn't decode), the CLI and
+the editor write `<file>.lost.json` beside it, listing each one with its own data, and keep a
+copy of a source file they overwrite with less (`<name>.orig.<ext>`). Other programs' objects
+go back into a DWG saved in the source's version.
 
 To run LISP routines, scripts and alias files, or to drive CADCraft from your own programs, see
 [docs/customization.md](docs/customization.md).

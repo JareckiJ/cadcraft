@@ -558,6 +558,39 @@ fn fixture() -> String {
     dxf(&[HEADER, TABLES, BLOCKS, ENTITIES, OBJECTS].concat())
 }
 
+/// The fixture without ACME's own entity and object types (their records and CLASSes, and the
+/// dictionary entry and reactor naming the object). BLOCK-marker XDATA is still present.
+fn fixture_without_custom_types() -> String {
+    let flat = fixture();
+    let mut lines = flat.lines();
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    while let (Some(c), Some(v)) = (lines.next(), lines.next()) {
+        pairs.push((c.trim(), v));
+    }
+    let custom = |v: &str| v.starts_with("ACME_");
+    let mut keep: Vec<(&str, &str)> = Vec::new();
+    let mut skipping = false;
+    for (i, &(c, v)) in pairs.iter().enumerate() {
+        if c == "0" {
+            let class_of_custom = v == "CLASS" && pairs.get(i + 1).is_some_and(|&(c1, v1)| c1 == "1" && custom(v1));
+            skipping = custom(v) || class_of_custom;
+        }
+        // The dictionary entry and the reactor that name the dropped object (handle 42).
+        let names_object = (c == "350" || c == "330") && v == "42";
+        let entry_key = c == "3" && pairs.get(i + 1).is_some_and(|&(c1, v1)| c1 == "350" && v1 == "42");
+        if !skipping && !names_object && !entry_key {
+            keep.push((c, v));
+        }
+    }
+    keep.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+}
+
+/// The DWG success fixture also excludes the measured unsupported BLOCK-marker XDATA.
+/// Its other metadata and references remain; the complete source is still audited as DXF.
+fn supported_fixture() -> String {
+    fixture_without_custom_types().replace("1001\nACME\n1000\nblock-entity-data\n", "")
+}
+
 /// A written file, record by record: (section, record type, groups after the `0`).
 struct Out {
     recs: Vec<(String, String, Vec<Tag>)>,
@@ -954,28 +987,81 @@ fn hostile_raw_data_never_panics() {
 }
 
 /// Through the DWG bridge (acadrust): what the DWG writer and reader keep of the same data.
-/// Entities and objects of custom classes, xdata on table records and blocks, entities' colour
-/// book names and reactors are not kept there (acadrust gaps); the rest is.
+/// Custom entities/objects and BLOCK-marker XDATA can't be written there: separate tests assert
+/// their refusal, so this uses a fixture without those records/payload. All assertions on the
+/// supported metadata remain intact.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn dwg_keeps_extension_dictionaries_xrecords_and_entity_xdata() {
-    let via_dwg = |d: &Drawing| cadcraft_io::read(&cadcraft_io::write(d, "x.dwg").expect("write DWG"), "x.dwg").expect("read DWG");
-    let d = via_dwg(&via_dwg(&read_dxf(fixture().as_bytes()).expect("read fixture")));
-    let o = Out::new(&write_dxf(&d));
-    assert_eq!(o.dangling(), Vec::<String>::new());
-    let line = o.handle("2A").expect("line").1;
-    assert_eq!(xdata(line, "ACME").get(..2), Some(&[(1000, "hello".to_string()), (1070, "42".to_string())][..]));
-    assert_eq!(xdata(line, "PE_URL").first(), Some(&(1000, "https://example.com/spec".to_string())));
-    assert_eq!(s(line, 440), "33554559");
-    let [xd] = group(line, "ACAD_XDICTIONARY").try_into().expect("the line's extension dictionary");
-    let (_, dict) = o.handle(&xd).expect("dictionary");
-    assert_eq!(o.entry(dict, "ACME_XREC").map(|x| s(x.1, 1)), Some("entity-xdict-data".into()));
-    assert_eq!(o.entry(o.root(), "ACME_DATA").map(|x| s(x.1, 1)), Some("top-level-xrecord".into()));
-    let (_, vars) = o.entry(o.root(), "AcDbVariableDictionary").expect("variable dictionary");
-    assert_eq!(o.entry(vars, "ACMEVAR").map(|x| (x.0, s(x.1, 1))), Some(("DICTIONARYVAR", "var-value".into())));
-    let table = o.of("TABLE").into_iter().find(|t| s(t, 2) == "LAYER").expect("LAYER table");
-    assert_eq!(group(table, "ACAD_XDICTIONARY").len(), 1, "layer states");
-    assert_eq!(s(o.named("LAYER", "WALLS"), 430), "RAL$RAL 3020");
-    assert_eq!(d.block("DOOR").map(|b| b.description.as_str()), Some("A door leaf"));
-    assert!(d.ucss.iter().any(|u| u.name == "TILTED"));
+    let mut d = read_dxf(supported_fixture().as_bytes()).expect("read supported fixture");
+    for cycle in 1..=2 {
+        d.modify_entity(cadcraft_doc::Handle(0x2A), |e| {
+            if let EntityKind::Line(line) = &mut e.kind {
+                line.b.x += 5.;
+            }
+        })
+        .expect("edit LINE");
+        let bytes = cadcraft_io::write(&d, "x.dwg").expect("write supported DWG");
+        let outcome = acadrust::DwgReader::from_stream(std::io::Cursor::new(&bytes)).read_with_stats().expect("read native DWG");
+        assert_eq!(outcome.stats.skipped_source_records, 0);
+        assert!(outcome.stats.record_stream_read && outcome.stats.stream_completed);
+        let Some(acadrust::EntityType::Line(line)) = outcome.document.get_entity(acadrust::Handle::new(0x2A)) else { panic!("native LINE absent") };
+        assert_eq!((line.start.x, line.start.y, line.end.x, line.end.y), (0., 0., 10. + 5. * f64::from(cycle), 0.));
+        d = cadcraft_io::read(&bytes, "x.dwg").expect("reopen supported DWG");
+        let o = Out::new(&write_dxf(&d));
+        assert_eq!(o.dangling(), Vec::<String>::new());
+        let line = o.handle("2A").expect("line").1;
+        assert_eq!(xdata(line, "ACME").get(..2), Some(&[(1000, "hello".to_string()), (1070, "42".to_string())][..]));
+        assert_eq!(xdata(line, "PE_URL").first(), Some(&(1000, "https://example.com/spec".to_string())));
+        assert_eq!(s(line, 440), "33554559");
+        let [xd] = group(line, "ACAD_XDICTIONARY").try_into().expect("the line's extension dictionary");
+        let (_, dict) = o.handle(&xd).expect("dictionary");
+        assert_eq!(o.entry(dict, "ACME_XREC").map(|x| s(x.1, 1)), Some("entity-xdict-data".into()));
+        assert_eq!(o.entry(o.root(), "ACME_DATA").map(|x| s(x.1, 1)), Some("top-level-xrecord".into()));
+        let (_, vars) = o.entry(o.root(), "AcDbVariableDictionary").expect("variable dictionary");
+        assert_eq!(o.entry(vars, "ACMEVAR").map(|x| (x.0, s(x.1, 1))), Some(("DICTIONARYVAR", "var-value".into())));
+        let table = o.of("TABLE").into_iter().find(|t| s(t, 2) == "LAYER").expect("LAYER table");
+        assert_eq!(group(table, "ACAD_XDICTIONARY").len(), 1, "layer states");
+        assert_eq!(s(o.named("LAYER", "WALLS"), 430), "RAL$RAL 3020");
+        assert_eq!(d.block("DOOR").map(|b| b.description.as_str()), Some("A door leaf"));
+        assert!(d.ucss.iter().any(|u| u.name == "TILTED"));
+    }
+}
+
+/// The complete fixture (ACME's entities and object) can't all be a DWG: the save writes the rest
+/// and its loss report names each record left out, with its DXF groups; DXF keeps them all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn dwg_leaves_out_the_custom_types_and_reports_each_with_its_groups() {
+    let d = read_dxf(fixture().as_bytes()).expect("read fixture");
+    let (bytes, report) = cadcraft_io::write_with_report(&d, "x.dwg", &cadcraft_io::SaveOptions::default()).expect("DWG written");
+    assert!(!bytes.is_empty());
+    let report = report.expect("a loss report");
+    let names: Vec<&str> = report.records.iter().filter_map(|r| r.record.as_deref()).collect();
+    assert!(names.contains(&"ACME_WIDGET") && names.contains(&"ACME_OBJECT"), "{names:?}");
+    assert!(
+        report.records.iter().filter(|r| r.record.as_deref().is_some_and(|n| n.starts_with("ACME_"))).all(|r| !r.dxf.is_empty()),
+        "each with its groups"
+    );
+    assert!(report.to_json().contains("ACME_WIDGET"));
+    // Nothing of the drawing CADCraft models is lost for them: the native DWG reads back.
+    let back = acadrust::DwgReader::from_stream(std::io::Cursor::new(&bytes)).read().expect("native read");
+    assert!(back.get_entity(acadrust::Handle::new(0x2A)).is_some(), "the LINE");
+    let (_, dxf_report) = cadcraft_io::write_with_report(&d, "x.dxf", &cadcraft_io::SaveOptions::default()).expect("DXF");
+    assert!(dxf_report.is_none(), "DXF keeps them all");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn dwg_reports_block_marker_xdata_even_without_custom_types() {
+    let d = read_dxf(fixture_without_custom_types().as_bytes()).expect("read fixture");
+    assert!(d.model.iter().all(|e| !matches!(e.kind, cadcraft_doc::EntityKind::Unknown(_))));
+    assert!(d.foreign.classes.iter().all(|class| !class.iter().any(|tag| tag.code == 1 && tag.value.starts_with("ACME_"))));
+    let (_, report) = cadcraft_io::write_with_report(&d, "x.dwg", &cadcraft_io::SaveOptions::default()).expect("DWG written");
+    let report = report.expect("BLOCK metadata reported, not silently lost");
+    let r = report.records.iter().find(|r| r.kind == "metadata").expect("the BLOCK-marker XDATA");
+    assert_eq!(r.record.as_deref(), Some("DOOR"));
+    assert!(r.reason.contains("ACME") && r.reason.contains("BLOCK marker"), "{}", r.reason);
+    let dxf = write_dxf(&d);
+    assert_eq!(xdata(Out::new(&dxf).named("BLOCK", "DOOR"), "ACME"), [(1000, "block-entity-data".into())]);
 }

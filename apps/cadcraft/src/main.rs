@@ -119,6 +119,14 @@ pub fn install_io() {
     cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
         cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
     });
+    // What a saved file lacks of the drawing's source: kept beside it (<file>.lost.json).
+    cadcraft_engine::cmd::file::set_write_report(|d, name, o| {
+        let (bytes, report) =
+            cadcraft_io::write_with_report(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())?;
+        let loss =
+            report.filter(|r| !r.is_empty()).map(|r| cadcraft_engine::cmd::file::Loss { count: r.count(), summary: r.summary(), json: r.to_json() });
+        Ok((bytes, loss))
+    });
     // AutoLISP's entget, entmake and entmod see entities as DXF groups.
     cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
         groups: cadcraft_io::entity_groups,

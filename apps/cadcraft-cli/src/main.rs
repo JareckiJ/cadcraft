@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! cadcraft-cli info FILE.dxf                       summary as JSON
+//! cadcraft-cli audit FILE [--as dwg|dxf] [--version 2018] [--report OUT.json]  what saving it would lose (nothing written)
 //! cadcraft-cli convert IN.dxf OUT.(dxf|svg|png) [--window x0,y0,x1,y1 | --view extents|current]
 //! cadcraft-cli run [FILE|--sample|--metric] [--script TEXT|--script-file F.scr] [--cmd 'id {json}']... [--save OUT] [--export OUT.png] [--window ... | --view ...]
 //! cadcraft-cli commands [FILTER]                   command catalog (JSON)
@@ -57,6 +58,7 @@ fn stdout_failed(e: std::io::Error) {
 
 const USAGE: &str = "usage:
   cadcraft-cli info FILE.dxf
+  cadcraft-cli audit FILE.(dwg|dxf) [--as dwg|dxf] [--version 2018] [--report OUT.json]
   cadcraft-cli convert IN.dxf OUT.(dxf|dwg|svg|png|pdf) [FRAMING]
   cadcraft-cli run [FILE | --sample | --metric] [--script TEXT] [--script-file F.scr] [--cmd 'id {json}']... [--save OUT.dxf] [--export OUT.(png|svg|pdf)] [FRAMING]
   cadcraft-cli commands [FILTER]
@@ -180,6 +182,12 @@ fn install_io() {
     cadcraft_engine::cmd::file::set_write_as(|d, name, o| {
         cadcraft_io::write_with(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
     });
+    // What a saved file lacks of the drawing's source: kept beside it (<file>.lost.json).
+    cadcraft_engine::cmd::file::set_write_report(|d, name, o| {
+        let (bytes, report) =
+            cadcraft_io::write_with_report(d, name, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())?;
+        Ok((bytes, report.filter(|r| !r.is_empty()).map(|r| loss(&r))))
+    });
     // AutoLISP's entget, entmake and entmod see entities as DXF groups.
     cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
         groups: cadcraft_io::entity_groups,
@@ -217,6 +225,70 @@ fn validate_options(command: &str, args: &[String], specs: &[OptionSpec]) -> Res
 }
 
 const NO_OPTIONS: &[OptionSpec] = &[];
+const AUDIT_OPTIONS: &[OptionSpec] = &[
+    OptionSpec { name: "--as", takes_value: true },
+    OptionSpec { name: "--version", takes_value: true },
+    OptionSpec { name: "--report", takes_value: true },
+];
+
+/// `audit FILE`: what saving the file loses, found without writing it. By default it is saved in
+/// memory in its own format and version; `--as` and `--version` choose others. Prints the loss
+/// report's summary and how the saved file's records differ from the file's (kind by kind, read
+/// back independently); `--report` writes it all as JSON, each lost record with its own data.
+fn audit(args: &[String]) -> Result<(), String> {
+    let mut file = None;
+    let mut target = None;
+    let mut version = None;
+    let mut report = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--as" => target = Some(it.next().ok_or("--as needs dwg or dxf")?.to_ascii_lowercase()),
+            "--version" => {
+                let v = it.next().ok_or("--version needs a version (2018, AC1032)")?;
+                version = Some(cadcraft_io::Version::parse(v).ok_or_else(|| format!("unknown version `{v}`"))?);
+            }
+            "--report" => report = Some(it.next().ok_or("--report needs a path")?.clone()),
+            _ => file = Some(a.clone()),
+        }
+    }
+    let file = file.ok_or_else(|| USAGE.to_string())?;
+    let bytes = std::fs::read(&file).map_err(|e| format!("{file}: {e}"))?;
+    let target = target.unwrap_or_else(|| if cadcraft_dwg_like(&bytes) { "dwg".into() } else { "dxf".into() });
+    if !matches!(target.as_str(), "dwg" | "dxf") {
+        return Err(format!("--as {target}: audit saves as dwg or dxf"));
+    }
+    let a = cadcraft_io::audit(&bytes, &file, &target, &cadcraft_io::SaveOptions { version, binary: false }).map_err(|e| e.to_string())?;
+    outln!("{file}: {} → saved in memory as {} (nothing written)", a.source, a.target);
+    match &a.report {
+        Some(r) if r.kept_natively > 0 => outln!("  kept as they were: {} records of other programs", r.kept_natively),
+        _ => {}
+    }
+    match a.report.as_ref().filter(|r| !r.is_empty()) {
+        Some(r) => outln!("  lost: {}", r.summary()),
+        None => outln!("  lost: nothing the loss report knows of"),
+    }
+    if let Some(e) = &a.inventory_error {
+        outln!("  record counts not compared: {e}");
+    } else if a.differences.is_empty() {
+        outln!("  record counts: the same in the saved file, kind by kind");
+    } else {
+        outln!("  record counts that differ (file → saved), {} kinds:", a.differences.len());
+        for (k, x, y) in &a.differences {
+            outln!("    {k}: {x} → {y}{}", if y < x { "  (fewer)" } else { "" });
+        }
+    }
+    if let Some(path) = report {
+        std::fs::write(&path, a.to_json()).map_err(|e| format!("{path}: {e}"))?;
+        outln!("  report: {path}");
+    }
+    Ok(())
+}
+
+/// Whether the bytes are a DWG file (its version stamp).
+fn cadcraft_dwg_like(bytes: &[u8]) -> bool {
+    bytes.len() > 6 && bytes.starts_with(b"AC10")
+}
 
 fn info(path: &str) -> Result<(), String> {
     let mut s = Session::empty();
@@ -230,16 +302,34 @@ fn export(s: &Session, out: &str) -> Result<(), String> {
     export_framed(s, out, None)
 }
 
+/// The engine's view of an I/O loss report.
+fn loss(r: &cadcraft_io::LossReport) -> cadcraft_engine::cmd::file::Loss {
+    cadcraft_engine::cmd::file::Loss { count: r.count(), summary: r.summary(), json: r.to_json() }
+}
+
 fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), String> {
+    use cadcraft_engine::cmd::file::{back_up_source, keep_loss_report};
     let d = s.doc().map_err(|e| e.to_string())?;
-    let bytes = cadcraft_io::write_framed(d, out, window).map_err(|e| e.to_string())?;
+    let (bytes, report) = cadcraft_io::write_framed_report(d, out, window).map_err(|e| e.to_string())?;
+    let loss = report.as_ref().filter(|r| !r.is_empty()).map(loss);
+    // Never overwrite the opened file with less than it had without keeping a copy of it.
+    let source = s.state().ok().and_then(|st| st.path.clone());
+    if let Some(copy) = back_up_source(out, source.as_deref(), loss.as_ref())? {
+        eprintln!("kept a copy of the original as {copy}");
+    }
     std::fs::write(out, &bytes).map_err(|e| format!("{out}: {e}"))?;
     eprintln!("wrote {out} ({} bytes)", bytes.len());
-    if cadcraft_engine::cmd::file::drops_unknown(out) {
-        let lost = cadcraft_engine::cmd::file::not_saved(d);
-        if let Some(m) = cadcraft_engine::cmd::file::not_saved_message(&lost) {
-            eprintln!("{m}");
-        }
+    if !cadcraft_io::is_image(out)
+        && let Some(path) = keep_loss_report(out, loss.as_ref())?
+        && let Some(l) = &loss
+    {
+        eprintln!("{}; each one is listed (with its own data where it was kept) in {path}", l.summary);
+    }
+    if let Some(r) = &report
+        && r.kept_natively > 0
+        && r.is_empty()
+    {
+        eprintln!("kept all {} records of other programs the file had, as they were", r.kept_natively);
     }
     Ok(())
 }
@@ -825,6 +915,7 @@ fn cli() -> ExitCode {
     let r = match args.first().map(String::as_str) {
         Some("info") => validate_options("info", &rest, NO_OPTIONS).and_then(|_| rest.first().ok_or_else(|| USAGE.to_string())).and_then(|p| info(p)),
         Some("convert") => convert(&rest),
+        Some("audit") => validate_options("audit", &rest, AUDIT_OPTIONS).and_then(|_| audit(&rest)),
         Some("run") => run(&rest),
         Some("perf") => validate_options("perf", &rest, NO_OPTIONS).and_then(|_| perf(&rest)),
         Some("sample") => validate_options("sample", &rest, NO_OPTIONS).and_then(|_| sample(&rest)),

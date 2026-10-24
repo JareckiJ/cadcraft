@@ -64,14 +64,87 @@ fn mb(n: u64) -> String {
     if m >= 100.0 { format!("{m:.0} MB") } else { format!("{m:.1} MB") }
 }
 
+mod preservation;
+pub use preservation::{BridgeClass, BridgeIssue, BridgeIssueKind, BridgeIssueReason, DwgRead, MAX_BRIDGE_ISSUES};
+
+/// Other programs' objects carried beside the drawing for a same-version DWG save (FF1).
+#[cfg(not(target_arch = "wasm32"))]
+mod carry;
+#[cfg(not(target_arch = "wasm32"))]
+pub use carry::{CarriedRecord, CarryRole, NativeCarry, NotCarried};
+
+/// The web build reads no DWG, so nothing is ever carried there.
+#[cfg(target_arch = "wasm32")]
+mod carry {
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CarriedRecord {
+        pub handle: u64,
+        pub owner: u64,
+        pub entity: bool,
+        pub type_name: String,
+        pub path: Vec<String>,
+        pub class: Option<super::BridgeClass>,
+    }
+    impl CarriedRecord {
+        pub fn raw(&self) -> &[u8] {
+            &[]
+        }
+        pub fn handle_bits(&self) -> i64 {
+            0
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct NativeCarry;
+    impl NativeCarry {
+        pub fn version(&self) -> &str {
+            ""
+        }
+        pub fn records(&self) -> &[CarriedRecord] {
+            &[]
+        }
+        pub fn is_empty(&self) -> bool {
+            true
+        }
+        pub fn handles(&self) -> std::collections::HashSet<u64> {
+            Default::default()
+        }
+        pub fn skipped(&self, _handle: u64) -> Option<&str> {
+            None
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct NotCarried {
+        pub key: String,
+        pub handles: Vec<u64>,
+        pub reason: String,
+    }
+}
+#[cfg(target_arch = "wasm32")]
+pub use carry::{CarriedRecord, NativeCarry, NotCarried};
+
+/// A DWG written from DXF, and what it couldn't keep.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DwgWrite {
+    pub bytes: Vec<u8>,
+    /// Carried records written back.
+    pub kept: usize,
+    /// Carried subtrees that weren't (their records are lost from this file).
+    pub not_carried: Vec<NotCarried>,
+    /// Other programs' records the DWG writer can't keep, left out: "entity `X` (handle 1F)".
+    pub dropped: Vec<String>,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use std::io::{Cursor, Write};
     use std::panic::AssertUnwindSafe;
 
-    use super::{Limits, mb};
+    use super::{DwgRead, Limits, mb};
 
     /// Read DWG bytes and return an ASCII DXF rendition, within [`Limits::DEFAULT`].
+    ///
+    /// The DXF is a *partial* conversion when the read lost anything (see [`DwgRead::issues`]);
+    /// this byte-only form cannot report that, so it fails instead of returning it silently.
     pub fn dwg_to_dxf(bytes: &[u8]) -> Result<Vec<u8>, String> {
         dwg_to_dxf_with(bytes, Limits::DEFAULT)
     }
@@ -80,14 +153,32 @@ mod native {
     /// guard: the input size before the DWG reader runs, the DXF size while it is written, so a
     /// runaway conversion stops at the limit instead of filling memory first.
     pub fn dwg_to_dxf_with(bytes: &[u8], limits: Limits) -> Result<Vec<u8>, String> {
-        dwg_to_dxf_noted(bytes, limits).map(|(dxf, _)| dxf)
+        let read = dwg_to_dxf_detailed(bytes, limits)?;
+        if read.has_loss() {
+            return Err(format!(
+                "DWG {}: {} record(s) can't be carried into the DXF conversion ({}); use the detailed reader to open it as a partial drawing",
+                read.version,
+                read.issue_count,
+                read.issues.first().map_or_else(|| "unspecified".to_string(), |i| i.describe())
+            ));
+        }
+        Ok(read.dxf)
     }
 
     /// [`dwg_to_dxf_with`], also returning notes on what the read left out. The reader runs in
     /// failsafe mode: an object record it can't decode is skipped instead of failing the whole
     /// file, and the notes say how many were skipped and of which types, so a partial read never
-    /// passes for a complete one.
+    /// passes for a complete one. The DXF is a documented *partial* conversion: the notes are
+    /// presentation only, and callers that must not lose content use [`dwg_to_dxf_detailed`].
     pub fn dwg_to_dxf_noted(bytes: &[u8], limits: Limits) -> Result<(Vec<u8>, Vec<String>), String> {
+        dwg_to_dxf_detailed(bytes, limits).map(|r| (r.dxf, r.notes))
+    }
+
+    /// [`dwg_to_dxf_noted`] with the typed [`BridgeIssue`] inventory: native unknown
+    /// entities/objects (with their CLASS identity), records the decoder skipped, records this
+    /// bridge pruned, and BLOCK-marker XDATA the DXF writer drops. The inventories are taken from
+    /// the native document before conversion, never from message text.
+    pub fn dwg_to_dxf_detailed(bytes: &[u8], limits: Limits) -> Result<DwgRead, String> {
         if bytes.len() > limits.max_dwg_bytes {
             return Err(format!("DWG: the file is {}, larger than the {} CADCraft opens", mb(bytes.len() as u64), mb(limits.max_dwg_bytes as u64)));
         }
@@ -102,7 +193,12 @@ mod native {
             let why = outcome.stats.diagnostics.first().map(|d| d.message.trim_start_matches("Failsafe: ").to_string());
             return Err(format!("DWG: {}", why.unwrap_or_else(|| "the file's objects couldn't be read".to_string())));
         }
+        let version = super::version(bytes).unwrap_or_else(|| outcome.stats.source_version.clone());
+        let mut issues = super::preservation::Collector::new();
+        issues.native_document(&outcome.document);
+        issues.decoder_skips(&outcome.stats, type_label);
         let mut notes = read_notes(&outcome.stats);
+        let carry = super::carry::collect(&outcome.document);
         let mut doc = outcome.document;
         current_style_names(&mut doc);
         table_merges(&mut doc);
@@ -111,6 +207,7 @@ mod native {
         if orphans > 0 {
             let (s, were) = if orphans == 1 { ("", "was") } else { ("s", "were") };
             notes.push(format!("DWG: {orphans} DGN line style component{s} that no line style definition uses {were} left out"));
+            issues.pruned(orphans);
         }
         let mut out = CappedWriter { buf: Vec::new(), limit: limits.max_dxf_bytes, exceeded: false };
         let written = std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DxfWriter::new(&doc).write_to_writer(&mut out)))
@@ -124,7 +221,23 @@ mod native {
             ));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
-        Ok((add_header_vars(out.buf, &doc.header), notes))
+        let (issues, issue_count) = issues.finish();
+        let dxf = add_header_vars(out.buf, &doc.header);
+        Ok(DwgRead { dxf, notes, version, issues, issue_count, carry: carry.map(std::sync::Arc::new) })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn type_label_for_tests(t: Option<&str>) -> String {
+        type_label(t)
+    }
+
+    /// The label of a skipped record's type: its DXF name when the DWG type code has a fixed one.
+    fn type_label(t: Option<&str>) -> String {
+        match t.map(str::parse::<i16>) {
+            Some(Ok(code)) => type_name(code).map_or_else(|| format!("type {code}"), str::to_string),
+            Some(Err(_)) => t.unwrap_or_default().to_string(),
+            None => "unknown".to_string(),
+        }
     }
 
     /// Most record types named in the skipped-records note.
@@ -137,11 +250,7 @@ mod native {
         if skipped == 0 {
             return Vec::new();
         }
-        let label = |t: Option<&str>| match t.map(str::parse::<i16>) {
-            Some(Ok(code)) => type_name(code).map_or_else(|| format!("type {code}"), str::to_string),
-            Some(Err(_)) => t.unwrap_or_default().to_string(),
-            None => "unknown".to_string(),
-        };
+        let label = type_label;
         let mut by_type: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
         for d in stats.diagnostics.iter().filter(|d| d.record_handle.is_some()) {
             *by_type.entry(label(d.record_type.as_deref())).or_default() += 1;
@@ -357,42 +466,46 @@ mod native {
         orphans.len()
     }
 
-    /// Leave out what acadrust can't write as this DWG version: other programs' custom entities
-    /// and objects without raw DWG data of that version. acadrust 0.6.4 refuses the whole file
-    /// for one of them (0.6.3 left them out); CADCraft already tells the user which entity types
-    /// a DWG doesn't keep (`not_saved`), so the rest of the drawing is written. Returns how many.
-    fn drop_unwritable(doc: &mut acadrust::CadDocument) -> usize {
+    /// The custom entities and objects of other programs that acadrust can't write as `doc.version`
+    /// (no raw DWG data, data of another version, or R12), as "entity `X` (handle 1F)" lines.
+    /// Nothing is left out to make the write succeed: the caller refuses the whole file, naming
+    /// every one (the writer alone stops at the first, and says nothing of the others).
+    pub(crate) fn unwritable(doc: &acadrust::CadDocument) -> Vec<String> {
         let version = doc.version;
-        let unwritable: Vec<acadrust::Handle> = doc
+        let r12 = version == acadrust::DxfVersion::AC1009;
+        let mut found: Vec<String> = doc
             .entities()
             .filter_map(|e| match e {
                 acadrust::entities::EntityType::Unknown(u)
-                    if u.raw_dwg_data.is_none() || u.dwg_source_version.is_some_and(|v| v != version) || version == acadrust::DxfVersion::AC1009 =>
+                    if u.raw_dwg_data.is_none() || u.dwg_source_version.is_some_and(|v| v != version) || r12 =>
                 {
-                    Some(u.common.handle)
+                    Some(format!("entity `{}` (handle {:X})", u.dxf_name, u.common.handle.value()))
                 }
                 _ => None,
             })
             .collect();
-        for h in &unwritable {
-            doc.remove_entity(*h);
+        found.extend(doc.objects.iter().filter_map(|(h, o)| match o {
+            acadrust::objects::ObjectType::Unknown { type_name, raw_dwg_data, raw_dwg_version, .. }
+                if raw_dwg_data.is_none() || raw_dwg_version.is_some_and(|v| v != version) || r12 =>
+            {
+                Some(format!("object `{type_name}` (handle {:X})", h.value()))
+            }
+            _ => None,
+        }));
+        found
+    }
+
+    /// The refusal for [`unwritable`] records: names up to a few and counts the rest.
+    pub(crate) fn refuse_unwritable(found: &[String], version: acadrust::DxfVersion) -> String {
+        const SHOWN: usize = 5;
+        let mut list = found.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+        if found.len() > SHOWN {
+            list.push_str(&format!(" and {} more", found.len() - SHOWN));
         }
-        let objects: Vec<acadrust::Handle> = doc
-            .objects
-            .iter()
-            .filter_map(|(h, o)| match o {
-                acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, .. }
-                    if raw_dwg_data.is_none() || raw_dwg_version.is_some_and(|v| v != version) || version == acadrust::DxfVersion::AC1009 =>
-                {
-                    Some(*h)
-                }
-                _ => None,
-            })
-            .collect();
-        for h in &objects {
-            doc.objects.remove(h);
-        }
-        unwritable.len() + objects.len()
+        format!(
+            "DWG: can't be written as {version:?} without losing {} custom record(s) of other programs, which CADCraft keeps only in DXF: {list}; nothing was written",
+            found.len()
+        )
     }
 
     /// Header variables the DWG reader fills in but acadrust's DXF writer (0.6.3) leaves out of
@@ -466,16 +579,7 @@ mod native {
     /// Convert DXF bytes into a DWG file of `version`, a code from [`super::VERSIONS`] ("AC1032"),
     /// whatever version the DXF declares.
     pub fn dxf_to_dwg_as(dxf: &[u8], version: &str) -> Result<Vec<u8>, String> {
-        let v = match version.trim().to_ascii_uppercase().as_str() {
-            "AC1015" => acadrust::DxfVersion::AC1015,
-            "AC1018" => acadrust::DxfVersion::AC1018,
-            "AC1021" => acadrust::DxfVersion::AC1021,
-            "AC1024" => acadrust::DxfVersion::AC1024,
-            "AC1027" => acadrust::DxfVersion::AC1027,
-            "AC1032" => acadrust::DxfVersion::AC1032,
-            _ => return Err(super::unsupported(version)),
-        };
-        convert(dxf, Some(v))
+        convert(dxf, Some(dwg_version(version)?))
     }
 
     /// The current dimension and text styles' names from their handles: a DWG stores the
@@ -512,7 +616,210 @@ mod native {
         }
     }
 
+    /// Convert DXF bytes into a DWG of `version` (a [`super::VERSIONS`] code), putting `carry`'s
+    /// records back when the version is theirs. Nothing is refused: other programs' records the
+    /// writer can't keep are left out and listed, as are carried subtrees that couldn't go back
+    /// in. A DWG with carried records is read back and checked; if any differ, it is written
+    /// again without them (and they are listed), so a passthrough never yields a damaged file.
+    pub fn dxf_to_dwg_carrying(dxf: &[u8], version: &str, carry: Option<&super::NativeCarry>) -> Result<super::DwgWrite, String> {
+        let v = dwg_version(version)?;
+        let mut doc = prepare(dxf, Some(v))?;
+        let mut out = super::DwgWrite::default();
+        let applied = carry.filter(|c| !c.is_empty()).map(|c| super::carry::apply(&mut doc, c));
+        let dropped = drop_unwritable(&mut doc);
+        let bytes = write_doc(&mut doc)?;
+        let Some(applied) = applied else {
+            return Ok(super::DwgWrite { bytes, dropped, ..out });
+        };
+        let check = if applied.kept == 0 {
+            Ok(())
+        } else {
+            std::panic::catch_unwind(|| acadrust::DwgReader::from_stream(Cursor::new(bytes.as_slice())).read())
+                .map_err(|_| "the DWG reader failed on the written file".to_string())
+                .and_then(|r| r.map_err(|e| e.to_string()))
+                .and_then(|back| super::carry::verify(&back, &applied))
+        };
+        match check {
+            Ok(()) => {
+                out.bytes = bytes;
+                out.kept = applied.kept;
+                out.not_carried = applied.not_carried;
+                out.dropped = dropped;
+            }
+            Err(why) => {
+                let mut doc = prepare(dxf, Some(v))?;
+                out.dropped = drop_unwritable(&mut doc);
+                out.bytes = write_doc(&mut doc)?;
+                let carry = carry.map(|c| c.records().iter().map(|r| r.handle).collect::<Vec<_>>()).unwrap_or_default();
+                out.not_carried = vec![super::NotCarried {
+                    key: "*".into(),
+                    handles: carry,
+                    reason: format!("the written DWG didn't read back as carried ({why}); written without them"),
+                }];
+            }
+        }
+        Ok(out)
+    }
+
+    fn dwg_version(version: &str) -> Result<acadrust::DxfVersion, String> {
+        Ok(match version.trim().to_ascii_uppercase().as_str() {
+            "AC1015" => acadrust::DxfVersion::AC1015,
+            "AC1018" => acadrust::DxfVersion::AC1018,
+            "AC1021" => acadrust::DxfVersion::AC1021,
+            "AC1024" => acadrust::DxfVersion::AC1024,
+            "AC1027" => acadrust::DxfVersion::AC1027,
+            "AC1032" => acadrust::DxfVersion::AC1032,
+            _ => return Err(super::unsupported(version)),
+        })
+    }
+
+    /// Leave out what acadrust can't write as the document's version: other programs' custom
+    /// entities and objects without raw DWG data of that version (acadrust refuses the whole file
+    /// for one of them), with the dictionary entries that named them. Returns them, for the
+    /// caller's loss report: nothing goes unlisted.
+    fn drop_unwritable(doc: &mut acadrust::CadDocument) -> Vec<String> {
+        let found = unwritable(doc);
+        if found.is_empty() {
+            return found;
+        }
+        let version = doc.version;
+        let r12 = version == acadrust::DxfVersion::AC1009;
+        let entities: Vec<acadrust::Handle> = doc
+            .entities()
+            .filter_map(|e| match e {
+                acadrust::entities::EntityType::Unknown(u)
+                    if u.raw_dwg_data.is_none() || u.dwg_source_version.is_some_and(|v| v != version) || r12 =>
+                {
+                    Some(u.common.handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for h in &entities {
+            doc.remove_entity(*h);
+        }
+        let objects: std::collections::HashSet<acadrust::Handle> = doc
+            .objects
+            .iter()
+            .filter_map(|(h, o)| match o {
+                acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, .. }
+                    if raw_dwg_data.is_none() || raw_dwg_version.is_some_and(|v| v != version) || r12 =>
+                {
+                    Some(*h)
+                }
+                _ => None,
+            })
+            .collect();
+        doc.objects.retain(|h, _| !objects.contains(h));
+        for o in doc.objects.values_mut() {
+            let acadrust::objects::ObjectType::Dictionary(d) = o else { continue };
+            if d.entries.iter().any(|(_, e)| objects.contains(e)) {
+                d.entries.retain(|(_, e)| !objects.contains(e));
+                let keys: std::collections::HashSet<&str> = d.entries.iter().map(|(k, _)| k.as_str()).collect();
+                d.hard_owner_entries.retain(|k| keys.contains(k.as_str()));
+            }
+        }
+        found
+    }
+
+    /// How many records of each kind a DWG or DXF file holds, read with acadrust (failsafe for a
+    /// DWG): entities and objects by type (other programs' by their own type name), table records
+    /// by table, and entities with each application's extended data; empty dictionaries, and those
+    /// holding only a draw order table, aren't counted. Draw order counts the spaces
+    /// drawn out of handle order (by their SORTENTSTABLE, else by entity order) rather than the
+    /// tables: a table that keeps handle order changes nothing and isn't written back. Comparing
+    /// a file with what CADCraft saves from it shows what the save lost or changed beyond its loss
+    /// report.
+    pub fn inventory(bytes: &[u8]) -> Result<std::collections::BTreeMap<String, u64>, String> {
+        use acadrust::entities::EntityType;
+        use acadrust::objects::ObjectType;
+        let doc = if super::is_dwg(bytes) {
+            if bytes.len() > Limits::DEFAULT.max_dwg_bytes {
+                return Err(format!(
+                    "DWG: the file is {}, larger than the {} CADCraft opens",
+                    mb(bytes.len() as u64),
+                    mb(Limits::DEFAULT.max_dwg_bytes as u64)
+                ));
+            }
+            std::panic::catch_unwind(|| {
+                acadrust::DwgReader::from_stream_with_options(Cursor::new(bytes), acadrust::DwgReadOptions::failsafe()).read()
+            })
+            .map_err(|_| "the DWG reader failed on this file".to_string())?
+            .map_err(|e| format!("DWG: {e}"))?
+        } else {
+            if bytes.len() > Limits::DEFAULT.max_dxf_bytes {
+                return Err(format!(
+                    "DXF: the file is {}, larger than the {} CADCraft reads",
+                    mb(bytes.len() as u64),
+                    mb(Limits::DEFAULT.max_dxf_bytes as u64)
+                ));
+            }
+            let data = bytes.to_vec();
+            std::panic::catch_unwind(move || acadrust::DxfReader::from_reader(Cursor::new(data)).and_then(|r| r.read()))
+                .map_err(|_| "the DXF reader failed on this file".to_string())?
+                .map_err(|e| format!("DXF: {e}"))?
+        };
+        let mut out: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+        let mut add = |k: String| *out.entry(k).or_default() += 1;
+        for e in doc.entities() {
+            match e {
+                EntityType::Unknown(u) => add(format!("entity {}", u.dxf_name.to_ascii_uppercase())),
+                e => add(format!("entity {}", e.as_entity().entity_type().to_ascii_uppercase())),
+            }
+            for r in e.common().extended_data.records() {
+                add(format!("extended data {} (entities)", r.application_name.to_ascii_uppercase()));
+            }
+        }
+        let mut sort_tables = std::collections::HashMap::new();
+        for o in doc.objects.values() {
+            match o {
+                ObjectType::SortEntitiesTable(t) => {
+                    sort_tables.insert(t.block_owner_handle, t);
+                }
+                // An empty dictionary holds nothing (AutoCAD leaves many on layers), and one holding only
+                // a draw order table is counted by its space (below): neither is counted, so a save
+                // that drops one isn't shown as a loss.
+                ObjectType::Dictionary(d) if d.entries.iter().all(|(k, _)| k.eq_ignore_ascii_case("ACAD_SORTENTS")) => {}
+                ObjectType::Unknown { type_name, .. } => add(format!("object {}", type_name.to_ascii_uppercase())),
+                o => {
+                    let s = format!("{o:?}");
+                    add(format!("object {}", s.split(['(', ' ', '{']).next().unwrap_or("?")));
+                }
+            }
+        }
+        for b in doc.block_records.iter() {
+            let mut order = b.entity_handles.clone();
+            if let Some(t) = sort_tables.get(&b.handle) {
+                order.sort_by_key(|h| t.effective_sort_handle(*h).value());
+            }
+            if order.windows(2).any(|w| matches!(w, [a, b] if a.value() >= b.value())) {
+                add("draw order: spaces drawn out of handle order".to_string());
+            }
+        }
+        for (table, n) in [
+            ("LAYER", doc.layers.iter().count()),
+            ("LTYPE", doc.line_types.iter().count()),
+            ("STYLE", doc.text_styles.iter().count()),
+            ("DIMSTYLE", doc.dim_styles.iter().count()),
+            ("APPID", doc.app_ids.iter().count()),
+            ("BLOCK_RECORD", doc.block_records.iter().count()),
+        ] {
+            out.insert(format!("table {table}"), n as u64);
+        }
+        Ok(out)
+    }
+
     fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<Vec<u8>, String> {
+        let mut doc = prepare(dxf, version)?;
+        let found = unwritable(&doc);
+        if !found.is_empty() {
+            return Err(refuse_unwritable(&found, doc.version));
+        }
+        write_doc(&mut doc)
+    }
+
+    /// The document the DWG writer gets: CADCraft's DXF read by acadrust, set up for `version`.
+    fn prepare(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<acadrust::CadDocument, String> {
         // Reject a pathologically large DXF before handing it to the third-party decoder, which
         // allocates tables and section buffers from the input's declared sizes and cannot be
         // interrupted once it starts (CWE-789). This bounds the large-input variant; the decoder
@@ -539,11 +846,15 @@ mod native {
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
         dimension_flags(&mut doc);
-        drop_unwritable(&mut doc);
-        current_dimstyle(&mut doc);
-        add_variable_dictionary(&mut doc);
-        current_text_style(&mut doc);
-        std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec(&doc)))
+        Ok(doc)
+    }
+
+    fn write_doc(doc: &mut acadrust::CadDocument) -> Result<Vec<u8>, String> {
+        current_dimstyle(doc);
+        add_variable_dictionary(doc);
+        current_text_style(doc);
+        let doc = &*doc;
+        std::panic::catch_unwind(AssertUnwindSafe(|| acadrust::DwgWriter::write_to_vec(doc)))
             .map_err(|_| "the DWG writer failed on this drawing".to_string())?
             .map_err(|e| format!("DWG write: {e}"))
     }
@@ -642,7 +953,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as};
+pub use native::{dwg_to_dxf, dwg_to_dxf_detailed, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, dxf_to_dwg_carrying, inventory};
 
 /// The error for a DWG version CADCraft can't write.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -660,6 +971,10 @@ pub fn dwg_to_dxf_noted(_bytes: &[u8], _limits: Limits) -> Result<(Vec<u8>, Vec<
     Err("DWG files can't be opened in the web build yet; save as DXF".into())
 }
 #[cfg(target_arch = "wasm32")]
+pub fn dwg_to_dxf_detailed(_bytes: &[u8], _limits: Limits) -> Result<DwgRead, String> {
+    Err("DWG files can't be opened in the web build yet; save as DXF".into())
+}
+#[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf_with(_bytes: &[u8], _limits: Limits) -> Result<Vec<u8>, String> {
     Err("DWG files can't be opened in the web build yet; save as DXF".into())
 }
@@ -668,9 +983,25 @@ pub fn dxf_to_dwg(_dxf: &[u8]) -> Result<Vec<u8>, String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
 #[cfg(target_arch = "wasm32")]
+pub fn inventory(_bytes: &[u8]) -> Result<std::collections::BTreeMap<String, u64>, String> {
+    Err("file inventories aren't available in the web build".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn dxf_to_dwg_carrying(_dxf: &[u8], version: &str, _carry: Option<&NativeCarry>) -> Result<DwgWrite, String> {
+    Err(unsupported(version))
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn dxf_to_dwg_as(_dxf: &[u8], _version: &str) -> Result<Vec<u8>, String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
+
+/// The synthetic FF1 sources the I/O tests use (one original builder, shared by file path).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../../io/tests/support/ff1.rs"]
+#[allow(dead_code)]
+mod ff1;
 
 #[cfg(test)]
 mod tests {
@@ -681,6 +1012,25 @@ mod tests {
         assert!(is_dwg(b"AC1032\0\0\0\0"));
         assert!(!is_dwg(b"  0\r\nSECTION"));
         assert_eq!(version(b"AC1018xxxx").as_deref(), Some("AC1018"));
+    }
+
+    /// A custom record read from a DWG of one version can't be written as another: the check
+    /// names every such record (entity and object), and nothing is left out to get a file.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn custom_records_of_another_dwg_version_are_refused_not_dropped() {
+        let source = ff1::dwg_source(ff1::CustomRecords::Combined).unwrap();
+        let mut doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(source.bytes.as_ref())).read().unwrap();
+        assert_eq!(native::unwritable(&doc), Vec::<String>::new(), "same version: writable as read");
+        assert!(acadrust::DwgWriter::write_to_vec(&doc).is_ok());
+        for other in [acadrust::DxfVersion::AC1027, acadrust::DxfVersion::AC1018] {
+            doc.version = other;
+            let found = native::unwritable(&doc);
+            assert_eq!(found.len(), 2, "{other:?}: {found:?}");
+            let msg = native::refuse_unwritable(&found, other);
+            assert!(msg.contains("FF1_WIDGET") && msg.contains("FF1_OBJECT"), "{msg}");
+            assert!(acadrust::DwgWriter::write_to_vec(&doc).is_err(), "{other:?}: the dependency writer must also refuse");
+        }
     }
 
     /// A DXF with ROMANS as `$TEXTSTYLE` gives a DWG whose current text style is ROMANS, not
@@ -697,6 +1047,144 @@ mod tests {
         let romans = doc.text_styles.iter().find(|ts| ts.name == "ROMANS").map(|ts| ts.handle);
         assert!(romans.is_some(), "ROMANS is missing from the DWG");
         assert_eq!(Some(doc.header.current_text_style_handle), romans);
+    }
+
+    use super::ff1;
+
+    /// An AC1032 source with a LINE, optionally a BLOCK-marker XDATA record.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn block_xdata_dwg(with_xdata: bool) -> Vec<u8> {
+        use acadrust::xdata::{ExtendedDataRecord, XDataValue};
+        let mut doc = acadrust::CadDocument::with_version(acadrust::DxfVersion::AC1032);
+        doc.app_ids.add_or_replace(acadrust::tables::AppId::new("FF1_APP"));
+        // The BLOCK marker entities exist in a document that was read, not in a fresh one.
+        let mut doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(acadrust::DwgWriter::write_to_vec(&doc).unwrap())).read().unwrap();
+        if with_xdata {
+            let h = doc.block_records.iter().find(|b| b.name.eq_ignore_ascii_case("*Model_Space")).map(|b| b.block_entity_handle).unwrap();
+            let acadrust::entities::EntityType::Block(b) = doc.get_entity_mut(h).unwrap() else { panic!("not a BLOCK") };
+            let mut rec = ExtendedDataRecord::new("FF1_APP");
+            rec.values.push(XDataValue::String("FF1_BLOCK_UNIQUE".into()));
+            b.common.extended_data.add_record(rec);
+        }
+        acadrust::DwgWriter::write_to_vec(&doc).unwrap()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn block_marker_xdata_is_reported_and_plain_blocks_are_not() {
+        let plain = dwg_to_dxf_detailed(&block_xdata_dwg(false), Limits::DEFAULT).unwrap();
+        assert!(!plain.has_loss() && plain.issues.is_empty(), "{:?}", plain.issues);
+        let read = dwg_to_dxf_detailed(&block_xdata_dwg(true), Limits::DEFAULT).unwrap();
+        assert_eq!(read.issue_count, 1, "{:?}", read.issues);
+        let [issue] = &read.issues[..] else { panic!("one issue") };
+        assert_eq!((issue.reason, issue.kind), (BridgeIssueReason::BlockMarkerXdata, BridgeIssueKind::Metadata));
+        assert!(issue.record_name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case("*Model_Space")));
+        assert!(issue.handle.is_some());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_custom_records_are_reported_with_class_handle_and_version() {
+        use ff1::{CustomRecords, dwg_source};
+        for records in [CustomRecords::EntityOnly, CustomRecords::ObjectOnly, CustomRecords::Combined] {
+            let src = dwg_source(records).unwrap();
+            let read = dwg_to_dxf_detailed(&src.bytes, Limits::DEFAULT).unwrap();
+            assert_eq!(read.version, "AC1032");
+            // The decoder skipped nothing: the report must not rely on skip counts.
+            assert!(read.notes.is_empty(), "{:?}", read.notes);
+            let expected: Vec<&ff1::OpaqueRecord> = [&src.entity, &src.object].into_iter().flatten().collect();
+            assert_eq!(read.issue_count, expected.len() as u64, "{records:?}: {:?}", read.issues);
+            for rec in expected {
+                let issue = read.issues.iter().find(|i| i.handle == Some(rec.handle.value())).unwrap_or_else(|| panic!("{} missing", rec.name));
+                let kind = if rec.name == "FF1_WIDGET" { BridgeIssueKind::Entity } else { BridgeIssueKind::Object };
+                assert_eq!((issue.reason, issue.kind), (BridgeIssueReason::OpaqueCustomRecord, kind));
+                assert_eq!(issue.record_name.as_deref(), Some(rec.name));
+                let class = issue.class.as_ref().expect("class identity");
+                assert_eq!((class.number, class.dxf_name.as_str()), (Some(rec.class_number), rec.name));
+                assert_eq!((class.cpp_name.as_str(), class.application_name.as_str()), (format!("Rust{}", rec.name).as_str(), "FF1_SYNTHETIC"));
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn byte_only_wrappers_do_not_hide_known_losses() {
+        let src = ff1::dwg_source(ff1::CustomRecords::Combined).unwrap();
+        let e = dwg_to_dxf(&src.bytes).unwrap_err();
+        assert!(e.contains("AC1032") && e.contains("FF1_"), "{e}");
+        assert!(dwg_to_dxf_with(&src.bytes, Limits::DEFAULT).is_err());
+        // The noted wrapper is the documented partial conversion: the drawing, without the records.
+        let (dxf, _) = dwg_to_dxf_noted(&src.bytes, Limits::DEFAULT).unwrap();
+        assert!(String::from_utf8_lossy(&dxf).contains("LINE"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn ordinary_drawings_report_nothing() {
+        let mut doc = acadrust::CadDocument::with_version(acadrust::DxfVersion::AC1032);
+        doc.add_entity(acadrust::EntityType::Line(acadrust::entities::Line::from_coords(0., 0., 0., 1., 1., 0.))).unwrap();
+        let bytes = acadrust::DwgWriter::write_to_vec(&doc).unwrap();
+        let read = dwg_to_dxf_detailed(&bytes, Limits::DEFAULT).unwrap();
+        assert!(!read.has_loss() && read.issues.is_empty() && read.issue_count == 0);
+        assert!(dwg_to_dxf(&bytes).is_ok());
+    }
+
+    /// Skips reach the report from the decoder's counts and per-record diagnostics (not from
+    /// notes), and records beyond the decoder's own diagnostic cap are still counted.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn decoder_skips_and_pruning_become_typed_issues() {
+        let mut stats = acadrust::ReadStats { skipped_source_records: 5, source_records: 20, ..Default::default() };
+        for h in [0x40, 0x41] {
+            let mut d = acadrust::ReadDiagnostic::new("skip", acadrust::ReadStage::RecordStream, "x");
+            d.record_handle = Some(h);
+            d.record_type = Some("19".into());
+            stats.diagnostics.push(d);
+        }
+        // A diagnostic without a record handle is not a skipped record.
+        stats.diagnostics.push(acadrust::ReadDiagnostic::new("other", acadrust::ReadStage::Header, "y"));
+        let mut c = preservation::Collector::new();
+        c.decoder_skips(&stats, native::type_label_for_tests);
+        c.pruned(3);
+        let (issues, count) = c.finish();
+        assert_eq!(count, 8);
+        assert_eq!(issues.len(), 4);
+        assert_eq!((issues[0].handle, issues[0].record_name.as_deref()), (Some(0x40), Some("LINE")));
+        assert_eq!((issues[2].reason, issues[2].count, issues[2].handle), (BridgeIssueReason::DecoderSkippedRecord, 3, None));
+        assert_eq!((issues[3].reason, issues[3].count), (BridgeIssueReason::PrunedRecord, 3));
+        // The notes of the same stats agree on the total without being parsed.
+        assert!(native::read_notes(&stats)[0].contains("5 of 20"));
+        // More diagnostics than skips never over-count.
+        stats.skipped_source_records = 1;
+        let mut c = preservation::Collector::new();
+        c.decoder_skips(&stats, native::type_label_for_tests);
+        assert_eq!(c.finish().1, 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn issue_details_are_capped_but_the_count_is_not() {
+        let mut c = preservation::Collector::new();
+        for _ in 0..(MAX_BRIDGE_ISSUES + 40) {
+            c.pruned(2);
+        }
+        let (issues, count) = c.finish();
+        assert_eq!(issues.len(), MAX_BRIDGE_ISSUES);
+        assert_eq!(count, 2 * (MAX_BRIDGE_ISSUES as u64 + 40));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn truncated_and_oversized_sources_fail_safely() {
+        let src = ff1::dwg_source(ff1::CustomRecords::Combined).unwrap();
+        for cut in [0, 6, 100, src.bytes.len() / 2, src.bytes.len() - 1] {
+            // Either a clean error or a read that still reports the loss; never a panic.
+            if let Ok(read) = dwg_to_dxf_detailed(&src.bytes[..cut], Limits::DEFAULT) {
+                assert!(read.has_loss() || cut + 1 >= src.bytes.len(), "cut {cut} lost records silently");
+            }
+        }
+        let tiny = Limits { max_dwg_bytes: 16, max_dxf_bytes: 1 << 30 };
+        assert!(dwg_to_dxf_detailed(&src.bytes, tiny).unwrap_err().contains("larger than"));
     }
 
     #[test]

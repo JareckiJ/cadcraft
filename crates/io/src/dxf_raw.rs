@@ -676,6 +676,21 @@ fn written_records(tags: &[Tag]) -> Vec<Rec> {
     out
 }
 
+/// Prepared BLOCK markers carrying XDATA (block role, first application), identified by the same
+/// role as foreign extras.
+/// Inspect the tags before the DWG dependency parses them: its BLOCK entity inventory and
+/// `object_xdata` no longer contain this metadata after DXF reading.
+pub(crate) fn block_marker_xdata(tags: &[Tag]) -> Vec<(ForeignKey, String)> {
+    let mut out = Vec::new();
+    for r in written_records(tags).iter().filter(|r| r.sec == "BLOCKS" && r.kind == "BLOCK") {
+        let body = tags.get(r.start + 1..r.end).unwrap_or(&[]);
+        if let Some(app) = body.iter().find(|t| t.code == 1001) {
+            out.push((("BLOCK".into(), up(&val(body, 2).unwrap_or_default())), app.str()));
+        }
+    }
+    out
+}
+
 /// Remaps the kept data's handles onto a written file.
 struct Map<'a> {
     f: &'a Foreign,
@@ -822,6 +837,10 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     if f.is_empty() && unknown.is_empty() && xd.is_empty() {
         return;
     }
+    // APPIDs with retained extras need records before the role/handle inventory and merge,
+    // even when no entity uses the application. Adding them only after merging loses their
+    // own XDATA and leaves references to those registrations without a written role.
+    add_appids(tags, f.records.keys().filter(|(kind, _)| kind == "APPID").map(|(_, name)| name.as_str()));
     let recs = written_records(tags);
     let body = |r: &Rec| tags.get(r.start + 1..r.end).unwrap_or(&[]);
     let by_sec = |name: &str| -> Recs {
@@ -973,7 +992,8 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         }
         record(&map, r, b, x.as_deref(), false, Some(r.start) == root, &mut out);
     }
-    add_appids(&mut out);
+    // Foreign objects/records and entities may have introduced other applications during merge.
+    add_appids(&mut out, std::iter::empty());
     let top = max_handle(&out).saturating_add(1);
     if let Some(t) = seed_index(&out).and_then(|i| out.get_mut(i))
         && Handle::parse_hex(&t.str()).is_none_or(|h| h.0 < top)
@@ -1145,9 +1165,10 @@ fn xdata(map: &Map, x: &ForeignExtra, own: &HashSet<String>, out: &mut Vec<Tag>)
     }
 }
 
-/// APPID records for every application with xdata in the file, added to the APPID table.
-fn add_appids(out: &mut Vec<Tag>) {
-    let used: BTreeMap<String, String> = out.iter().filter(|t| t.code == 1001).map(|t| (up(&t.str()), t.str().trim().to_string())).collect();
+/// APPID records required by retained extras or XDATA in the file, added to the APPID table.
+fn add_appids<'a>(out: &mut Vec<Tag>, required: impl Iterator<Item = &'a str>) {
+    let mut used: BTreeMap<String, String> = out.iter().filter(|t| t.code == 1001).map(|t| (up(&t.str()), t.str().trim().to_string())).collect();
+    used.extend(required.map(|name| (up(name), name.trim().to_string())));
     let recs = written_records(out);
     let Some(table) = recs.iter().position(|r| {
         r.sec == "TABLES" && r.kind == "TABLE" && val(out.get(r.start + 1..r.end).unwrap_or(&[]), 2).is_some_and(|n| up(&n) == "APPID")
