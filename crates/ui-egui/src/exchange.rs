@@ -67,6 +67,7 @@ struct PanZoom {
 }
 
 impl Default for PanZoom {
+    /// The whole sheet in view.
     fn default() -> Self {
         PanZoom { zoom: 1.0, pan: Vec2::ZERO }
     }
@@ -421,12 +422,14 @@ mod tests {
 
     use super::{MAX_ZOOM, PanZoom, covers, visible_crop, with_margin};
 
+    /// The preview area the zoom tests use.
     fn area() -> Rect {
         Rect::from_min_size(pos2(10.0, 20.0), vec2(800.0, 600.0))
     }
 
     const IMAGE: Vec2 = vec2(1600.0, 1000.0);
 
+    /// The sheet fits the area and is centred until zoomed.
     #[test]
     fn the_sheet_fits_the_area_and_is_centred_until_zoomed() {
         let r = PanZoom::default().image_rect(area(), IMAGE);
@@ -434,6 +437,7 @@ mod tests {
         assert!((r.center() - area().center()).length() < 1e-3);
     }
 
+    /// Zooming keeps the image point under the pointer in place.
     #[test]
     fn zoom_keeps_the_point_under_the_pointer() {
         let mut v = PanZoom::default();
@@ -450,6 +454,7 @@ mod tests {
         assert_eq!(v, PanZoom::default());
     }
 
+    /// The zoom is limited and the sheet stays over the area.
     #[test]
     fn zoom_is_limited_and_the_sheet_stays_over_the_area() {
         let mut v = PanZoom::default();
@@ -477,6 +482,7 @@ mod tests {
         assert!(v.zoom == 1.0 && v.pan == Vec2::ZERO);
     }
 
+    /// The part in view is what is drawn again in detail.
     #[test]
     fn the_visible_part_is_what_is_drawn_again_in_detail() {
         // Whole sheet in view: all of it.
@@ -505,6 +511,7 @@ mod tests {
         (red, img.width(), img.height())
     }
 
+    /// The preview draws the page setup's plot style table, and `None` overrides it.
     #[test]
     fn the_preview_draws_the_plot_style_table_of_the_page_setup() {
         let (mut app, _) = app();

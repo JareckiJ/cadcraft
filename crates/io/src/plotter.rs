@@ -182,6 +182,7 @@ mod tests {
         tiny_skia::Pixmap::decode_png(bytes).unwrap()
     }
 
+    /// A PNG crop is that part of the sheet at the same scale.
     #[test]
     fn a_png_crop_is_that_part_of_the_sheet_at_the_same_scale() {
         let d = drawing();
@@ -214,6 +215,7 @@ mod tests {
         assert_eq!((l_part.width(), l_part.height()), (l_full.width() / 2, l_full.height() / 2));
     }
 
+    /// Bad crops are errors; no crop, or the whole sheet, is fine.
     #[test]
     fn a_bad_png_crop_is_an_error() {
         let d = drawing();

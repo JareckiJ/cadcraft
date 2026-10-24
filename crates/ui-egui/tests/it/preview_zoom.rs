@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 /// The options of every `plot` the preview made.
 static PLOTS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
 
+/// A plot hook that records the options it is given.
 fn recording_plot(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>, String> {
     if let Ok(mut plots) = PLOTS.lock() {
         plots.push(opts.clone());
@@ -26,6 +27,7 @@ fn plots() -> Vec<Value> {
     PLOTS.lock().map(|p| p.iter().filter(|o| o["output"] == "png").cloned().collect()).unwrap_or_default()
 }
 
+/// Zooming in draws the part in view again at the screen's resolution.
 #[test]
 fn zooming_in_draws_the_part_in_view_at_the_screens_resolution() {
     set_io(IoHooks { read: |_, _| Err("no".into()), write: |_, _| Err("no".into()), plot: Some(recording_plot) });
