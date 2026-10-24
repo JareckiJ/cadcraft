@@ -217,6 +217,21 @@ fn an_unknown_object_of_an_acdb_class_is_reported_when_the_dwg_leaves_it_out() -
     Ok(())
 }
 
+/// Two records of one type left out of a DWG are reported each with its own DXF groups.
+#[test]
+fn records_of_one_type_are_reported_each_with_its_own_groups() -> TestResult {
+    let source = ff1::dxf_source(CustomRecords::ObjectOnly)
+        .replacen("3\nFF1_OBJECT\n350\n42\n", "3\nFF1_OBJECT\n350\n42\n3\nFF1_SECOND\n350\n43\n", 1)
+        .replacen("0\nENDSEC\n0\nEOF", "0\nFF1_OBJECT\n5\n43\n330\nC\n100\nRustFF1_OBJECT\n1\nFF1_OBJECT_SECOND\n0\nENDSEC\n0\nEOF", 1);
+    let doc = cadcraft_io::read_dxf(source.as_bytes())?;
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_dxf::Version::R2018), ..Default::default() };
+    let report = saved(&doc, "out.dwg", &opts)?.1.ok_or("no loss report")?;
+    let mut payloads: Vec<String> = report.records.iter().filter_map(|r| r.dxf.iter().find(|(c, _)| *c == 1).map(|(_, v)| v.clone())).collect();
+    payloads.sort();
+    assert_eq!(payloads, ["FF1_OBJECT_SECOND", "FF1_OBJECT_UNIQUE"], "{:?}", report.records);
+    Ok(())
+}
+
 /// The strict bridge refuses custom records it can't write as DWG.
 #[test]
 fn the_bridge_refuses_custom_records_it_cannot_write_as_dwg() {

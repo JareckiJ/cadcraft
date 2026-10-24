@@ -20,6 +20,32 @@ fn loss(count: u64) -> Loss {
     Loss { count, summary: format!("{count} lost"), json: format!("{{\"lost\":{count},\"records\":[]}}") }
 }
 
+/// A report of the records `ids` (kind, type, handle) lost.
+fn loss_of(ids: &[(&str, &str, &str)]) -> Loss {
+    let records: Vec<String> = ids.iter().map(|(k, t, h)| format!("{{\"kind\":\"{k}\",\"type\":\"{t}\",\"handle\":\"{h}\"}}")).collect();
+    Loss {
+        count: ids.len() as u64,
+        summary: format!("{} lost", ids.len()),
+        json: format!("{{\"lost\":{},\"records\":[{}]}}", ids.len(), records.join(",")),
+    }
+}
+
+/// The file's report lists other records than this save loses (as many): those are still in the
+/// file, so it is backed up; a save losing only what the report lists isn't.
+#[test]
+fn a_report_listing_other_records_does_not_stop_the_backup() -> TestResult {
+    let d = dir("identity")?;
+    let path = d.join("i.dwg");
+    let p = path.to_str().ok_or("path")?;
+    std::fs::write(&path, b"keeps B, lacks A")?;
+    keep_loss_report(p, Some(&loss_of(&[("object", "X_A", "40")])))?;
+    assert_eq!(back_up_source(p, Some(p), Some(&loss_of(&[("object", "X_A", "40")])))?, None);
+    let copy = back_up_source(p, Some(p), Some(&loss_of(&[("object", "X_B", "41")])))?.ok_or("no backup")?;
+    assert_eq!(std::fs::read(&copy)?, b"keeps B, lacks A");
+    std::fs::remove_dir_all(&d)?;
+    Ok(())
+}
+
 /// A report kept for one file doesn't stop the backup of a different file at the same path.
 #[test]
 fn a_report_of_another_file_does_not_stop_the_backup() -> TestResult {

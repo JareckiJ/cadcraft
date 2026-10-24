@@ -137,9 +137,9 @@ pub fn loss_report_path(path: &str) -> String {
 
 /// Before a save that lacks records of the drawing's source overwrites the drawing's own file,
 /// copy that file to `<name>.orig.<ext>` (`<name>.orig-2.<ext>`, … when that exists) so nothing is
-/// gone for good. Not when the file already lacks as much: a report beside it from an earlier save
-/// (`<file>.lost.json`), made for exactly this file (its size and hash match), counting at least
-/// as many lost records means it holds nothing more this save would lose. The copy is created
+/// gone for good. Not when the file already lacks it all: a report beside it from an earlier save
+/// (`<file>.lost.json`), made for exactly this file (its size and hash match), that lists every
+/// record this save lacks means the file holds nothing more this save would lose. The copy is created
 /// exclusively (an existing name, symlink or not, is skipped, never followed) with the file's own
 /// permissions. Returns the copy's path; nothing is copied when the save isn't lossy, isn't over
 /// the drawing's file, or the file isn't there (or on the web, which has no files).
@@ -157,8 +157,11 @@ pub fn back_up_source(path: &str, source: Option<&str>, loss: Option<&Loss>) -> 
             return Ok(None);
         }
         let report = std::fs::read_to_string(loss_report_path(path)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
-        let already = report.filter(|v| v.get("file") == Some(&stamp_json(file_stamp(p)))).and_then(|v| v.get("lost").and_then(Value::as_u64));
-        if already.is_some_and(|n| n >= loss.count) {
+        let fresh: Option<Value> = serde_json::from_str(&loss.json).ok();
+        let already = report.filter(|v| v.get("file") == Some(&stamp_json(file_stamp(p))));
+        if let (Some(old), Some(new)) = (&already, &fresh)
+            && lacks_already(old, new)
+        {
             return Ok(None);
         }
         let failed = |e: std::io::Error| format!("backing up {path} before a save that lacks some of its records: {e}");
@@ -188,6 +191,22 @@ pub fn back_up_source(path: &str, source: Option<&str>, loss: Option<&Loss>) -> 
         let _ = (path, source, loss);
         Ok(None)
     }
+}
+
+/// Whether the file an `old` report describes already lacks every record the `new` report lists
+/// (same kind, type and handle), and at least as many it doesn't list: then the save loses
+/// nothing that is still in the file.
+#[cfg(not(target_arch = "wasm32"))]
+fn lacks_already(old: &Value, new: &Value) -> bool {
+    let ids = |v: &Value| -> std::collections::HashSet<(String, String, String)> {
+        let field = |r: &Value, k: &str| r.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+        v.get("records")
+            .and_then(Value::as_array)
+            .map(|rs| rs.iter().map(|r| (field(r, "kind"), field(r, "type"), field(r, "handle"))).collect())
+            .unwrap_or_default()
+    };
+    let unlisted = |v: &Value| v.get("unlisted").and_then(Value::as_u64).unwrap_or(0);
+    unlisted(new) <= unlisted(old) && ids(new).is_subset(&ids(old))
 }
 
 /// A file's size and FNV-1a 64 hash: what binds a loss report to the file it describes.

@@ -10,7 +10,7 @@
 //! The import state comes only from the DWG bridge's typed issues, never from human warning text
 //! and never from DXF `skipped_records`/`read_notes`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use cadcraft_doc::foreign::{PreservationClass, PreservationFormat, PreservationIssue, PreservationKind, PreservationReason, PreservationState};
@@ -331,11 +331,29 @@ pub(crate) fn dxf_customs_lost(d: &Drawing, version: crate::Version, dropped: &[
     for o in &d.foreign.objects {
         kept.push(Some(("object", o.kind.to_ascii_uppercase(), o.handle.0, o.tags.iter().map(|t| (t.code, t.value.clone())).collect())));
     }
+    // Indexes into `kept`, each slot used once: by (kind, type, handle), and by (kind, type) in order.
+    let mut exact: HashMap<(&'static str, String, u64), Vec<usize>> = HashMap::new();
+    let mut by_type: HashMap<(&'static str, String), std::collections::VecDeque<usize>> = HashMap::new();
+    for (i, (k, t, h, _)) in kept.iter().enumerate().filter_map(|(i, c)| c.as_ref().map(|c| (i, c))) {
+        exact.entry((*k, t.clone(), *h)).or_default().push(i);
+        by_type.entry((*k, t.clone())).or_default().push_back(i);
+    }
     let mut out = Vec::with_capacity(dropped.len());
     for r in dropped {
         let name = r.type_name.to_ascii_uppercase();
-        let same = |c: &Option<(&'static str, String, u64, Vec<(i32, String)>)>| c.as_ref().is_some_and(|(k, t, _, _)| *k == r.kind && *t == name);
-        let at = kept.iter().position(|c| same(c) && c.as_ref().is_some_and(|(_, _, h, _)| *h == r.handle)).or_else(|| kept.iter().position(same));
+        let mut at = exact
+            .get_mut(&(r.kind, name.clone(), r.handle))
+            .and_then(|v| v.iter().position(|i| kept.get(*i).is_some_and(Option::is_some)).map(|p| v.swap_remove(p)));
+        if at.is_none()
+            && let Some(q) = by_type.get_mut(&(r.kind, name))
+        {
+            while let Some(i) = q.pop_front() {
+                if kept.get(i).is_some_and(Option::is_some) {
+                    at = Some(i);
+                    break;
+                }
+            }
+        }
         let (reason, dxf) = match at.and_then(|i| kept.get_mut(i)).and_then(Option::take) {
             Some((_, _, _, groups)) => (held.clone(), groups),
             None => (unheld.clone(), Vec::new()),
