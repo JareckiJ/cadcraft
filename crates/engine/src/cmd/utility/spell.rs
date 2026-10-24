@@ -331,7 +331,8 @@ impl SpellM {
             user_dictionary(s).ok_or_else(|| other("No word list: set the SPELLDICTIONARY option to a word list file (one word per line)."))?;
         // Only an implicit default list may be absent; a configured one must be readable.
         let implicit = s.settings.spelldictionary.trim().is_empty();
-        self.dict = if implicit && !std::path::Path::new(&path).exists() { HashSet::new() } else { read_list(&path).map_err(|e| other(e.to_string()))? };
+        self.dict =
+            if implicit && !std::path::Path::new(&path).exists() { HashSet::new() } else { read_list(&path).map_err(|e| other(e.to_string()))? };
         let d = s.doc()?;
         for h in hs {
             let Some(e) = d.entity(*h) else { continue };
