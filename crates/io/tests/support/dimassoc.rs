@@ -1,6 +1,7 @@
 //! An original synthetic DXF after the DXF Reference (DIMENSION, DIMASSOC, DICTIONARY): dimension
 //! associativity CADCraft doesn't model. Shared by the I/O and engine tests (by file path).
 
+/// A LINE record with handle `h` in the space or block `owner`, at height `y`.
 fn line(h: &str, owner: &str, y: f64) -> String {
     format!("0\nLINE\n5\n{h}\n330\n{owner}\n100\nAcDbEntity\n8\n0\n100\nAcDbLine\n10\n0\n20\n{y}\n30\n0\n11\n10\n21\n{y}\n31\n0\n")
 }

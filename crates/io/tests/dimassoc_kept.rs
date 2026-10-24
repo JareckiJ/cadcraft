@@ -43,10 +43,12 @@ fn written(text: &str) -> TestResult<Vec<(String, String)>> {
     Ok(out)
 }
 
+/// Both fixture associations: (dimension, linked line).
 fn both() -> Vec<(String, String)> {
     vec![("31".into(), "30".into()), ("51".into(), "50".into())]
 }
 
+/// Associations CADCraft does not model are written back, through two DXF saves.
 #[test]
 fn associations_cadcraft_doesnt_model_are_written_back_with_their_references() -> TestResult {
     let d = cadcraft_io::read_dxf(source().as_bytes())?;
@@ -61,6 +63,7 @@ fn associations_cadcraft_doesnt_model_are_written_back_with_their_references() -
     Ok(())
 }
 
+/// Erasing the linked line drops its association and leaves no dangling reference.
 #[test]
 fn erasing_the_linked_geometry_drops_the_association() -> TestResult {
     let mut d = cadcraft_io::read_dxf(source().as_bytes())?;
@@ -76,6 +79,7 @@ fn erasing_the_linked_geometry_drops_the_association() -> TestResult {
     Ok(())
 }
 
+/// Both associations go into the DWG and survive a second DWG save.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn associations_go_into_the_dwg_and_back() -> TestResult {

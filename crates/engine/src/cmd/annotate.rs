@@ -602,6 +602,7 @@ fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "dimensions": hs.len(), "associated": n, "points": points, "message": format!("{n} of {} dimension(s) associated.", hs.len()) }))
 }
 
+/// DIMDISASSOCIATE: clears the association of the given dimensions (the modelled one and a kept DIMASSOC read from the file); returns how many had one.
 fn run_disassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = dims_of(s, &targets(s, p)?);
     let d = s.doc_mut()?;

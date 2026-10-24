@@ -8,6 +8,7 @@ use cadcraft_doc::Handle;
 use cadcraft_engine::Session;
 use serde_json::json;
 
+/// DIMDISASSOCIATE drops only the chosen dimension's kept DIMASSOC; UNDO brings it back.
 #[test]
 fn disassociating_drops_the_kept_association() -> Result<(), Box<dyn std::error::Error>> {
     let mut s = Session::empty();
