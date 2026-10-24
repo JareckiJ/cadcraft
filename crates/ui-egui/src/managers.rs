@@ -519,7 +519,7 @@ fn page_setup(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action 
             // Layout plotting always prints the whole sheet, so only that area is offered.
             let rows = PageRows { areas: &["layout"], scale: true, center: true };
             egui::Grid::new("pagesetup_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(right, |ui| {
-                if let Some((k, v)) = page_rows(ui, egui::Id::new(("pagesetup", name)), page, &rows, &choices, None) {
+                if let Some((k, v)) = page_rows(ui, egui::Id::new(("pagesetup", name)), page, &rows, &choices, None, picked.len() > 1) {
                     action = Some(("pagesetup", pagesetup_change(&picked, name, k, v)));
                 }
             });
@@ -636,7 +636,8 @@ fn parse_ratio(t: &str) -> Option<f64> {
 /// transparency, plot style table) shared by the Page Setup Manager and the Plot dialog, inside a
 /// two-column grid. Returns the setting the user changed as a `pagesetup` parameter (`device`,
 /// `paper`, `landscape`, `plotArea`, `scaleToFit`, `scale`, `center`, `lineweights`,
-/// `plotTransparency` or `plotStyleTable`).
+/// `plotTransparency` or `plotStyleTable`). With `force`, picking the value already shown is a
+/// change too: with several layouts picked, that is how the others are made to match the one shown.
 fn page_rows(
     ui: &mut egui::Ui,
     salt: egui::Id,
@@ -644,19 +645,20 @@ fn page_rows(
     rows: &PageRows,
     choices: &PageChoices,
     placement: Option<(&mut bool, &mut [f64; 2], bool)>,
+    force: bool,
 ) -> Option<(&'static str, Value)> {
     let mut change = None;
     ui.label("Printer/plotter");
     egui::ComboBox::from_id_salt(salt.with("device")).selected_text(device_label(page)).width(190.0).show_ui(ui, |ui| {
         if ui.selectable_label(device_label(page) == "None", "None").on_hover_text("PDF on the paper chosen below").clicked()
-            && device_label(page) != "None"
+            && (force || device_label(page) != "None")
         {
             change = Some(("device", json!("None")));
         }
         for dev in choices.devices.iter() {
             let on = dev.name.eq_ignore_ascii_case(&page.device);
             if ui.selectable_label(on, &dev.name).on_hover_text(format!("{} ({})", dev.description, dev.output.as_str().to_uppercase())).clicked()
-                && !on
+                && (force || !on)
             {
                 change = Some(("device", json!(dev.name)));
             }
@@ -669,14 +671,14 @@ fn page_rows(
     egui::ComboBox::from_id_salt(salt.with("paper")).selected_text(page.paper.as_str()).width(190.0).show_ui(ui, |ui| match device {
         Some(dev) => {
             for p in &dev.papers {
-                if ui.selectable_label(p.name == page.paper, &p.name).clicked() && p.name != page.paper {
+                if ui.selectable_label(p.name == page.paper, &p.name).clicked() && (force || p.name != page.paper) {
                     change = Some(("paper", json!(p.name)));
                 }
             }
         }
         None => {
             for p in cadcraft_render::PAPER_SIZES {
-                if ui.selectable_label(p.name == page.paper, p.name).clicked() && p.name != page.paper {
+                if ui.selectable_label(p.name == page.paper, p.name).clicked() && (force || p.name != page.paper) {
                     change = Some(("paper", json!(p.name)));
                 }
             }
@@ -685,10 +687,10 @@ fn page_rows(
     ui.end_row();
     ui.label("Orientation");
     ui.horizontal(|ui| {
-        if ui.radio(!page.landscape, "Portrait").clicked() && page.landscape {
+        if ui.radio(!page.landscape, "Portrait").clicked() && (force || page.landscape) {
             change = Some(("landscape", json!(false)));
         }
-        if ui.radio(page.landscape, "Landscape").clicked() && !page.landscape {
+        if ui.radio(page.landscape, "Landscape").clicked() && (force || !page.landscape) {
             change = Some(("landscape", json!(true)));
         }
     });
@@ -697,7 +699,7 @@ fn page_rows(
     ui.add_enabled_ui(rows.areas.len() > 1, |ui| {
         egui::ComboBox::from_id_salt(salt.with("area")).selected_text(area_label(&page.plot_area)).show_ui(ui, |ui| {
             for a in rows.areas {
-                if ui.selectable_label(page.plot_area == *a, area_label(a)).clicked() && page.plot_area != *a {
+                if ui.selectable_label(page.plot_area == *a, area_label(a)).clicked() && (force || page.plot_area != *a) {
                     change = Some(("plotArea", json!(a)));
                 }
             }
@@ -772,12 +774,12 @@ fn page_rows(
     ui.end_row();
     ui.label("Plot style table");
     egui::ComboBox::from_id_salt(salt.with("styles")).selected_text(style_label(page)).width(190.0).show_ui(ui, |ui| {
-        if ui.selectable_label(style_label(page) == "None", "None").clicked() && style_label(page) != "None" {
+        if ui.selectable_label(style_label(page) == "None", "None").clicked() && (force || style_label(page) != "None") {
             change = Some(("plotStyleTable", json!("None")));
         }
         for name in &choices.styles {
             let on = name.eq_ignore_ascii_case(&page.plot_style_table);
-            if ui.selectable_label(on, name).clicked() && !on {
+            if ui.selectable_label(on, name).clicked() && (force || !on) {
                 change = Some(("plotStyleTable", json!(name)));
             }
         }
@@ -1008,7 +1010,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                     PageRows { areas: &["layout"], scale: false, center: false }
                 };
                 let placement = model.then_some((&mut st.center, &mut st.offset_mm, offset_supported));
-                if let Some((k, v)) = page_rows(ui, egui::Id::new(("plot", st.target.as_str())), &st.page, &rows, &choices, placement) {
+                if let Some((k, v)) = page_rows(ui, egui::Id::new(("plot", st.target.as_str())), &st.page, &rows, &choices, placement, false) {
                     apply_page_change(&mut st.page, k, &v);
                 }
                 if model && st.page.plot_area == "window" {
