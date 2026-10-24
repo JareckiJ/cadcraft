@@ -300,8 +300,8 @@ impl CubeProjector {
                 Stroke::new(1.1, Color32::from_rgb(0x4b, 0x50, 0x58)),
             ));
 
-            // Draw subtle inner subdivision lines (AutoCAD-style edge/corner bands) when hovered or in 3D view.
-            if hovered_zone.is_some() || !self.orbit.is_top() {
+            // Draw subtle inner subdivision lines (AutoCAD-style edge/corner bands) when hovered.
+            if hovered_zone.is_some() {
                 self.paint_face_subdivisions(painter, face);
             }
 
@@ -312,16 +312,15 @@ impl CubeProjector {
                 self.paint_zone_highlight_on_face(painter, face, hz);
             }
 
-            // Draw face label anchored to the face's 3D orientation so it rotates with the cube
-            // (including upside-down when viewing from the back/north side, as in AutoCAD).
-            if ndot > 0.24 {
-                self.paint_face_label(painter, face, ndot);
+            // Render the localized face label as a 3D surface-mapped mesh ("sticker") on the cube face
+            // so it foreshortens, skews, and rotates upside-down with the face in 3D space.
+            if ndot > 0.16 {
+                self.paint_face_label(painter, face);
             }
         }
     }
 
-    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, ndot: f64) {
-        let center_2d = self.project_unit(face.point(0.0, 0.0)).0;
+    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef) {
         let label = match face.key {
             "TOP" => crate::tl!("TOP"),
             "BOTTOM" => crate::tl!("BOTTOM"),
@@ -331,18 +330,43 @@ impl CubeProjector {
             "RIGHT" => crate::tl!("RIGHT"),
             other => other,
         };
-        let font_px = (11.5 * (ndot as f32).sqrt()).clamp(8.5, 12.0);
-        let font_id = egui::FontId::proportional(font_px);
-        let color = Color32::from_rgb(0x2e, 0x32, 0x38);
+        let color = Color32::from_rgb(0x1f, 0x23, 0x28);
+        // Layout the text at high resolution so its glyph quads are crisp, then map the galley's
+        // centered 2D coordinates directly onto the face's `(u, v)` surface coordinates `[-1, 1]^2`.
+        let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(18.0), color);
+        let size = galley.size();
+        if size.x <= 1e-3 || size.y <= 1e-3 {
+            return;
+        }
+        let cx = size.x * 0.5;
+        let cy = size.y * 0.5;
+        // Fit the label comfortably inside the cube face (`max_u = 1.48` out of `2.0` total face width),
+        // while capping the vertical scale so short labels like "TOP" stay the same height as "BOTTOM".
+        let scale_u = (1.48 / f64::from(size.x)).min(0.62 / f64::from(size.y));
+        let scale_v = (0.64 / f64::from(size.y)).min(scale_u * 1.15);
 
-        // Compute the projected screen-space direction of the face's local `+u_axis` (baseline right).
-        // In screen coordinates +Y is downward, while in 2D view-plane coordinates +Y is upward.
-        let u_proj = self.orbit.project_vec(face.u_axis);
-        let u_screen = vec2(u_proj.x as f32, -u_proj.y as f32);
-        let angle = if u_screen.length_sq() > 1e-5 { u_screen.y.atan2(u_screen.x) } else { 0.0 };
-
-        let galley = painter.layout_no_wrap(label.to_string(), font_id, color);
-        painter.add(egui::epaint::TextShape::new(center_2d, galley, color).with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER));
+        // Emit a faux-bold pass (two slight horizontal offsets in face `u`-space) so the label looks
+        // bold and clear like AutoCAD's ViewCube face textures.
+        let mut mesh = egui::Mesh::with_texture(egui::TextureId::default());
+        for du_bold in [-0.018_f64, 0.018_f64, 0.0_f64] {
+            for row in &galley.rows {
+                let row_y = row.rect().min.y;
+                for vtx in &row.visuals.mesh.vertices {
+                    let gx = f64::from(vtx.pos.x - cx);
+                    let gy = f64::from(row_y + vtx.pos.y - cy);
+                    let u = gx * scale_u + du_bold;
+                    // Galley +Y is downward; face +v is upward.
+                    let v = -gy * scale_v;
+                    let screen_pos = self.project_unit(face.point(u, v)).0;
+                    mesh.vertices.push(egui::epaint::Vertex { pos: screen_pos, uv: vtx.uv, color });
+                }
+                let base = (mesh.vertices.len() - row.visuals.mesh.vertices.len()) as u32;
+                for &idx in &row.visuals.mesh.indices {
+                    mesh.indices.push(base + idx);
+                }
+            }
+        }
+        painter.add(Shape::mesh(mesh));
     }
 
     fn paint_face_subdivisions(&self, painter: &egui::Painter, face: FaceDef) {
