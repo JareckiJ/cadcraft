@@ -31,7 +31,9 @@ mod overkill;
 mod pline_opts;
 pub mod plotters;
 mod props;
+pub use draw2::breakline::BreaklineOptions;
 pub use props::MatchProps;
+pub(crate) use props::set_current_color_value;
 pub use props::{missing_fonts, substitute_font};
 mod qselect;
 mod selecttools;
@@ -41,6 +43,8 @@ mod table;
 mod tolerance;
 mod trim_hatch;
 mod trimextend;
+mod txt2mtxt;
+pub use txt2mtxt::Txt2MtxtOptions;
 mod utility;
 mod view;
 
@@ -202,6 +206,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(utility::specs());
         v.extend(table::specs());
         v.extend(tolerance::specs());
+        v.extend(txt2mtxt::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
         v

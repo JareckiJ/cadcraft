@@ -962,7 +962,7 @@
 	Viewport {id}	Видовой экран {id}
 	Viewports	Видовые экраны
 	W	З
-	WCS ⌄	МСК ⌄
+	WCS	МСК
 	White	Белый
 	Width factor	Коэффициент ширины
 	Window	Окно
@@ -1607,3 +1607,4 @@
 	The selected objects don't enclose an area: together they must form a closed boundary. Select the missing objects or close the gaps.	Выбранные объекты не ограничивают область: вместе они должны образовывать замкнутый контур. Выберите недостающие объекты или закройте разрывы.
 	No boundary objects selected: select closed objects, or objects that together enclose an area.	Не выбраны объекты контура: выберите замкнутые объекты или объекты, которые вместе ограничивают область.
 	Some of the selected objects don't enclose an area and were left out of the hatch. Together, objects must form a closed boundary.	Некоторые выбранные объекты не ограничивают область и не вошли в штриховку. Вместе объекты должны образовывать замкнутый контур.
+	Analyze Shapes	Анализ фигур

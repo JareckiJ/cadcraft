@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod aliasdlg;
 pub mod animation;
 pub mod autosave;
 pub mod batchplot;
@@ -140,6 +141,8 @@ pub struct UiState {
     /// The Start page shows recent files as a grid of previews instead of a list.
     #[serde(default)]
     pub recent_grid: bool,
+    /// The folder the last APPLOAD file came from: the next pick starts there.
+    pub last_lisp_dir: Option<String>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -221,6 +224,7 @@ impl Default for UiState {
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
             recent_grid: false,
+            last_lisp_dir: None,
         }
     }
 }
@@ -239,6 +243,13 @@ pub struct Services {
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
     /// Pick a folder (Options ▸ Fonts); `None` where the host has no folder dialog.
     pub pick_folder: Option<Box<dyn Fn() -> Option<String>>>,
+    /// Pick a `.lsp` file for APPLOAD, starting in the given folder (empty for the default one).
+    /// `None` where there is no native file dialog: the desktop without one asks for the name,
+    /// and the web (no file system) says to drop the file (`no_file_system`).
+    pub pick_lisp: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// The host has no file system to read a path from (the browser): a dropped file's contents
+    /// are what it loads, and APPLOAD says so instead of asking for a name it cannot read.
+    pub no_file_system: bool,
 }
 
 pub struct CadApp {
@@ -275,6 +286,8 @@ pub struct CadApp {
     shown_follows_system: bool,
     /// Whether egui was last told to animate (`None` until the first frame).
     shown_animations: Option<bool>,
+    /// The interface scale last handed to egui (`None` until the first frame).
+    shown_interface_scale: Option<f32>,
     pub frame_ms: f64,
     pub quit_requested: bool,
     /// The app may close although drawings have unsaved changes (they were dealt with, or the
@@ -290,6 +303,8 @@ pub struct CadApp {
     pub gpu_faults: std::sync::Arc<gpu::GpuFaults>,
     /// The notice shown after one (see [`autosave::gpu_notice`]).
     pub gpu_notice: Option<autosave::GpuNotice>,
+    /// The Command Aliases dialog while open ([`aliasdlg`]).
+    pub alias_dlg: Option<aliasdlg::AliasDlgState>,
     /// The Hatch and Gradient dialog while open or picking ([`hatchdlg`]).
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
@@ -322,6 +337,7 @@ impl CadApp {
             shown_theme: None,
             shown_follows_system: false,
             shown_animations: None,
+            shown_interface_scale: None,
             frame_ms: 0.0,
             quit_requested: false,
             quit_confirmed: false,
@@ -330,6 +346,7 @@ impl CadApp {
             recovery: autosave::Recovery::default(),
             gpu_faults: std::sync::Arc::default(),
             gpu_notice: None,
+            alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
         }
@@ -427,6 +444,9 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if let Some(dir) = &self.ui.last_lisp_dir {
+            prefs["lispDir"] = json!(dir);
+        }
         prefs.to_string()
     }
 
@@ -453,6 +473,9 @@ impl CadApp {
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
+            self.ui.last_lisp_dir = Some(dir.to_string());
         }
     }
 
@@ -631,6 +654,13 @@ impl CadApp {
         if !animate {
             animation::unsmooth_scroll(ctx);
         }
+        // Applied only when the saved scale changes, so egui's own keyboard zoom keeps working
+        // within a session (and is never saved).
+        let scale = self.options.interface_scale;
+        if self.shown_interface_scale != Some(scale) {
+            ctx.set_zoom_factor(scale);
+            self.shown_interface_scale = Some(scale);
+        }
         self.drain_control(ctx);
         self.finish_opening();
         self.opening.show(ctx);
@@ -705,6 +735,9 @@ impl CadApp {
             chrome::file_tabs(self, ui);
         }
         let has_doc = !self.session.docs.is_empty() && !self.ui.start_tab;
+        if has_doc && !self.ui.show_toolsets {
+            palettes::toolsets_strip(self, ui);
+        }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             if has_doc {
                 docking::show(self, ui);

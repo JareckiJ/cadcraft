@@ -1,7 +1,7 @@
 //! Paper sizes and the layout sheet (paper rectangle, printable area) for paper space.
 //!
-//! Paper-space units are millimetres in metric drawings (`MEASUREMENT` = 1) and inches
-//! otherwise. The sheet's lower-left corner is the paper-space origin.
+//! Paper-space units are millimetres in metric drawings (`MEASUREMENT` = 1) and on layouts whose
+//! page setup is in millimetres, and inches otherwise. The sheet's lower-left corner is the paper-space origin.
 
 use cadcraft_doc::{Drawing, PageSetup};
 use cadcraft_geom::{Bounds2, Vec2};
@@ -81,21 +81,17 @@ pub fn paper_unit_mm(d: &Drawing) -> f64 {
     if d.header.i64("MEASUREMENT", 0) == 1 { 1.0 } else { 25.4 }
 }
 
-/// Millimetres per paper unit of `space`: a layout's own paper units when its page setup names
-/// them (a drawing in inches may have layouts set up in millimetres), else the drawing's.
-pub fn space_unit_mm(d: &Drawing, space: &cadcraft_doc::Space) -> f64 {
-    match space.layout().and_then(|n| d.layout(n)) {
-        Some(l) => Sheet::from_page(&l.page, paper_unit_mm(d)).unit_mm,
-        None => paper_unit_mm(d),
-    }
+/// Millimetres per paper-space unit on a layout with page setup `page`: millimetres when the
+/// page says so (plot paper units mm), else as the drawing's MEASUREMENT says. Drawings from
+/// AutoCAD often have MEASUREMENT 0 with layouts in millimetres (#1058).
+pub fn page_unit_mm(d: &Drawing, page: &PageSetup) -> f64 {
+    if page.paper_mm { 1.0 } else { paper_unit_mm(d) }
 }
 
-/// Millimetres per paper unit of the layout holding object `h` (the drawing's when none does).
+/// Millimetres per paper-space unit on the layout holding the paper-space entity `h` (the
+/// drawing's when no layout holds it).
 pub fn unit_mm_of(d: &Drawing, h: cadcraft_doc::Handle) -> f64 {
-    match d.layouts.iter().find(|l| l.entities.get(h).is_some()) {
-        Some(l) => Sheet::from_page(&l.page, paper_unit_mm(d)).unit_mm,
-        None => paper_unit_mm(d),
-    }
+    d.layouts.iter().find(|l| l.entities.contains(h)).map_or_else(|| paper_unit_mm(d), |l| page_unit_mm(d, &l.page))
 }
 
 /// The paper sheet of a layout, in paper-space units.
@@ -113,14 +109,8 @@ impl Sheet {
     pub fn bounds(&self) -> Bounds2 {
         Bounds2::new(Vec2::ZERO, self.size)
     }
-    /// The sheet for a page setup in a drawing whose paper units are `unit_mm` millimetres (the
-    /// layout's own paper units, when it names them, win).
+    /// The sheet for a page setup whose paper units are `unit_mm` millimetres ([`page_unit_mm`]).
     pub fn from_page(page: &PageSetup, unit_mm: f64) -> Sheet {
-        let unit_mm = match page.mm_units {
-            Some(true) => 1.0,
-            Some(false) => 25.4,
-            None => unit_mm,
-        };
         let sane = |v: f64, d: f64| if v.is_finite() && v > 0.0 { v.min(100_000.0) } else { d };
         let w = sane(page.width_mm, 215.9);
         let h = sane(page.height_mm, 279.4);
@@ -142,7 +132,7 @@ impl Sheet {
 /// The sheet of a named layout (`None` if there is no such layout).
 pub fn sheet(d: &Drawing, layout: &str) -> Option<Sheet> {
     let l = d.layouts.iter().find(|l| l.name == layout).or_else(|| d.layout(layout))?;
-    Some(Sheet::from_page(&l.page, paper_unit_mm(d)))
+    Some(Sheet::from_page(&l.page, page_unit_mm(d, &l.page)))
 }
 
 #[cfg(test)]

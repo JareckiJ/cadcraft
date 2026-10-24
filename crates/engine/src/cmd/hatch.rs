@@ -21,11 +21,11 @@ pub use pick::{HatchPicks, PickMode};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new("hatch", "Hatch...", run_hatch).menu(&["Draw", "Hatch..."]).alias(&["h", "bh", "-hatch"]).params("{points?: [[x,y]] (internal points) and/or handles?: [hex] (closed objects, or objects that together enclose an area), pattern?: \"ANSI31\", scale?, angle? (degrees), associative? (HPASSOC), separate? (HPSEPARATE: a hatch per point/object), origin?: [x,y] (HPORIGIN) | originMode?: \"current\"|\"bottomLeft\"|\"bottomRight\"|\"topLeft\"|\"topRight\"|\"center\" (HPORIGINMODE), style?: \"normal\"|\"outer\"|\"ignore\" (HPISLANDDETECTION), background?: colour | \"None\"} — gaps up to HPGAPTOL close").interactive(|s| Ok(Box::new(HatchM::new(s, false)))),
+        CommandSpec::new("hatch", "Hatch...", run_hatch).menu(&["Draw", "Hatch..."]).alias(&["h", "bh", "-hatch"]).params("{points?: [[x,y]] (internal points) and/or handles?: [hex] (closed objects, or objects that together enclose an area), pattern?: \"ANSI31\" (built in, or defined by patternFile | patternText), patternFile?: path to a .pat file | patternText?: its contents (loads the patterns it defines), scale?, angle? (degrees), associative? (HPASSOC), separate? (HPSEPARATE: a hatch per point/object), origin?: [x,y] (HPORIGIN) | originMode?: \"current\"|\"bottomLeft\"|\"bottomRight\"|\"topLeft\"|\"topRight\"|\"center\" (HPORIGINMODE), style?: \"normal\"|\"outer\"|\"ignore\" (HPISLANDDETECTION), background?: colour | \"None\"} — gaps up to HPGAPTOL close").interactive(|s| Ok(Box::new(HatchM::new(s, false)))),
         CommandSpec::new("gradient", "Gradient...", run_gradient).menu(&["Draw", "Gradient..."]).alias(&["gd"]).params("{points? and/or handles?, name?: \"LINEAR\"|\"CYLINDER\"|\"CURVED\"|\"SPHERICAL\"|\"HEMISPHERICAL\" or INV… (colours swapped), color1?, color2?, angle? (degrees), centered? (default true)}").interactive(|s| Ok(Box::new(HatchM::new(s, true)))),
         CommandSpec::new("boundary", "Boundary...", run_boundary).menu(&["Draw", "Boundary..."]).alias(&["bo", "bpoly"]).params("{points: [[x,y]]}").interactive(|_| Ok(Box::new(BoundaryM { region: false }))),
         CommandSpec::new("region", "Region", run_region).menu(&["Draw", "Region"]).alias(&["reg"]).params("{handles?}"),
-        CommandSpec::new("hatchedit", "Hatch Edit", edit::run_hatchedit).menu(&["Modify", "Object", "Hatch..."]).alias(&["he", "-hatchedit"]).params("{handles?, pattern?, scale?, angle?, gradient?: {name?, color1?, color2?, angle? (degrees), centered?} (makes or changes a gradient fill; `pattern` turns it back), associative?: bool (false unlinks; true links each loop to a closed object of the same shape, or to `boundary` objects), boundary?: [hex], style?, background?: colour | \"None\", origin? | originMode?, separate?: true, recreate?: \"polyline\"|\"region\", associate?: bool (link to the recreated boundary)}").interactive(|s| Ok(Box::new(edit::HatchEditM::new(s)))),
+        CommandSpec::new("hatchedit", "Hatch Edit", edit::run_hatchedit).menu(&["Modify", "Object", "Hatch..."]).alias(&["he", "-hatchedit"]).params("{handles?, pattern?, scale?, angle?, gradient?: {name?, color1?, color2?, angle? (degrees), centered?} (makes or changes a gradient fill; `pattern` turns it back), associative?: bool (false unlinks; true links each loop to a closed object of the same shape, or to `boundary` objects), boundary?: [hex], addPoints?: [[x,y]], addBoundary?: [hex], removeLoops?: [zero-based index] (geometry edits require one hatch), style?, background?: colour | \"None\", origin? | originMode?, separate?: true, recreate?: \"polyline\"|\"region\", associate?: bool (link to the recreated boundary)}").interactive(|s| Ok(Box::new(edit::HatchEditM::new(s)))),
         CommandSpec::new("hatchpick", "Hatch Pick", pick::run_hatchpick)
             .params("{points?: [[x,y]] (internal points), handles?: [hex] (closed objects, or objects that together enclose an area)} (typed: Points, Objects, oRigin or Hatch, then the picks): the Hatch and Gradient dialog's picks, kept in the session; changes nothing")
             .enabled(has_doc)
@@ -34,14 +34,18 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// The tolerance curves are flattened with for boundary tracing, in a space with extents `ext`.
+pub(super) fn outline_tol(ext: Bounds2) -> f64 {
+    (ext.width() + ext.height()).max(1e-9) / 20000.0
+}
+
 /// Tessellated outlines of every visible curve in the space (hatch boundary candidates), each
 /// with the handle of the object it came from: only the objects reaching into `near` when given,
 /// tessellated finely enough for that area.
 fn outlines(d: &Drawing, space: &Space, near: Option<Bounds2>) -> (Vec<Vec<Vec2>>, Vec<Handle>) {
     let Some(store) = d.space(space) else { return (Vec::new(), Vec::new()) };
     let ext = d.extents(space);
-    let area = near.unwrap_or(ext);
-    let tol = (area.width() + area.height()).max(1e-9) / 20000.0;
+    let tol = near.map_or_else(|| outline_tol(ext), outline_tol);
     let mut out = Vec::new();
     let mut owners = Vec::new();
     for e in store.iter() {
@@ -135,7 +139,8 @@ fn closed_loop(d: &Drawing, e: &Entity) -> Option<Vec<PolyVertex>> {
 }
 
 /// Open curves that can make up an island together (a square drawn as four LINEs, two ARCs
-/// forming a circle). Closed objects are islands on their own (see `closed_loop`).
+/// forming a circle, the inner lines of multiline walls around a room). Closed objects are
+/// islands on their own (see `closed_loop`).
 fn island_curve(d: &Drawing, e: &Entity) -> bool {
     matches!(
         e.kind,
@@ -145,6 +150,7 @@ fn island_curve(d: &Drawing, e: &Entity) -> bool {
             | EntityKind::LwPolyline(_)
             | EntityKind::Polyline3d(_)
             | EntityKind::Spline(_)
+            | EntityKind::MLine(_)
     ) && closed_loop(d, e).is_none()
 }
 
@@ -258,6 +264,8 @@ fn loops_in(s: &Session, p: Vec2, near: Option<Bounds2>) -> Result<Vec<HatchLoop
             "There are too many objects in the view to find the boundary. Zoom in closer to the area to hatch and pick again.".into(),
         ));
     }
+    // A line that ends on a flattened curve (an ellipse) can stop short of its chords.
+    let polys = cadcraft_geom::region::snap_ends(&polys, outline_tol(near.unwrap_or(ext)), tol);
     let found = cadcraft_geom::region::boundary_at_gap(&polys, p, tol, gap_tolerance(d)).ok_or_else(|| {
         EngineError::Other(
             "Valid hatch boundary not found: the area around the picked point is not closed. Close the gaps in its boundary and pick again.".into(),
@@ -651,7 +659,7 @@ fn run_hatch(s: &mut Session, p: &Value) -> Result<Value> {
         && cadcraft_doc::library::pattern(&up).is_none()
         && patfile::user_pattern(&up).is_none()
     {
-        return Err(bad("hatch", format!("unknown pattern {up}")));
+        return Err(bad("hatch", format!("unknown pattern {up}: not built in; load it with patternFile or patternText (a .pat file)")));
     }
     make(s, p, false)
 }
@@ -1069,6 +1077,16 @@ mod tests {
         s.cancel();
         s.start("gradient").unwrap();
         assert!(s.current_prompt().unwrap().picker.is_none());
+    }
+
+    #[test]
+    fn unknown_pattern_error_and_catalog_name_the_pat_file_route() {
+        let mut s = Session::new();
+        s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+        let e = s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "GRAVEL" })).unwrap_err();
+        assert!(e.to_string().contains("patternFile"), "{e}");
+        let spec = specs().into_iter().find(|c| c.id == "hatch").unwrap();
+        assert!(spec.params.contains("patternFile") && spec.params.contains("patternText"), "{}", spec.params);
     }
 
     #[test]
