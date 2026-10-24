@@ -159,7 +159,6 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "CMDACTIVE" => json!(i32::from(s.running.is_some())),
         "TILEMODE" => json!(i32::from(s.state().is_ok_and(|d| d.space.layout().is_none()))),
         "PLATFORM" => json!(std::env::consts::OS),
-        "LOGINNAME" => json!(std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default()),
         "BLOCKEDITOR" => json!(i32::from(s.state().is_ok_and(|d| d.block_edit.is_some()))),
         // The template NEW/QNEW start from (a profile setting, like FONTALT; "" = none).
         "QNEWTEMPLATE" => json!(crate::cmd::file::qnew_template()),
@@ -239,7 +238,6 @@ const READ_ONLY: &[&str] = &[
     "CMDACTIVE",
     "TILEMODE",
     "PLATFORM",
-    "LOGINNAME",
     "DBMOD",
     "BLOCKEDITOR",
     "CTAB",
