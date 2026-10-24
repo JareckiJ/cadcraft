@@ -2194,7 +2194,8 @@ fn cycle_badge(p: &egui::Painter, at: Pos2) {
 /// they share the canvas's layer: `layer_id_at` reports the drawing, and only their rectangles can
 /// tell them apart from it (#1701).
 fn over_canvas_menu(app: &CadApp, p: Pos2) -> bool {
-    app.canvas.cycle.as_ref().is_some_and(|c| c.rows.iter().any(|r| r.expand(2.0).contains(p))) || app.cmd.option_rows.iter().any(|(r, _)| r.expand(2.0).contains(p))
+    app.canvas.cycle.as_ref().is_some_and(|c| c.rows.iter().any(|r| r.expand(2.0).contains(p)))
+        || app.cmd.option_rows.iter().any(|(r, _)| r.expand(2.0).contains(p))
 }
 
 /// The selection cycling list beside the click that opened it: a row per object, its type and
