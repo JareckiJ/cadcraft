@@ -1294,22 +1294,15 @@
 	Bottom right	右下
 	Top right	右上
 	Top left	左上
-	Center	中心
 	Color 1	颜色 1
 	Color 2	颜色 2
 	Shape	形状
-	Linear	线性
 	Inverted	反向
 	Centered	居中
-	Cylinder	圆柱体
 	Curved	曲线
 	Spherical	球面
 	Hemispherical	半球面
 	Drawing Units	图形单位
-	Length	长度
-	Type	类型
-	Precision	精度
-	Angle	角度
 	Insertion scale	插入比例
 	Units to scale inserted content	用于缩放插入内容的单位
 	Sample output	示例输出
