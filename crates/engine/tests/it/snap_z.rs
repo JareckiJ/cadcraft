@@ -104,3 +104,14 @@ fn m2p_with_a_typed_snap_for_each_point_takes_their_levels() {
     assert!(pts.contains(&Vec3::new(5.0, 0.0, 1880.5)), "{pts:?}");
     assert!(pts.contains(&Vec3::new(50.0, 50.0, 0.0)), "{pts:?}");
 }
+
+/// A point a LISP expression gives at a point prompt keeps its Z, as a typed `x,y,z` does.
+#[test]
+fn a_lisp_point_keeps_its_z() {
+    let mut s = Session::new();
+    s.cmdline("line").unwrap();
+    s.cmdline("(list 1 2 7)").unwrap();
+    s.cmdline("(list 5 2)").unwrap();
+    s.cmdline("").unwrap();
+    assert!(lines(&s).contains(&(Vec3::new(1.0, 2.0, 7.0), Vec3::new(5.0, 2.0, 0.0))), "{:?}", lines(&s));
+}

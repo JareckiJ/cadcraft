@@ -1604,7 +1604,13 @@ impl Session {
                 lisp::value::Value::Real(r) => self.typed(&format!("{r}")),
                 lisp::value::Value::Str(s) => self.typed(&s),
                 other => match other.as_point() {
-                    Some(p) => self.input(Input::Point(Vec2::new(p[0], p[1]))),
+                    // A 3D point keeps its Z, as a typed `x,y,z` does.
+                    Some(p) => {
+                        self.point_z = p.get(2).copied().filter(|z| z.is_finite()).unwrap_or(0.0);
+                        let r = self.input(Input::Point(Vec2::new(p[0], p[1])));
+                        self.point_z = 0.0;
+                        r
+                    }
                     None => {
                         self.echo(format!("Invalid input: {}", lisp::value::to_text(&other, true)));
                         Ok(())
