@@ -21,7 +21,8 @@ impl Rgb {
         format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
     }
     pub fn parse_hex(s: &str) -> Option<Rgb> {
-        let s = s.trim().trim_start_matches('#');
+        let s = s.trim();
+        let s = s.strip_prefix('#').unwrap_or(s);
         if s.len() != 6 || !s.chars().all(|c| c.is_ascii_hexdigit()) {
             return None;
         }
@@ -156,7 +157,7 @@ fn build_palette() -> [Rgb; 256] {
     for (slot, c) in p.iter_mut().zip(base) {
         *slot = c;
     }
-    let values = [255.0, 165.0, 127.0, 76.0, 38.0];
+    let values = [255.0, 204.0, 153.0, 127.0, 76.0];
     for i in 10..250usize {
         let hue = (i - 10) / 10; // 0..24, 15° each
         let sub = i % 10;
@@ -234,12 +235,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_hex_rejects_repeated_hash() {
+        assert_eq!(Rgb::parse_hex("##ff0000"), None);
+        assert_eq!(Rgb::parse_hex("###ff0000"), None);
+        assert_eq!(Color::parse("##ff0000"), None);
+        assert_eq!(Rgb::parse_hex("#ff0000"), Some(Rgb(255, 0, 0)));
+        assert_eq!(Rgb::parse_hex("ff0000"), Some(Rgb(255, 0, 0)));
+    }
+
+    #[test]
     fn palette_known_entries() {
         assert_eq!(aci_rgb(1), Rgb(255, 0, 0));
         assert_eq!(aci_rgb(10), Rgb(255, 0, 0));
         assert_eq!(aci_rgb(11), Rgb(255, 127, 127));
-        assert_eq!(aci_rgb(12), Rgb(165, 0, 0));
-        assert_eq!(aci_rgb(13), Rgb(165, 82, 82));
+        assert_eq!(aci_rgb(12), Rgb(204, 0, 0));
+        assert_eq!(aci_rgb(13), Rgb(204, 102, 102));
+        assert_eq!(aci_rgb(14), Rgb(153, 0, 0));
+        assert_eq!(aci_rgb(15), Rgb(153, 76, 76));
+        assert_eq!(aci_rgb(16), Rgb(127, 0, 0));
+        assert_eq!(aci_rgb(18), Rgb(76, 0, 0));
         assert_eq!(aci_rgb(20), Rgb(255, 63, 0));
         assert_eq!(aci_rgb(30), Rgb(255, 127, 0));
         assert_eq!(aci_rgb(50), Rgb(255, 255, 0));
