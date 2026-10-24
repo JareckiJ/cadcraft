@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (DIMASSOC objects for angular, diametric and radial dimensions) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (dimension associativity CADCraft doesn't model kept through DXF and DWG) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -101,6 +101,15 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 | Objects: dynamic block data (ACAD_EVALUATION_GRAPH, BLOCK…PARAMETER, BLOCK…ACTION, grips) | read into a model (`dynblock`, `blocks.dynamic`): parameters, visibility states, value sets, stretch and lookup actions; references: their dynamic block, values and custom properties (`blocks.reference`, Properties ▸ Custom, read-only); kept raw (#528) | written back as read; a changed visibility state is written as AutoCAD writes it (a new anonymous block with its `AcDbBlockRepBTag`, the objects' `AcDbBlockRepETag`, the reference's representation data) | visibility states (and lookups that set only them) can be changed (`blocks.reference.set`, Properties ▸ Custom); distances, positions and the actions they drive not yet; DWG open and save keep it too (checked with an AutoCAD dynamic block) |
 | Handles and owners | entity handles kept; others regenerated | consistent | stable across CADCraft re-saves (#495); other programs' table and object handles renumbered once |
 
+**Dimension associativity CADCraft doesn't model.** CADCraft models the association of model and
+paper space dimensions whose points it can infer and writes those DIMASSOC objects itself. Any
+other DIMASSOC (a dimension in a block, or points linked by snaps CADCraft doesn't infer, such as
+nearest, perpendicular or through a block insert) is kept as read and written back with its
+references moved, through DXF and DWG (`dimassoc_kept`). A kept association whose linked geometry
+was erased is dropped, so the dimension is no longer associative, as when the geometry is erased
+in AutoCAD; DIMDISASSOCIATE drops it too. Moving the geometry in CADCraft doesn't move such a
+dimension (AutoCAD re-evaluates it on its next edit). Before, every one of them was lost on save.
+
 **DXF ≈ 50% read, ≈ 30% write** (estimated; weights: common 2D entities 50%, annotation objects
 20%, tables/objects 15%, foreign data preservation 15%).
 
@@ -140,6 +149,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | minor | Dimension associativity CADCraft doesn't model (dimensions in blocks, uninferred snaps) kept and written back through DXF and DWG; dropped with erased geometry or by DIMDISASSOCIATE |
 | 2026-10-22 | minor | DXF/DWG save: angular, diametric and radial dimensions get standard DIMASSOC objects (one centre reference to the circle for radial/diametric, the definition points for angular), so AutoCAD follows their geometry; the standard objects of those kinds are read back too, without CADCraft's xdata (#1651) |
 | 2026-10-19 | minor | DXF/DWG save: angular dimension block text honors DIMDSEP, including per-dimension overrides (#1646) |
 | 2026-10-19 | minor | A file's own arrowhead blocks with standard names (AutoCAD's `_Dot`, `_DotSmall`), named only by a dimension style, are kept and saved as they were instead of being replaced by CADCraft's solids; PURGE keeps arrowhead blocks dimension styles name |

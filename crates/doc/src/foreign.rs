@@ -89,8 +89,31 @@ impl Foreign {
             && self.data_store.is_empty()
     }
 
+    /// Whether a kept association (DIMASSOC object) links dimension `dim`: one CADCraft doesn't
+    /// model, written back as it was read.
+    pub fn has_dimassoc(&self, dim: Handle) -> bool {
+        self.objects.iter().any(|o| dimassoc_of(o) == Some(dim))
+    }
+
+    /// Drop the kept association of dimension `dim` (DIMDISASSOCIATE); whether it had one. Its
+    /// extension dictionary entry and the dimension's reactor to it go with it on save.
+    pub fn drop_dimassoc(&mut self, dim: Handle) -> bool {
+        let before = self.objects.len();
+        self.objects.retain(|o| dimassoc_of(o) != Some(dim));
+        self.objects.len() != before
+    }
+
     /// The entities the data store has records for (their 320 handles).
     pub fn data_store_entities(&self) -> std::collections::BTreeSet<Handle> {
         self.data_store.iter().filter(|t| t.code == 320).filter_map(|t| Handle::parse_hex(t.value.trim())).collect()
     }
+}
+
+/// The dimension a kept DIMASSOC object links: the first 330 after its AcDbDimAssoc marker.
+fn dimassoc_of(o: &ForeignObject) -> Option<Handle> {
+    if !o.kind.trim().eq_ignore_ascii_case("DIMASSOC") {
+        return None;
+    }
+    let mut body = o.tags.iter().skip_while(|t| !(t.code == 100 && t.value.trim() == "AcDbDimAssoc"));
+    body.find(|t| t.code == 330).and_then(|t| Handle::parse_hex(t.value.trim()))
 }

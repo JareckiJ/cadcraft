@@ -38,8 +38,21 @@ const MODELLED_KEYS: &[&str] = &[
 
 /// Extension dictionary entries not kept raw: dimension associativity (CADCraft reads and
 /// rewrites it), draw order and annotation scale contexts (written from their own models by the
-/// changes that model them; stale copies would contradict the drawing).
+/// changes that model them; stale copies would contradict the drawing). A dimension's association
+/// CADCraft didn't model (one in a block, or linked by object snaps it doesn't infer) is kept, see
+/// [`modelled_xdict_key`].
 const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_DIMASSOC", "ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
+
+/// The extension dictionary entry of a dimension's association (its DIMASSOC object).
+const DIMASSOC_KEY: &str = "ACAD_DIMASSOC";
+
+/// Whether an extension dictionary entry is written from CADCraft's model rather than kept: a
+/// dimension's DIMASSOC only when CADCraft read the association into the dimension (`owner` is
+/// the dictionary's owner; `own_assoc` the dimensions that have one), as it then writes its own.
+fn modelled_xdict_key(key: &str, owner: Option<&str>, own_assoc: &HashSet<String>) -> bool {
+    let k = up(key);
+    MODELLED_XDICT_KEYS.contains(&k.as_str()) && (k != DIMASSOC_KEY || owner.is_none_or(|o| own_assoc.contains(o)))
+}
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
 /// (DSTYLE) on dimensions and dimension styles; elsewhere it is kept.
@@ -332,6 +345,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     for e in all_entities(d) {
         ents.entry(e.handle.hex()).or_insert(matches!(e.kind, EntityKind::Unknown(_)));
     }
+    // Dimensions whose association CADCraft read (and writes back from its model).
+    let own_assoc: HashSet<String> =
+        all_entities(d).filter(|e| matches!(&e.kind, EntityKind::Dimension(dm) if !dm.assoc.is_empty())).map(|e| e.handle.hex()).collect();
     let ids = identities(&tables, &blocks, &objects);
     // Extension dictionaries of entities and records: owner → dictionary.
     let mut xdict_of: HashMap<String, String> = HashMap::new();
@@ -361,7 +377,10 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
         !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
     };
-    let modelled_entry = |t: &[Tag], h: &str| entries(t).iter().any(|(k, eh)| eh == h && MODELLED_XDICT_KEYS.contains(&up(k).as_str()));
+    let modelled_entry = |t: &[Tag], h: &str| {
+        let owner = head(t).owner;
+        entries(t).iter().any(|(k, eh)| eh == h && modelled_xdict_key(k, owner.as_deref(), &own_assoc))
+    };
     // Which objects to keep: those under a named object dictionary entry CADCraft doesn't model,
     // under the extension dictionary of an entity or record (minus modelled entries; one left
     // empty goes), or owned by an entity of a type CADCraft doesn't model. Memoized along each
@@ -395,7 +414,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
                 continue;
             }
             if is_xdict(cur) {
-                break entries(t).iter().any(|(k, _)| !MODELLED_XDICT_KEYS.contains(&up(k).as_str()));
+                break entries(t).iter().any(|(k, _)| !modelled_xdict_key(k, Some(o.as_str()), &own_assoc));
             }
             break ents.get(&o) == Some(&true);
         };
@@ -412,7 +431,7 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
         let Some(h) = head(t).handle.and_then(|h| handle(&h)) else { continue };
         let mut tags: Vec<RawTag> = t.iter().map(raw).collect();
         if is_xdict(i) {
-            strip_entries(&mut tags);
+            strip_entries(&mut tags, head(t).owner.as_deref(), &own_assoc);
         }
         if head(t).owner == root
             && let Some(key) = root_key(&h.hex())
@@ -588,12 +607,13 @@ pub(crate) fn data_store(tags: &mut Vec<Tag>, d: &Drawing, modern: bool) {
     tags.splice(at..at, out);
 }
 
-/// Drop a dictionary's modelled entries (key and handle) from its groups.
-fn strip_entries(tags: &mut Vec<RawTag>) {
+/// Drop a dictionary's modelled entries (key and handle) from its groups (`owner`: the
+/// dictionary's owner, for [`modelled_xdict_key`]).
+fn strip_entries(tags: &mut Vec<RawTag>, owner: Option<&str>, own_assoc: &HashSet<String>) {
     let mut out = Vec::with_capacity(tags.len());
     let mut i = 0;
     while let Some(t) = tags.get(i) {
-        if t.code == 3 && MODELLED_XDICT_KEYS.contains(&up(&t.value).as_str()) && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360)) {
+        if t.code == 3 && modelled_xdict_key(&t.value, owner, own_assoc) && tags.get(i + 1).is_some_and(|n| matches!(n.code, 350 | 360)) {
             i += 2;
             continue;
         }
@@ -920,6 +940,14 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
         };
         for p in path {
             alive_memo.insert(p, verdict);
+        }
+    }
+    // A kept association goes only with everything it links: a dimension whose geometry is gone
+    // is no longer associative (as when it is erased in AutoCAD), not linked to nothing.
+    for o in f.objects.iter().filter(|o| up(&o.kind) == "DIMASSOC") {
+        let linked = o.tags.iter().filter(|t| matches!(t.code, 331 | 332)).filter_map(|t| handle(&t.value)).all(|h| written.contains(&h.hex()));
+        if !linked {
+            alive_memo.insert(o.handle.hex(), false);
         }
     }
     // New handles for the written kept objects, above every written handle and the seed.
