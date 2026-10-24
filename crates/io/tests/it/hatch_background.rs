@@ -47,3 +47,24 @@ fn autocads_background_xdata_alone_gives_the_colour() {
     let h = back.model.iter().find_map(|e| if let EntityKind::Hatch(h) = &e.kind { Some(h.clone()) } else { None }).unwrap();
     assert_eq!(h.background, Some(Color::Index(5)));
 }
+
+#[test]
+fn a_cleared_background_stays_cleared() {
+    let mut d = Drawing::new_metric();
+    d.add(&Space::Model, Common::default(), hatch(Some(Color::Index(3)))).unwrap();
+    let mut back = cadcraft_io::read_dxf(cadcraft_io::write_dxf(&d).as_bytes()).unwrap();
+    let h = back.model.iter().next().unwrap().handle;
+    back.modify_entity(h, |e| {
+        if let EntityKind::Hatch(x) = &mut e.kind {
+            x.background = None;
+        }
+    })
+    .unwrap();
+    let text = cadcraft_io::write_dxf(&back);
+    // Only the application's registration is left; no hatch carries the colour any more.
+    let groups = text.lines().map(str::trim).collect::<Vec<_>>();
+    assert!(!groups.windows(2).any(|w| w[0] == "1001" && w[1] == "HATCHBACKGROUNDCOLOR"), "the old background is not written again");
+    let again = cadcraft_io::read_dxf(text.as_bytes()).unwrap();
+    let h = again.model.iter().find_map(|e| if let EntityKind::Hatch(h) = &e.kind { Some(h.clone()) } else { None }).unwrap();
+    assert_eq!(h.background, None);
+}

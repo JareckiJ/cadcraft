@@ -198,6 +198,18 @@ struct Db {
     loaded_bytes: usize,
     /// Stems of the fonts found in the user's font folders.
     user: std::collections::HashSet<String>,
+    /// Names read from user font files for lists and family searches, by stem. Reading them
+    /// does not keep the file's bytes, so it does not use up `MAX_LOADED_BYTES`.
+    face_names: HashMap<String, Arc<FaceNames>>,
+}
+
+/// The names inside one font file.
+#[derive(Default)]
+struct FaceNames {
+    /// The first face's family name.
+    family: Option<String>,
+    /// Each face's normalized names (family, typographic family, full name).
+    faces: Vec<Vec<String>>,
 }
 
 /// State of the missing-glyph search.
@@ -374,6 +386,7 @@ pub fn rescan() {
     g.fallback = Fallback::default();
     g.loaded_bytes = 0;
     g.user.clear();
+    g.face_names.clear();
     drop(g);
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
@@ -413,7 +426,7 @@ pub fn installed() -> Vec<FontFile> {
         .map(|(stem, name, user)| {
             let family = if user && named < MAX_NAMED {
                 named += 1;
-                g.file(&stem).and_then(|b| faces(&b).into_iter().next()).and_then(|f| f.family_name())
+                g.face_names(&stem).and_then(|n| n.family.clone())
             } else {
                 None
             };
@@ -455,13 +468,33 @@ impl Db {
         if self.loaded_bytes >= MAX_LOADED_BYTES {
             return None;
         }
-        let bytes = Arc::new(match self.paths.get(stem)? {
-            Source::File(path) => read_file(path)?,
-            Source::Static(bytes) => bytes.to_vec(),
-        });
+        let bytes = self.peek(stem)?;
         self.loaded_bytes = self.loaded_bytes.saturating_add(bytes.len());
         self.files.insert(stem.to_string(), bytes.clone());
         Some(bytes)
+    }
+
+    /// Bytes of the font file with this stem, without keeping them or charging the load budget.
+    fn peek(&self, stem: &str) -> Option<Arc<Vec<u8>>> {
+        if let Some(b) = self.files.get(stem) {
+            return Some(b.clone());
+        }
+        Some(Arc::new(match self.paths.get(stem)? {
+            Source::File(path) => read_file(path)?,
+            Source::Static(bytes) => bytes.to_vec(),
+        }))
+    }
+
+    /// The names inside the font file with this stem, read once (the bytes are dropped after).
+    fn face_names(&mut self, stem: &str) -> Option<Arc<FaceNames>> {
+        if let Some(n) = self.face_names.get(stem) {
+            return Some(n.clone());
+        }
+        let bytes = self.peek(stem)?;
+        let all = faces(&bytes);
+        let names = Arc::new(FaceNames { family: all.first().and_then(Face::family_name), faces: all.iter().map(Face::names).collect() });
+        self.face_names.insert(stem.to_string(), names.clone());
+        Some(names)
     }
 
     fn lookup(&mut self, k: &str) -> Option<Face> {
@@ -484,10 +517,11 @@ impl Db {
         let mut stems: Vec<String> = self.user.iter().cloned().collect();
         stems.sort();
         for stem in stems.into_iter().take(200) {
-            let Some(bytes) = self.file(&stem) else { continue };
-            if let Some(face) = faces(&bytes).into_iter().find(|f| f.names().iter().any(|n| *n == want || format!("{n}regular") == want)) {
-                return Some(face);
-            }
+            let Some(names) = self.face_names(&stem) else { continue };
+            let Some(i) = names.faces.iter().position(|f| f.iter().any(|n| *n == want || format!("{n}regular") == want)) else { continue };
+            // Only the file that has the face is kept (and charged to the load budget).
+            let bytes = self.file(&stem).or_else(|| self.peek(&stem))?;
+            return faces(&bytes).into_iter().nth(i);
         }
         None
     }
@@ -1120,6 +1154,10 @@ mod family_tests {
         let before = generation();
         set_font_dirs(&[dir.to_string_lossy().to_string()]);
         assert!(generation() > before);
+        // Listing reads the family name without keeping the file (or using up the load budget).
+        let early = installed();
+        assert!(early.iter().any(|f| f.name == "CadcraftTestFace.ttf" && f.family.is_some()));
+        assert!(!lock().files.contains_key("cadcrafttestface"), "listing keeps no font bytes");
         assert!(find("CadcraftTestFace.ttf").is_some());
         let listed = installed();
         let entry = listed.iter().find(|f| f.name == "CadcraftTestFace.ttf");

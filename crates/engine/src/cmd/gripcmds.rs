@@ -30,6 +30,21 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// `kind` with a dimension's stored text position set to where the text is drawn (its grip),
+/// which differs while the text is not user-positioned. Grip drags then start from the shown
+/// text, not from a stale stored position.
+fn as_shown(d: &cadcraft_doc::Drawing, kind: &EntityKind) -> EntityKind {
+    let mut k = kind.clone();
+    if let EntityKind::Dimension(dm) = &mut k
+        && let Some(t) = crate::grips::grip_points(d, kind).get(3).copied()
+        && t.is_finite()
+    {
+        dm.text_mid.x = t.x;
+        dm.text_mid.y = t.y;
+    }
+    k
+}
+
 fn index_param(cmd: &str, p: &Value) -> Result<usize> {
     let i = p.get("index").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`index` (grip number) is required"))?;
     usize::try_from(i).map_err(|_| bad(cmd, "index out of range"))
@@ -48,8 +63,10 @@ fn stretch(s: &mut Session, cmd: &str, p: &Value) -> Result<Value> {
     // `to` is where the grip as shown goes; a dimension's text grip shows where the text is drawn,
     // which its stored position may not be.
     let from = crate::grips::grip_points(s.doc()?, &e.kind).get(i).copied().unwrap_or(to);
-    let raw = e.kind.grips().get(i).copied().unwrap_or(from);
-    let k = stretch_grip(&e.kind, i, raw + (to - from)).ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
+    // Start from the text where it is drawn, so the grip lands where it was dropped.
+    let base = as_shown(s.doc()?, &e.kind);
+    let raw = base.grips().get(i).copied().unwrap_or(from);
+    let k = stretch_grip(&base, i, raw + (to - from)).ok_or_else(|| bad(cmd, "no such grip, or the result would be degenerate"))?;
     let mut edits = vec![(h, k)];
     // The other `handles` with a grip on the same point stretch with it (connected objects stay
     // connected); locked ones and edits that would be degenerate are left alone.
@@ -172,14 +189,14 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
         None => moves.push((h, vec![(i, to)])),
     };
     for &(h, i) in hot.iter().take(MAX_GRIPS) {
-        let Some(from) = d.entity(h).and_then(|e| e.kind.grips().get(i).copied()) else { continue };
+        let Some(from) = d.entity(h).and_then(|e| as_shown(d, &e.kind).grips().get(i).copied()) else { continue };
         add(h, i, from + delta);
         let tol = 1e-9 * (1.0 + from.len());
         for &o in others.iter().take(MAX_GRIPS) {
             if o == h {
                 continue;
             }
-            if let Some(j) = d.entity(o).and_then(|e| e.kind.grips().iter().position(|g| g.near(from, tol))) {
+            if let Some(j) = d.entity(o).and_then(|e| as_shown(d, &e.kind).grips().iter().position(|g| g.near(from, tol))) {
                 add(o, j, from + delta);
             }
         }
@@ -190,7 +207,7 @@ pub(super) fn stretched(s: &Session, hot: &[(Handle, usize)], others: &[Handle],
             continue;
         }
         let Some(e) = d.entity(h) else { continue };
-        let mut k = e.kind.clone();
+        let mut k = as_shown(d, &e.kind);
         let mut changed = false;
         for (i, to) in mv {
             if let Some(nk) = stretch_grip(&k, i, to) {

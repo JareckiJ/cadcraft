@@ -33,9 +33,24 @@ fn entry(tags: &[Tag], name: &str) -> Option<String> {
 
 /// A field's code (2, continued in 3s) with its `\_FldIdx n` places filled from its children.
 fn code(objects: &HashMap<String, Vec<Tag>>, h: &str, depth: usize) -> Option<String> {
+    code_in(objects, h, depth, &mut HashMap::new())
+}
+
+/// [`code`], with the codes already worked out (by handle and depth) in `seen`: a file whose
+/// fields share children is expanded once per child, not once per reference.
+fn code_in(objects: &HashMap<String, Vec<Tag>>, h: &str, depth: usize, seen: &mut HashMap<(String, usize), Option<String>>) -> Option<String> {
     if depth > MAX_DEPTH {
         return None;
     }
+    if let Some(done) = seen.get(&(h.to_string(), depth)) {
+        return done.clone();
+    }
+    let out = expand(objects, h, depth, seen);
+    seen.insert((h.to_string(), depth), out.clone());
+    out
+}
+
+fn expand(objects: &HashMap<String, Vec<Tag>>, h: &str, depth: usize, seen: &mut HashMap<(String, usize), Option<String>>) -> Option<String> {
     let tags = objects.get(h)?;
     let start = tags.iter().position(|t| t.code == 100 && t.str().trim() == "AcDbField").unwrap_or(0);
     let body = tags.get(start..)?;
@@ -53,8 +68,15 @@ fn code(objects: &HashMap<String, Vec<Tag>>, h: &str, depth: usize) -> Option<St
     for (i, c) in children.iter().enumerate().take(64) {
         let place = format!("%<\\_FldIdx {i}>%");
         if s.contains(&place) {
-            let inner = code(objects, c, depth + 1)?;
+            let inner = code_in(objects, c, depth + 1, seen)?;
+            // The filled-in code stays within the limit too (nested fields can multiply it).
+            if inner.len() > MAX_LEN {
+                return None;
+            }
             s = s.replace(&place, &format!("%<{inner}>%"));
+            if s.len() > MAX_LEN {
+                return None;
+            }
         }
     }
     Some(s)
@@ -118,5 +140,42 @@ pub(crate) fn resolve(secs: &[Section], d: &mut Drawing) {
         if let Some(b) = d.blocks.get_mut(&k) {
             set(&mut std::sync::Arc::make_mut(b).entities);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_dxf::Tag;
+
+    fn field(code: &str, children: &[&str]) -> Vec<Tag> {
+        let mut t = vec![Tag::s(100, "AcDbField"), Tag::s(2, code)];
+        t.extend(children.iter().map(|c| Tag::s(360, *c)));
+        t
+    }
+
+    #[test]
+    fn nested_fields_fill_their_places() {
+        let mut o = HashMap::new();
+        o.insert("A".to_string(), field("Date: %<\\_FldIdx 0>%", &["B"]));
+        o.insert("B".to_string(), field("\\AcVar date", &[]));
+        assert_eq!(code(&o, "A", 0).as_deref(), Some("Date: %<\\AcVar date>%"));
+    }
+
+    /// A hostile file whose fields each use the next one 60 times, 8 deep: the expansion would
+    /// be 60^8 times the text. It is refused, quickly and without the memory.
+    #[test]
+    fn fields_that_multiply_are_refused_without_blowing_up() {
+        let places: String = (0..60).map(|i| format!("%<\\_FldIdx {i}>%")).collect();
+        let mut o = HashMap::new();
+        for k in 0..=MAX_DEPTH {
+            let next = format!("L{}", k + 1);
+            let kids: Vec<&str> = (0..60).map(|_| next.as_str()).collect();
+            o.insert(format!("L{k}"), field(&places, &kids));
+        }
+        o.insert(format!("L{}", MAX_DEPTH + 1), field("x", &[]));
+        let t = std::time::Instant::now();
+        assert_eq!(code(&o, "L0", 0), None);
+        assert!(t.elapsed().as_secs() < 5, "took {:?}", t.elapsed());
     }
 }
