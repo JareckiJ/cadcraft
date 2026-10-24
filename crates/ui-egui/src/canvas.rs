@@ -2022,6 +2022,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             cycle_badge(&painter, hp);
         }
     }
+    let mut tooltip = false;
     if inside
         && app.session.settings.dynmode
         && let Some(hp) = hover_pos
@@ -2031,7 +2032,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let fields = crate::grip_dyn::draw(app, &painter);
         if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
             dynamic_input(app, &painter, hp, fields);
+            tooltip = true;
         }
+    }
+    // Without the tooltip its options menu is not on screen, so a click cannot pick one of last frame's rows.
+    if !tooltip {
+        app.cmd.option_rows.clear();
     }
     // Over the crosshair, so the row under the pointer reads clearly.
     cycle_list(app, &painter);
