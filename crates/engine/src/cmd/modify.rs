@@ -1622,96 +1622,151 @@ fn run_breakat(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
-/// Join lines/arcs/polylines that share endpoints into one polyline (or merge collinear lines).
-pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Option<Handle>> {
+/// Join lines/arcs/polylines that share endpoints into polylines (or merge collinear lines).
+pub(crate) fn join(s: &mut Session, hs: &[Handle]) -> Result<Vec<Handle>> {
     if let Some(h) = super::modify2::join_curves(s, hs)? {
-        return Ok(Some(h));
+        return Ok(vec![h]);
     }
     if hs.iter().any(|h| super::curves::is_locked(s, *h)) {
         return Err(EngineError::Other("An object is on a locked layer.".into()));
     }
     let d = s.doc()?;
-    let mut segs: Vec<Segment> = Vec::new();
-    // Source entity of each segment in `segs`, so only entities that end up in the chain are removed.
-    let mut owners: Vec<Handle> = Vec::new();
-    let mut common = None;
+    let mut pool: Vec<(Segment, Handle)> = Vec::new();
+    let mut entity_common = std::collections::HashMap::new();
     for h in hs {
         let Some(e) = d.entity(*h) else { continue };
-        common.get_or_insert_with(|| e.common.clone());
+        entity_common.insert(*h, e.common.clone());
         match &e.kind {
-            EntityKind::Line(l) => segs.push(Segment::Line(Line::new(l.a.xy(), l.b.xy()))),
-            EntityKind::Arc(a) => segs.push(Segment::Arc { arc: Arc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true }),
-            EntityKind::LwPolyline(p) if !p.closed => segs.extend(Polyline { vertices: p.vertices.clone(), closed: false }.segments()),
+            EntityKind::Line(l) => pool.push((Segment::Line(Line::new(l.a.xy(), l.b.xy())), *h)),
+            EntityKind::Arc(a) => pool.push((Segment::Arc { arc: Arc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true }, *h)),
+            EntityKind::LwPolyline(p) if !p.closed => {
+                for seg in (Polyline { vertices: p.vertices.clone(), closed: false }).segments() {
+                    pool.push((seg, *h));
+                }
+            }
             _ => {}
         }
-        owners.resize(segs.len(), *h);
     }
-    if segs.len() < 2 {
+    if pool.len() < 2 {
         return Err(EngineError::Other("Select at least two objects to join.".into()));
     }
-    // Chain greedily from the first segment.
-    let mut chain = vec![segs.remove(0)];
-    let mut used = vec![owners.remove(0)];
+
     let tol = 1e-6;
-    loop {
-        let start = chain.first().map(Segment::start).unwrap_or_default();
-        let end = chain.last().map(Segment::end).unwrap_or_default();
-        let Some(i) =
-            segs.iter().position(|s| s.start().near(end, tol) || s.end().near(end, tol) || s.start().near(start, tol) || s.end().near(start, tol))
-        else {
-            break;
-        };
-        let s0 = segs.remove(i);
-        used.push(owners.remove(i));
-        if s0.start().near(end, tol) {
-            chain.push(s0);
-        } else if s0.end().near(end, tol) {
-            chain.push(s0.reversed());
-        } else if s0.end().near(start, tol) {
-            chain.insert(0, s0);
-        } else {
-            chain.insert(0, s0.reversed());
+    let mut total: std::collections::HashMap<Handle, usize> = std::collections::HashMap::new();
+    for (_, owner) in &pool {
+        *total.entry(*owner).or_default() += 1;
+    }
+
+    let mut chains: Vec<(Vec<Segment>, Vec<Handle>)> = Vec::new();
+
+    while !pool.is_empty() {
+        let (first_seg, first_owner) = pool.remove(0);
+        let mut chain = vec![first_seg];
+        let mut used = vec![first_owner];
+
+        loop {
+            let start = chain.first().map(Segment::start).unwrap_or_default();
+            let end = chain.last().map(Segment::end).unwrap_or_default();
+
+            // Stop growing this chain once it closes into a loop.
+            if chain.len() >= 2 && start.near(end, tol) {
+                break;
+            }
+
+            let Some(i) = pool
+                .iter()
+                .position(|(s, _)| s.start().near(end, tol) || s.end().near(end, tol) || s.start().near(start, tol) || s.end().near(start, tol))
+            else {
+                break;
+            };
+
+            let (s0, owner) = pool.remove(i);
+            used.push(owner);
+            if s0.start().near(end, tol) {
+                chain.push(s0);
+            } else if s0.end().near(end, tol) {
+                chain.push(s0.reversed());
+            } else if s0.end().near(start, tol) {
+                chain.insert(0, s0);
+            } else {
+                chain.insert(0, s0.reversed());
+            }
+        }
+
+        let closed = chain.len() >= 2 && chain.first().zip(chain.last()).is_some_and(|(a, b)| a.start().near(b.end(), tol));
+        let mut unique_owners = used.clone();
+        unique_owners.sort();
+        unique_owners.dedup();
+
+        let mut used_counts: std::collections::HashMap<Handle, usize> = std::collections::HashMap::new();
+        for owner in &used {
+            *used_counts.entry(*owner).or_default() += 1;
+        }
+        let fully_consumed = used_counts.iter().all(|(owner, count)| total.get(owner) == Some(count));
+
+        if fully_consumed && (unique_owners.len() >= 2 || (chain.len() >= 2 && closed)) {
+            chains.push((chain, used));
         }
     }
-    if chain.len() < 2 {
+
+    if chains.is_empty() {
         return Err(EngineError::Other("Objects are not connected.".into()));
     }
-    let closed = chain.first().zip(chain.last()).is_some_and(|(a, b)| a.start().near(b.end(), tol));
-    let mut vs: Vec<PolyVertex> = chain
-        .iter()
-        .map(|s| PolyVertex {
-            p: s.start(),
-            bulge: match s {
-                Segment::Line(_) => 0.0,
-                Segment::Arc { arc, ccw } => cadcraft_geom::arc_to_bulge(if *ccw { arc.sweep() } else { -arc.sweep() }),
-            },
-            ..Default::default()
-        })
-        .collect();
-    if !closed && let Some(l) = chain.last() {
-        vs.push(PolyVertex::new(l.end()));
-    }
+
     let space = s.space();
     let doc = s.doc_mut()?;
-    for h in hs.iter().filter(|h| used.contains(*h)) {
-        doc.remove_entity(*h);
+    let mut out = Vec::new();
+
+    for (chain, used) in chains {
+        let closed = chain.len() >= 2 && chain.first().zip(chain.last()).is_some_and(|(a, b)| a.start().near(b.end(), tol));
+        let mut vs: Vec<PolyVertex> = chain
+            .iter()
+            .map(|s| PolyVertex {
+                p: s.start(),
+                bulge: match s {
+                    Segment::Line(_) => 0.0,
+                    Segment::Arc { arc, ccw } => cadcraft_geom::arc_to_bulge(if *ccw { arc.sweep() } else { -arc.sweep() }),
+                },
+                ..Default::default()
+            })
+            .collect();
+        if !closed && let Some(l) = chain.last() {
+            vs.push(PolyVertex::new(l.end()));
+        }
+
+        let mut unique_owners = used.clone();
+        unique_owners.sort();
+        unique_owners.dedup();
+        for h in &unique_owners {
+            doc.remove_entity(*h);
+        }
+
+        let first_owner = used.first().copied();
+        let common = first_owner.and_then(|h| entity_common.get(&h).cloned()).unwrap_or_default();
+
+        let nh = doc.new_handle();
+        if let Some(st) = doc.space_mut(&space) {
+            st.push(Entity { handle: nh, common, kind: lwpoly(vs, closed) });
+        }
+        out.push(nh);
     }
-    let nh = doc.new_handle();
-    if let Some(st) = doc.space_mut(&space) {
-        st.push(Entity { handle: nh, common: common.unwrap_or_default(), kind: lwpoly(vs, closed) });
-    }
+
     s.set_selection(Vec::new());
-    Ok(Some(nh))
+    Ok(out)
 }
 
+/// Run the JOIN command with JSON arguments.
 fn run_join(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = targets(s, p)?;
     if p.get("close").and_then(Value::as_bool) == Some(true) {
         let h = super::modify2::join_close(s, &hs)?;
-        return Ok(json!({ "handle": h.hex() }));
+        return Ok(json!({ "handle": h.hex(), "handles": [h.hex()] }));
     }
-    let r = join(s, &hs)?;
-    Ok(json!({ "handle": r.map(|h| h.hex()) }))
+    let rs = join(s, &hs)?;
+    Ok(json!({
+        "handle": rs.first().map(|h| h.hex()),
+        "handles": rs.iter().map(|h| h.hex()).collect::<Vec<_>>()
+    }))
 }
 
 // ---------------- interactive ----------------
@@ -1795,17 +1850,25 @@ impl SelectThen {
     /// JOIN the selected objects and report what they became.
     fn join_now(&mut self, s: &mut Session) -> Result<Step> {
         match join(s, &self.objs) {
-            Ok(h) => {
+            Ok(hs) => {
                 // Objects outside the joined chain are kept, so count only the ones JOIN consumed
                 // (and the source object an ellipse or spline join keeps).
                 let d = s.doc()?;
-                let n = self.objs.iter().filter(|o| d.entity(**o).is_none() || h == Some(**o)).count();
-                let what = match h.and_then(|h| d.entity(h)).map(|e| &e.kind) {
-                    Some(EntityKind::Spline(_)) => "spline",
-                    Some(EntityKind::Ellipse(_)) => "ellipse",
-                    _ => "polyline",
-                };
-                s.echo(format!("{n} objects joined into 1 {what}"))
+                let n = self.objs.iter().filter(|o| d.entity(**o).is_none() || hs.contains(o)).count();
+                let m = hs.len();
+                if m == 0 {
+                    s.echo("0 objects joined".to_string());
+                } else if m == 1 {
+                    let h = hs.first().copied();
+                    let what = match h.and_then(|h| d.entity(h)).map(|e| &e.kind) {
+                        Some(EntityKind::Spline(_)) => "spline",
+                        Some(EntityKind::Ellipse(_)) => "ellipse",
+                        _ => "polyline",
+                    };
+                    s.echo(format!("{n} objects joined into 1 {what}"));
+                } else {
+                    s.echo(format!("{n} objects joined into {m} polylines"));
+                }
             }
             Err(e) => s.echo(e.to_string()),
         }
