@@ -346,9 +346,18 @@ fn main() -> eframe::Result {
             if let Some(rs) = &cc.wgpu_render_state {
                 app.set_wgpu(rs, eframe::egui_wgpu::depth_format_from_bits(0, STENCIL_BITS));
             }
+            // Create the shared control-request channel. Both the JSON control server
+            // (`--control PORT`) and the built-in MCP server share the same sender, so all
+            // requests go through the same queue to the engine.
+            let (ctrl_tx, ctrl_rx) = std::sync::mpsc::channel::<cadcraft_ui_egui::ControlRequest>();
+            app = app.with_control(ctrl_rx);
+
             if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
+                control_server::start(port, ctrl_tx.clone(), cc.egui_ctx.clone());
+            }
+
+            if let Some(port) = app.ui.mcp_port {
+                control_server::start(port, ctrl_tx, cc.egui_ctx.clone());
             }
             if sample {
                 let _ = app.run("ui.sample", serde_json::json!({}));

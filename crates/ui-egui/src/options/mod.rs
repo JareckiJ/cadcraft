@@ -70,6 +70,8 @@ pub struct UiOptions {
     /// While a command runs: a quick right-click is Enter and a held one opens the shortcut menu
     /// (AutoCAD's time-sensitive right-click). Off: a right-click always opens the menu.
     pub time_sensitive_right_click: bool,
+    /// Mouse wheel always zooms, even on macOS where trackpad scroll would normally pan.
+    pub wheel_zoom: bool,
     /// The size of every menu, palette, dialog and the command line (1: the system's own).
     pub interface_scale: f32,
 }
@@ -82,6 +84,7 @@ impl Default for UiOptions {
             snap_marker_size: theme::SNAP_MARKER,
             selection_color: None,
             time_sensitive_right_click: true,
+            wheel_zoom: false,
             interface_scale: 1.0,
         }
     }
@@ -148,7 +151,9 @@ struct UiChanges {
     savetime: Option<u32>,
     savefilepath: Option<String>,
     time_sensitive_right_click: Option<bool>,
+    wheel_zoom: Option<bool>,
     interface_scale: Option<f32>,
+    mcp_port: Option<Option<u16>>,
 }
 
 fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
@@ -191,6 +196,14 @@ fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
             c.save_version = Some(crate::SaveVersion::parse(name.trim()).ok_or("saveVersion must be 2000, 2004, 2007, 2010, 2013 or 2018")?);
         }
         "timeSensitiveRightClick" => c.time_sensitive_right_click = Some(v.as_bool().ok_or("timeSensitiveRightClick must be true or false")?),
+        "wheelZoom" => c.wheel_zoom = Some(v.as_bool().ok_or("wheelZoom must be true or false")?),
+        "mcpPort" => match v {
+            Value::Null => c.mcp_port = Some(None),
+            _ => {
+                let n = v.as_u64().filter(|n| (1024..=65535).contains(n)).ok_or("mcpPort must be a port number from 1024 to 65535, or null to disable")?;
+                c.mcp_port = Some(Some(n as u16));
+            }
+        },
         k if k.eq_ignore_ascii_case("SAVETIME") => {
             let max = cadcraft_engine::autosave::MAX_SAVETIME;
             let n = v
@@ -227,6 +240,8 @@ fn ui_json(app: &CadApp) -> Map<String, Value> {
     m.insert("SAVETIME".into(), json!(cadcraft_engine::autosave::savetime()));
     m.insert("SAVEFILEPATH".into(), json!(cadcraft_engine::autosave::savefilepath()));
     m.insert("timeSensitiveRightClick".into(), json!(o.time_sensitive_right_click));
+    m.insert("wheelZoom".into(), json!(o.wheel_zoom));
+    m.insert("mcpPort".into(), app.ui.mcp_port.map_or(Value::Null, |p| json!(p)));
     m
 }
 
@@ -300,6 +315,12 @@ fn run_json(app: &mut CadApp, params: &Value) -> Result<Value, String> {
     if let Some(b) = ui.time_sensitive_right_click {
         app.options.time_sensitive_right_click = b;
     }
+    if let Some(b) = ui.wheel_zoom {
+        app.options.wheel_zoom = b;
+    }
+    if let Some(p) = ui.mcp_port {
+        app.ui.mcp_port = p;
+    }
     Ok(report(app))
 }
 
@@ -330,7 +351,9 @@ impl CadApp {
             "selectionColor": color_json(self.options.selection_color),
             "snapMarkerSize": self.options.snap_marker_size,
             "timeSensitiveRightClick": self.options.time_sensitive_right_click,
+            "wheelZoom": self.options.wheel_zoom,
             "interfaceScale": self.options.interface_scale,
+            "mcpPort": self.ui.mcp_port,
         })
         .to_string()
     }
@@ -346,9 +369,7 @@ impl CadApp {
             cadcraft_engine::cmd::options::restore(&mut self.session, vars);
         }
         let mut c = UiChanges::default();
-        for key in
-            ["systemCursor", "modelBackground", "paperBackground", "selectionColor", "snapMarkerSize", "timeSensitiveRightClick", "interfaceScale"]
-        {
+        for key in ["systemCursor", "modelBackground", "paperBackground", "selectionColor", "snapMarkerSize", "timeSensitiveRightClick", "wheelZoom", "interfaceScale", "mcpPort"] {
             if let Some(value) = v.get(key) {
                 let _ = parse_ui(key, value, &mut c);
             }
@@ -372,8 +393,14 @@ impl CadApp {
         if let Some(b) = c.time_sensitive_right_click {
             self.options.time_sensitive_right_click = b;
         }
+        if let Some(b) = c.wheel_zoom {
+            self.options.wheel_zoom = b;
+        }
         if let Some(n) = c.interface_scale {
             self.options.interface_scale = n;
+        }
+        if let Some(p) = c.mcp_port {
+            self.ui.mcp_port = p;
         }
     }
 }

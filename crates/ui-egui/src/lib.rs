@@ -109,6 +109,10 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// MCP server TCP port; `None` means the built-in MCP server is disabled.
+    /// Takes effect on the next launch after the setting is changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_port: Option<u16>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -180,6 +184,7 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            mcp_port: None,
         }
     }
 }

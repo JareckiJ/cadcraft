@@ -12,13 +12,14 @@ use crate::animation::AnimationPref;
 use crate::theme::{ThemePref, Tokens};
 
 /// The tabs: (id in the dialog name, label).
-pub(super) const TABS: [(&str, &str); 6] = [
+pub(super) const TABS: [(&str, &str); 7] = [
     ("display", "Display"),
     ("files", "Open and Save"),
     ("drafting", "Drafting"),
     ("selection", "Selection"),
     ("preferences", "User Preferences"),
     ("profiles", "Profiles"),
+    ("automation", "Automation"),
 ];
 
 const WIDTH: f32 = 580.0;
@@ -57,6 +58,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
                 "selection" => selection(app, ui, &mut changes),
                 "preferences" => preferences(app, ui, &mut changes),
                 "profiles" => profiles(app, ui, &mut changes),
+                "automation" => automation(app, ui, &mut changes),
                 _ => display(app, ui, &mut changes),
             }
             // The same height on every tab, so switching tabs doesn't move the buttons.
@@ -490,6 +492,56 @@ fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>
         changes.insert("timeSensitiveRightClick".into(), json!(timed));
     }
     hint(ui, crate::tl!("Turned off, a right-click while a command runs always opens the shortcut menu."));
+    ui.add_space(6.0);
+    let mut wheel_zoom = app.options.wheel_zoom;
+    if ui.checkbox(&mut wheel_zoom, crate::tl!("Mouse wheel zooms (instead of scrolling)")).changed() {
+        changes.insert("wheelZoom".into(), json!(wheel_zoom));
+    }
+    hint(ui, crate::tl!("By default on macOS, trackpad and Magic Mouse scrolling pans the drawing. Enable this to make the wheel always zoom."));
+}
+
+fn automation(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
+    heading(ui, "MCP Server");
+    ui.add_space(4.0);
+
+    let mut enabled = app.ui.mcp_port.is_some();
+    if ui.checkbox(&mut enabled, crate::tl!("Enable MCP server")).changed() {
+        if enabled {
+            changes.insert("mcpPort".into(), json!(7980u16));
+        } else {
+            changes.insert("mcpPort".into(), Value::Null);
+        }
+    }
+
+    ui.add_space(4.0);
+    ui.add_enabled_ui(app.ui.mcp_port.is_some(), |ui| {
+        grid(ui, "options_automation", |ui| {
+            ui.label(crate::tl!("Port"));
+            let mut port = app.ui.mcp_port.unwrap_or(7980);
+            if ui.add(egui::DragValue::new(&mut port).range(1024..=65535)).changed() {
+                changes.insert("mcpPort".into(), json!(port));
+            }
+            ui.end_row();
+        });
+    });
+
+    if app.ui.mcp_port.is_some() {
+        let port = app.ui.mcp_port.unwrap_or(7980);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let config = format!(
+                "{{\n  \"mcpServers\": {{\n    \"cadcraft\": {{\n      \"command\": \"cadcraft-cli\",\n      \"args\": [\"mcp\", \"--connect\", \"127.0.0.1:{port}\"]\n    }}\n  }}\n}}"
+            );
+            if ui.button(crate::tl!("Copy Config")).clicked() {
+                ui.ctx().copy_text(config);
+            }
+            ui.label(RichText::new(crate::tl!("Copies the MCP client config for Claude Code / claude_desktop_config.json")).small().color(Tokens::get().text_dim));
+        });
+    }
+
+    ui.add_space(6.0);
+    hint(ui, crate::tl!("Connect cadcraft-cli or other MCP clients to this port."));
+    hint(ui, crate::tl!("Changes take effect on next launch."));
 }
 
 fn profiles(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
