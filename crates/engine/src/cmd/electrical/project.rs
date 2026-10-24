@@ -275,7 +275,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .noundo(),
         CommandSpec::new("eproject.list", "List Project Drawings", run_list)
             .menu(menu("list"))
-            .params("{project?} → {project, drawings: [{sheet, drawing, exists}]}")
+            .params("{project?, quiet?: bool (no command-line report)} → {project, drawings: [{sheet, drawing, exists}]}")
             .enabled(always)
             .noundo(),
         CommandSpec::new("eproject.tag", "Tag Devices in Project", run_tag)
@@ -419,8 +419,11 @@ fn run_list(s: &mut Session, p: &Value) -> Result<Value> {
     let path = project_path("eproject.list", p)?;
     let pr = read_project(&path)?;
     let out = opened_json(&path, &pr);
-    let names: Vec<String> = pr.drawings.iter().enumerate().map(|(i, d)| format!("{}: {d}", i + 1)).collect();
-    s.log.push(format!("{} — {}", pr.name, names.join(", ")));
+    // Panels poll the open project with `quiet`: nothing on the command line.
+    if !p.get("quiet").and_then(Value::as_bool).unwrap_or(false) {
+        let names: Vec<String> = pr.drawings.iter().enumerate().map(|(i, d)| format!("{}: {d}", i + 1)).collect();
+        s.log.push(format!("{} — {}", pr.name, names.join(", ")));
+    }
     Ok(out)
 }
 

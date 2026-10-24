@@ -63,7 +63,7 @@ impl State {
                 .map(|d| (s(&d["name"]), s(&d["description"]), s(&d["class"]), s(&d["family"])))
                 .collect();
         }
-        self.project = app.session.execute("eproject.list", &json!({})).ok();
+        self.project = app.session.execute("eproject.list", &json!({ "quiet": true })).ok();
     }
 }
 

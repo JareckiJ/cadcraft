@@ -56,11 +56,11 @@ fn electrical_tool_bar_and_project_manager() {
 
     // The tool bar's icons, by their tooltips' labels.
     for label in ["Draw Wire (EWIRE): click a pin or wire, then the next", "Relay coil (-K)", "Parts list (CSV)", "Project Manager"] {
-        assert!(h.query_by_label(label).is_some(), "tool bar icon {label}");
+        assert!(h.query_all_by_label(label).next().is_some(), "tool bar icon {label}");
     }
     // The sheets with their titles.
     for title in ["Power distribution", "Motor control", "PLC inputs"] {
-        assert!(h.query_by_label_contains(title).is_some(), "sheet {title}");
+        assert!(h.query_all_by_label_contains(title).next().is_some(), "sheet {title}");
     }
     // Select sheet 3 and move it up: the order changes and the renumber offer appears.
     h.get_by_label_contains("PLC inputs").click();

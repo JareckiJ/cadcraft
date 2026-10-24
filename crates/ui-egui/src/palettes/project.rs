@@ -63,7 +63,7 @@ fn text(v: &Value) -> String {
 
 impl State {
     fn poll(&mut self, app: &mut CadApp) {
-        let current = app.session.execute("eproject.list", &json!({})).ok().and_then(|v| v["project"].as_str().map(str::to_string));
+        let current = app.session.execute("eproject.list", &json!({ "quiet": true })).ok().and_then(|v| v["project"].as_str().map(str::to_string));
         if current != self.project {
             self.project = current;
             self.selected = None;

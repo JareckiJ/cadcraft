@@ -66,7 +66,7 @@ const GROUPS: &[&[(Icon, Act, &str)]] = &[
 pub const HEIGHT: f32 = 32.0;
 
 fn has_project(app: &mut CadApp) -> bool {
-    app.session.execute("eproject.list", &json!({})).is_ok()
+    app.session.execute("eproject.list", &json!({ "quiet": true })).is_ok()
 }
 
 fn run(app: &mut CadApp, act: Act) {
