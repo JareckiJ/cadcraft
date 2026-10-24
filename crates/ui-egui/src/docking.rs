@@ -467,7 +467,7 @@ fn close_bar(app: &mut crate::CadApp, ui: &mut egui::Ui, panel: Panel) {
             let r = ui
                 .add(egui::Button::new(egui::RichText::new("✕").size(14.0).color(t.text_dim)).frame(false).min_size(egui::vec2(22.0, 20.0)))
                 .on_hover_text(crate::tl!("Close panel"));
-            crate::control::record_widget(ui, &r, "Close panel", "button", None);
+            crate::icons::describe_control(ui, &r, "Close panel", None, false);
             if r.clicked()
                 && let Err(e) = command(app, false, &json!({ "operation": "close", "panel": panel.id() }))
             {
