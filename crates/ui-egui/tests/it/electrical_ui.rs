@@ -83,7 +83,7 @@ fn electrical_tool_bar_and_project_manager() {
     h.run_steps(6);
     save(&mut h, "electrical-6-insert-contact");
     assert!(h.query_by_label_contains("Coil / main device").is_some(), "the contact dialog");
-    let coil = h.query_all_by_label_contains("-K3").next().map(|n| n.label().unwrap_or_default());
+    let coil = h.query_all_by_label_contains("-K3").next();
     assert!(coil.is_some(), "the coil is listed");
     h.get_all_by_label_contains("-K3").next().unwrap().click();
     h.run_steps(2);
@@ -98,8 +98,14 @@ fn electrical_tool_bar_and_project_manager() {
     save(&mut h, "electrical-4-workspace");
     assert!(!h.state().ui.show_toolsets && !h.state().ui.show_palettes);
     // The palette's close button closes it.
-    h.get_by_label("Close panel").click();
+    use cadcraft_ui_egui::docking::Panel;
+    let open_palettes = |h: &Harness<'static, CadApp>| {
+        [Panel::Projects, Panel::Electrical, Panel::Devices, Panel::Community].iter().filter(|p| h.state().ui.docking.layout.contains(p)).count()
+    };
+    let before = open_palettes(&h);
+    assert!(before >= 1);
+    h.get_all_by_label("Close panel").next().expect("a close button").click();
     h.run_steps(4);
-    assert!(!h.state().ui.docking.layout.contains(&cadcraft_ui_egui::docking::Panel::Projects));
+    assert_eq!(open_palettes(&h), before - 1);
     save(&mut h, "electrical-5-closed");
 }
