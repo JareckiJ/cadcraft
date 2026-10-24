@@ -249,9 +249,15 @@ fn jog_angle_overrides_stay_radians_in_xdata() {
 #[test]
 fn header_jog_angle_takes_degrees_too_and_drops_unusable_values() {
     let d = drawing();
+    // The header carries the current style's jog angle, in radians.
+    let text = write_dxf(&d);
+    let lines: Vec<&str> = text.lines().collect();
+    let at = lines.iter().position(|l| l.trim() == "$DIMJOGANG").expect("$DIMJOGANG written") + 2;
+    assert!((lines[at].trim().parse::<f64>().unwrap() - 45f64.to_radians()).abs() < 1e-9, "{}", lines[at]);
     let jog = |v: &str| {
-        let text = write_dxf(&d).replacen("HEADER\r\n", &format!("HEADER\r\n  9\r\n$DIMJOGANG\r\n 40\r\n{v}\r\n"), 1);
-        read_dxf(text.as_bytes()).unwrap().header.get("DIMJOGANG").and_then(HVal::as_f64)
+        let mut lines = lines.clone();
+        lines[at] = v;
+        read_dxf(lines.join("\r\n").as_bytes()).unwrap().header.get("DIMJOGANG").and_then(HVal::as_f64)
     };
     assert_eq!(jog("0.5235987755982988"), Some(30.0));
     assert_eq!(jog("30.0"), Some(30.0));
