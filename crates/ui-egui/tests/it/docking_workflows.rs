@@ -205,6 +205,21 @@ fn grouped_restore_preserves_order_and_rectangle_in_both_close_orders_after_relo
 }
 
 #[test]
+fn palettes_off_and_on_reopen_a_floating_group_as_one_window() {
+    let mut h = harness(None, 1280.0, 1.0);
+    h.state_mut().run("ui.dock", json!({"operation":"float","panel":"layers","rect":[400,250,300,350]})).unwrap();
+    h.state_mut().run("ui.dock", json!({"operation":"move","panel":"properties","target":"layers","zone":"center"})).unwrap();
+    h.state_mut().run("ui.dock", json!({"operation":"close","panel":"properties"})).unwrap();
+    h.state_mut().run("ui.toggle.palettes", json!({"on": false})).unwrap();
+    h.run_steps(3);
+    h.state_mut().run("ui.toggle.palettes", json!({"on": true})).unwrap();
+    h.run_steps(3);
+    let floating = &h.state().ui.docking.layout.floating;
+    assert_eq!(floating.len(), 1, "{floating:?}");
+    assert!(floating[0].contains(&Panel::Layers) && floating[0].contains(&Panel::Properties), "{floating:?}");
+}
+
+#[test]
 fn explicit_properties_open_restores_closed_panel_and_activates_inactive_tab() {
     let mut harness = harness(None, 1000.0, 1.0);
     harness.state_mut().run("ui.dock", json!({"operation":"close","panel":"properties"})).unwrap();

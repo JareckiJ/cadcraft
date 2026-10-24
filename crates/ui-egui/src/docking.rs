@@ -134,8 +134,10 @@ pub fn reveal_panel(workspace: &mut Workspace, panel: Panel) -> Result<(), Strin
     Ok(())
 }
 
-/// Show or hide a panel for the Tool Sets and palette switches. Showing restores the recorded
-/// place without changing which tab is selected or which accordion entries are open.
+/// Show or hide a panel for the Tool Sets and palette switches. Showing a panel whose recorded
+/// anchor is shown restores it there without changing which tab is selected or which accordion
+/// entries are open. Otherwise it goes through [`reveal_panel`], which regroups it with hidden
+/// panels it was beside, and selects it.
 fn set_visible(workspace: &mut Workspace, panel: Panel, visible: bool) -> Result<(), String> {
     if workspace.layout.contains(&panel) == visible {
         return Ok(());
@@ -145,7 +147,9 @@ fn set_visible(workspace: &mut Workspace, panel: Panel, visible: bool) -> Result
     }
     let mut next = workspace.clone();
     let location = next.hidden.iter().find(|(id, _)| *id == panel).map(|(_, location)| location.clone());
-    if location.is_some_and(|location| next.layout.restore(panel, &location).is_ok()) {
+    // A direct restore against a hidden anchor would open a window of its own.
+    let direct = location.filter(|location| location.anchor.is_none_or(|anchor| next.layout.contains(&anchor)));
+    if direct.is_some_and(|location| next.layout.restore(panel, &location).is_ok()) {
         next.hidden.retain(|(id, _)| *id != panel);
         validate(&next)?;
         *workspace = next;
