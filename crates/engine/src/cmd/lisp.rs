@@ -805,8 +805,8 @@ fn run_dotnet_bridge(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "delete_entity" => {
             let Some(h) = str_param(p, "handle").and_then(Handle::parse_hex) else { return Ok(json!({ "ok": false })) };
+            let Some(space) = s.doc()?.space_of(h) else { return Ok(json!({ "ok": false })) };
             let d = s.doc_mut()?;
-            let Some(space) = d.space_of(h) else { return Ok(json!({ "ok": false })) };
             if let Some(st) = d.space_mut(&space) {
                 st.remove(h);
             }

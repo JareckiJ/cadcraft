@@ -615,6 +615,84 @@ pub(crate) fn gather(
     gather_in(d, space, ix, cursor, aperture, osmode, &[])
 }
 
+/// The primitives within `aperture` of the 2D view-plane `view_cursor` under `orbit`, with their elevation.
+pub(crate) fn gather_in_orbit(
+    d: &Drawing,
+    space: &Space,
+    orbit: cadcraft_render::Orbit3d,
+    view_cursor: Vec2,
+    aperture: f64,
+) -> Vec<(Prim, f64)> {
+    let Some(store) = d.space(space) else { return Vec::new() };
+    let handles = crate::select::orbit_near_handles(d, space, orbit, view_cursor, aperture);
+    let mut near_prims: Vec<(Prim, f64)> = Vec::new();
+    let mut budget = MAX_BLOCK_LEAVES;
+    let all = Bounds2::new(Vec2::new(-1e18, -1e18), Vec2::new(1e18, 1e18));
+    for h in handles.into_iter().take(2000) {
+        let Some(e) = store.get(h) else { continue };
+        if !d.is_visible(e) {
+            continue;
+        }
+        if matches!(&e.kind, EntityKind::Line(l) if (l.a.z - l.b.z).abs() > 1e-12)
+            || matches!(&e.kind, EntityKind::Polyline3d(_) | EntityKind::Face3d(_))
+        {
+            continue;
+        }
+        let elev = cadcraft_render::entity_elevation(&e.kind);
+        let mut flat: Vec<(u32, Vec2)> = Vec::new();
+        let mut ent_prims: Vec<Prim> = Vec::new();
+        {
+            let mut sink = Sink { osmode: mode::NEA, aperture, probe: all, cands: &mut flat, near: &mut ent_prims };
+            sink.object(&e.kind, None);
+            if let EntityKind::Dimension(dm) = &e.kind
+                && dm.block.as_ref().and_then(|n| d.block(n)).is_none()
+            {
+                sink.dimension(d, dm, &mut budget, &[]);
+            }
+        }
+        near_prims.extend(
+            ent_prims
+                .into_iter()
+                .filter(|p| prim_near_in_orbit(p, elev, orbit, view_cursor, aperture))
+                .map(|p| (p, elev)),
+        );
+        let mut push_block = |ins: &Insert, z0: f64| {
+            block_leaves_z(d, ins, &Mat3::IDENTITY, z0, 1.0, 0, &mut budget, &[], &mut |k, m, z| {
+                let mut leaf_cands: Vec<(u32, Vec2)> = Vec::new();
+                let mut leaf_prims: Vec<Prim> = Vec::new();
+                let mut sink = Sink { osmode: mode::NEA, aperture, probe: all, cands: &mut leaf_cands, near: &mut leaf_prims };
+                sink.object(k, Some(m));
+                near_prims.extend(
+                    leaf_prims
+                        .into_iter()
+                        .filter(|p| prim_near_in_orbit(p, z, orbit, view_cursor, aperture))
+                        .map(|p| (p, z)),
+                );
+            });
+        };
+        if let EntityKind::Insert(ins) = &e.kind {
+            push_block(ins, 0.0);
+        }
+        if let EntityKind::Dimension(dm) = &e.kind
+            && let Some(blk) = dm.block.as_ref().and_then(|n| d.block(n))
+        {
+            let ins = Insert {
+                block: blk.name.clone(),
+                insert: blk.base,
+                scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 1,
+                rows: 1,
+                col_spacing: 0.0,
+                row_spacing: 0.0,
+            };
+            push_block(&ins, elev);
+        }
+    }
+    near_prims
+}
+
 fn gather_in(
     d: &Drawing,
     space: &Space,

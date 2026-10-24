@@ -1536,6 +1536,9 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
         if prompt.as_ref().is_none_or(|p| !cadcraft_engine::pointmod::accepts(p)) {
             app.session.tracking.clear();
         }
+        if app.session.running.as_ref().is_some_and(|r| r.id == "stretch") {
+            return orbit.unproject_xy(raw).unwrap_or(raw);
+        }
         return raw;
     }
     let Some(work_raw) = orbit.unproject_xy(raw) else {
