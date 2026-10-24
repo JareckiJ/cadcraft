@@ -465,7 +465,8 @@ mod native {
             return dxf;
         }
         let find = |dxf: &[u8], pat: &[u8], from: usize| dxf.get(from..).and_then(|t| t.windows(pat.len()).position(|w| w == pat)).map(|p| p + from);
-        let Some(objects) = find(&dxf, b"  2\r\nOBJECTS\r\n", 0) else { return dxf };
+        // The section's own header: a layer or block named OBJECTS has a group 2 of that value too.
+        let Some(objects) = find(&dxf, b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n", 0) else { return dxf };
         let Some(objects_end) = find(&dxf, b"  0\r\nENDSEC\r\n", objects) else { return dxf };
         let index = ObjectIndex::of(&dxf, objects, objects_end);
         // (where, groups): dictionary entries, then the objects at the section's end.
@@ -814,6 +815,22 @@ mod native {
             // Already there: left alone.
             let twice = super::add_purge_preventers(once.clone(), &doc, usize::MAX);
             assert_eq!(twice, once);
+            Ok(())
+        }
+
+        /// A layer named OBJECTS (its group 2 comes before the OBJECTS section's) doesn't take the
+        /// restored records: they go into the OBJECTS section.
+        #[test]
+        fn a_layer_named_objects_is_not_the_objects_section() -> Result<(), Box<dyn std::error::Error>> {
+            let (mut doc, _) = source(NAME)?;
+            doc.layers.add(acadrust::tables::Layer::new("OBJECTS"))?;
+            let mut dxf = Vec::new();
+            acadrust::DxfWriter::new(&doc).write_to_writer(&mut dxf)?;
+            let out = super::add_purge_preventers(dxf, &doc, usize::MAX);
+            let text = String::from_utf8_lossy(&out);
+            let section = text.find("  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n").ok_or("OBJECTS section")?;
+            let record = text.find(&format!("  0\r\n{NAME}\r\n")).ok_or("restored record")?;
+            assert!(record > section, "the record is in the OBJECTS section");
             Ok(())
         }
 
