@@ -819,7 +819,7 @@ impl Session {
     }
     /// The space commands act on (model space while working inside a layout viewport).
     pub fn space(&self) -> Space {
-        self.state().map(DrawingState::edit_space).unwrap_or_default()
+        self.state().map(DocState::edit_space).unwrap_or_default()
     }
     /// The tab being displayed: Model or a layout, regardless of MSPACE.
     pub fn layout_space(&self) -> Space {
@@ -881,7 +881,7 @@ impl Session {
 
     /// World units per pixel at the current view.
     pub fn pixel_size(&self) -> f64 {
-        let v = self.state().map(DrawingState::view).unwrap_or_default();
+        let v = self.state().map(DocState::view).unwrap_or_default();
         v.height / self.viewport_px.1.max(1.0)
     }
 
