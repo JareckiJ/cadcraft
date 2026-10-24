@@ -398,14 +398,9 @@ impl StretchM {
 
     /// Select with a typed mode that has its points. With too few (a fence of one point, a polygon
     /// of two) the mode is dropped.
-    fn finish_mode(&mut self, s: &mut Session, mut m: SelectMode) -> Result<()> {
+    fn finish_mode(&mut self, s: &mut Session, m: SelectMode) -> Result<()> {
         let space = s.space();
         let orbit = s.edit_orbit();
-        if !orbit.is_top() {
-            for p in &mut m.pts {
-                *p = orbit.project(p.to3(0.0));
-            }
-        }
         let Some(mut hs) = m.select(s.doc()?, &space, orbit) else { return Ok(()) };
         let crossing = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
             (SelectKind::Crossing | SelectKind::CPolygon, _) => true,
@@ -460,16 +455,14 @@ impl StretchM {
         match i {
             Input::Point(p) => {
                 let orbit = s.edit_orbit();
-                let vp = if orbit.is_top() { p } else { orbit.project(p.to3(0.0)) };
                 match self.corner.take() {
                     Some(c) => {
-                        let vc = if orbit.is_top() { c } else { orbit.project(c.to3(0.0)) };
-                        let bx = cadcraft_geom::Bounds2::new(vc, vp);
+                        let bx = cadcraft_geom::Bounds2::new(c, p);
                         let space = s.space();
-                        let mut hs = crate::select::select_window_in_orbit(s.doc()?, &space, orbit, bx, vp.x < vc.x);
+                        let mut hs = crate::select::select_window_in_orbit(s.doc()?, &space, orbit, bx, p.x < c.x);
                         let area = StretchArea::r#box(bx, orbit);
                         if !self.removing {
-                            if vp.x < vc.x {
+                            if p.x < c.x {
                                 add_mline_vertex_hits(s.doc()?, &space, &area, &mut hs);
                             }
                             self.windows.push(area);
@@ -479,7 +472,7 @@ impl StretchM {
                     None => {
                         let aperture = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
                         let space = s.space();
-                        match crate::select::pick_in_orbit(s.doc()?, &space, orbit, vp, aperture) {
+                        match crate::select::pick_in_orbit(s.doc()?, &space, orbit, p, aperture) {
                             Some(h) => self.add(s, vec![h], true),
                             None => self.corner = Some(p),
                         }
@@ -596,13 +589,16 @@ impl Interactive for StretchM {
     /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         let orbit = s.edit_orbit();
-        let vp = |p: Vec2| if orbit.is_top() { p } else { orbit.project(p.to3(0.0)) };
-        let vc = vp(c);
-        let vline = |p: Vec2, q: Vec2| Some(line(orbit.unproject_xy(p)?, orbit.unproject_xy(q)?));
+        let vline = |p: Vec2, q: Vec2| {
+            if orbit.is_top() || orbit.is_edge_on() {
+                Some(line(p, q))
+            } else {
+                Some(line(orbit.unproject_xy(p)?, orbit.unproject_xy(q)?))
+            }
+        };
         let rect = |a: Vec2| -> Vec<EntityKind> {
-            let a = vp(a);
-            let (b, d) = (Vec2::new(vc.x, a.y), Vec2::new(a.x, vc.y));
-            [vline(a, b), vline(b, vc), vline(vc, d), vline(d, a)].into_iter().flatten().collect()
+            let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
+            [vline(a, b), vline(b, c), vline(c, d), vline(d, a)].into_iter().flatten().collect()
         };
         if let (StretchPhase::Select, Some(m)) = (self.phase, &self.mode) {
             let Some(first) = m.pts.first().copied() else { return Vec::new() };
@@ -610,10 +606,10 @@ impl Interactive for StretchM {
                 return rect(first);
             }
             // The fence or polygon so far, on to the cursor; a polygon closes back to its start.
-            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| vline(vp(*w.first()?), vp(*w.get(1)?))).collect();
-            out.extend(m.pts.last().and_then(|l| vline(vp(*l), vc)));
+            let mut out: Vec<EntityKind> = m.pts.windows(2).filter_map(|w| vline(*w.first()?, *w.get(1)?)).collect();
+            out.extend(m.pts.last().and_then(|l| vline(*l, c)));
             if m.kind != SelectKind::Fence && m.pts.len() >= 2 {
-                out.extend(vline(vc, vp(first)));
+                out.extend(vline(c, first));
             }
             return out;
         }

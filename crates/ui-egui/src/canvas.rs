@@ -36,10 +36,12 @@ impl Xf {
 }
 
 /// What a display list was built from: drawing uid, revision, tessellation band, hatch level of
-/// detail band, lineweight display, document and active viewport view (see [`ensure_list`]).
-type ListKey = (u64, u64, i32, i32, bool, bool, usize, u64);
+/// detail band, lineweight display, transparency display, document, active viewport view and 3D
+/// orbit (see [`ensure_list`]).
+type ListKey = (u64, u64, i32, i32, bool, bool, usize, u64, u64);
 
-/// Whether two list keys are for the same drawing content (they may differ only in the view).
+/// Whether two list keys are for the same drawing content (they may differ only in the view or
+/// 3D orbit).
 fn same_content(a: &ListKey, b: &ListKey) -> bool {
     (a.0, a.1, a.4, a.5, a.6, a.7) == (b.0, b.1, b.4, b.5, b.6, b.7)
 }
@@ -139,9 +141,10 @@ pub struct CanvasState {
     cycle_key: Option<CycleKey>,
 }
 
-/// The command, prompt, drawing (and its revision) and view that the objects under the cursor
-/// were listed for: when any of them changes, the list and the Shift+Space highlight are stale.
-type CycleKey = (Option<String>, Option<String>, u64, u64, Vec2, f64);
+/// The command, prompt, drawing (and its revision), view and 3D orbit that the objects under the
+/// cursor were listed for: when any of them changes, the list and the Shift+Space highlight are
+/// stale.
+type CycleKey = (Option<String>, Option<String>, u64, u64, Vec2, f64, u64);
 
 impl CanvasState {
     /// The active MSPACE viewport's contents when they are drawn apart from the layout's list
@@ -305,7 +308,6 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         use std::hash::{Hash, Hasher};
         let mut s = std::collections::hash_map::DefaultHasher::new();
         split.hash(&mut s);
-        active_orbit.hash_key().hash(&mut s);
         if split.is_none()
             && let Some((h, vp)) = st.active_viewport()
         {
@@ -314,7 +316,17 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         s.finish()
     };
     let (lwdisplay, transparency_display) = (app.session.settings.lwdisplay, app.session.settings.transparency_display);
-    let key: ListKey = (st.uid, st.revision, band(px), lod_band, lwdisplay, transparency_display, std::sync::Arc::as_ptr(&st.doc) as usize, vp_view);
+    let key: ListKey = (
+        st.uid,
+        st.revision,
+        band(px),
+        lod_band,
+        lwdisplay,
+        transparency_display,
+        std::sync::Arc::as_ptr(&st.doc) as usize,
+        vp_view,
+        active_orbit.hash_key(),
+    );
     // A background build that finished: use it unless the drawing has changed since it started
     // (or the list was dropped to force a rebuild).
     if let Some(job) = &app.canvas.job {
@@ -1357,7 +1369,7 @@ fn draw_tracking(
 
 /// The rubber-band and snap-adjusted cursor point for the current prompt (the engine's
 /// `Session::snap_cursor`: object snaps, acquiring tracking points, grid, tracking paths, ortho).
-fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render::Orbit3d, ctx: &egui::Context) -> Vec2 {
+fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render::Orbit3d, ctx: &egui::Context) -> Option<Vec2> {
     let prompt = app.session.current_prompt();
     let wants_point = app.session.accepts_work_point();
     let base = prompt.as_ref().and_then(|p| p.base);
@@ -1369,14 +1381,12 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
         if prompt.as_ref().is_none_or(|p| !cadcraft_engine::pointmod::accepts(p)) {
             app.session.tracking.clear();
         }
-        if app.session.running.as_ref().is_some_and(|r| r.id == "stretch") {
-            return orbit.unproject_xy(raw).unwrap_or(raw);
+        if orbit.is_edge_on() && app.session.prompt_wants_work_point() {
+            return None;
         }
-        return raw;
+        return Some(raw);
     }
-    let Some(work_raw) = orbit.unproject_xy(raw) else {
-        return raw;
-    };
+    let work_raw = orbit.unproject_xy(raw)?;
     let (now, shift) = ctx.input(|i| (i.time, i.modifiers.shift));
     let q =
         snap::tracking::CursorQuery { base, deferred, corner, aperture: app.session.settings.aperture / xf.scale, tol: 6.0 / xf.scale, now, shift };
@@ -1386,7 +1396,7 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, orbit: cadcraft_render:
     }
     app.canvas.snap = r.snap;
     app.canvas.track = r.track;
-    r.point
+    Some(r.point)
 }
 
 /// The vertical wheel scroll this frame that zooms, in points, read from the raw wheel events so
@@ -1656,7 +1666,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
             for pos in earlier.iter().filter(|p| rect.contains(**p)) {
-                let w = effective_point(app, xf.to_world(*pos), &xf, current_orbit, ui.ctx());
+                let Some(w) = effective_point(app, xf.to_world(*pos), &xf, current_orbit, ui.ctx()) else { continue };
                 let result = match app.canvas.snap {
                     Some(hit) => app.session.input_snapped(hit),
                     None => app.session.input(Input::Point(w)),
@@ -1670,13 +1680,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
     let raw_world = hover_pos.filter(|_| inside).map(|p| xf.to_world(p));
     let dyn_frame = crate::cmdline::dyn_frame(app);
-    let edge_on_work_point = current_orbit.is_edge_on()
-        && app.session.current_prompt().as_ref().is_some_and(cadcraft_engine::pointmod::accepts)
-        && app.session.pending_window.is_none()
-        && app.session.select_mode.is_none()
-        && !app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom"));
-    if let Some(w) = raw_world.filter(|_| !edge_on_work_point) {
-        let mut eff = effective_point(app, w, &xf, current_orbit, ui.ctx());
+    if let Some((w, mut eff)) = raw_world.and_then(|w| Some((w, effective_point(app, w, &xf, current_orbit, ui.ctx())?))) {
         // A locked Dynamic Input value (`40,` or `40<` typed) holds the cursor and overrides snaps.
         if let Some(f) = dyn_frame
             && let Some(e) = crate::dyninput::parse(&app.cmd.buffer, &f)
@@ -1739,6 +1743,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.state().map_or(0, |st| st.revision),
         xf.center,
         xf.scale,
+        current_orbit.hash_key(),
     );
     if app.canvas.cycle_key.as_ref() != Some(&key) {
         app.canvas.cycle = None;
@@ -2060,7 +2065,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
-    let preview_orbit = if app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom")) {
+    let preview_orbit = if app.session.running.as_ref().is_some_and(|r| r.id.starts_with("zoom"))
+        || (current_orbit.is_edge_on() && !app.session.prompt_wants_work_point())
+    {
         cadcraft_render::Orbit3d::default()
     } else {
         current_orbit

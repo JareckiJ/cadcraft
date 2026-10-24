@@ -630,15 +630,17 @@ pub(crate) fn candidate_in_orbit(
         let mut best: Option<(f64, Vec2, PathShape)> = None;
         for (prim, z) in &prims {
             for (end, shape) in extension_ends(prim) {
+                let pr = orbit.project(end.to3(*z));
+                let work_end = super::work_plane_point(orbit, end, *z, pr);
                 let dd = match hit {
-                    Some(h) => end.dist(h.point),
-                    None => orbit.project(end.to3(*z)).dist(view_cursor),
+                    Some(h) => work_end.dist(h.point),
+                    None => pr.dist(view_cursor),
                 };
                 if !dd.is_finite() || dd > aperture || best.as_ref().is_some_and(|(bd, ..)| *bd <= dd) {
                     continue;
                 }
-                if shape.is_finite() && end.is_finite() {
-                    best = Some((dd, end, shape));
+                if shape.is_finite() && work_end.is_finite() {
+                    best = Some((dd, work_end, shape));
                 }
             }
         }

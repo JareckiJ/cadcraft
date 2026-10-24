@@ -377,17 +377,26 @@ pub fn osnap_in_orbit_with_proj(
     }
     if osmode & (mode::INT | mode::APP) != 0 {
         let segs: Vec<(Vec<Segment>, f64)> = near_prims.iter().take(200).map(|(p, z)| (prim_segments(p), *z)).collect();
-        let real = if osmode & mode::INT != 0 { mode::INT } else { mode::APP };
         for i in 0..segs.len() {
             for j in i + 1..segs.len() {
                 let extend = osmode & mode::APP != 0 && [i, j].iter().all(|k| near_prims.get(*k).is_some_and(|(p, _)| extendable(p)));
                 let (Some((sa, za)), Some((sb, zb))) = (segs.get(i), segs.get(j)) else { continue };
+                let same_z = (*za - *zb).abs() <= 1e-9;
                 let z = (*za + *zb) * 0.5;
+                let real_mode = if same_z && osmode & mode::INT != 0 {
+                    Some(mode::INT)
+                } else if osmode & mode::APP != 0 {
+                    Some(mode::APP)
+                } else {
+                    None
+                };
                 for a in sa {
                     for b in sb {
-                        for x in intersect_ext(&fix_circle(a), &fix_circle(b), false) {
-                            if orbit.project(x.to3(z)).dist(view_cursor) <= aperture {
-                                cands3.push((real, x, z));
+                        if let Some(m) = real_mode {
+                            for x in intersect_ext(&fix_circle(a), &fix_circle(b), false) {
+                                if orbit.project(x.to3(z)).dist(view_cursor) <= aperture {
+                                    cands3.push((m, x, z));
+                                }
                             }
                         }
                         if extend {
@@ -407,7 +416,10 @@ pub fn osnap_in_orbit_with_proj(
             if osmode & mode::PER != 0 {
                 match p {
                     Prim::Seg(Segment::Line(l)) => cands3.push((mode::PER, l.project(bp), *z)),
-                    Prim::Seg(Segment::Arc { arc, .. }) => cands3.push((mode::PER, Circle::new(arc.center, arc.radius).closest(bp), *z)),
+                    Prim::Seg(Segment::Arc { arc, .. }) => {
+                        let curve = SnapCurve::Arc { center: arc.center, radius: arc.radius, start: arc.start, end: arc.end };
+                        cands3.extend(curve.perpendiculars(bp, bp).into_iter().map(|q| (mode::PER, q, *z)));
+                    }
                     Prim::Circle(c) => cands3.push((mode::PER, c.closest(bp), *z)),
                     Prim::Infinite { base: b0, dir, .. } => cands3.push((mode::PER, *b0 + *dir * (bp - *b0).dot(*dir), *z)),
                     Prim::Ellipse(e) => cands3.extend(curves::ellipse_perpendiculars(e, bp).into_iter().map(|q| (mode::PER, q, *z))),
@@ -417,7 +429,11 @@ pub fn osnap_in_orbit_with_proj(
             }
             if osmode & mode::TAN != 0 {
                 let pts = match p {
-                    Prim::Seg(Segment::Arc { arc, .. }) => Circle::new(arc.center, arc.radius).tangent_points(bp),
+                    Prim::Seg(Segment::Arc { arc, .. }) => Circle::new(arc.center, arc.radius)
+                        .tangent_points(bp)
+                        .into_iter()
+                        .filter(|t| arc.contains_angle(arc.center.angle_to(*t)))
+                        .collect(),
                     Prim::Circle(c) => c.tangent_points(bp),
                     Prim::Ellipse(e) => curves::ellipse_tangents(e, bp),
                     Prim::Spline(s) => curves::spline_tangents(s, bp),
@@ -434,7 +450,7 @@ pub fn osnap_in_orbit_with_proj(
                 return None;
             }
             let pr = orbit.project(w.to3(z));
-            (pr.is_finite() && pr.dist(view_cursor) <= aperture).then_some((m, w, pr))
+            (pr.is_finite() && pr.dist(view_cursor) <= aperture).then(|| (m, work_plane_point(orbit, w, z, pr), pr))
         })
         .min_by(|a, b| {
             let da = snap_score(a.0, a.2, view_cursor, aperture);
@@ -459,7 +475,7 @@ pub fn osnap_in_orbit_with_proj(
             let pr = orbit.project(c.to3(z));
             let dd = pr.dist(view_cursor);
             if dd <= aperture && nb.is_none_or(|(bd, ..)| dd < bd) {
-                nb = Some((dd, c, pr));
+                nb = Some((dd, work_plane_point(orbit, c, z, pr), pr));
             }
         };
         for (p, z) in &near_prims {
@@ -476,6 +492,16 @@ pub fn osnap_in_orbit_with_proj(
         }
     }
     None
+}
+
+/// Convert a snapped point `w` at elevation `z` (with 2D view-plane projection `pr`) onto the
+/// `z = 0` work plane so `orbit.project(point.to3(0.0))` lands on `pr`.
+pub(crate) fn work_plane_point(orbit: cadcraft_render::Orbit3d, w: Vec2, z: f64, pr: Vec2) -> Vec2 {
+    if z.abs() <= 1e-12 {
+        w
+    } else {
+        orbit.unproject_xy(pr).unwrap_or(w)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1224,7 +1250,7 @@ fn deferred_hit_in_orbit(
         let Some(cur_z) = orbit.unproject_z(view_cursor, *z) else { continue };
         let curve = match p {
             Prim::Circle(c) => SnapCurve::Circle { center: c.center, radius: c.radius },
-            Prim::Seg(Segment::Arc { arc, .. }) => SnapCurve::Circle { center: arc.center, radius: arc.radius },
+            Prim::Seg(Segment::Arc { arc, .. }) => SnapCurve::Arc { center: arc.center, radius: arc.radius, start: arc.start, end: arc.end },
             Prim::Seg(Segment::Line(l)) => SnapCurve::Line { a: l.a, b: l.b },
             Prim::Infinite { base, dir, .. } => SnapCurve::Line { a: *base, b: *base + *dir },
             _ => continue,
@@ -1235,6 +1261,12 @@ fn deferred_hit_in_orbit(
             }
             SnapCurve::Circle { center, radius } if osmode & mode::PER != 0 => {
                 (mode::PER, "Deferred Perpendicular", Circle::new(center, radius).closest(cur_z))
+            }
+            SnapCurve::Arc { center, radius, start, end } if osmode & mode::TAN != 0 => {
+                (mode::TAN, "Deferred Tangent", cadcraft_geom::Arc::new(center, radius, start, end).closest(cur_z))
+            }
+            SnapCurve::Arc { center, radius, start, end } if osmode & mode::PER != 0 => {
+                (mode::PER, "Deferred Perpendicular", cadcraft_geom::Arc::new(center, radius, start, end).closest(cur_z))
             }
             SnapCurve::Line { a, b } if osmode & mode::PER != 0 => {
                 let l = cadcraft_geom::Line::new(a, b);
@@ -1248,7 +1280,8 @@ fn deferred_hit_in_orbit(
         let pr = orbit.project(at.to3(*z));
         let dd = pr.dist(view_cursor);
         if pr.is_finite() && dd <= aperture && best.as_ref().is_none_or(|(bd, ..)| dd < *bd) {
-            best = Some((dd, SnapHit { point: at, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }) }, pr));
+            let point = work_plane_point(orbit, at, *z, pr);
+            best = Some((dd, SnapHit { point, mode: m, name, viewport: None, deferred: Some(Deferred { mode: m, curve, at }) }, pr));
         }
     }
     best.map(|(_, h, pr)| (h, pr))

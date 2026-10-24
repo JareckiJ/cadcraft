@@ -1247,11 +1247,14 @@ impl Session {
 
     fn feed(&mut self, input: Option<Input>) -> Result<()> {
         let base = if matches!(input, Some(Input::Point(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
+        let wants_work = self.prompt_wants_work_point();
         let Some(mut run) = self.running.take() else { return Ok(()) };
         let step = match input {
             Some(Input::Cancel) => Ok(Step::Cancel),
             Some(i) => {
-                if let Input::Point(p) = &i {
+                if let Input::Point(p) = &i
+                    && wants_work
+                {
                     self.last_point = *p;
                     if let Some(b) = base.filter(|b| b.is_finite() && p.is_finite() && b.dist(*p) > 1e-12) {
                         self.last_segment = Some((b, *p));
@@ -1429,18 +1432,10 @@ impl Session {
         }
     }
 
-    /// Whether the current prompt collects points on the model work plane (`z = 0`) rather than
-    /// picking objects or selection areas in the 2D view plane. Returns `false` when the `z = 0`
-    /// work plane is viewed edge-on ([`cadcraft_render::Orbit3d::is_edge_on`]).
-    pub fn accepts_work_point(&self) -> bool {
+    /// Whether the current prompt expects a point on the model work plane (`z = 0`) rather than
+    /// picking objects, selection areas, or zoom frames in the 2D view plane.
+    pub fn prompt_wants_work_point(&self) -> bool {
         if self.pending_window.is_some() || self.select_mode.is_some() {
-            return false;
-        }
-        if self
-            .state()
-            .ok()
-            .is_some_and(|st| matches!(st.edit_space(), Space::Model) && st.orbit.is_edge_on())
-        {
             return false;
         }
         if let Some(r) = &self.running {
@@ -1452,6 +1447,17 @@ impl Session {
             }
         }
         self.current_prompt().as_ref().is_some_and(pointmod::accepts)
+    }
+
+    /// Whether the current prompt collects points on the model work plane (`z = 0`) rather than
+    /// picking objects or selection areas in the 2D view plane. Returns `false` when the `z = 0`
+    /// work plane is viewed edge-on ([`cadcraft_render::Orbit3d::is_edge_on`]).
+    pub fn accepts_work_point(&self) -> bool {
+        !self
+            .state()
+            .ok()
+            .is_some_and(|st| matches!(st.edit_space(), Space::Model) && st.orbit.is_edge_on())
+            && self.prompt_wants_work_point()
     }
 
     /// Whether the object under the cursor is highlighted (SELECTIONPREVIEW): the cursor picks
@@ -1607,7 +1613,7 @@ impl Session {
                 lisp::value::Value::Real(r) => self.typed(&format!("{r}")),
                 lisp::value::Value::Str(s) => self.typed(&s),
                 other => match other.as_point() {
-                    Some(p) => self.input(Input::Point(Vec2::new(p[0], p[1]))),
+                    Some(p) => self.typed_point(Vec2::new(p[0], p[1])),
                     None => {
                         self.echo(format!("Invalid input: {}", lisp::value::to_text(&other, true)));
                         Ok(())
@@ -1631,14 +1637,14 @@ impl Session {
         if prompt.accept.point {
             if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
-                return self.input(Input::Point(p));
+                return self.typed_point(p);
             }
             // Direct distance entry along the tracking path the cursor is on, from the point it
             // comes from (an acquired or temporary tracking point needs no base point).
             if let Some(dist) = units::parse_distance(tt).filter(|_| !prompt.accept.number)
                 && let Some((from, dir)) = self.tracking.last.as_ref().filter(|t| t.point.near(self.cursor, 1e-9)).and_then(|t| t.along())
             {
-                return self.input(Input::Point(from + dir * dist));
+                return self.typed_point(from + dir * dist);
             }
             // Direct distance entry along the rubber band.
             if let (Some(base), Some(dist)) = (prompt.base, units::parse_distance(tt))
@@ -1650,10 +1656,24 @@ impl Session {
                 }
                 let dir = (c - base).normalized();
                 let dir = if dir == Vec2::ZERO { Vec2::X } else { dir };
-                return self.input(Input::Point(base + dir * dist));
+                return self.typed_point(base + dir * dist);
             }
         }
         self.input(Input::Text(tt.to_string()))
+    }
+
+    /// Feed a point typed at the command line (or evaluated from a LISP expression): keeps
+    /// `last_point` in model XY (`z = 0`) coordinates and projects to the 2D view plane when the
+    /// active prompt selects objects or areas in view space (`!prompt_wants_work_point()`).
+    fn typed_point(&mut self, p: Vec2) -> Result<()> {
+        self.last_point = p;
+        let pt = if self.prompt_wants_work_point() {
+            p
+        } else {
+            let orbit = self.edit_orbit();
+            if orbit.is_top() { p } else { orbit.project(p.to3(0.0)) }
+        };
+        self.input(Input::Point(pt))
     }
 
     /// Run a script, as AutoCAD reads one: a space or a line end ends an input, and an empty
@@ -1851,11 +1871,43 @@ impl Session {
         Ok(Bounds2::new(lo, hi))
     }
 
-    pub fn zoom_extents(&mut self) -> Result<()> {
+    /// Extents of the space being edited, projected into the 2D view plane when `edit_orbit` is
+    /// not Top.
+    pub(crate) fn space_extents(&self) -> Result<Bounds2> {
         let space = self.space();
-        let ext = self.doc()?.extents(&space);
+        let orbit = self.edit_orbit();
+        let d = self.doc()?;
+        if orbit.is_top() {
+            Ok(d.extents(&space))
+        } else {
+            Ok(cadcraft_render::build(
+                d,
+                &space,
+                &cadcraft_render::Options { orbit, text: true, fill: true, ..Default::default() },
+            )
+            .bounds)
+        }
+    }
+
+    pub fn zoom_extents(&mut self) -> Result<()> {
+        let orbit = self.edit_orbit();
+        let ext = self.space_extents()?;
         let (w, h) = self.viewport_px;
-        let ext = if ext.is_empty() { self.zoom_limits()? } else { ext };
+        let ext = if ext.is_empty() {
+            let lim = self.zoom_limits()?;
+            if orbit.is_top() {
+                lim
+            } else {
+                Bounds2::from_points([
+                    orbit.project(Vec2::new(lim.min.x, lim.min.y).to3(0.0)),
+                    orbit.project(Vec2::new(lim.max.x, lim.min.y).to3(0.0)),
+                    orbit.project(Vec2::new(lim.max.x, lim.max.y).to3(0.0)),
+                    orbit.project(Vec2::new(lim.min.x, lim.max.y).to3(0.0)),
+                ])
+            }
+        } else {
+            ext
+        };
         let st = self.state_mut()?;
         let aspect = st.zoom_aspect(w / h.max(1.0));
         let height = ext.height().max(ext.width() / aspect.max(1e-6)).max(1e-6) * 1.05;

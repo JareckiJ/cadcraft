@@ -151,8 +151,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 fn ext_bounds(s: &Session) -> Result<Bounds2> {
-    let space = s.space();
-    Ok(s.doc()?.extents(&space))
+    s.space_extents()
 }
 
 fn fit(s: &mut Session, b: Bounds2) -> Result<()> {
@@ -639,7 +638,6 @@ impl Session {
         if st.orbit.is_top() {
             st.orbit = cadcraft_render::Orbit3d::default();
         }
-        self.touch();
         Ok(())
     }
 }
@@ -701,7 +699,6 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("reset").and_then(Value::as_bool) == Some(true) {
         let st = s.state_mut()?;
         st.orbit = cadcraft_render::Orbit3d::default();
-        s.touch();
         return Ok(json!({ "yaw": 0.0, "pitch": 0.0, "label": "TOP" }));
     }
     let pivot = default_orbit_pivot(s);
@@ -727,7 +724,6 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
             cadcraft_render::Orbit3d { yaw: yaw_deg.to_radians(), pitch: pitch_rad, pivot }
         };
         let (y, pt, lbl) = (st.orbit.yaw.to_degrees(), st.orbit.pitch.to_degrees(), st.orbit.label());
-        s.touch();
         return Ok(json!({ "yaw": y, "pitch": pt, "label": lbl }));
     }
     if st.orbit.is_top() {
@@ -743,7 +739,6 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
         st.orbit = cadcraft_render::Orbit3d::default();
     }
     let (y, pt, lbl) = (st.orbit.yaw.to_degrees(), st.orbit.pitch.to_degrees(), st.orbit.label());
-    s.touch();
     Ok(json!({ "yaw": y, "pitch": pt, "label": lbl }))
 }
 
