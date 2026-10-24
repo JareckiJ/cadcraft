@@ -1,21 +1,20 @@
 # Parity checklist
 
-> **Generated:** 2026-10-15 by `cargo xtask parity`. Do not edit by hand.
-> **Generated:** 2026-10-16 by `cargo xtask parity`. Do not edit by hand.
+> **Generated:** 2026-10-20 by `cargo xtask parity`. Do not edit by hand.
 
 Menu-breadth parity: a reference menu item counts as covered when a CADCraft command is registered under the same menu label. It measures breadth, not depth; see [target-app-parity.md](target-app-parity.md) for the weighted assessment.
 
-**Menu breadth: 283 / 491 items (58%)** · 427 registered commands.
+**Menu breadth: 294 / 491 items (60%)** · 438 registered commands.
 
 | Menu | Items | Covered | % |
 |---|---|---|---|
 | File | 22 | 13 | 59% |
 | Edit | 13 | 11 | 85% |
-| View | 75 | 31 | 41% |
+| View | 75 | 32 | 43% |
 | Insert | 11 | 5 | 45% |
 | Format | 27 | 25 | 93% |
-| Tools | 85 | 60 | 71% |
-| Draw | 87 | 55 | 63% |
+| Tools | 85 | 69 | 81% |
+| Draw | 87 | 56 | 64% |
 | Dimension | 28 | 28 | 100% |
 | Modify | 113 | 52 | 46% |
 | Window | 22 | 3 | 14% |
@@ -69,7 +68,6 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - View > Render > Light > Light Glyphs
 - View > Render > Materials Browser
 - View > UCS Icon > On
-- View > UCS Icon > Origin
 - View > UCS Icon > Properties...
 - View > ViewCube > On
 - View > ViewCube > Settings
@@ -90,24 +88,14 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Tools > Inquiry > Volume
 - Tools > Update Fields
 - Tools > Edit Xref in Place
-- Tools > New UCS > World
 - Tools > New UCS > Face
-- Tools > New UCS > View
-- Tools > New UCS > Origin
 - Tools > New UCS > Z Axis Vector
-- Tools > New UCS > 3 Point
 - Tools > New UCS > X
 - Tools > New UCS > Y
-- Tools > New UCS > Z
 - Tools > Named UCS...
 - Tools > Customize > Interface (CUI)...
-- Tools > Customize > Edit Command Aliases (PGP)...
 - Tools > Import Settings
 - Tools > Export Settings
-- Tools > Express Tools > Convert Text to Mtext
-- Tools > Express Tools > Break-line Symbol
-- Tools > Express Tools > Move/Copy/Rotate
-- Tools > Express Tools > Explode Attributes to Text
 - Tools > Express Tools > Replace Block...
 - Tools > Express Tools > Super Hatch > Image...
 - Tools > Express Tools > Super Hatch > Xref...
@@ -142,7 +130,6 @@ Menu-breadth parity: a reference menu item counts as covered when a CADCraft com
 - Draw > 3D Modeling > Meshes > Meshes, Ruled Surface
 - Draw > 3D Modeling > Meshes > Meshes, Edge Surface
 - Draw > 3D Modeling > Setup > Drawing
-- Draw > 3D Modeling > Setup > View
 - Draw > 3D Modeling > Setup > Profile
 - Modify > Object > External Reference > Frame
 - Modify > Object > Image > Adjust...

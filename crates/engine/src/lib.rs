@@ -32,6 +32,7 @@ pub mod select;
 pub mod snap;
 pub mod spatial;
 pub mod sysvars;
+pub mod ucs;
 pub mod undoctl;
 pub mod units;
 
@@ -147,6 +148,8 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// The user was told that the current UCS is tilted ([`Session::note_tilted_ucs`]).
+    pub ucs_tilted_noted: bool,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -173,6 +176,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            ucs_tilted_noted: false,
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -1555,7 +1559,8 @@ impl Session {
                 lisp::value::Value::Real(r) => self.typed(&format!("{r}")),
                 lisp::value::Value::Str(s) => self.typed(&s),
                 other => match other.as_point() {
-                    Some(p) => self.input(Input::Point(Vec2::new(p[0], p[1]))),
+                    // A point from LISP is in the current UCS, as typed coordinates are.
+                    Some(p) => self.input(Input::Point(self.input_ucs().to_wcs(Vec2::new(p[0], p[1])))),
                     None => {
                         self.echo(format!("Invalid input: {}", lisp::value::to_text(&other, true)));
                         Ok(())
@@ -1577,7 +1582,8 @@ impl Session {
             return self.input(Input::Keyword(k));
         }
         if prompt.accept.point {
-            if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
+            self.note_tilted_ucs();
+            if let Some(p) = self.parse_typed_point(tt, self.last_point) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
                 return self.input(Input::Point(p));
             }
