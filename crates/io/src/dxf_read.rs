@@ -248,6 +248,7 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
     entity_with_table_budget(kind, tags, &mut 4_000_000)
 }
 
+/// Parse one entity while charging materialized table cells to the caller's shared import budget.
 fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usize) -> Option<(Common, EntityKind)> {
     // The paper-space viewport our writer adds (dxf_write::paper_view) stays implicit.
     if kind == "VIEWPORT" && crate::dxf_ext::is_paper_view(tags) {
@@ -1400,6 +1401,7 @@ fn style_font(tags: &[Tag], file: String) -> String {
     }
 }
 
+/// Load symbol tables and resolve handle references, indexing layer names for case-insensitive updates.
 fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
     let recs = records(tags);
     // STYLE handle → name, or the shape file of an unnamed shape style (linetype elements).
@@ -1686,6 +1688,7 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
     read_budgeted(bytes, 4_000_000)
 }
 
+/// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
 fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
     let secs = sections(&tags);
@@ -2396,9 +2399,11 @@ pub fn entity_from_groups(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKin
 #[cfg(test)]
 mod table_budget_tests {
     use super::*;
+    /// Build synthetic table tags with a requested row and column count for allocation-budget checks.
     fn table_tags(rows: i64, cols: i64) -> Vec<Tag> {
         vec![Tag::s(100, "AcDbTable"), Tag::i(91, rows), Tag::i(92, cols), Tag::i(171, 1), Tag::s(1, "cell")]
     }
+    /// A table that cannot fit allocates no cell grid, while a smaller table spends only its cell count.
     #[test]
     fn exhausted_budget_rejects_before_materializing_cells() {
         let mut left = 3;
@@ -2409,6 +2414,7 @@ mod table_budget_tests {
         assert_eq!(table.cells[0].len(), 2);
         assert_eq!(left, 1);
     }
+    /// Tables in blocks and repeated entity sections consume one document-wide cell allowance.
     #[test]
     fn blocks_and_entity_sections_share_one_budget() {
         let table = "0\nACAD_TABLE\n100\nAcDbTable\n91\n1\n92\n2\n171\n1\n1\ncell\n";
