@@ -105,8 +105,8 @@ fn dedup_roles(loops: Vec<(usize, bool, Vec<Vec2>)>) -> Vec<(usize, bool, Vec<Ve
             continue;
         }
         let mut found = None;
-        for (k, (_, _, u)) in unique.iter().enumerate() {
-            if u.len() != l.len() {
+        for (k, (_, o, u)) in unique.iter().enumerate() {
+            if *o != outer || u.len() != l.len() {
                 continue;
             }
             // Each `same_polygon` call costs about 2·len² comparisons; stop if that would overrun.
@@ -124,15 +124,39 @@ fn dedup_roles(loops: Vec<(usize, bool, Vec<Vec2>)>) -> Vec<(usize, bool, Vec<Ve
                 break;
             }
         }
-        match found {
-            Some(k) if unique.get(k).is_some_and(|u| u.1 != outer) => {
-                unique.remove(k);
-            }
-            Some(_) => {}
-            None => unique.push((i, outer, l)),
+        // A repeat within its role goes; the first of each boundary per role is kept.
+        if found.is_none() {
+            unique.push((i, outer, l));
         }
     }
-    unique
+    // Then an outer loop and an island that are the same boundary cancel, whatever their order.
+    let mut out: Vec<(usize, bool, Vec<Vec2>)> = Vec::with_capacity(unique.len());
+    for (i, outer, l) in unique {
+        // The same comparison budget as above (CWE-407): once spent, loops stay as they are.
+        let twin = out.iter().position(|(_, o, u)| {
+            if *o == outer || u.len() != l.len() {
+                return false;
+            }
+            let cost = 2u64.saturating_mul((u.len() as u64).saturating_mul(l.len() as u64));
+            match budget.checked_sub(cost) {
+                Some(left) => {
+                    budget = left;
+                    same_polygon(u, &l)
+                }
+                None => {
+                    budget = 0;
+                    false
+                }
+            }
+        });
+        match twin {
+            Some(k) => {
+                out.remove(k);
+            }
+            None => out.push((i, outer, l)),
+        }
+    }
+    out
 }
 
 /// Vertex comparisons `dedup_polygons` may perform before it stops deduplicating.
@@ -624,6 +648,48 @@ mod tests {
         let tris = fill::triangulate_evenodd(&loops);
         let area: f64 = tris.chunks(3).map(|t| ((t[1] - t[0]).cross(t[2] - t[0]) / 2.0).abs()).sum();
         assert!((area - 100.0).abs() < 1e-6, "triangulated area must be 100.0, not zero");
+    }
+}
+
+#[cfg(test)]
+mod role_dedup_tests {
+    use super::*;
+    use cadcraft_doc::{Hatch, HatchLoop};
+    use cadcraft_geom::PolyVertex;
+
+    fn square(x0: f64, x1: f64, outer: bool) -> HatchLoop {
+        HatchLoop {
+            vertices: [(x0, x0), (x1, x0), (x1, x1), (x0, x1)].iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect(),
+            outer,
+            sources: vec![],
+        }
+    }
+
+    /// The same boundary as outer and island loops: repeats within a role collapse first, then an
+    /// outer loop and an island cancel, so the fill doesn't depend on the loops' order.
+    #[test]
+    fn coincident_loops_give_the_same_fill_in_any_order() {
+        let hatch = |loops: Vec<HatchLoop>| Hatch {
+            origin: Vec2::ZERO,
+            pattern: "SOLID".into(),
+            solid: true,
+            loops,
+            scale: 1.0,
+            angle: 0.0,
+            associative: false,
+            style: 0,
+            elevation: 0.0,
+            gradient: None,
+            background: None,
+            pattern_lines: vec![],
+        };
+        let inner = |o: bool| square(40.0, 60.0, o);
+        for order in [vec![true, false, true], vec![true, true, false], vec![false, true, true]] {
+            let mut loops = vec![square(0.0, 100.0, true)];
+            loops.extend(order.iter().map(|&o| inner(o)));
+            let kept = fill_loops(&hatch(loops), 1e-4);
+            assert_eq!(kept.len(), 1, "{order:?}: only the enclosing square is left");
+        }
     }
 }
 

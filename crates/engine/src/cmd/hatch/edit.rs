@@ -8,7 +8,7 @@ use cadcraft_geom::{Bounds2, Polyline, Vec2, point_in_polygon};
 use serde_json::{Value, json};
 
 use super::assoc::{detach, same_shape};
-use super::{GRADIENT_NAMES, ORIGIN_KW, OriginMode, closed_loop, dedup_loops, gradient_name, island_style, loops_at, loops_from_handles};
+use super::{GRADIENT_NAMES, ORIGIN_KW, OriginMode, closed_loop, dedup_loops, gradient_name, island_style, loops_at, loops_from_handles, same_loop};
 use crate::cmd::helpers::lwpoly;
 use crate::cmd::{bad, bool_or, point_param, points_param, size_param, str_param, targets};
 use crate::{Accept, Input, Interactive, Picker, Prompt, Result, Session, Step};
@@ -343,7 +343,10 @@ fn edit_loops(h: &mut Hatch, added: &[HatchLoop], removed: &[usize]) -> Result<(
         return Ok(());
     }
     h.loops = h.loops.drain(..).enumerate().filter_map(|(i, l)| (!removed.contains(&i)).then_some(l)).collect();
-    h.loops.extend_from_slice(added);
+    // A boundary the hatch already has is not added again (whatever role it has here): a second
+    // copy would cancel it under the odd-parity fill.
+    let added: Vec<HatchLoop> = added.iter().filter(|a| !h.loops.iter().any(|l| same_loop(l, a))).cloned().collect();
+    h.loops.extend(added);
     dedup_loops(&mut h.loops);
     if h.loops.is_empty() {
         return Err(bad("hatchedit", "a hatch needs at least one boundary loop"));
