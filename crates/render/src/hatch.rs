@@ -94,69 +94,84 @@ fn dedup_polygons(loops: &mut Vec<Vec<Vec2>>) {
 /// circle too).
 fn dedup_roles(loops: Vec<(usize, bool, Vec<Vec2>)>) -> Vec<(usize, bool, Vec<Vec2>)> {
     // `same_polygon` is O(n²) in a polygon's vertex count (every cyclic alignment, both windings),
-    // and each loop is compared against every unique one kept so far, so adversarial boundary
-    // geometry could force quadratic-on-quadratic work. Charge every vertex comparison against a
-    // shared budget; once it is spent, stop deduplicating and keep the remaining loops as-is
-    // (CWE-407).
+    // and each loop is compared with the loops kept so far, so adversarial boundary geometry could
+    // force quadratic-on-quadratic work. Only loops that could match are looked at (same role, or
+    // the other one, and the same vertex count, found by key), every vertex comparison is charged
+    // against a shared budget, and once it is spent no more loops are looked at: the rest are kept
+    // as they are (CWE-407).
     let mut budget: u64 = MAX_DEDUP_COMPARISONS;
+    // First a repeat within its role goes: the first of each boundary per role is kept.
     let mut unique: Vec<(usize, bool, Vec<Vec2>)> = Vec::with_capacity(loops.len());
+    let mut by_shape: std::collections::HashMap<(bool, usize), Vec<usize>> = std::collections::HashMap::new();
     for (i, outer, l) in loops {
         if l.len() < 3 {
             continue;
         }
-        let mut found = None;
-        for (k, (_, o, u)) in unique.iter().enumerate() {
-            if *o != outer || u.len() != l.len() {
-                continue;
-            }
-            // Each `same_polygon` call costs about 2·len² comparisons; stop if that would overrun.
-            let cost = 2u64.saturating_mul((u.len() as u64).saturating_mul(l.len() as u64));
-            match budget.checked_sub(cost) {
-                Some(left) => budget = left,
-                None => {
-                    // Out of budget: keep `l` without further comparison.
-                    budget = 0;
-                    break;
-                }
+        let key = (outer, l.len());
+        let mut repeat = false;
+        for &k in by_shape.get(&key).map_or(&[][..], Vec::as_slice) {
+            let Some((_, _, u)) = unique.get(k) else { continue };
+            if !charge(&mut budget, u.len(), l.len()) {
+                break;
             }
             if same_polygon(u, &l) {
-                found = Some(k);
+                repeat = true;
                 break;
             }
         }
-        // A repeat within its role goes; the first of each boundary per role is kept.
-        if found.is_none() {
+        if !repeat {
+            by_shape.entry(key).or_default().push(unique.len());
             unique.push((i, outer, l));
         }
     }
     // Then an outer loop and an island that are the same boundary cancel, whatever their order.
-    let mut out: Vec<(usize, bool, Vec<Vec2>)> = Vec::with_capacity(unique.len());
+    let mut slots: Vec<Option<(usize, bool, Vec<Vec2>)>> = Vec::with_capacity(unique.len());
+    let mut open: std::collections::HashMap<(bool, usize), Vec<usize>> = std::collections::HashMap::new();
     for (i, outer, l) in unique {
-        // The same comparison budget as above (CWE-407): once spent, loops stay as they are.
-        let twin = out.iter().position(|(_, o, u)| {
-            if *o == outer || u.len() != l.len() {
-                return false;
+        let twin_key = (!outer, l.len());
+        let mut twin = None;
+        for (at, &k) in open.get(&twin_key).map_or(&[][..], Vec::as_slice).iter().enumerate() {
+            let Some(Some((_, _, u))) = slots.get(k) else { continue };
+            if !charge(&mut budget, u.len(), l.len()) {
+                break;
             }
-            let cost = 2u64.saturating_mul((u.len() as u64).saturating_mul(l.len() as u64));
-            match budget.checked_sub(cost) {
-                Some(left) => {
-                    budget = left;
-                    same_polygon(u, &l)
-                }
-                None => {
-                    budget = 0;
-                    false
-                }
+            if same_polygon(u, &l) {
+                twin = Some((at, k));
+                break;
             }
-        });
+        }
         match twin {
-            Some(k) => {
-                out.remove(k);
+            Some((at, k)) => {
+                if let Some(slot) = slots.get_mut(k) {
+                    *slot = None;
+                }
+                if let Some(ks) = open.get_mut(&twin_key) {
+                    ks.remove(at);
+                }
             }
-            None => out.push((i, outer, l)),
+            None => {
+                open.entry((outer, l.len())).or_default().push(slots.len());
+                slots.push(Some((i, outer, l)));
+            }
         }
     }
-    out
+    slots.into_iter().flatten().collect()
+}
+
+/// Charge a `same_polygon` call between loops of `a` and `b` vertices (about 2·a·b comparisons)
+/// against `budget`: false, with the budget spent, when it would overrun.
+fn charge(budget: &mut u64, a: usize, b: usize) -> bool {
+    let cost = 2u64.saturating_mul((a as u64).saturating_mul(b as u64));
+    match budget.checked_sub(cost) {
+        Some(left) if *budget > 0 => {
+            *budget = left;
+            true
+        }
+        _ => {
+            *budget = 0;
+            false
+        }
+    }
 }
 
 /// Vertex comparisons `dedup_polygons` may perform before it stops deduplicating.
@@ -690,6 +705,26 @@ mod role_dedup_tests {
             let kept = fill_loops(&hatch(loops), 1e-4);
             assert_eq!(kept.len(), 1, "{order:?}: only the enclosing square is left");
         }
+    }
+}
+
+#[cfg(test)]
+mod role_dedup_scale_tests {
+    use super::*;
+
+    /// Many distinct loops (as an adversarial file may hold) are sorted out quickly: only loops
+    /// that could match are looked at, and once the budget is spent none are.
+    #[test]
+    fn many_distinct_loops_are_handled_quickly() {
+        let tri = |k: usize| {
+            let x = k as f64;
+            vec![Vec2::new(x, 0.0), Vec2::new(x + 0.5, 0.0), Vec2::new(x, 0.5)]
+        };
+        let loops: Vec<(usize, bool, Vec<Vec2>)> = (0..40_000).map(|k| (k, k % 2 == 0, tri(k))).collect();
+        let start = std::time::Instant::now();
+        let kept = dedup_roles(loops);
+        assert_eq!(kept.len(), 40_000);
+        assert!(start.elapsed() < std::time::Duration::from_secs(5), "{:?}", start.elapsed());
     }
 }
 
