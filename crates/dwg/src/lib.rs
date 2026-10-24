@@ -106,6 +106,7 @@ mod native {
         let mut doc = outcome.document;
         current_style_names(&mut doc);
         table_merges(&mut doc);
+        complete_sort_tables(&mut doc);
         table_style_rows(&mut doc, false);
         let orphans = drop_orphaned_dgn_components(&mut doc);
         if orphans > 0 {
@@ -229,6 +230,32 @@ mod native {
             82 => "LAYOUT",
             _ => return None,
         })
+    }
+
+    /// Draw order (SORTENTSTABLE) with every entity of its block listed. acadrust 0.6.5's DXF
+    /// writer replaces a table's sort handles by fresh handles in the same order, all above the
+    /// file's handles, while an entity the table doesn't list is drawn by its own handle: every
+    /// listed entity would move above every unlisted one. Listing the others by their own handles
+    /// keeps the source's order through the renumbering.
+    fn complete_sort_tables(doc: &mut acadrust::CadDocument) {
+        let blocks: std::collections::HashMap<acadrust::Handle, &[acadrust::Handle]> =
+            doc.block_records.iter().map(|b| (b.handle, b.entity_handles.as_slice())).collect();
+        let mut missing: Vec<(acadrust::Handle, Vec<acadrust::Handle>)> = Vec::new();
+        for (h, o) in &doc.objects {
+            let acadrust::objects::ObjectType::SortEntitiesTable(t) = o else { continue };
+            let Some(ents) = blocks.get(&t.block_owner_handle) else { continue };
+            let add: Vec<_> = ents.iter().copied().filter(|e| !t.contains(*e)).collect();
+            if !add.is_empty() {
+                missing.push((*h, add));
+            }
+        }
+        for (h, add) in missing {
+            if let Some(acadrust::objects::ObjectType::SortEntitiesTable(t)) = doc.objects.get_mut(&h) {
+                for e in add {
+                    t.add_entry(e, e);
+                }
+            }
+        }
     }
 
     /// Merged table cells onto the cells. acadrust 0.6.3 reads a 2010+ (AC1024+) DWG table's
