@@ -22,6 +22,7 @@ fn text_mleader() -> MLeader {
         landing: Vec3::new(5.0, 4.0, 0.0),
         dogleg: 0.75,
         text: Some(MText {
+            defined_height: Default::default(),
             insert: Vec3::new(5.9, 4.0, 0.0),
             height: 0.4,
             width: 6.0,
@@ -264,4 +265,22 @@ fn multileader_through_dwg() {
     let got = mleaders(&back);
     assert_eq!(got.len(), 1, "{:?}", back.model.iter().map(|e| e.kind.dxf_name()).collect::<Vec<_>>());
     assert_eq!(*got[0], m);
+}
+
+/// A multileader style's own arrowhead (a standard one no dimension style uses) is written as its
+/// block, so the style's 341 names it and it reads back.
+#[test]
+fn a_style_arrowhead_no_dimension_style_uses_is_kept() {
+    let mut d = Drawing::new_imperial();
+    let s = d.mleader_styles.first_mut().unwrap();
+    s.props.arrow_block = "_DOT".into();
+    assert!(
+        d.dim_styles
+            .iter()
+            .all(|s| ![&s.arrow_block, &s.arrow_block1, &s.arrow_block2, &s.leader_arrow_block].iter().any(|a| a.eq_ignore_ascii_case("_DOT")))
+    );
+    let (text, back) = roundtrip(&d);
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    assert!(lines.windows(2).any(|w| w == ["2", "_DOT"]), "no _DOT block record was written");
+    assert_eq!(back.mleader_styles.first().map(|s| s.props.arrow_block.as_str()), Some("_DOT"));
 }

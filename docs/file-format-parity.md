@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-17 · **Change:** minor (DWG read leaves out orphaned DGN line style components) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (CADCraft's own DWG container reader; DWG round trips keep every object's handle and type) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -37,6 +37,15 @@ version (the file's `$ACADVER`, 2018 for a new drawing), at least 2004 unless 20
 The bridge repairs two acadrust 0.6.3 gaps in 2010+ DWG: merged table cells and table-style
 title/header suppression.
 
+CADCraft also has its own DWG reader for the file's structure (`crates/dwg/src/codec`, every
+version from R13 to 2018 except 2007, the web build too): sections, object map, class list and each
+object's type, handle and space, with a note for everything that does not check out. It doesn't
+map objects to the drawing yet; it checks and corrects what the bridge hands over. On a real
+AutoCAD drawing (the MI-201 part, saved by AutoCAD in each version) opened and saved again, every
+object keeps its handle and type in 2004, 2010, 2013 and 2018, and every one but the 2000 format's
+VX table control in 2000 (`dwg_corpus_handles`, run locally with the corpus). Additions on save:
+CADCraft's own APPID and extension data, and three APPIDs acadrust adds when it reads.
+
 | DWG version | Code | AutoCAD 2027 | CADCraft read | CADCraft write | Tested how |
 |---|---|---|---|---|---|
 | R1.0–R2.6, R9, R10, R11/R12 | MC0.0–AC1009 | read | **no** (`is_dwg` accepts only `AC10xx` magic; acadrust doesn't target pre-R13) | no | — |
@@ -47,7 +56,7 @@ title/header suppression.
 | 2007–2009 | AC1021 | read, write | via bridge | yes | `dwg_at_every_version_reads_back` |
 | 2010–2012 | AC1024 | read, write | via bridge | yes | `dwg_at_every_version_reads_back`, `ac1024_dwg_with_many_entities_opens` |
 | 2013–2017 | AC1027 | read, write | via bridge | yes | `dwg_at_every_version_reads_back` |
-| 2018–2027 | AC1032 | read, write (default) | via bridge; untested on real files | yes (default for new drawings) | `dwg_at_every_version_reads_back` (synthetic only) |
+| 2018–2027 | AC1032 | read, write (default) | via bridge | yes (default for new drawings) | `dwg_at_every_version_reads_back`; an AutoCAD 2018 file locally (`dwg_corpus_handles`, needs the corpus) |
 | Web build | — | — | **no** (error: "save as DXF") | no | — |
 
 Everything lost in the DXF read/write paths below is also lost through DWG, plus whatever
@@ -138,6 +147,8 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | CADCraft's own DWG container reader (`crates/dwg/src/codec`: R13–2018 but 2007, sections, object map, classes, raw objects; hardened and tested with damaged files). With it, DWG open repairs the paper space block's ENDBLK handle, which the bridge renumbers; and an extension dictionary its owner's record doesn't name (the bridge's table styles) is kept and linked again, so the table style round-trip data (CELLSTYLEMAP) survives. An AutoCAD DWG opened and saved keeps every object's handle and type (2004–2018; was 54 of 191 objects for 2018 before the DXF handle work; tests `codec::tests`, `dwg_space_markers`, `dwg_check`, `xdict_by_owner`, `dwg_corpus_handles`) |
+| 2026-10-23 | minor | DXF save keeps what it read: tables, blocks, layouts, dictionaries and styles keep their handles; every header variable is written back with its group codes; the dictionary tree and entity reactors survive; plot settings, layout data, viewport settings, multileader and table style fields, DIMASSOC snap data, dimension arrowhead flips (73–75) and the APPID table are modelled. An AutoCAD 2018 DXF saved again keeps 183 of 194 records unchanged (was 124), all 253 header variables (was 107) and every handle (tests: `kept_handles`, `header_kept_vars`, `kept_structure`, `field_roundtrip`, `record_fields`) |
 | 2026-10-17 | minor | DWG read: DGN line style components no line style definition reaches are left out before the DXF bridge, with a read note; an 83 MB site plan with 888,483 of them (1.2 GB of DXF, over the limit) now opens (#1482) |
 | 2026-10-12 | minor | PDF output: object transparency plotted as PDF alpha (`/ExtGState` `/ca` `/CA`) when the page setup's or the plot's "Plot transparency" is on; PNG plots blend it, SVG uses `opacity`; plots without it are unchanged byte for byte |
 | 2026-10-12 | minor | DXF/DWG save: the Model layout's plot settings are written as CADCraft plots model space, drawing extents scaled to fit (PLOTSETTINGS 74 = 1, 75 = 0), instead of plot type 5 "Layout information", which other programs' Plot dialogs can't use for model space |

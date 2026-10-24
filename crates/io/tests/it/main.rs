@@ -15,19 +15,27 @@ mod dim_marks_roundtrip;
 mod dimstyle_vars_roundtrip;
 mod drafting_spacing;
 #[cfg(not(target_arch = "wasm32"))]
+mod dwg_corpus_handles;
+#[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
 mod dwg_layout_owner;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_roundtrip_losses;
+#[cfg(not(target_arch = "wasm32"))]
+mod dwg_space_markers;
 mod dwt_template;
 mod dxf_versions;
 mod dynblock_read;
 mod entity_props_roundtrip;
+mod field_roundtrip;
 mod followups_626;
 mod groups_roundtrip;
 mod hatch_assoc_roundtrip;
 mod hatch_pattern_def;
+mod header_kept_vars;
 mod helix_roundtrip;
+mod kept_handles;
+mod kept_structure;
 mod layout_paper_units;
 mod layout_plot_window;
 #[cfg(not(target_arch = "wasm32"))]
@@ -48,6 +56,7 @@ mod pdf_layers;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
+mod record_fields;
 mod region_roundtrip;
 mod roundtrip_audit;
 mod skipped_records;
@@ -64,4 +73,5 @@ mod tolerance_roundtrip;
 mod user_lin_pat_roundtrip;
 mod view_tables_roundtrip;
 mod viewport_clip_roundtrip;
+mod xdict_by_owner;
 mod xref_roundtrip;

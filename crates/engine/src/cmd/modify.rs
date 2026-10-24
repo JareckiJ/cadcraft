@@ -1382,6 +1382,7 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                     handle: Handle(0),
                     common: e.common.clone(),
                     kind: EntityKind::MText(cadcraft_doc::MText {
+                        defined_height: Default::default(),
                         insert: v3(g.text_pos),
                         height: g.text_height,
                         width: 0.0,

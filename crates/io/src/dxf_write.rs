@@ -3,7 +3,7 @@
 //! `$ACADVER`, from 2004 in the newer DIMSTYLE groups, and from 2007 in UTF-8 text (the caller
 //! picks the text encoding) and MULTILEADER entities (older files get LEADER + MTEXT).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadcraft_color::Color;
 use cadcraft_doc::*;
@@ -22,9 +22,29 @@ struct W {
     /// Persistent reactors of boundary objects: each source object of an associative hatch →
     /// the hatches (groups `{ACAD_REACTORS 330 …}`), from [`hatch_reactors`].
     reactors: HashMap<Handle, Vec<String>>,
+    /// Handles already given in the file being written (entities' own, and every one handed out).
+    used: HashSet<u64>,
+    /// Handles kept from the file the drawing was read from: new handles
+    /// skip them, so each goes back to the object that had it.
+    reserved: HashSet<u64>,
+    /// Role → the handle it had when read ([`cadcraft_doc::foreign::Foreign::handles`]).
+    roles: HashMap<(String, String), Handle>,
 }
 
 impl W {
+    /// A writer for groups only: no handles are kept or reserved.
+    fn scratch(next: u64) -> W {
+        W {
+            t: Vec::new(),
+            next,
+            pstyles: HashMap::new(),
+            layers: HashMap::new(),
+            reactors: HashMap::new(),
+            used: HashSet::new(),
+            reserved: HashSet::new(),
+            roles: HashMap::new(),
+        }
+    }
     fn s(&mut self, c: i32, v: impl Into<String>) {
         self.t.push(Tag::s(c, v));
     }
@@ -43,10 +63,29 @@ impl W {
         self.f(c, p.x);
         self.f(c + 10, p.y);
     }
+    /// A new handle, never one that is used or kept for another object.
     fn h(&mut self) -> String {
-        let h = format!("{:X}", self.next);
+        // A hostile file can put handles at the top of the range: past it, look for a free one
+        // from the bottom. Among `taken + 1` values one is free, so this ends.
+        while self.next == 0 || self.next == u64::MAX || self.used.contains(&self.next) || self.reserved.contains(&self.next) {
+            self.next = if self.next >= u64::MAX - 1 { 1 } else { self.next + 1 };
+        }
+        let n = self.next;
+        self.used.insert(n);
         self.next = self.next.saturating_add(1);
-        h
+        format!("{n:X}")
+    }
+    /// The handle `kept` (an object's own, else the one its role had when read), if it is set
+    /// and not given yet; otherwise a new one.
+    fn keep(&mut self, kept: impl Into<Handle>, role: (&str, &str)) -> String {
+        let kept: Handle = kept.into();
+        let role_handle = || self.roles.get(&(role.0.to_string(), role.1.to_ascii_uppercase())).copied();
+        let h = if kept.is_none() { role_handle().unwrap_or(Handle(0)) } else { kept };
+        if !h.is_none() && !self.used.contains(&h.0) {
+            self.used.insert(h.0);
+            return h.hex();
+        }
+        self.h()
     }
     /// A `102 {NAME` … `102 }` group of handles.
     fn group(&mut self, name: &str, code: i32, handles: &[&str]) {
@@ -100,6 +139,8 @@ struct OsnapRef {
     param: f64,
     point: Vec3,
     other: Option<Handle>,
+    /// What the file held for this reference, while the link is still the one read.
+    read: Option<OsnapRead>,
 }
 
 /// Handles and names the entity writer needs from the rest of the file.
@@ -204,7 +245,7 @@ fn annotative_xdata(w: &mut W) {
 
 /// Override (`ACAD` DSTYLE) and associativity (`CADCRAFT` ASSOC) xdata of a dimension.
 fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
-    let mut ov = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
+    let mut ov = W::scratch(0);
     let mut sah = false;
     for (k, v) in &dm.overrides {
         let Some(field) = DimStyle::field_name(k) else { continue };
@@ -379,6 +420,79 @@ fn header_vars(w: &mut W, d: &Drawing) {
         }
     }
     dim_header_vars(w, d);
+}
+
+/// Header variables the writer doesn't write by name ([`HEADER_VARS`], the current dimension
+/// style's, the version, code page, extents and handle seed): every other variable read from a
+/// file, with the group code it was read with ([`cadcraft_doc::Header::codes`]), in name order.
+/// A variable that points at another object by handle is written while that object keeps the
+/// handle it was read with.
+fn kept_header_vars(w: &mut W, d: &Drawing, start: usize) {
+    let written: HashSet<String> =
+        w.t.get(start..).unwrap_or(&[]).iter().filter(|t| t.code == 9).map(|t| t.str().trim_start_matches('$').to_ascii_uppercase()).collect();
+    // Converted on reading (or written elsewhere), so their codes no longer fit the value.
+    const SKIP: &[&str] = &["ACADVER", "DWGCODEPAGE", "HANDSEED", "EXTMIN", "EXTMAX", "ANGBASE", "DIMDSEP", "DIMJOGANG"];
+    for (name, v) in &d.header.vars {
+        if written.contains(name) || SKIP.contains(&name.as_str()) {
+            continue;
+        }
+        let Some(code) = d.header.code(name) else { continue };
+        // Only a code a header value can have: a structural code (0 starts a record, 9 a variable,
+        // 100 to 102 subclasses and groups) or extended data would break the file.
+        if !header_value_code(code) {
+            continue;
+        }
+        // A reference to another object by handle: written while that object keeps its handle.
+        if matches!(code, 5 | 105 | 320..=369 | 390..=399 | 480 | 481) {
+            let target = v.as_str().and_then(Handle::parse_hex);
+            if !target.is_some_and(|h| w.reserved.contains(&h.0) || w.used.contains(&h.0)) {
+                continue;
+            }
+        }
+        match (code, v) {
+            (cadcraft_doc::POINT_2D, HVal::Point(p)) => {
+                w.s(9, format!("${name}"));
+                w.f(10, p.x);
+                w.f(20, p.y);
+            }
+            (cadcraft_doc::POINT_3D, HVal::Point(p)) => {
+                w.s(9, format!("${name}"));
+                w.p(10, *p);
+            }
+            (_, HVal::Point(_)) => {}
+            (c, v) => match cadcraft_dxf::kind_of(c) {
+                cadcraft_dxf::Kind::Real => {
+                    if let Some(f) = v.as_f64().filter(|f| f.is_finite()) {
+                        w.s(9, format!("${name}"));
+                        w.f(c, f);
+                    }
+                }
+                cadcraft_dxf::Kind::Int16 | cadcraft_dxf::Kind::Int32 | cadcraft_dxf::Kind::Int64 | cadcraft_dxf::Kind::Bool => {
+                    if let Some(i) = v.as_i64() {
+                        w.s(9, format!("${name}"));
+                        w.i(c, i);
+                    }
+                }
+                cadcraft_dxf::Kind::Str | cadcraft_dxf::Kind::Hex => {
+                    let t = match v {
+                        HVal::Str(t) => t.clone(),
+                        HVal::Int(i) => i.to_string(),
+                        HVal::Real(r) => cadcraft_dxf::format_real(*r),
+                        HVal::Point(_) => continue,
+                    };
+                    w.s(9, format!("${name}"));
+                    w.s(c, t);
+                }
+            },
+        }
+    }
+}
+
+/// Whether a header variable may be written with group `code` (DXF Reference, HEADER section):
+/// a value code, a handle, or one of the point codes. `code` comes from the file a drawing was
+/// read from (or a `.cad` document), so anything else is skipped.
+fn header_value_code(code: i32) -> bool {
+    matches!(code, cadcraft_doc::POINT_2D | cadcraft_doc::POINT_3D | 1..=8 | 10..=99 | 105 | 110..=149 | 160..=179 | 210..=239 | 270..=481)
 }
 
 /// An entity's group 440 (DXF Reference): ByBlock is `0x01000000`, a fixed transparency its alpha
@@ -574,7 +688,9 @@ fn text_tags(w: &mut W, d: &Drawing, t: &Text, attrib: Option<(&Attrib, Version)
     if t.oblique != 0.0 {
         w.f(51, t.oblique.to_degrees());
     }
-    w.s(7, &t.style);
+    if !t.style.trim().eq_ignore_ascii_case("Standard") {
+        w.s(7, &t.style);
+    }
     let h = match t.halign {
         HAlign::Left => 0,
         HAlign::Center => 1,
@@ -826,6 +942,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             w.p(10, t.insert);
             w.f(40, t.height);
             w.f(41, t.width);
+            // Defined annotation height (DXF 2010 and later).
+            if cx.target >= Version::R2010 {
+                w.f(46, if t.defined_height.is_finite() { t.defined_height.max(0.0) } else { 0.0 });
+            }
             w.i(71, i64::from(t.attach));
             w.i(72, 1);
             // Long contents go in 250-char 3-chunks, the remainder in 1.
@@ -838,7 +958,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             if n == 0 {
                 w.s(1, "");
             }
-            w.s(7, &t.style);
+            // The DXF default style is STANDARD: written only when it is another (as AutoCAD does).
+            if !t.style.trim().eq_ignore_ascii_case("Standard") {
+                w.s(7, &t.style);
+            }
             if t.rotation != 0.0 {
                 w.f(50, t.rotation.to_degrees());
             }
@@ -895,6 +1018,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
         EntityKind::Dimension(dm) => {
             w.s(0, "DIMENSION");
             common_x(w, e, owner, paper, "AcDbDimension", cx.assoc.get(&e.handle));
+            // The subclass's version (DXF 2010 and later).
+            if cx.target >= Version::R2010 {
+                w.i(280, 0);
+            }
             let bname = cx.dim_blocks.get(&e.handle).cloned().or_else(|| dm.block.clone()).unwrap_or_default();
             w.s(2, bname);
             w.p(10, dm.defpt);
@@ -913,8 +1040,17 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 DimKind::ArcLength => 1,
             };
             w.i(70, ty | 32 | if dm.user_text_pos { 128 } else { 0 });
+            if dm.attachment != 0 {
+                w.i(71, i64::from(dm.attachment));
+            }
             // The actual measurement (read-only in DXF): AutoLISP's entget shows it.
             w.f(42, g.measurement);
+            // The flag before the arrowhead flips, and the flips (2007 and later).
+            if cx.target >= Version::R2007 || dm.flag_73 || dm.flip_arrows.iter().any(|f| *f) {
+                w.i(73, i64::from(dm.flag_73));
+                w.i(74, i64::from(dm.flip_arrows[0]));
+                w.i(75, i64::from(dm.flip_arrows[1]));
+            }
             if !dm.text.is_empty() {
                 w.s(1, &dm.text);
             }
@@ -927,7 +1063,10 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                     w.s(100, "AcDbAlignedDimension");
                     w.p(13, dm.p13);
                     w.p(14, dm.p14);
-                    w.f(50, rotation.to_degrees());
+                    // 0 is the default (a horizontal dimension), left out as AutoCAD does.
+                    if rotation != 0.0 {
+                        w.f(50, rotation.to_degrees());
+                    }
                     oblique_52(w, dm, rotation);
                     w.s(100, "AcDbRotatedDimension");
                 }
@@ -1418,6 +1557,7 @@ fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
             handle: Handle(0),
             common: text_c,
             kind: EntityKind::MText(MText {
+                defined_height: Default::default(),
                 insert: g.text_pos.to3(0.0),
                 height: g.text_height,
                 width: 0.0,
@@ -1472,6 +1612,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
                 handle: Handle(0),
                 common: Common { color: cell.color, ..c.clone() },
                 kind: EntityKind::MText(MText {
+                    defined_height: Default::default(),
                     insert: cell.at.to3(0.0),
                     height: cell.height,
                     width: 0.0,
@@ -1551,6 +1692,11 @@ pub(crate) fn polyline_vertex_ref(p: &LwPolyline, index: usize) -> Option<(i64, 
 /// Standard DIMASSOC point references of an associative dimension: the extension-line
 /// origins of linear/aligned dimensions and the feature point of ordinate dimensions, linked
 /// to objects that exist ([`whole_object_ref`]). CADCraft's exact links travel in xdata as well.
+/// The reference data the file held for `a`, while `a` is still the link that was read.
+fn kept_read(a: &DimAssoc) -> Option<OsnapRead> {
+    a.read.0.as_deref().filter(|r| r.handle == a.handle && r.snap.as_ref() == Some(&a.snap)).cloned()
+}
+
 fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
     let slots: &[&str] = match dm.kind {
         DimKind::Linear { .. } | DimKind::Aligned => &["p13", "p14"],
@@ -1572,7 +1718,7 @@ fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
             };
             let Some((osnap, param, segment)) = index.and_then(|i| polyline_vertex_ref(p, i)) else { continue };
             flags |= 1 << slot;
-            refs.push(OsnapRef { osnap, main: a.handle, segment, param, point, other: None });
+            refs.push(OsnapRef { osnap, main: a.handle, segment, param, point, other: None, read: kept_read(a) });
             continue;
         }
         if !whole_object_ref(&ent.kind) {
@@ -1591,7 +1737,7 @@ fn std_assoc_refs(d: &Drawing, dm: &Dimension) -> (i64, Vec<OsnapRef>) {
             }
         };
         flags |= 1 << slot;
-        refs.push(OsnapRef { osnap, main: a.handle, segment: 0, param, point, other });
+        refs.push(OsnapRef { osnap, main: a.handle, segment: 0, param, point, other, read: kept_read(a) });
     }
     (flags, refs)
 }
@@ -1648,13 +1794,18 @@ fn paper_view(w: &mut W, d: &Drawing, e: &Entity, owner: &str, cx: &Ctx) {
 
 /// The VPORT table: the `*Active` model space tiles (one viewport on the extents when there is no
 /// tiled configuration) and the saved configurations, each tile a record, the current one first.
-fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
+fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2, target: Version) {
+    // A lone `*Active` tile the file held: its settings, handle and window shape are kept; the view
+    // itself is the drawing's extents (CADCraft zooms to them on opening).
+    let held = d.active_vport.as_deref();
     let single = VportTile {
+        settings: held.map(|t| t.settings.clone()).unwrap_or_default(),
+        handle: held.map(|t| t.handle).unwrap_or_default(),
         min: Vec2::ZERO,
         max: Vec2::new(1.0, 1.0),
         center: if ext.is_empty() { Vec2::new(6.0, 4.5) } else { ext.center() },
         height: if ext.is_empty() { 9.0 } else { (ext.height() * 1.1).max(1e-6) },
-        aspect: 1.6,
+        aspect: held.map_or(1.6, |t| t.aspect),
     };
     let tiled = d.vports.iter().find(|c| c.is_active() && c.tiles.len() > 1);
     let mut records: Vec<(&str, &VportTile)> = match tiled {
@@ -1665,7 +1816,8 @@ fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
     let th = table_head(w, "VPORT", records.len());
     let finite = |p: Vec2, or: Vec2| if p.is_finite() { p } else { or };
     for (name, t) in records {
-        record_head(w, "VPORT", &th, "AcDbViewportTableRecord");
+        let v = &t.settings;
+        record_head(w, "VPORT", name, t.handle, &th, "AcDbViewportTableRecord");
         w.s(2, name);
         w.i(70, 0);
         w.p2(10, finite(t.min, Vec2::ZERO));
@@ -1675,18 +1827,79 @@ fn vport_table(w: &mut W, d: &Drawing, ext: Bounds2) {
         w.p2(13, d.header.point("SNAPBASE").map(|p| p.xy()).filter(|p| p.is_finite()).unwrap_or(Vec2::ZERO));
         w.p2(14, d.header.snap_unit());
         w.p2(15, d.header.grid_unit());
-        w.p(16, Vec3::Z);
-        w.p(17, Vec3::ZERO);
+        w.p(16, v.direction);
+        w.p(17, v.target);
         w.f(40, if t.height.is_finite() && t.height > 0.0 { t.height } else { 1.0 });
         w.f(41, if t.aspect.is_finite() && t.aspect > 0.0 { t.aspect } else { 1.0 });
-        w.f(42, 50.0);
+        w.f(42, v.lens);
+        w.f(43, v.front_clip);
+        w.f(44, v.back_clip);
         w.f(50, d.header.f64("SNAPANG", 0.0));
+        w.f(51, v.twist);
+        for (c, x) in [
+            (71, v.view_mode),
+            (72, v.circle_zoom),
+            (73, v.fast_zoom),
+            (74, v.ucs_icon),
+            (75, v.snap_on),
+            (76, v.grid_on),
+            (77, v.snap_style),
+            (78, v.snap_isopair),
+        ] {
+            w.i(c, i64::from(x));
+        }
+        if let Some(sheet) = &v.style_sheet {
+            w.s(1, sheet.clone());
+        }
+        w.i(281, i64::from(v.render_mode));
+        w.i(65, i64::from(v.ucs_per_viewport));
+        w.p(110, v.ucs_origin);
+        w.p(111, v.ucs_x);
+        w.p(112, v.ucs_y);
+        w.i(79, i64::from(v.ortho_type));
+        w.f(146, v.elevation);
+        for (c, h) in [(345, v.named_ucs), (346, v.base_ucs)] {
+            if !h.is_none() {
+                w.s(c, h.hex());
+            }
+        }
+        if v.shade_plot != 0 {
+            w.i(170, i64::from(v.shade_plot));
+        }
+        // Grid flags and the default lighting came with AutoCAD 2007.
+        if target >= Version::R2007 {
+            w.i(60, i64::from(v.grid_flags));
+            w.i(61, i64::from(v.major_grid));
+        }
+        for (c, h) in [(332, v.background), (333, v.shade_plot_object), (348, v.visual_style)] {
+            if !h.is_none() {
+                w.s(c, h.hex());
+            }
+        }
+        if target >= Version::R2007 {
+            w.i(292, i64::from(v.default_lighting));
+            w.i(282, i64::from(v.lighting_type));
+            w.f(141, v.brightness);
+            w.f(142, v.contrast);
+        }
+        if let Some(a) = v.ambient {
+            w.i(63, i64::from(a));
+        }
+        if let Some(rgb) = v.ambient_rgb {
+            w.i(421, rgb);
+        }
     }
     w.s(0, "ENDTAB");
 }
 
+/// Every entity handle of the drawing: written as they are.
+fn all_entity_handles(d: &Drawing) -> HashSet<u64> {
+    let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
+    spaces.flat_map(|s| s.iter().map(|e| e.handle.0)).filter(|h| *h != 0).collect()
+}
+
 fn table_head(w: &mut W, name: &str, count: usize) -> String {
-    let h = w.h();
+    let h = w.keep(Handle(0), ("TABLE", name));
     w.s(0, "TABLE");
     w.s(2, name);
     w.s(5, h.clone());
@@ -1696,8 +1909,9 @@ fn table_head(w: &mut W, name: &str, count: usize) -> String {
     h
 }
 
-fn record_head(w: &mut W, kind: &str, owner: &str, subclass: &str) -> String {
-    let h = w.h();
+/// A table record's first groups; `kept` is its own handle (0: the one its name had when read).
+fn record_head(w: &mut W, kind: &str, name: &str, kept: impl Into<Handle>, owner: &str, subclass: &str) -> String {
+    let h = w.keep(kept, (kind, name));
     w.s(0, kind);
     w.s(if kind == "DIMSTYLE" { 105 } else { 5 }, h.clone());
     w.s(330, owner);
@@ -1744,17 +1958,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     let committed = d.committed();
     let d: &Drawing = &committed;
     // Structural handles start above every entity handle.
-    let mut w = W {
-        t: Vec::new(),
-        next: d.handseed.max(0x100).saturating_add(0x1000),
-        pstyles: HashMap::new(),
-        layers: HashMap::new(),
-        reactors: hatch_reactors(d),
-    };
+    let mut w = W::scratch(d.handseed.max(0x100).saturating_add(0x1000));
+    w.reactors = hatch_reactors(d);
+    w.used = all_entity_handles(d);
+    w.roles = d.foreign.handles.iter().map(|(k, h)| (k.clone(), *h)).collect();
+    w.reserved = d.kept_handles();
     // Pre-allocate handles for block records.
     let mut paper_layouts: Vec<&Layout> = d.layouts.iter().collect();
     paper_layouts.sort_by_key(|l| l.tab_order);
-    let ms_br = w.h();
+    let ms_br = w.keep(Handle(0), ("BLOCK_RECORD", "*MODEL_SPACE"));
     // Xrefs are saved as references: without their objects and the symbols that came with them.
     let saved_view = crate::dxf_xref::saved_view(d);
     let d = saved_view.as_ref().unwrap_or(d);
@@ -1763,7 +1975,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         .enumerate()
         .map(|(i, l)| (if i == 0 { "*Paper_Space".to_string() } else { format!("*Paper_Space{}", i - 1) }, String::new(), *l))
         .collect();
-    let ps_brs: Vec<(String, String, &Layout)> = ps_brs.into_iter().map(|(n, _, l)| (n, w.h(), l)).collect();
+    let ps_brs: Vec<(String, String, &Layout)> =
+        ps_brs.into_iter().map(|(n, _, l)| (n.clone(), w.keep(l.block_handle, ("BLOCK_RECORD", &n)), l)).collect();
     let dim_plan = dim_block_plan(d);
     let mut user_blocks: Vec<(String, String, &Block)> = d
         .blocks
@@ -1772,7 +1985,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         .map(|b| (b.name.clone(), String::new(), b.as_ref()))
         .collect();
     user_blocks.iter_mut().for_each(|b| b.1 = format!("{:X}", 0));
-    let user_blocks: Vec<(String, String, &Block)> = user_blocks.into_iter().map(|(n, _, b)| (n, w.h(), b)).collect();
+    let user_blocks: Vec<(String, String, &Block)> =
+        user_blocks.into_iter().map(|(n, _, b)| (n.clone(), w.keep(b.handle, ("BLOCK_RECORD", &n)), b)).collect();
     let mut cx = Ctx { paper_views: paper_views(d), target, ..Ctx::default() };
     cx.block_records = user_blocks.iter().map(|(n, h, _)| (n.to_ascii_uppercase(), h.clone())).collect();
     // Dimension blocks.
@@ -1811,7 +2025,10 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
                         name
                     }
                 };
-                let brh = w.h();
+                let brh = match reused {
+                    Some(b) => w.keep(b.handle, ("BLOCK_RECORD", &b.name)),
+                    None => w.h(),
+                };
                 cx.dim_blocks.insert(e.handle, name.clone());
                 dim_defs.push((name, brh, ents));
             }
@@ -1828,6 +2045,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     for s in &d.dim_styles {
         arrow_names.extend([s.arrow_block.clone(), s.arrow_block1.clone(), s.arrow_block2.clone(), s.leader_arrow_block.clone()]);
     }
+    // A multileader style's arrowhead (341) is a block record too.
+    arrow_names.extend(d.mleader_styles.iter().map(|s| s.props.arrow_block.clone()));
     for e in &every {
         if let EntityKind::Dimension(dm) = &e.kind {
             for (k, v) in &dm.overrides {
@@ -1882,53 +2101,69 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     // Image definitions (IMAGEDEF objects) of raster images anywhere in the drawing.
     cx.images = crate::dxf_image::plan(every.iter().copied(), || w.h());
-    cx.mlines = crate::dxf_mline::plan(d, every.iter().copied(), || w.h());
+    cx.mlines = crate::dxf_mline::plan(d, every.iter().copied(), |h, role| w.keep(h, role));
     // DIMASSOC objects of associative dimensions in model and paper space.
     for st in &all_spaces {
         for e in st.iter() {
             if let EntityKind::Dimension(dm) = &e.kind {
                 let (flags, refs) = std_assoc_refs(d, dm);
                 if !refs.is_empty() {
-                    cx.assoc.insert(e.handle, AssocObj { xdict: w.h(), handle: w.h(), flags, refs });
+                    let own = e.handle.hex();
+                    let xdict = w.keep(Handle(0), ("XDICT", &own));
+                    let handle = w.keep(Handle(0), ("DIMASSOC", &own));
+                    cx.assoc.insert(e.handle, AssocObj { xdict, handle, flags, refs });
+                }
+            }
+        }
+    }
+    // The geometry a dimension follows names its DIMASSOC as a persistent reactor (S4).
+    let mut assoc_sorted: Vec<(&Handle, &AssocObj)> = cx.assoc.iter().collect();
+    assoc_sorted.sort_by_key(|(h, _)| **h);
+    for (_, a) in assoc_sorted {
+        for r in &a.refs {
+            for target in std::iter::once(r.main).chain(r.other) {
+                let list = w.reactors.entry(target).or_default();
+                if !list.contains(&a.handle) {
+                    list.push(a.handle.clone());
                 }
             }
         }
     }
     let default_table_style = [TableStyle::default()];
     let table_styles: &[TableStyle] = if d.table_styles.is_empty() { &default_table_style } else { &d.table_styles };
-    cx.table_styles = table_styles.iter().map(|s| (s.name.clone(), w.h())).collect();
+    cx.table_styles = table_styles.iter().map(|s| (s.name.clone(), w.keep(s.handle, ("NOD/ACAD_TABLESTYLE", &s.name)))).collect();
     let default_mleader_style = [MLeaderStyle::default()];
     let mleader_styles: &[MLeaderStyle] = if d.mleader_styles.is_empty() { &default_mleader_style } else { &d.mleader_styles };
-    cx.mleader_styles = mleader_styles.iter().map(|s| (s.name.clone(), w.h())).collect();
-    let root_dict = w.h();
-    let group_dict = w.h();
-    let layout_dict = w.h();
-    let table_style_dict = w.h();
+    cx.mleader_styles = mleader_styles.iter().map(|s| (s.name.clone(), w.keep(s.handle, ("NOD/ACAD_MLEADERSTYLE", &s.name)))).collect();
+    let root_dict = w.keep(Handle(0), ("NOD", ""));
+    let group_dict = w.keep(Handle(0), ("NOD", "ACAD_GROUP"));
+    let layout_dict = w.keep(Handle(0), ("NOD", "ACAD_LAYOUT"));
+    let table_style_dict = w.keep(Handle(0), ("NOD", "ACAD_TABLESTYLE"));
     // CADCraft data in XRECORDs of the named object dictionary: (key, handle, text chunks).
     let mut xrecords: Vec<(&str, String, Vec<String>)> = Vec::new();
     // The drawing's own next handle: table records and objects are numbered above it, so
     // reading it back (instead of $HANDSEED) keeps their handles across saves (#495).
-    xrecords.push((dxf_ext::HANDSEED_KEY, w.h(), vec![format!("{:X}", d.handseed)]));
+    xrecords.push((dxf_ext::HANDSEED_KEY, w.keep(Handle(0), ("NOD", dxf_ext::HANDSEED_KEY)), vec![format!("{:X}", d.handseed)]));
     if let Some(name) = d.header.get("CMLEADERSTYLE").and_then(HVal::as_str) {
-        xrecords.push((dxf_ext::MLEADER_STYLE_KEY, w.h(), vec![name.to_string()]));
+        xrecords.push((dxf_ext::MLEADER_STYLE_KEY, w.keep(Handle(0), ("NOD", dxf_ext::MLEADER_STYLE_KEY)), vec![name.to_string()]));
     }
     if let Some(chunks) = dxf_ext::constraint_chunks(&d.constraints, &d.parametric) {
-        xrecords.push((dxf_ext::CONSTRAINTS_KEY, w.h(), chunks));
+        xrecords.push((dxf_ext::CONSTRAINTS_KEY, w.keep(Handle(0), ("NOD", dxf_ext::CONSTRAINTS_KEY)), chunks));
     }
     if let Some(chunks) = dxf_ext::layer_state_chunks(&d.layer_states) {
-        xrecords.push((dxf_ext::LAYER_STATES_KEY, w.h(), chunks));
+        xrecords.push((dxf_ext::LAYER_STATES_KEY, w.keep(Handle(0), ("NOD", dxf_ext::LAYER_STATES_KEY)), chunks));
     }
     if let Some(chunks) = dxf_ext::plot_style_chunks(&d.plot_style_tables) {
-        xrecords.push((dxf_ext::PLOT_STYLES_KEY, w.h(), chunks));
+        xrecords.push((dxf_ext::PLOT_STYLES_KEY, w.keep(Handle(0), ("NOD", dxf_ext::PLOT_STYLES_KEY)), chunks));
     }
     if let Some(chunks) = dxf_ext::anno_chunks(d) {
-        xrecords.push((dxf_ext::ANNOTATION_KEY, w.h(), chunks));
+        xrecords.push((dxf_ext::ANNOTATION_KEY, w.keep(Handle(0), ("NOD", dxf_ext::ANNOTATION_KEY)), chunks));
     }
     // The annotation scale list: the ACAD_SCALELIST dictionary of SCALE objects.
-    let scale_dict = w.h();
-    let scales: Vec<(&cadcraft_doc::AnnoScale, String)> = d.scales.iter().filter(|s| s.is_valid()).map(|s| (s, w.h())).collect();
+    let scale_dict = w.keep(Handle(0), ("NOD", "ACAD_SCALELIST"));
+    let scales: Vec<(&cadcraft_doc::AnnoScale, String)> = d.scales.iter().filter(|s| s.is_valid()).map(|s| (s, w.keep(s.handle, ("", "")))).collect();
     // Plot style names used by layers and objects (Normal always), each a placeholder object.
-    let pstyle_dict = w.h();
+    let pstyle_dict = w.keep(Handle(0), ("NOD", "ACAD_PLOTSTYLENAME"));
     let mut pstyle_names: Vec<String> = vec![cadcraft_doc::NORMAL_STYLE.to_string()];
     let named = d.layers.iter().map(|l| l.plot_style.as_str()).chain(every.iter().map(|e| e.common.plot_style.as_str()));
     for n in named {
@@ -1938,14 +2173,21 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             pstyle_names.push(n.to_string());
         }
     }
-    let pstyles: Vec<(String, String)> = pstyle_names.into_iter().map(|n| (n, w.h())).collect();
+    let pstyles: Vec<(String, String)> = pstyle_names
+        .into_iter()
+        .map(|n| {
+            let h = w.keep(Handle(0), ("NOD/ACAD_PLOTSTYLENAME", &n));
+            (n, h)
+        })
+        .collect();
     w.pstyles = pstyles.iter().map(|(n, h)| (n.to_ascii_uppercase(), h.clone())).collect();
-    let model_layout = w.h();
-    let layout_handles: Vec<String> = ps_brs.iter().map(|_| w.h()).collect();
+    let model_layout = w.keep(Handle(0), ("NOD/ACAD_LAYOUT", "MODEL"));
+    let layout_handles: Vec<String> = ps_brs.iter().map(|(_, _, l)| w.keep(l.handle, ("NOD/ACAD_LAYOUT", &l.name))).collect();
 
     // ---------------- HEADER ----------------
     w.s(0, "SECTION");
     w.s(2, "HEADER");
+    let header_start = w.t.len();
     w.s(9, "$ACADVER");
     w.s(1, version.code());
     w.s(9, "$DWGCODEPAGE");
@@ -1958,6 +2200,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.p(10, ext.max.to3(0.0));
     }
     header_vars(&mut w, d);
+    kept_header_vars(&mut w, d, header_start);
     let seed_pos = w.t.len();
     w.s(9, "$HANDSEED");
     w.s(5, "0");
@@ -2008,14 +2251,14 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // ---------------- TABLES ----------------
     w.s(0, "SECTION");
     w.s(2, "TABLES");
-    vport_table(&mut w, d, ext);
+    vport_table(&mut w, d, ext, target);
     // LTYPE. Embedded text and shapes point at STYLE records (340), which get their handles
     // in the STYLE table below: (tag position, style name, is a shape) are filled in there.
     let mut ltype_handles: HashMap<String, String> = HashMap::new();
     let mut ltype_style_refs: Vec<(usize, Option<String>, bool)> = Vec::new();
     let th = table_head(&mut w, "LTYPE", d.linetypes.len());
     for lt in &d.linetypes {
-        let h = record_head(&mut w, "LTYPE", &th, "AcDbLinetypeTableRecord");
+        let h = record_head(&mut w, "LTYPE", &lt.name, lt.handle, &th, "AcDbLinetypeTableRecord");
         ltype_handles.entry(lt.name.to_ascii_uppercase()).or_insert(h.clone());
         cx.ltypes.entry(lt.name.to_ascii_uppercase()).or_insert(h);
         w.s(2, &lt.name);
@@ -2023,7 +2266,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(3, &lt.description);
         w.i(72, 65);
         w.i(73, lt.pattern.len() as i64);
-        w.f(40, lt.pattern_length());
+        // + 0.0 turns -0.0 (an empty pattern's sum) into 0.0.
+        w.f(40, lt.pattern_length() + 0.0);
         for el in &lt.pattern {
             w.f(49, el.length);
             // 74: 2 = text, 4 = shape, + 1 when the rotation is absolute (DXF Reference, LTYPE).
@@ -2053,7 +2297,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // LAYER
     let th = table_head(&mut w, "LAYER", d.layers.len());
     for l in &d.layers {
-        let lh = record_head(&mut w, "LAYER", &th, "AcDbLayerTableRecord");
+        let lh = record_head(&mut w, "LAYER", &l.name, l.handle, &th, "AcDbLayerTableRecord");
         w.layers.insert(l.name.to_ascii_uppercase(), lh);
         w.s(2, &l.name);
         // 16 | 32: an xref's layer (`xref|name`), externally dependent and resolved.
@@ -2099,7 +2343,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     let th = table_head(&mut w, "STYLE", d.text_styles.len() + shape_files.len());
     for s in &d.text_styles {
-        let h = record_head(&mut w, "STYLE", &th, "AcDbTextStyleTableRecord");
+        let h = record_head(&mut w, "STYLE", &s.name, s.handle, &th, "AcDbTextStyleTableRecord");
         cx.styles.entry(s.name.to_ascii_uppercase()).or_insert(h);
         w.s(2, &s.name);
         // 70 bit 4: vertical; 71 bits 2/4: backwards / upside down.
@@ -2125,7 +2369,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     let mut shape_handles: HashMap<String, String> = HashMap::new();
     for f in &shape_files {
-        let h = record_head(&mut w, "STYLE", &th, "AcDbTextStyleTableRecord");
+        let h = record_head(&mut w, "STYLE", "", Handle(0), &th, "AcDbTextStyleTableRecord");
         shape_handles.insert(f.to_ascii_uppercase(), h);
         w.s(2, "");
         w.i(70, 1);
@@ -2150,7 +2394,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // VIEW: named views (DXF Reference, VIEW). A view's layer state is CADCraft xdata.
     let th = table_head(&mut w, "VIEW", d.views.len());
     for v in &d.views {
-        record_head(&mut w, "VIEW", &th, "AcDbViewTableRecord");
+        record_head(&mut w, "VIEW", &v.name, v.handle, &th, "AcDbViewTableRecord");
         w.s(2, &v.name);
         w.i(70, i64::from(v.layout.is_some()));
         w.f(40, v.height);
@@ -2180,7 +2424,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // UCS: named user coordinate systems (DXF Reference, UCS).
     let th = table_head(&mut w, "UCS", d.ucss.len());
     for u in &d.ucss {
-        record_head(&mut w, "UCS", &th, "AcDbUCSTableRecord");
+        record_head(&mut w, "UCS", &u.name, u.handle, &th, "AcDbUCSTableRecord");
         w.s(2, &u.name);
         w.i(70, 0);
         w.p(10, u.origin);
@@ -2190,17 +2434,27 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.f(146, 0.0);
     }
     w.s(0, "ENDTAB");
-    let apps = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
+    // Our own and AutoCAD's applications, then the others the file registered; a registered name
+    // keeps its case, flags and handle.
+    let mut apps: Vec<AppId> = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP]
+        .into_iter()
+        .map(|n| d.appids.iter().find(|a| a.name.eq_ignore_ascii_case(n)).cloned().unwrap_or_else(|| AppId { name: n.into(), ..AppId::default() }))
+        .collect();
+    for a in &d.appids {
+        if !apps.iter().any(|x| x.name.eq_ignore_ascii_case(&a.name)) {
+            apps.push(a.clone());
+        }
+    }
     let th = table_head(&mut w, "APPID", apps.len());
-    for app in apps {
-        record_head(&mut w, "APPID", &th, "AcDbRegAppTableRecord");
-        w.s(2, app);
-        w.i(70, 0);
+    for app in &apps {
+        record_head(&mut w, "APPID", &app.name, app.handle, &th, "AcDbRegAppTableRecord");
+        w.s(2, &app.name);
+        w.i(70, i64::from(app.flags));
     }
     w.s(0, "ENDTAB");
     // DIMSTYLE
     let th = {
-        let h = w.h();
+        let h = w.keep(Handle(0), ("TABLE", "DIMSTYLE"));
         w.s(0, "TABLE");
         w.s(2, "DIMSTYLE");
         w.s(5, h.clone());
@@ -2212,12 +2466,12 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         h
     };
     for s in &d.dim_styles {
-        record_head(&mut w, "DIMSTYLE", &th, "AcDbDimStyleTableRecord");
+        record_head(&mut w, "DIMSTYLE", &s.name, s.handle, &th, "AcDbDimStyleTableRecord");
         w.s(2, &s.name);
         w.i(70, 0);
         let v = serde_json::to_value(s).unwrap_or_default();
         let defaults = serde_json::to_value(DimStyle::default()).unwrap_or_default();
-        let mut newer = W { t: Vec::new(), next: 0, pstyles: HashMap::new(), layers: HashMap::new(), reactors: HashMap::new() };
+        let mut newer = W::scratch(0);
         for (field, code, kind) in dxf_ext::DIM_CODES {
             let Some(enc) = v.get(*field).and_then(|x| cx.encode(*kind, x)) else { continue };
             // DIMPOST is written even when empty: a reader that defaults a missing one to "<>"
@@ -2267,14 +2521,20 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(100, "AcDbBlockTableRecord");
         w.s(2, name);
         w.s(340, layout.unwrap_or("0"));
-        // User blocks: insertion units (70) and explodability (280).
+        // Insertion units (70), explodability (280) and uniform scaling (281); spaces and
+        // generated blocks as AutoCAD writes them.
         if let Some(b) = blk {
             w.i(70, i64::from(b.units));
             w.i(280, i64::from(b.explodable));
+            w.i(281, i64::from(b.scale_uniformly));
             if let Some(a) = &b.array {
                 w.s(1001, dxf_ext::APP);
                 w.xdata(dxf_ext::array_xdata(a));
             }
+        } else {
+            w.i(70, 0);
+            w.i(280, 1);
+            w.i(281, 0);
         }
     };
     br_rec(&mut w, &ms_br, "*Model_Space", Some(&model_layout), None);
@@ -2293,8 +2553,16 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // ---------------- BLOCKS ----------------
     w.s(0, "SECTION");
     w.s(2, "BLOCKS");
-    let block = |w: &mut W, name: &str, desc: &str, brh: &str, base: Vec3, flags: i64, ents: &mut dyn Iterator<Item = &Entity>, paper: bool| {
-        let bh = w.h();
+    let block = |w: &mut W,
+                 name: &str,
+                 kept: (cadcraft_doc::KeptHandle, cadcraft_doc::KeptHandle),
+                 desc: &str,
+                 brh: &str,
+                 base: Vec3,
+                 flags: i64,
+                 ents: &mut dyn Iterator<Item = &Entity>,
+                 paper: bool| {
+        let bh = w.keep(kept.0, ("BLOCK", name));
         w.s(0, "BLOCK");
         w.s(5, bh);
         w.s(330, brh);
@@ -2315,7 +2583,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         for e in ents {
             entity(w, d, e, brh, false, &cx);
         }
-        let eh = w.h();
+        let eh = w.keep(kept.1, ("ENDBLK", name));
         w.s(0, "ENDBLK");
         w.s(5, eh);
         w.s(330, brh);
@@ -2326,32 +2594,35 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(8, "0");
         w.s(100, "AcDbBlockEnd");
     };
-    block(&mut w, "*Model_Space", "", &ms_br, Vec3::ZERO, 0, &mut std::iter::empty(), false);
+    let none = (cadcraft_doc::KeptHandle::default(), cadcraft_doc::KeptHandle::default());
+    block(&mut w, "*Model_Space", none, "", &ms_br, Vec3::ZERO, 0, &mut std::iter::empty(), false);
     for (i, (n, h, l)) in ps_brs.iter().enumerate() {
+        let kept = (l.begin_handle, l.end_handle);
         if i == 0 {
-            block(&mut w, n, "", h, Vec3::ZERO, 0, &mut std::iter::empty(), true);
+            block(&mut w, n, kept, "", h, Vec3::ZERO, 0, &mut std::iter::empty(), true);
         } else {
-            block(&mut w, n, "", h, Vec3::ZERO, 0, &mut l.entities.iter().map(|e| e.as_ref()), true);
+            block(&mut w, n, kept, "", h, Vec3::ZERO, 0, &mut l.entities.iter().map(|e| e.as_ref()), true);
         }
     }
     for (n, h, b) in &user_blocks {
-        block(&mut w, n, &b.description, h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
+        let kept = (b.begin_handle, b.end_handle);
+        block(&mut w, n, kept, &b.description, h, b.base, if b.anonymous { 1 } else { 0 }, &mut b.entities.iter().map(|e| e.as_ref()), false);
     }
     // Generated geometry entities (dimension, arrowhead and table blocks) need handles.
     for (_, _, ents) in dim_defs.iter_mut().chain(arrow_defs.iter_mut()).chain(table_defs.iter_mut()) {
         for e in ents.iter_mut().filter(|e| e.handle.0 == 0) {
-            e.handle = Handle(w.next);
-            w.next = w.next.saturating_add(1);
+            e.handle = Handle::parse_hex(&w.h()).unwrap_or(Handle(0));
         }
     }
     for (n, h, ents) in &dim_defs {
-        block(&mut w, n, "", h, Vec3::ZERO, 1, &mut ents.iter(), false);
+        let kept = d.block(n).map_or(none, |b| (b.begin_handle, b.end_handle));
+        block(&mut w, n, kept, "", h, Vec3::ZERO, 1, &mut ents.iter(), false);
     }
     for (n, h, ents) in &arrow_defs {
-        block(&mut w, n, "", h, Vec3::ZERO, 0, &mut ents.iter(), false);
+        block(&mut w, n, none, "", h, Vec3::ZERO, 0, &mut ents.iter(), false);
     }
     for (n, h, ents) in &table_defs {
-        block(&mut w, n, "", h, Vec3::ZERO, 1, &mut ents.iter(), false);
+        block(&mut w, n, none, "", h, Vec3::ZERO, 1, &mut ents.iter(), false);
     }
     w.s(0, "ENDSEC");
 
@@ -2372,8 +2643,9 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // Groups (members that still exist) and multileader styles.
     let group_owner = group_dict.clone();
     let written: std::collections::HashSet<String> = w.t.iter().filter(|t| t.code == 5).map(Tag::str).collect();
-    let groups: Vec<(&Group, String)> = d.groups.iter().filter(|g| !g.name.is_empty()).map(|g| (g, w.h())).collect();
-    let mleader_dict = w.h();
+    let groups: Vec<(&Group, String)> =
+        d.groups.iter().filter(|g| !g.name.is_empty()).map(|g| (g, w.keep(g.handle, ("NOD/ACAD_GROUP", &g.name)))).collect();
+    let mleader_dict = w.keep(Handle(0), ("NOD", "ACAD_MLEADERSTYLE"));
     let mleader_handles: Vec<String> = cx.mleader_styles.iter().map(|(_, h)| h.clone()).collect();
     w.s(0, "SECTION");
     w.s(2, "OBJECTS");
@@ -2382,30 +2654,26 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     w.s(330, "0");
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
-    w.s(3, "ACAD_GROUP");
-    w.s(350, group_dict.clone());
+    // Entries in key order, as AutoCAD writes them.
+    let mut nod: Vec<(String, String)> = vec![
+        ("ACAD_GROUP".into(), group_dict.clone()),
+        ("ACAD_LAYOUT".into(), layout_dict.clone()),
+        ("ACAD_MLEADERSTYLE".into(), mleader_dict.clone()),
+        ("ACAD_MLINESTYLE".into(), cx.mlines.dict.clone()),
+        (dxf_ext::PLOT_STYLE_NAMES_KEY.into(), pstyle_dict.clone()),
+        ("ACAD_TABLESTYLE".into(), table_style_dict.clone()),
+        ("ACAD_SCALELIST".into(), scale_dict.clone()),
+    ];
     if !cx.images.is_empty() {
-        w.s(3, "ACAD_IMAGE_DICT");
-        w.s(350, cx.images.dict.clone());
-        w.s(3, "ACAD_IMAGE_VARS");
-        w.s(350, cx.images.vars.clone());
+        nod.push(("ACAD_IMAGE_DICT".into(), cx.images.dict.clone()));
+        nod.push(("ACAD_IMAGE_VARS".into(), cx.images.vars.clone()));
     }
-    w.s(3, "ACAD_LAYOUT");
-    w.s(350, layout_dict.clone());
-    w.s(3, "ACAD_MLEADERSTYLE");
-    w.s(350, mleader_dict.clone());
-    w.s(3, "ACAD_MLINESTYLE");
-    w.s(350, cx.mlines.dict.clone());
-    w.s(3, dxf_ext::PLOT_STYLE_NAMES_KEY);
-    w.s(350, pstyle_dict.clone());
-    w.s(3, "ACAD_TABLESTYLE");
-    w.s(350, table_style_dict.clone());
-    for (key, h, _) in &xrecords {
-        w.s(3, *key);
+    nod.extend(xrecords.iter().map(|(key, h, _)| ((*key).to_string(), h.clone())));
+    nod.sort_by(|a, b| a.0.cmp(&b.0));
+    for (key, h) in nod {
+        w.s(3, key);
         w.s(350, h);
     }
-    w.s(3, "ACAD_SCALELIST");
-    w.s(350, scale_dict.clone());
     w.s(0, "DICTIONARY");
     w.s(5, group_dict);
     w.s(330, root_dict.clone());
@@ -2421,6 +2689,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // Multileader styles.
     w.s(0, "DICTIONARY");
     w.s(5, mleader_dict.clone());
+    w.group("ACAD_REACTORS", 330, &[&root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -2428,15 +2697,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(3, &s.name);
         w.s(350, h);
     }
-    let byblock_ltype = ltype_handles.get("BYBLOCK").cloned();
     for (s, h) in mleader_styles.iter().zip(&mleader_handles) {
-        mleader_style_obj(&mut w, s, h, &mleader_dict, byblock_ltype.as_deref(), cx.style(&s.text_style));
+        mleader_style_obj(&mut w, s, h, &mleader_dict, &cx, cx.style(&s.text_style));
     }
     // Multiline styles.
     w.t.extend(crate::dxf_mline::objects(&cx.mlines, &root_dict));
     // Table styles.
     w.s(0, "DICTIONARY");
     w.s(5, table_style_dict.clone());
+    w.group("ACAD_REACTORS", 330, &[&root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
@@ -2487,7 +2756,6 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         let dh = dim.hex();
         w.s(0, "DICTIONARY");
         w.s(5, a.xdict.clone());
-        w.group("ACAD_REACTORS", 330, &[&dh]);
         w.s(330, dh.clone());
         w.s(100, "AcDbDictionary");
         w.i(280, 1);
@@ -2504,13 +2772,21 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.i(70, 0);
         w.i(71, 0);
         for r in &a.refs {
+            let rd = r.read.as_ref();
             w.s(1, "AcDbOsnapPointRef");
-            w.i(72, r.osnap);
+            w.i(72, rd.map_or(r.osnap, |x| i64::from(x.osnap)));
             w.s(331, r.main.hex());
-            w.i(73, if r.segment > 0 { 2 } else { 0 });
-            w.i(91, r.segment);
-            w.s(301, "");
-            w.f(40, r.param);
+            w.i(73, rd.map_or(if r.segment > 0 { 2 } else { 0 }, |x| i64::from(x.subent)));
+            w.i(91, rd.map_or(r.segment, |x| x.gs_marker));
+            match rd {
+                Some(x) => {
+                    if let Some(xref) = &x.xref {
+                        w.s(301, xref.clone());
+                    }
+                }
+                None => w.s(301, ""),
+            }
+            w.f(40, rd.map_or(r.param, |x| x.param));
             w.p(10, r.point);
             if let Some(o) = r.other {
                 w.s(332, o.hex());
@@ -2523,16 +2799,21 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     }
     w.s(0, "DICTIONARY");
     w.s(5, layout_dict.clone());
+    w.group("ACAD_REACTORS", 330, &[&root_dict]);
     w.s(330, root_dict.clone());
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
-    w.s(3, "Model");
-    w.s(350, model_layout.clone());
+    // Entries in key order, as AutoCAD writes them.
+    let mut entries: Vec<(&str, String)> = vec![("Model", model_layout.clone())];
     for (i, (_, _, l)) in ps_brs.iter().enumerate() {
-        w.s(3, &l.name);
-        w.s(350, layout_handles.get(i).cloned().unwrap_or_default());
+        entries.push((l.name.as_str(), layout_handles.get(i).cloned().unwrap_or_default()));
     }
-    let layout_obj = |w: &mut W, h: &str, name: &str, tab: i64, brh: &str, flags: i64, page: &PageSetup, view: Option<(Vec2, f64)>| {
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, h) in entries {
+        w.s(3, name);
+        w.s(350, h);
+    }
+    let layout_obj = |w: &mut W, h: &str, name: &str, tab: i64, brh: &str, page: &PageSetup, rec: &LayoutRecord, view: Option<(Vec2, f64)>| {
         // Plot scale: a standard scale when fitting or 1:1, otherwise custom (142 paper units
         // per 143 drawing units).
         let scale = if page.scale.is_finite() && page.scale > 0.0 { page.scale } else { 1.0 };
@@ -2550,58 +2831,80 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             "window" => 4,
             _ => 5,
         };
+        // The values the file held, while the page is still what was made of them.
+        let rd = page.read.0.as_deref().filter(|r| r.still(page));
+        let ps = &page.settings;
         w.s(0, "LAYOUT");
         w.s(5, h);
+        w.group("ACAD_REACTORS", 330, &[&layout_dict]);
         w.s(330, layout_dict.clone());
         w.s(100, "AcDbPlotSettings");
-        w.s(1, "");
+        w.s(1, ps.name.clone());
         let device = page.device.trim();
-        w.s(2, if device.is_empty() || device.eq_ignore_ascii_case("None") { "none_device" } else { device });
-        w.s(4, page.paper.replace(' ', "_"));
-        w.s(6, "");
+        match rd {
+            Some(r) => w.s(2, r.device.clone()),
+            None => w.s(2, if device.is_empty() || device.eq_ignore_ascii_case("None") { "none_device" } else { device }),
+        }
+        w.s(4, rd.map_or_else(|| page.paper.replace(' ', "_"), |r| r.paper.clone()));
+        w.s(6, ps.view_name.clone());
+        let size = rd.map_or([page.width_mm, page.height_mm], |r| r.size);
+        let ratio = rd.map_or([scale, 1.0], |r| r.scale);
         for (c, v) in [
             (40, page.margins_mm[0]),
             (41, page.margins_mm[1]),
             (42, page.margins_mm[2]),
             (43, page.margins_mm[3]),
-            (44, page.width_mm),
-            (45, page.height_mm),
-            (46, 0.0),
-            (47, 0.0),
+            (44, size[0]),
+            (45, size[1]),
+            (46, ps.origin[0]),
+            (47, ps.origin[1]),
             (48, page.plot_window[0]),
             (49, page.plot_window[1]),
             (140, page.plot_window[2]),
             (141, page.plot_window[3]),
-            (142, scale),
-            (143, 1.0),
+            (142, ratio[0]),
+            (143, ratio[1]),
         ] {
             w.f(c, v);
         }
-        w.i(70, plot_flags);
+        w.i(70, rd.map_or(plot_flags, |r| r.flags));
         // Plot paper units: 1 millimetres, 0 inches (#1058).
-        w.i(72, i64::from(cadcraft_render::paper::page_unit_mm(d, page) == 1.0));
-        w.i(73, i64::from(page.landscape));
-        w.i(74, plot_type);
+        w.i(72, rd.map_or_else(|| i64::from(cadcraft_render::paper::page_unit_mm(d, page) == 1.0), |r| i64::from(r.paper_units)));
+        w.i(73, rd.map_or_else(|| i64::from(page.landscape), |r| i64::from(r.rotation)));
+        w.i(74, rd.map_or(plot_type, |r| i64::from(r.plot_type)));
         w.s(7, &page.plot_style_table);
-        w.i(75, if page.scale_to_fit { 0 } else { 16 });
-        w.f(147, scale);
-        w.f(148, 0.0);
-        w.f(149, 0.0);
+        w.i(75, rd.map_or(if page.scale_to_fit { 0 } else { 16 }, |r| i64::from(r.standard_scale)));
+        if target >= Version::R2004 {
+            w.i(76, i64::from(ps.shade_mode));
+            w.i(77, i64::from(ps.shade_resolution));
+            w.i(78, i64::from(ps.shade_dpi));
+        }
+        w.f(147, rd.map_or(scale, |r| r.factor));
+        w.f(148, ps.image_origin[0]);
+        w.f(149, ps.image_origin[1]);
+        if !ps.shade_plot.is_none() {
+            w.s(333, ps.shade_plot.hex());
+        }
         w.s(100, "AcDbLayout");
         w.s(1, name);
-        w.i(70, flags);
+        w.i(70, i64::from(rec.flags));
         w.i(71, tab);
-        w.p2(10, Vec2::ZERO);
-        w.p2(11, Vec2::new(12.0, 9.0));
-        w.p(12, Vec3::ZERO);
-        w.p(14, Vec3::ZERO);
-        w.p(15, Vec3::ZERO);
-        w.f(146, 0.0);
-        w.p(13, Vec3::ZERO);
-        w.p(16, Vec3::new(1.0, 0.0, 0.0));
-        w.p(17, Vec3::new(0.0, 1.0, 0.0));
-        w.i(76, 0);
+        w.p2(10, rec.limits_min);
+        w.p2(11, rec.limits_max);
+        w.p(12, rec.insbase);
+        w.p(14, rec.extents_min);
+        w.p(15, rec.extents_max);
+        w.f(146, rec.elevation);
+        w.p(13, rec.ucs_origin);
+        w.p(16, rec.ucs_x);
+        w.p(17, rec.ucs_y);
+        w.i(76, i64::from(rec.ortho_type));
         w.s(330, brh);
+        for (c, v) in [(331, rec.last_viewport), (345, rec.named_ucs), (346, rec.base_ucs)] {
+            if !v.is_none() {
+                w.s(c, v.hex());
+            }
+        }
         // The saved paper-space view (centre, height) as CADCraft xdata.
         if let Some((c, height)) = view.filter(|(c, v)| c.x.is_finite() && c.y.is_finite() && v.is_finite()) {
             w.s(1001, dxf_ext::APP);
@@ -2617,10 +2920,14 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group 74), which means
     // nothing for model space: another program's Plot dialog then shows no plot area or scale.
     let model_page = PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() };
-    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None);
+    let (model_page, model_rec) = match d.model_layout.as_deref() {
+        Some(m) => (m.page.clone(), m.record.clone()),
+        None => (model_page, LayoutRecord::default()),
+    };
+    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, &model_page, &model_rec, None);
     for (i, (_, brh, l)) in ps_brs.iter().enumerate() {
         let h = layout_handles.get(i).cloned().unwrap_or_default();
-        layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, 1, &l.page, l.view);
+        layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, &l.page, &l.record, l.view);
     }
     // Raster image definitions.
     w.t.extend(crate::dxf_image::objects(&cx.images, &root_dict));
@@ -2704,18 +3011,21 @@ fn table_style_obj(w: &mut W, d: &Drawing, s: &TableStyle, h: &str, dict: &str) 
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbTableStyle");
-    w.s(3, "");
-    w.i(70, 0);
-    w.i(71, 0);
+    if let Some(v) = s.props.version {
+        w.i(280, i64::from(v));
+    }
+    w.s(3, s.props.description.clone());
+    w.i(70, i64::from(s.props.flow_up));
+    w.i(71, i64::from(s.props.flags));
     w.f(40, s.margin);
     w.f(41, s.margin);
     w.i(280, i64::from(!s.title));
     w.i(281, i64::from(!s.header));
     // Data, column header and title cell styles; CADCraft's complete cell styles in xdata.
-    for kind in crate::dxf_table::CELL_TYPES {
+    for (kind, data) in crate::dxf_table::CELL_TYPES.into_iter().zip(&s.props.cells) {
         let cs = s.cell_style(kind);
         let style = if d.text_style(&cs.text_style).is_some() { cs.text_style.clone() } else { "Standard".to_string() };
-        w.t.extend(crate::dxf_table::cell_type_tags(&cs, &style));
+        w.t.extend(crate::dxf_table::cell_type_tags(&cs, &style, data));
     }
     let x = crate::dxf_table::cell_styles_xdata(s);
     if !x.is_empty() {
@@ -2745,61 +3055,78 @@ fn group_obj(w: &mut W, g: &Group, h: &str, dict: &str, written: &std::collectio
 /// A MLEADERSTYLE object (DXF Reference, OBJECTS: MLEADERSTYLE): MText content and straight
 /// ByBlock leaders with the style's landing gap, dogleg length, arrow size, text style and
 /// text height.
-fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, byblock_ltype: Option<&str>, text_style: Option<String>) {
-    // ByBlock as a 32-bit colour value (0xC1000000).
-    const BYBLOCK: i64 = -1_056_964_608;
+fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, cx: &Ctx, text_style: Option<String>) {
+    let p = &s.props;
+    // A linetype or block the style names, by its record's handle.
+    let ltype = |name: &str| cx.ltypes.get(&name.to_ascii_uppercase()).or_else(|| cx.ltypes.get("BYBLOCK")).cloned();
+    let block = |name: &str| (!name.is_empty()).then(|| cx.block_records.get(&name.to_ascii_uppercase()).cloned()).flatten();
     w.s(0, "MLEADERSTYLE");
     w.s(5, h);
     w.group("ACAD_REACTORS", 330, &[dict]);
     w.s(330, dict);
     w.s(100, "AcDbMLeaderStyle");
-    w.i(179, 2);
-    w.i(170, 2);
-    w.i(171, 1);
-    w.i(172, 0);
-    w.i(90, 2);
-    w.f(40, 0.0);
-    w.f(41, 0.0);
-    w.i(173, 1);
-    w.i(91, BYBLOCK);
-    if let Some(lt) = byblock_ltype {
+    // The style version (and the attachment direction at the end) came with AutoCAD 2010.
+    if cx.target >= Version::R2010 {
+        w.i(179, i64::from(p.version));
+    }
+    w.i(170, i64::from(p.content_type));
+    w.i(171, i64::from(p.draw_mleader_order));
+    w.i(172, i64::from(p.draw_leader_order));
+    w.i(90, i64::from(p.max_leader_points));
+    w.f(40, p.first_angle);
+    w.f(41, p.second_angle);
+    w.i(173, i64::from(p.leader_type));
+    w.i(91, p.leader_color);
+    if let Some(lt) = ltype(&p.leader_linetype) {
         w.s(340, lt);
     }
-    w.i(92, -2);
-    w.i(290, 1);
+    w.i(92, i64::from(p.leader_lineweight));
+    w.i(290, i64::from(p.landing));
     w.f(42, s.landing_gap);
-    w.i(291, 1);
+    w.i(291, i64::from(p.dogleg_on));
     w.f(43, s.dogleg);
-    w.s(3, "");
+    w.s(3, p.description.clone());
+    // A user block by name, otherwise the arrowhead block written for it ([`tags_for`]).
+    if let Some(a) = block(&p.arrow_block).or_else(|| (!p.arrow_block.trim().is_empty()).then(|| cx.arrow(&p.arrow_block)).flatten()) {
+        w.s(341, a);
+    }
     w.f(44, s.arrow_size);
-    w.s(300, "");
+    w.s(300, p.default_text.clone());
     if let Some(ts) = text_style {
         w.s(342, ts);
     }
-    w.i(174, 1);
-    w.i(178, 1);
-    w.i(175, 1);
-    w.i(176, 0);
-    w.i(93, BYBLOCK);
+    w.i(174, i64::from(p.text_left_attachment));
+    w.i(178, i64::from(p.text_right_attachment));
+    w.i(175, i64::from(p.text_angle));
+    w.i(176, i64::from(p.text_alignment));
+    w.i(93, p.text_color);
     w.f(45, s.text_height);
-    w.i(292, 0);
-    w.i(297, 0);
-    w.f(46, 4.0);
-    w.i(94, BYBLOCK);
-    for c in [47, 49, 140] {
-        w.f(c, 1.0);
+    w.i(292, i64::from(p.text_frame));
+    w.i(297, i64::from(p.text_align_left));
+    w.f(46, p.align_space);
+    if let Some(b) = block(&p.block) {
+        w.s(343, b);
     }
-    w.i(293, 1);
-    w.f(141, 0.0);
-    w.i(294, 1);
-    w.i(177, 0);
-    w.f(142, 1.0);
-    w.i(295, 0);
+    w.i(94, p.block_color);
+    for (c, v) in [(47, p.block_scale[0]), (49, p.block_scale[1]), (140, p.block_scale[2])] {
+        w.f(c, v);
+    }
+    w.i(293, i64::from(p.block_scale_on));
+    w.f(141, p.block_rotation);
+    w.i(294, i64::from(p.block_rotation_on));
+    w.i(177, i64::from(p.block_connection));
+    w.f(142, p.scale);
+    w.i(295, i64::from(p.overwrite));
     w.i(296, i64::from(s.annotative));
-    w.f(143, 0.125);
-    w.i(271, 0);
-    w.i(272, 9);
-    w.i(273, 9);
+    w.f(143, p.break_gap);
+    if cx.target >= Version::R2010 {
+        w.i(271, i64::from(p.attachment_direction));
+        w.i(272, i64::from(p.bottom_attachment));
+        w.i(273, i64::from(p.top_attachment));
+    }
+    if let Some(g) = p.group_298 {
+        w.i(298, i64::from(g));
+    }
 }
 
 /// The ACAD_SCALELIST dictionary and its SCALE objects (DXF Reference, OBJECTS section): name
@@ -2811,8 +3138,24 @@ fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)], dict: &s
     w.s(330, root);
     w.s(100, "AcDbDictionary");
     w.i(281, 1);
-    for (i, (_, h)) in scales.iter().enumerate() {
-        w.s(3, format!("S{i}"));
+    // Each scale under the key it had in the file (AutoCAD's `A0`, `B1`…), others `S0`, `S1`…
+    let kept: HashMap<String, String> =
+        w.roles.iter().filter(|((kind, _), _)| kind == "NOD/ACAD_SCALELIST").map(|((_, key), h)| (h.hex(), key.clone())).collect();
+    let mut keys: Vec<String> = scales.iter().filter_map(|(_, h)| kept.get(h).cloned()).collect();
+    let mut n = 0;
+    for (_, h) in scales {
+        let key = match kept.get(h) {
+            Some(k) => k.clone(),
+            None => loop {
+                let k = format!("S{n}");
+                n += 1;
+                if !keys.contains(&k) {
+                    keys.push(k.clone());
+                    break k;
+                }
+            },
+        };
+        w.s(3, key);
         w.s(350, h.clone());
     }
     for (s, h) in scales {
@@ -2825,7 +3168,7 @@ fn scale_list(w: &mut W, scales: &[(&cadcraft_doc::AnnoScale, String)], dict: &s
         w.s(300, dxf_ext::xdata_str(&s.name));
         w.f(140, s.paper_units);
         w.f(141, s.drawing_units);
-        w.i(290, i64::from(cadcraft_doc::same_factor(s.factor(), 1.0)));
+        w.i(290, i64::from(s.unit_scale.unwrap_or_else(|| cadcraft_doc::same_factor(s.factor(), 1.0))));
     }
 }
 
@@ -2838,13 +3181,7 @@ fn cadcraft_fonts_name() -> &'static str {
 /// VERTEXes, gives its first). Handles of objects outside the entity (owner, styles) are left
 /// out. AutoLISP's `entget` is built on it.
 pub fn entity_groups(d: &Drawing, e: &Entity) -> (String, Vec<Tag>) {
-    let mut w = W {
-        t: Vec::new(),
-        next: d.handseed.max(0x100).saturating_add(0x1000),
-        pstyles: HashMap::new(),
-        layers: HashMap::new(),
-        reactors: HashMap::new(),
-    };
+    let mut w = W::scratch(d.handseed.max(0x100).saturating_add(0x1000));
     let cx = Ctx { target: Version::R2018, ..Ctx::default() };
     let paper = d.space_of(e.handle).is_some_and(|s| !matches!(s, cadcraft_doc::Space::Model));
     entity(&mut w, d, e, "0", paper, &cx);
