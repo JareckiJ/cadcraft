@@ -166,8 +166,11 @@ struct Preview {
     shown: Result<Shown, String>,
     view: PanZoom,
     detail: Option<Detail>,
-    /// When the view last changed (seconds), to draw in detail once it rests.
+    /// When the view, or the size the sheet is drawn at, last changed (seconds), to draw in detail
+    /// once it rests.
     changed: f64,
+    /// Where the sheet was drawn last: a resized window changes it with the view unchanged.
+    drawn: Rect,
     /// The part and scale last drawn in detail, so a failure is not retried every frame.
     tried: Option<([i32; 4], i32)>,
 }
@@ -238,7 +241,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let cached = ctx.data(|d| d.get_temp::<Preview>(id)).filter(|p| p.generation == generation);
     let mut pv = match cached {
         Some(p) => p,
-        None => Preview { generation, shown: render(app, ctx), view: PanZoom::default(), detail: None, changed: now, tried: None },
+        None => {
+            Preview { generation, shown: render(app, ctx), view: PanZoom::default(), detail: None, changed: now, drawn: Rect::NOTHING, tried: None }
+        }
     };
     let (mut close, mut print) = (false, false);
     // What to draw in detail after the window: the part and the sheet's width on screen.
@@ -295,9 +300,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     painter.image(d.tex.id(), part, full, egui::Color32::WHITE);
                 }
                 painter.rect_stroke(sheet, 0.0, egui::Stroke::new(1.0, egui::Color32::from_gray(120)), egui::StrokeKind::Outside);
-                if view != pv.view {
+                // A change of the view or of the size the sheet is drawn at (the window was resized)
+                // restarts the wait, so the detail is not drawn again at every step of a resize.
+                if view != pv.view || sheet != pv.drawn {
                     pv.changed = now;
                     pv.view = view;
+                    pv.drawn = sheet;
                 }
                 // Drawn in detail when the sheet is shown larger than its image, once the view rests.
                 let larger = sheet.width() * ui.ctx().pixels_per_point() > image.x * 1.1;
