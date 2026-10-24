@@ -1742,9 +1742,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
     // Hover highlight (throttled to cursor movement).
     // The cursor picks objects (pick box, rollover highlight): "Select objects" and single-object
-    // prompts, or no command with PICKFIRST on; SELECTIONPREVIEW says in which of those it shows.
-    let selecting = app.session.previews_selection();
-    if inside && selecting && app.session.pending_window.is_none() {
+    // prompts, or no command with PICKFIRST on; SELECTIONPREVIEW says in which of those the
+    // rollover highlight shows.
+    let picking = app.session.picking_objects() && app.session.pending_window.is_none();
+    if inside && app.session.previews_selection() && app.session.pending_window.is_none() {
         if hover_pos != app.canvas.hover_at
             && let (Some(w), Ok(st)) = (raw_world, app.session.state())
         {
@@ -2034,7 +2035,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             // Use the painted sheet even in MSPACE, where the editing transform follows a
             // model viewport. The whole cursor takes one colour from its centre.
             let ink = paper_rect.map_or(t.crosshair, |paper| crate::theme::crosshair_color(if paper.contains(hp) { t.paper } else { surround }));
-            draw_crosshair(app, &painter, rect, hp, selecting, ink);
+            draw_crosshair(app, &painter, rect, hp, picking, ink);
             if app.canvas.cycle_badge && app.canvas.cycle.is_none() {
                 cycle_badge(&painter, hp);
             }
@@ -2315,20 +2316,30 @@ fn pickbox_half(pickbox: f64) -> Option<f32> {
 fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox: bool, ink: Color32) {
     let st = Stroke::new(1.0, ink);
     let len = (rect.height() * app.session.settings.cursorsize as f32 / 100.0).max(12.0);
-    let pb = if pickbox { pickbox_half(app.session.settings.pickbox) } else { None };
-    let gap = pb.unwrap_or(0.0);
-    // Along the isometric plane's axes in isometric drafting.
-    if app.session.settings.isodraft {
-        for a in cadcraft_engine::snap::iso::cursor_axes(&app.session.settings) {
-            let dir = vec2(a.cos() as f32, -(a.sin() as f32));
-            p.line_segment([at - dir * len, at - dir * gap], st);
-            p.line_segment([at + dir * gap, at + dir * len], st);
-        }
+    let picking_in_cmd = pickbox && app.session.current_prompt().is_some_and(|pr| pr.picks_objects());
+    let pb = if pickbox {
+        pickbox_half(app.session.settings.pickbox).or(picking_in_cmd.then_some(1.5))
     } else {
-        p.line_segment([pos2(at.x - len, at.y), pos2(at.x - gap, at.y)], st);
-        p.line_segment([pos2(at.x + gap, at.y), pos2(at.x + len, at.y)], st);
-        p.line_segment([pos2(at.x, at.y - len), pos2(at.x, at.y - gap)], st);
-        p.line_segment([pos2(at.x, at.y + gap), pos2(at.x, at.y + len)], st);
+        None
+    };
+    let gap = pb.unwrap_or(0.0);
+    // At a command prompt that selects objects, AutoCAD shows only the pickbox square (no
+    // crosshair lines); when idle or once a selection window corner is picked, the crosshair
+    // lines are drawn.
+    if !picking_in_cmd {
+        // Along the isometric plane's axes in isometric drafting.
+        if app.session.settings.isodraft {
+            for a in cadcraft_engine::snap::iso::cursor_axes(&app.session.settings) {
+                let dir = vec2(a.cos() as f32, -(a.sin() as f32));
+                p.line_segment([at - dir * len, at - dir * gap], st);
+                p.line_segment([at + dir * gap, at + dir * len], st);
+            }
+        } else {
+            p.line_segment([pos2(at.x - len, at.y), pos2(at.x - gap, at.y)], st);
+            p.line_segment([pos2(at.x + gap, at.y), pos2(at.x + len, at.y)], st);
+            p.line_segment([pos2(at.x, at.y - len), pos2(at.x, at.y - gap)], st);
+            p.line_segment([pos2(at.x, at.y + gap), pos2(at.x, at.y + len)], st);
+        }
     }
     if let Some(pb) = pb {
         p.rect_stroke(Rect::from_center_size(at, vec2(pb * 2.0, pb * 2.0)), 0.0, st, egui::StrokeKind::Middle);
@@ -2937,6 +2948,58 @@ pub(crate) mod tests {
         app.session.pending_window = Some(cadcraft_engine::PendingWindow { corner: Vec2::ZERO, during_command: true });
         let text = painted_text(&mut app, &ctx, at);
         assert!(text.contains(&format!("   {}  <", arch(c.len()))), "no {} in:\n{text}", arch(c.len()));
+    }
+
+    #[test]
+    fn cursor_shows_pickbox_only_at_command_object_selection_prompts() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let at = pos2(400.0, 300.0);
+        let paint = |app: &CadApp| {
+            let ctx = egui::Context::default();
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let painter = ui.painter_at(rect);
+                let picking = app.session.picking_objects() && app.session.pending_window.is_none();
+                draw_crosshair(app, &painter, rect, at, picking, Color32::WHITE);
+            });
+            out.textures_delta.clear();
+            let mut lines = 0usize;
+            let mut rects = 0usize;
+            for clipped in &out.shapes {
+                match &clipped.shape {
+                    Shape::LineSegment { .. } => lines += 1,
+                    Shape::Rect(r) if r.rect.center() == at => rects += 1,
+                    _ => {}
+                }
+            }
+            (lines, rects)
+        };
+
+        // 1. Idle with PICKFIRST on: crosshair lines (4 segments) + pickbox square (1 rect).
+        assert_eq!(paint(&app), (4, 1), "idle with PICKFIRST on");
+
+        // 2. Idle with SELECTIONPREVIEW = 0: pickbox still drawn while PICKFIRST is on.
+        app.session.settings.selectionpreview = 0;
+        assert_eq!(paint(&app), (4, 1), "idle with SELECTIONPREVIEW = 0");
+        app.session.settings.selectionpreview = 3;
+
+        // 3. Command asking for points (LINE): crosshair lines only (4 segments, 0 rects).
+        app.session.cmdline("line").unwrap();
+        assert_eq!(paint(&app), (4, 0), "point prompt (LINE)");
+        app.session.cancel();
+
+        // 4. Command asking to select objects (ERASE): pickbox square only (0 segments, 1 rect).
+        app.session.cmdline("erase").unwrap();
+        assert_eq!(paint(&app), (0, 1), "object selection prompt (ERASE)");
+
+        // 5. Even when PICKBOX = 0, a command object-selection prompt keeps a minimal visible pickbox.
+        app.session.settings.pickbox = 0.0;
+        assert_eq!(paint(&app), (0, 1), "object selection prompt with PICKBOX = 0");
+        app.session.settings.pickbox = 3.0;
+
+        // 6. While picking the second corner of a selection window, the crosshair lines return.
+        app.session.pending_window = Some(cadcraft_engine::PendingWindow { corner: Vec2::ZERO, during_command: true });
+        assert_eq!(paint(&app), (4, 0), "selection window second corner");
     }
 }
 
