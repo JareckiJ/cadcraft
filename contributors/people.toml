@@ -77,3 +77,17 @@ real_name = "Gurparvez"
 [people.yupoet]
 display_name = "Paris Yu"
 sync_github_name = false
+
+[people.nicholasgower]
+sync_github_name = true
+
+[people.ffishman]
+real_name = "Rodrigo Gressler"
+display_name = "Rodrigo"
+sync_github_name = false
+
+[people.aussieboer61]
+real_name = "Richard Sauer"
+display_name = "Richard Sauer"
+sync_github_name = false
+
