@@ -81,20 +81,31 @@ fn same_polygon(a: &[Vec2], b: &[Vec2]) -> bool {
 
 /// Remove degenerate and duplicate boundary loops within a shared comparison budget.
 /// Retain remaining loops without further comparisons once the budget is exhausted.
+#[cfg(test)]
 fn dedup_polygons(loops: &mut Vec<Vec<Vec2>>) {
+    let roled: Vec<(usize, bool, Vec<Vec2>)> = loops.drain(..).enumerate().map(|(i, l)| (i, true, l)).collect();
+    *loops = dedup_roles(roled).into_iter().map(|(_, _, l)| l).collect();
+}
+
+/// [`dedup_polygons`] with each loop's role (outer, or island) and index: a loop the same as one
+/// kept in the same role is a duplicate and goes (a file can repeat a loop); one the same as a
+/// kept loop in the other role cancels it, both going, as they do under the odd-parity fill (one
+/// pick's outer loop that is another's island: a pick inside a circle and one around it fill the
+/// circle too).
+fn dedup_roles(loops: Vec<(usize, bool, Vec<Vec2>)>) -> Vec<(usize, bool, Vec<Vec2>)> {
     // `same_polygon` is O(n²) in a polygon's vertex count (every cyclic alignment, both windings),
     // and each loop is compared against every unique one kept so far, so adversarial boundary
     // geometry could force quadratic-on-quadratic work. Charge every vertex comparison against a
     // shared budget; once it is spent, stop deduplicating and keep the remaining loops as-is
     // (CWE-407).
     let mut budget: u64 = MAX_DEDUP_COMPARISONS;
-    let mut unique: Vec<Vec<Vec2>> = Vec::with_capacity(loops.len());
-    for l in loops.drain(..) {
+    let mut unique: Vec<(usize, bool, Vec<Vec2>)> = Vec::with_capacity(loops.len());
+    for (i, outer, l) in loops {
         if l.len() < 3 {
             continue;
         }
-        let mut dup = false;
-        for u in &unique {
+        let mut found = None;
+        for (k, (_, _, u)) in unique.iter().enumerate() {
             if u.len() != l.len() {
                 continue;
             }
@@ -109,15 +120,19 @@ fn dedup_polygons(loops: &mut Vec<Vec<Vec2>>) {
                 }
             }
             if same_polygon(u, &l) {
-                dup = true;
+                found = Some(k);
                 break;
             }
         }
-        if !dup {
-            unique.push(l);
+        match found {
+            Some(k) if unique.get(k).is_some_and(|u| u.1 != outer) => {
+                unique.remove(k);
+            }
+            Some(_) => {}
+            None => unique.push((i, outer, l)),
         }
     }
-    *loops = unique;
+    unique
 }
 
 /// Vertex comparisons `dedup_polygons` may perform before it stops deduplicating.
@@ -128,22 +143,28 @@ const MAX_DEDUP_COMPARISONS: u64 = 50_000_000;
 /// within islands alternate), 1 outer keeps the outermost loops and their first islands, 2
 /// ignore keeps only the outermost loops. Nesting depth = how many other loops enclose a loop.
 pub fn fill_loops(h: &Hatch, tol: f64) -> Vec<Vec<Vec2>> {
-    let mut loops: Vec<Vec<Vec2>> = h.loops.iter().map(|l| Polyline { vertices: l.vertices.clone(), closed: true }.tessellate(tol)).collect();
-    dedup_polygons(&mut loops);
+    fill_loop_indices(h, tol).into_iter().map(|(_, l)| l).collect()
+}
+
+/// [`fill_loops`] with the index in `h.loops` of each loop kept (AREA measures those exactly).
+pub fn fill_loop_indices(h: &Hatch, tol: f64) -> Vec<(usize, Vec<Vec2>)> {
+    let roled: Vec<(usize, bool, Vec<Vec2>)> =
+        h.loops.iter().enumerate().map(|(i, l)| (i, l.outer, Polyline { vertices: l.vertices.clone(), closed: true }.tessellate(tol))).collect();
+    let loops: Vec<(usize, Vec<Vec2>)> = dedup_roles(roled).into_iter().map(|(i, _, l)| (i, l)).collect();
     let max_depth = match h.style {
         1 => 1,
         2 => 0,
         _ => return loops,
     };
-    let verts: usize = loops.iter().map(Vec::len).sum();
+    let verts: usize = loops.iter().map(|(_, l)| l.len()).sum();
     if loops.len().saturating_mul(verts) > MAX_ISLAND_WORK {
         return loops;
     }
     let depth = |i: usize, l: &[Vec2]| {
         let Some(p) = probe(l) else { return 0 };
-        loops.iter().enumerate().filter(|(j, o)| *j != i && point_in_polygon(o, p)).count()
+        loops.iter().enumerate().filter(|(j, (_, o))| *j != i && point_in_polygon(o, p)).count()
     };
-    loops.iter().enumerate().filter(|(i, l)| depth(*i, l) <= max_depth).map(|(_, l)| l.clone()).collect()
+    loops.iter().enumerate().filter(|(i, (_, l))| depth(*i, l) <= max_depth).map(|(_, x)| x.clone()).collect()
 }
 
 /// A point of a loop to test its nesting with: the middle of its first non-degenerate edge

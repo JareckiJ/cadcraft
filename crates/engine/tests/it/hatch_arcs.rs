@@ -167,6 +167,13 @@ fn one_hatch_inside_and_around_a_circle_fills_both() {
     let hh = hatch_at(&mut s, &[[50.0, 50.0], [5.0, 5.0]]);
     let h = hatch(&s, &hh);
     assert!(close(filled(&h), 10000.0), "{} from {:?}", filled(&h), h.loops.iter().map(|l| (l.outer, l.vertices.len())).collect::<Vec<_>>());
+    // As drawn and as AREA measures it: the circle's outer loop and island cancel, the square
+    // is filled whole.
+    let drawn = cadcraft_engine::render::hatch_fill_loops(&h, 1e-3);
+    let centre = cadcraft_engine::geom::Vec2::new(50.0, 50.0);
+    assert_eq!(drawn.iter().filter(|l| cadcraft_engine::geom::point_in_polygon(l, centre)).count() % 2, 1, "the circle is filled");
+    let a = s.execute("area", &json!({ "handle": hh })).unwrap()["area"].as_f64().unwrap();
+    assert!(close(a, 10000.0), "{a}");
     // The same with a square inside the square (exact on main too, so merged there).
     let mut s = Session::new();
     s.execute("rectang", &json!({ "p1": [0, 0], "p2": [100, 100] })).unwrap();
@@ -191,4 +198,44 @@ fn filled(h: &Hatch) -> f64 {
         }
     }
     inside as f64 * step * step
+}
+
+/// HPORIGINMODE's corners take the circle's extents, not only its two vertices (a circle kept as
+/// two half-circles spans its whole height).
+#[test]
+fn a_circles_hatch_origin_takes_its_extents() {
+    let mut s = Session::new();
+    s.execute("circle", &json!({ "center": [50, 50], "radius": 40 })).unwrap();
+    let h = handle(&s.execute("hatch", &json!({ "points": [[50, 50]], "pattern": "ANSI31", "originMode": "bottomLeft" })).unwrap());
+    let o = hatch(&s, &h).origin;
+    assert!(close(o.x, 10.0) && close(o.y, 10.0), "{o:?}");
+    let h = handle(&s.execute("hatch", &json!({ "points": [[50, 50]], "pattern": "ANSI31", "originMode": "topRight" })).unwrap());
+    let o = hatch(&s, &h).origin;
+    assert!(close(o.x, 90.0) && close(o.y, 90.0), "{o:?}");
+}
+
+/// The polyline BOUNDARY makes keeps the arcs: a circle gives two half-circles, a rounded
+/// rectangle one arc segment, each with the object's exact area.
+#[test]
+fn boundary_keeps_the_arcs() {
+    let lw = |s: &Session, h: &str| -> Polyline {
+        match &s.doc().unwrap().entity(Handle::parse_hex(h).unwrap()).unwrap().kind {
+            EntityKind::LwPolyline(p) => Polyline { vertices: p.vertices.clone(), closed: p.closed },
+            k => panic!("not a polyline: {k:?}"),
+        }
+    };
+    let mut s = Session::new();
+    s.execute("circle", &json!({ "center": [50, 50], "radius": 40 })).unwrap();
+    let b = handle(&s.execute("boundary", &json!({ "points": [[50, 50]] })).unwrap());
+    let p = lw(&s, &b);
+    assert_eq!(p.vertices.len(), 2, "{:?}", p.vertices);
+    assert!(p.vertices.iter().all(|v| (v.bulge.abs() - 1.0).abs() < 1e-12));
+    assert!(close(p.area().abs(), PI * 1600.0), "{}", p.area());
+
+    let mut s = Session::new();
+    s.execute("pline", &json!({ "vertices": [[0, 0], { "p": [100, 0], "bulge": 1.0 }, [100, 50], [0, 50]], "closed": true })).unwrap();
+    let b = handle(&s.execute("boundary", &json!({ "points": [[50, 25]] })).unwrap());
+    let p = lw(&s, &b);
+    assert_eq!(p.vertices.iter().filter(|v| v.bulge.abs() > 1e-9).count(), 1, "{:?}", p.vertices);
+    assert!(close(p.area().abs(), 5000.0 + PI * 625.0 / 2.0), "{}", p.area());
 }

@@ -183,7 +183,7 @@ impl OriginMode {
     }
     /// The origin for loops: `current` when the mode keeps it.
     pub(crate) fn origin(self, loops: &[HatchLoop], current: Vec2) -> Vec2 {
-        let b = Bounds2::from_points(loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)).filter(|p| p.is_finite()));
+        let b = loops_bounds(loops);
         if b.is_empty() {
             return current;
         }
@@ -196,6 +196,25 @@ impl OriginMode {
             OriginMode::Center => b.center(),
         }
     }
+}
+
+/// The extents of hatch loops with their arcs: a bulged edge reaches past its vertices (a circle
+/// kept as two half-circle vertices spans its whole height).
+fn loops_bounds(loops: &[HatchLoop]) -> Bounds2 {
+    let mut b = Bounds2::from_points(loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)).filter(|p| p.is_finite()));
+    for l in loops {
+        let vs = &l.vertices;
+        for (i, v) in vs.iter().enumerate() {
+            let Some(next) = vs.get((i + 1) % vs.len()) else { continue };
+            if let Some((arc, _)) = cadcraft_geom::bulge_to_arc(v.p, next.p, v.bulge) {
+                let ab = arc.bounds();
+                if ab.min.is_finite() && ab.max.is_finite() {
+                    b = b.union(&ab);
+                }
+            }
+        }
+    }
+    b
 }
 
 /// Island detection style by name (HPISLANDDETECTION 0 normal, 1 outer, 2 ignore).
