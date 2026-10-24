@@ -695,48 +695,26 @@ fn adaptive(unit: f64, scale: f64, min_px: f64) -> f64 {
 fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
     let t = Tokens::get();
     let s = app.session.drafting_settings();
-    let wb = xf.world_bounds();
     if s.gridmode && s.isodraft {
         draw_iso_grid(app, p, xf);
     } else if s.gridmode {
-        let major_n = f64::from(s.gridmajor.max(1));
         let unit = if s.gridunit.x == 0.0 { s.snapunit.x } else { s.gridunit.x };
         let minor = adaptive(unit, xf.scale, 8.0);
-        let major = minor * major_n;
-        let mut lines = Vec::new();
-        let x0 = (wb.min.x / minor).floor() as i64;
-        let x1 = (wb.max.x / minor).ceil() as i64;
-        let y0 = (wb.min.y / minor).floor() as i64;
-        let y1 = (wb.max.y / minor).ceil() as i64;
-        if (x1 - x0) < 2000 && (y1 - y0) < 2000 {
-            for i in x0..=x1 {
-                let x = i as f64 * minor;
-                let is_major = (x / major).round() * major - x == 0.0 || ((x / major) - (x / major).round()).abs() < 1e-6;
-                let sx = xf.to_screen(Vec2::new(x, 0.0)).x;
-                lines.push(Shape::line_segment(
-                    [pos2(sx, xf.rect.top()), pos2(sx, xf.rect.bottom())],
-                    Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
-                ));
-            }
-            for j in y0..=y1 {
-                let y = j as f64 * minor;
-                let is_major = ((y / major) - (y / major).round()).abs() < 1e-6;
-                let sy = xf.to_screen(Vec2::new(0.0, y)).y;
-                lines.push(Shape::line_segment(
-                    [pos2(xf.rect.left(), sy), pos2(xf.rect.right(), sy)],
-                    Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
-                ));
-            }
+        // The grid lies in the snap frame: SNAPBASE and SNAPANG in the current UCS.
+        let space = app.session.space();
+        let (origin, angle) = app.session.doc().map(|d| cadcraft_engine::snap::grid_frame_in(d, &space)).unwrap_or((Vec2::ZERO, 0.0));
+        let lines = cadcraft_engine::snap::iso::rect_grid_lines(xf.world_bounds(), minor, origin, angle, s.gridmajor);
+        p.extend(lines.into_iter().map(|l| {
+            Shape::line_segment([xf.to_screen(l.a), xf.to_screen(l.b)], Stroke::new(1.0, if l.major { t.grid_major } else { t.grid_minor }))
+        }));
+    }
+    // The current UCS's X and Y axes through its origin.
+    let u = app.session.input_ucs();
+    let o = u.origin.xy();
+    for (dir, color) in [(u.x.xy(), t.axis_x), (u.y.xy(), t.axis_y)] {
+        if let Some(seg) = clip_infinite(xf, o, dir, false) {
+            p.line_segment(seg, Stroke::new(1.0, color));
         }
-        p.extend(lines);
-    }
-    // Axes through the origin.
-    let o = xf.to_screen(Vec2::ZERO);
-    if xf.rect.y_range().contains(o.y) {
-        p.line_segment([pos2(xf.rect.left(), o.y), pos2(xf.rect.right(), o.y)], Stroke::new(1.0, t.axis_x));
-    }
-    if xf.rect.x_range().contains(o.x) {
-        p.line_segment([pos2(o.x, xf.rect.top()), pos2(o.x, xf.rect.bottom())], Stroke::new(1.0, t.axis_y));
     }
 }
 
@@ -753,7 +731,9 @@ fn draw_iso_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
         }
         d *= 5.0;
     }
-    let (origin, angle) = app.session.doc().map(cadcraft_engine::snap::grid_frame).unwrap_or((Vec2::ZERO, 0.0));
+    // In the current UCS (SNAPBASE from its origin, SNAPANG from its X axis).
+    let space = app.session.space();
+    let (origin, angle) = app.session.doc().map(|d| cadcraft_engine::snap::grid_frame_in(d, &space)).unwrap_or((Vec2::ZERO, 0.0));
     let lines = iso::grid_lines(xf.world_bounds(), d, origin, angle, s.gridmajor);
     p.extend(
         lines.into_iter().map(|l| {
@@ -1236,9 +1216,16 @@ fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
     p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
 }
 
+/// The whole degrees (0–359) a tracking tooltip shows for the path `from` → `to`, measured from
+/// the current UCS's X axis at `ucs` radians.
+fn tooltip_angle(from: Vec2, to: Vec2, ucs: f64) -> i64 {
+    ((from.angle_to(to) - ucs).to_degrees().round() as i64).rem_euclid(360)
+}
+
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
 /// is on and the tooltip naming them ("Endpoint: 5.0000 < 90°").
-fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquired], track: Option<&snap::tracking::Track>, far: f64) {
+/// `ucs`: the current UCS's X axis (radians), which the tooltips measure angles from.
+fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquired], track: Option<&snap::tracking::Track>, far: f64, ucs: f64) {
     use snap::tracking::{Acquired, PathShape};
     let t = Tokens::get();
     let st = Stroke::new(1.0, t.snap);
@@ -1273,10 +1260,7 @@ fn draw_tracking(p: &egui::Painter, xf: &Xf, acquired: &[snap::tracking::Acquire
             }
         };
         p.extend(Shape::dotted_line(&pts, t.snap, 6.0, 1.0));
-        let (distance, angle) = (
-            cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4),
-            (path.from.angle_to(tr.point).to_degrees().round() as i64).rem_euclid(360),
-        );
+        let (distance, angle) = (cadcraft_engine::units::format_distance(path.from.dist(tr.point), 2, 4), tooltip_angle(path.from, tr.point, ucs));
         tips.push(if path.name == "Polar" {
             crate::tf!("Polar: {distance} < {angle}°", distance = distance, angle = angle)
         } else {
@@ -1984,16 +1968,28 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {
-        draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
+        draw_tracking(
+            &painter,
+            &xf,
+            &app.session.tracking.acquired,
+            app.canvas.track.as_ref(),
+            view.height * 4.0,
+            app.session.input_ucs().rotation(),
+        );
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
         draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
-    if app.ui.show_ucs_icon {
-        draw_ucs_icon(&painter, rect);
-        crate::viewcube::ucs_icon(app, ui, rect);
+    if app.session.ucsicon_bits() & 1 != 0 {
+        let place = crate::viewcube::IconPlace::of(app, rect, |p| xf.to_screen(p));
+        draw_ucs_icon(&painter, &place);
+        // Clickable only at the Command prompt: while a command runs, a pick or a snap at the UCS
+        // origin (where the icon may sit) reaches the drawing.
+        if app.session.running.is_none() && app.session.pending_window.is_none() {
+            crate::viewcube::ucs_icon(app, ui, rect, &place);
+        }
     }
     if app.ui.show_viewcube && sheet.is_none() {
         draw_viewcube(app, ui, rect);
@@ -2532,16 +2528,23 @@ fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     ));
 }
 
-fn draw_ucs_icon(p: &egui::Painter, rect: Rect) {
+/// The UCS icon: its X and Y arms along the current UCS's axes, with a square at the corner for
+/// the World UCS.
+fn draw_ucs_icon(p: &egui::Painter, at: &crate::viewcube::IconPlace) {
     let t = Tokens::get();
-    let o = pos2(rect.left() + 36.0, rect.bottom() - 34.0);
+    let (o, x, y) = (at.origin, at.x, at.y);
+    let arm = crate::viewcube::ARM;
     let st = Stroke::new(1.0, t.canvas_ink);
-    p.line_segment([o, o + vec2(60.0, 0.0)], st);
-    p.line_segment([o, o + vec2(0.0, -60.0)], st);
-    p.rect_stroke(Rect::from_center_size(o, vec2(9.0, 9.0)), 0.0, st, egui::StrokeKind::Middle);
+    p.line_segment([o, o + x * arm], st);
+    p.line_segment([o, o + y * arm], st);
+    if at.world {
+        let h = 4.5;
+        let square = vec![o + (x + y) * h, o + (x - y) * h, o - (x + y) * h, o - (x - y) * h];
+        p.add(Shape::closed_line(square, st));
+    }
     let f = egui::FontId::proportional(13.0);
-    p.text(o + vec2(70.0, 0.0), egui::Align2::LEFT_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
-    p.text(o + vec2(0.0, -70.0), egui::Align2::CENTER_BOTTOM, crate::tl!("Y"), f, t.canvas_ink);
+    p.text(o + x * (arm + 10.0), egui::Align2::CENTER_CENTER, crate::tl!("X"), f.clone(), t.canvas_ink);
+    p.text(o + y * (arm + 10.0), egui::Align2::CENTER_CENTER, crate::tl!("Y"), f, t.canvas_ink);
 }
 
 fn viewport_label(p: &egui::Painter, rect: Rect) {
@@ -2552,15 +2555,14 @@ fn viewport_label(p: &egui::Painter, rect: Rect) {
 
 fn draw_viewcube(app: &mut CadApp, ui: &mut egui::Ui, rect: Rect) {
     let l = crate::viewcube::Layout::new(rect);
-    let (c, ring) = (l.center, l.ring);
     let p = ui.painter_at(rect);
     crate::viewcube::show(app, ui, &l);
-    // WCS pill: the label and a down chevron, drawn as lines rather than a "⌄" glyph that a UI
-    // font may lack (it showed as a box, #1541).
-    let pill = Rect::from_center_size(c + vec2(0.0, ring + 26.0), vec2(56.0, 16.0));
+    // UCS pill: the current UCS's name and a down chevron, drawn as lines rather than a "⌄"
+    // glyph that a UI font may lack (it showed as a box, #1541).
+    let pill = l.pill;
     p.rect_filled(pill, 8.0, Color32::from_rgb(0x48, 0x50, 0x5c));
     let ink = Tokens::DARK.canvas_ink;
-    let label = p.layout_no_wrap(crate::tl!("WCS").to_string(), crate::theme::small(), ink);
+    let label = p.layout_no_wrap(ucs_pill_text(app), crate::theme::small(), ink);
     let (gap, chevron) = (4.0, 6.0);
     let left = pill.center().x - (label.size().x + gap + chevron) / 2.0;
     let mid = pill.center().y;
@@ -2665,6 +2667,22 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
 pub(crate) mod tests {
     use super::*;
     use cadcraft_render::DPrim;
+
+    /// Tracking tooltips give angles in the current UCS: a path along a UCS turned 30° reads 0°,
+    /// one along World X reads 330°, and the World UCS reads world angles.
+    #[test]
+    fn tooltip_angles_are_measured_from_the_ucs_x_axis() {
+        let o = Vec2::new(2.0, 1.0);
+        let at = |deg: f64| o + Vec2::from_angle(deg.to_radians()) * 5.0;
+        assert_eq!(tooltip_angle(o, at(90.0), 0.0), 90);
+        assert_eq!(tooltip_angle(o, at(-45.0), 0.0), 315);
+        let ucs = 30f64.to_radians();
+        assert_eq!(tooltip_angle(o, at(30.0), ucs), 0);
+        assert_eq!(tooltip_angle(o, at(0.0), ucs), 330);
+        assert_eq!(tooltip_angle(o, at(120.0), ucs), 90);
+        // A non-finite angle shows a number, not a panic.
+        assert!((0..360).contains(&tooltip_angle(o, o, f64::NAN)));
+    }
 
     fn list(handles: &[u64]) -> DisplayList {
         let prim =
@@ -2951,4 +2969,15 @@ mod hatch_pick_tests {
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
     }
+}
+
+/// The ViewCube pill's label: WCS, or the current UCS's name (cut short); the menu arrow is drawn
+/// beside it as lines (#1541).
+fn ucs_pill_text(app: &CadApp) -> String {
+    let (u, name) = app.session.ucs_named();
+    if u.is_world() && name.is_empty() {
+        return crate::tl!("WCS").to_string();
+    }
+    let n = if name.is_empty() { crate::tl!("Unnamed").to_string() } else { name };
+    if n.chars().count() > 8 { n.chars().take(7).chain(std::iter::once('…')).collect() } else { n }
 }
