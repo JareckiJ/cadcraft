@@ -76,6 +76,21 @@ fn electrical_tool_bar_and_project_manager() {
     h.run_steps(3);
     assert!(h.query_by_label_contains("Renumber device tags").is_none());
 
+    // Placing a contact by hand opens Insert / Edit Contact with the coils to pick from.
+    h.state_mut().cmdline("esymbol IEC_NO");
+    h.run_steps(2);
+    h.state_mut().cmdline("63,200");
+    h.run_steps(6);
+    save(&mut h, "electrical-6-insert-contact");
+    assert!(h.query_by_label_contains("Coil / main device").is_some(), "the contact dialog");
+    let coil = h.query_all_by_label_contains("-K3").next().map(|n| n.label().unwrap_or_default());
+    assert!(coil.is_some(), "the coil is listed");
+    h.get_all_by_label_contains("-K3").next().unwrap().click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert!(h.query_by_label_contains("Coil / main device").is_none(), "closed");
+
     // The electrical workspace: Tool Sets, Layers and Properties go; Project Manager and the
     // Electrical palette share the left side.
     h.state_mut().run("ui.workspace.electrical", json!({})).unwrap();

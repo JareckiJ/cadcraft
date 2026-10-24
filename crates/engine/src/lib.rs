@@ -645,6 +645,10 @@ pub struct Session {
     /// it resumes when that command ends. One level, as in AutoCAD.
     pub suspended: Option<Running>,
     pub log: Vec<String>,
+    /// Requests from interactive commands to the user interface, such as opening the
+    /// component dialog after a symbol is placed (`{"dialog": "ecomponent", "handle": "1A3"}`).
+    /// A UI drains them each frame; scripts and headless runs leave them (bounded).
+    pub ui_requests: Vec<serde_json::Value>,
     pub last_command: Option<String>,
     /// LASTPOINT.
     pub last_point: Vec2,
@@ -707,6 +711,14 @@ impl Default for Session {
 }
 
 impl Session {
+    /// Queue a request for the user interface ([`Session::ui_requests`]), keeping the newest 16.
+    pub fn request_ui(&mut self, request: serde_json::Value) {
+        if self.ui_requests.len() >= 16 {
+            self.ui_requests.remove(0);
+        }
+        self.ui_requests.push(request);
+    }
+
     pub fn new() -> Self {
         let mut s = Session::empty();
         s.new_drawing(false);
@@ -722,6 +734,7 @@ impl Session {
             in_script: false,
             suspended: None,
             log: Vec::new(),
+            ui_requests: Vec::new(),
             last_command: None,
             last_point: Vec2::ZERO,
             last_segment: None,

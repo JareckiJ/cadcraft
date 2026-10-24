@@ -34,6 +34,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.panel.project", "Project Manager", &["Window", "Project Manager"], Some("Cmd+6")),
     ("ui.toggle.etoolbar", "Electrical Tool Bar", &["Window", "Electrical Tool Bar"], None),
     ("ui.workspace.electrical", "Electrical Workspace", &["Window", "Electrical Workspace"], None),
+    ("ui.ecomponent", "Edit Component...", &["Tools", "Electrical", "Edit Component..."], None),
+    ("ui.toggle.ecomponent", "Component Dialog After Insert", &["Tools", "Electrical", "Component Dialog After Insert"], None),
     ("ui.toggle.systemcursor", "Show System Cursor", &["View", "Accessibility", "Show System Cursor"], None),
     ("ui.animations.system", "Use System Setting", &["View", "Accessibility", "Animation Effects", "Use System Setting"], None),
     ("ui.animations.on", "On", &["View", "Accessibility", "Animation Effects", "On"], None),
@@ -111,6 +113,25 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     // QUICKCALC typed or from a menu opens the palette; with parameters it is CAL.
     if id == "ui.panel.project" {
         return Some(crate::palettes::project::open(app));
+    }
+    if id == "ui.ecomponent" {
+        let handle = params
+            .get("handle")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| app.session.state().ok().and_then(|st| st.selection.first().map(|h| h.hex())));
+        return Some(match handle {
+            Some(h) => {
+                app.ui.dialog = Some(format!("ecomponent:{h}"));
+                Ok(json!({ "handle": h }))
+            }
+            None => Err("Select a symbol first.".to_string()),
+        });
+    }
+    if id == "ui.toggle.ecomponent" {
+        let on = params.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.ecomponent_dialog);
+        app.ui.ecomponent_dialog = on;
+        return Some(Ok(json!({ "on": on })));
     }
     if id == "ui.workspace.electrical" {
         return Some(crate::docking::electrical_workspace(app));

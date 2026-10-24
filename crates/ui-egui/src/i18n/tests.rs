@@ -99,6 +99,7 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
         include_str!("../palettes/electrical.rs"),
         include_str!("../palettes/project.rs"),
         include_str!("../etoolbar.rs"),
+        include_str!("../ecomponent.rs"),
         include_str!("../palettes/patterns.rs"),
         include_str!("../dialogs.rs"),
         include_str!("../hatchdlg.rs"),

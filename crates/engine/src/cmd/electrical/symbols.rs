@@ -1169,7 +1169,12 @@ impl Interactive for EsymbolM {
             }
             (Some(n), Input::Point(p)) => {
                 let n = n.clone();
-                run_esymbol(s, &json!({ "name": n, "at": [p.x, p.y] }))?;
+                let r = run_esymbol(s, &json!({ "name": n, "at": [p.x, p.y] }))?;
+                // Placed by hand: the UI asks for its data (Insert Component), like AutoCAD
+                // Electrical; contacts pick their coil there.
+                if let Some(h) = r["handle"].as_str() {
+                    s.request_ui(json!({ "dialog": "ecomponent", "handle": h, "block": r["block"] }));
+                }
                 Ok(Step::Done)
             }
             _ => Ok(Step::Continue),

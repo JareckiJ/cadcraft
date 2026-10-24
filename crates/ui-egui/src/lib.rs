@@ -30,6 +30,7 @@ pub mod xrefs;
 
 pub mod dyngrips;
 pub mod dyninput;
+pub mod ecomponent;
 pub mod etoolbar;
 pub mod gpu;
 pub mod grip_dyn;
@@ -77,6 +78,8 @@ pub struct UiState {
     pub show_toolbar: bool,
     /// The electrical tool bar (wiring, symbols, numbering, reports) under the tool bar.
     pub show_etoolbar: bool,
+    /// The Insert Component dialog follows placing a symbol by hand.
+    pub ecomponent_dialog: bool,
     pub show_file_tabs: bool,
     pub show_status_bar: bool,
     pub show_command_line: bool,
@@ -166,6 +169,7 @@ impl Default for UiState {
             show_palettes: true,
             show_toolbar: true,
             show_etoolbar: true,
+            ecomponent_dialog: true,
             show_file_tabs: true,
             show_status_bar: true,
             show_command_line: true,
@@ -399,6 +403,9 @@ impl CadApp {
         if !self.ui.show_etoolbar {
             prefs["electricalToolBar"] = json!(false);
         }
+        if !self.ui.ecomponent_dialog {
+            prefs["componentDialog"] = json!(false);
+        }
         prefs.to_string()
     }
 
@@ -429,6 +436,9 @@ impl CadApp {
         }
         if let Some(on) = v.get("electricalToolBar").and_then(Value::as_bool) {
             self.ui.show_etoolbar = on;
+        }
+        if let Some(on) = v.get("componentDialog").and_then(Value::as_bool) {
+            self.ui.ecomponent_dialog = on;
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
@@ -690,6 +700,7 @@ impl CadApp {
                 chrome::start_page(self, ui);
             }
         });
+        ecomponent::take_requests(self);
         dialogs::show(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
         closing::prompt(self, ui.ctx());
