@@ -273,36 +273,19 @@ impl CubeProjector {
         painter.add(Shape::Path(PathShape::closed_line(pts_inner, Stroke::new(1.0, rim_col))));
         painter.add(Shape::Path(PathShape::closed_line(pts_outer, Stroke::new(1.0, rim_col))));
 
-        // Render the cardinal letters (`N`, `E`/`O`, `S`/`Z`, `W`) as 3D surface-projected bold
-        // vector glyphs on the compass plane right on/outside the ring, just like AutoCAD.
-        let lc = Color32::from_rgb(0xdc, 0xe0, 0xe6);
-        let stroke = Stroke::new(2.1, lc);
+        // Render the cardinal letters (`N`, `E`/`O`, `S`/`Z`, `W`) as 3D plane-transformed
+        // font TextShapes on the compass plane right on the ring, supporting all 17 languages.
+        let lc = Color32::from_rgb(0xe2, 0xe6, 0xec);
+        let right_dir = self.project_ring_point(Vec3::new(1.0, 0.0, 0.0), 1.0) - self.project_ring_point(Vec3::ZERO, 1.0);
+        let down_dir = self.project_ring_point(Vec3::new(0.0, -1.0, 0.0), 1.0) - self.project_ring_point(Vec3::ZERO, 1.0);
         for (dir, label) in [
             (Vec3::new(0.0, 1.0, 0.0), crate::tl!("N")),
             (Vec3::new(0.0, -1.0, 0.0), crate::tl!("S")),
             (Vec3::new(1.0, 0.0, 0.0), crate::tl!("E")),
             (Vec3::new(-1.0, 0.0, 0.0), crate::tl!("W")),
         ] {
-            let ch = label.chars().next().unwrap_or('N').to_ascii_uppercase();
-            // Tangent right (`+X` in world XY) and up (`+Y` in world XY) on the compass plane so the
-            // letters rotate and tilt in 3D with the compass ring.
-            let char_r = 4.6_f32;
-            for poly in glyph_polylines(ch) {
-                let pts: Vec<Pos2> = poly
-                    .iter()
-                    .map(|&(gx, gy)| {
-                        let local_x = f64::from(gx - 0.5) * f64::from(char_r * 1.55) / f64::from(ring_radius);
-                        let local_y = f64::from(gy - 0.5) * f64::from(char_r * 2.15) / f64::from(ring_radius);
-                        let p_xy = Vec3::new(dir.x + local_x, dir.y + local_y, 0.0);
-                        self.project_ring_point(p_xy, ring_radius)
-                    })
-                    .collect();
-                if pts.len() == 2 {
-                    painter.line_segment([pts[0], pts[1]], stroke);
-                } else if pts.len() > 2 {
-                    painter.add(Shape::line(pts, stroke));
-                }
-            }
+            let pos = self.project_ring_point(dir, ring_radius);
+            paint_plane_text(painter, pos, label, 15.0, right_dir, down_dir, 24.0, lc);
         }
     }
 
@@ -353,60 +336,23 @@ impl CubeProjector {
                 self.paint_zone_highlight_on_face(painter, face, hz);
             }
 
-            // Render the localized face label using 3D surface-projected vector strokes so it is
-            // always centered, bold, skewed with the face parallelogram, and upside-down from behind.
+            // Render the localized face label using 3D plane-transformed TextShapes so it is
+            // crisp, bold, skewed with the face parallelogram, upside-down from behind, and
+            // supports all 17 interface languages (including Greek, Cyrillic, CJK, Hangul, Arabic).
             if ndot > 0.16 {
                 self.paint_face_label(painter, face, ndot);
             }
         }
     }
 
-    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, ndot: f64) {
-        let raw_label = match face.key {
-            "TOP" => crate::tl!("TOP"),
-            "BOTTOM" => crate::tl!("BOTTOM"),
-            "FRONT" => crate::tl!("FRONT"),
-            "BACK" => crate::tl!("BACK"),
-            "LEFT" => crate::tl!("LEFT"),
-            "RIGHT" => crate::tl!("RIGHT"),
-            other => other,
-        };
-        let label = raw_label.to_uppercase();
-        let chars: Vec<char> = label.chars().filter(|c| !c.is_whitespace()).collect();
-        if chars.is_empty() {
-            return;
-        }
-
-        // Character metrics in normalized glyph coordinates (`x in [0, 1]`, `y in [0, 1]`).
-        let char_w = 1.0_f64;
-        let gap = 0.36_f64;
-        let total_w = (chars.len() as f64) * char_w + ((chars.len().saturating_sub(1)) as f64) * gap;
-        // Fit comfortably inside the cube face (`[-0.64, 0.64]` in `u`-space) with generous height
-        // on the enlarged cube (`half_size = 28px`) so the face text is crisp and immediately legible.
-        let scale_u = (1.24 / total_w).min(0.31);
-        let scale_v = (scale_u * 1.48).min(0.45);
-        let stroke_px = (2.15 * (ndot as f32).powf(0.22)).clamp(1.55, 2.3);
-        let stroke = Stroke::new(stroke_px, Color32::from_rgb(0x1c, 0x20, 0x26));
-
-        let start_x = -0.5 * total_w;
-        for (i, ch) in chars.into_iter().enumerate() {
-            let x0 = start_x + (i as f64) * (char_w + gap);
-            for poly in glyph_polylines(ch) {
-                let pts: Vec<Pos2> = poly
-                    .iter()
-                    .map(|&(gx, gy)| {
-                        let u = (x0 + f64::from(gx) * char_w) * scale_u;
-                        let v = (f64::from(gy) - 0.5) * scale_v;
-                        self.project_unit(face.point(u, v)).0
-                    })
-                    .collect();
-                if pts.len() == 2 {
-                    painter.line_segment([pts[0], pts[1]], stroke);
-                } else if pts.len() > 2 {
-                    painter.add(Shape::line(pts, stroke));
-                }
-            }
-        }
+    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, _ndot: f64) {
+        let label = localized_face_label(face.key).to_uppercase();
+        let center_2d = self.project_unit(face.point(0.0, 0.0)).0;
+        // Screen-space tangent vectors corresponding to one unit in `u` (right) and `-v` (down) on the face.
+        let right = (self.project_unit(face.point(1.0, 0.0)).0 - center_2d) / self.half_size;
+        let down = (self.project_unit(face.point(0.0, -1.0)).0 - center_2d) / self.half_size;
+        let max_width = self.half_size * 1.55;
+        paint_plane_text(painter, center_2d, &label, 13.0, right, down, max_width, Color32::from_rgb(0x1f, 0x24, 0x2b));
     }
 
     fn paint_face_subdivisions(&self, painter: &egui::Painter, face: FaceDef) {
@@ -486,90 +432,144 @@ fn dist_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     p.distance(a + vec2(ab.x * t, ab.y * t))
 }
 
-/// Normalized vector-stroke polylines (`x in [0, 1]`, `y in [0, 1]` from bottom to top) for uppercase
-/// characters on the ViewCube faces.
-fn glyph_polylines(ch: char) -> &'static [&'static [(f32, f32)]] {
-    match ch {
-        'A' | 'Ä' | 'Á' | 'À' | 'Â' => &[&[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)], &[(0.18, 0.36), (0.82, 0.36)]],
-        'B' => &[
-            &[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (0.95, 0.85), (0.95, 0.62), (0.72, 0.5), (0.0, 0.5)],
-            &[(0.72, 0.5), (1.0, 0.38), (1.0, 0.15), (0.75, 0.0), (0.0, 0.0)],
-        ],
-        'C' | 'Ç' | 'Č' => &[&[(0.96, 0.82), (0.72, 1.0), (0.28, 1.0), (0.0, 0.75), (0.0, 0.25), (0.28, 0.0), (0.72, 0.0), (0.96, 0.18)]],
-        'D' => &[&[(0.0, 0.0), (0.0, 1.0), (0.65, 1.0), (1.0, 0.72), (1.0, 0.28), (0.65, 0.0), (0.0, 0.0)]],
-        'E' | 'É' | 'È' | 'Ê' | 'Ë' => &[&[(0.95, 1.0), (0.0, 1.0), (0.0, 0.0), (0.95, 0.0)], &[(0.0, 0.5), (0.78, 0.5)]],
-        'F' => &[&[(0.0, 0.0), (0.0, 1.0), (0.95, 1.0)], &[(0.0, 0.5), (0.78, 0.5)]],
-        'G' => &[&[
-            (0.96, 0.82),
-            (0.72, 1.0),
-            (0.28, 1.0),
-            (0.0, 0.75),
-            (0.0, 0.25),
-            (0.28, 0.0),
-            (0.78, 0.0),
-            (1.0, 0.22),
-            (1.0, 0.46),
-            (0.52, 0.46),
-        ]],
-        'H' => &[&[(0.0, 0.0), (0.0, 1.0)], &[(1.0, 0.0), (1.0, 1.0)], &[(0.0, 0.5), (1.0, 0.5)]],
-        'I' | 'Í' | 'Ì' | 'Î' => &[&[(0.18, 1.0), (0.82, 1.0)], &[(0.5, 0.0), (0.5, 1.0)], &[(0.18, 0.0), (0.82, 0.0)]],
-        'J' => &[&[(0.2, 1.0), (0.9, 1.0)], &[(0.65, 1.0), (0.65, 0.22), (0.42, 0.0), (0.15, 0.0), (0.0, 0.2)]],
-        'K' => &[&[(0.0, 0.0), (0.0, 1.0)], &[(0.96, 1.0), (0.0, 0.45)], &[(0.28, 0.6), (1.0, 0.0)]],
-        'L' => &[&[(0.0, 1.0), (0.0, 0.0), (0.95, 0.0)]],
-        'M' => &[&[(0.0, 0.0), (0.0, 1.0), (0.5, 0.35), (1.0, 1.0), (1.0, 0.0)]],
-        'N' | 'Ñ' => &[&[(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)]],
-        'O' | 'Ö' | 'Ó' | 'Ò' | 'Ô' => &[&[
-            (0.28, 1.0),
-            (0.72, 1.0),
-            (1.0, 0.74),
-            (1.0, 0.26),
-            (0.72, 0.0),
-            (0.28, 0.0),
-            (0.0, 0.26),
-            (0.0, 0.74),
-            (0.28, 1.0),
-        ]],
-        'P' => &[&[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (1.0, 0.82), (1.0, 0.62), (0.72, 0.45), (0.0, 0.45)]],
-        'Q' => &[
-            &[
-                (0.28, 1.0),
-                (0.72, 1.0),
-                (1.0, 0.74),
-                (1.0, 0.26),
-                (0.72, 0.0),
-                (0.28, 0.0),
-                (0.0, 0.26),
-                (0.0, 0.74),
-                (0.28, 1.0),
-            ],
-            &[(0.55, 0.28), (1.0, 0.0)],
-        ],
-        'R' | 'Ř' => &[
-            &[(0.0, 0.0), (0.0, 1.0), (0.72, 1.0), (1.0, 0.82), (1.0, 0.62), (0.72, 0.48), (0.0, 0.48)],
-            &[(0.52, 0.48), (1.0, 0.0)],
-        ],
-        'S' | 'Š' => &[&[
-            (0.95, 0.84),
-            (0.72, 1.0),
-            (0.25, 1.0),
-            (0.0, 0.82),
-            (0.0, 0.64),
-            (0.25, 0.52),
-            (0.75, 0.46),
-            (1.0, 0.32),
-            (1.0, 0.16),
-            (0.75, 0.0),
-            (0.22, 0.0),
-            (0.0, 0.16),
-        ]],
-        'T' => &[&[(0.0, 1.0), (1.0, 1.0)], &[(0.5, 0.0), (0.5, 1.0)]],
-        'U' | 'Ü' | 'Ú' | 'Ù' | 'Û' => &[&[(0.0, 1.0), (0.0, 0.24), (0.28, 0.0), (0.72, 0.0), (1.0, 0.24), (1.0, 1.0)]],
-        'V' => &[&[(0.0, 1.0), (0.5, 0.0), (1.0, 1.0)]],
-        'W' => &[&[(0.0, 1.0), (0.24, 0.0), (0.5, 0.65), (0.76, 0.0), (1.0, 1.0)]],
-        'X' => &[&[(0.0, 0.0), (1.0, 1.0)], &[(0.0, 1.0), (1.0, 0.0)]],
-        'Y' => &[&[(0.0, 1.0), (0.5, 0.5), (1.0, 1.0)], &[(0.5, 0.5), (0.5, 0.0)]],
-        'Z' | 'Ž' => &[&[(0.0, 1.0), (1.0, 1.0), (0.0, 0.0), (1.0, 0.0)]],
-        _ => &[&[(0.15, 0.15), (0.85, 0.15), (0.85, 0.85), (0.15, 0.85), (0.15, 0.15)]],
+/// Transform the existing font galley in the 3D face/compass plane while keeping it inside a
+/// [`egui::epaint::TextShape`] so `egui` populates and normalizes the font-atlas UVs at end-of-frame
+/// for every Unicode script (Latin, Greek, Cyrillic, Arabic, Hangul, CJK).
+#[allow(clippy::too_many_arguments)]
+fn paint_plane_text(
+    painter: &egui::Painter,
+    at: Pos2,
+    label: &str,
+    font_size: f32,
+    right: egui::Vec2,
+    down: egui::Vec2,
+    max_width: f32,
+    ink: Color32,
+) {
+    let base_galley = painter.layout_no_wrap(label.to_owned(), egui::FontId::proportional(font_size), ink);
+    let center = base_galley.rect.center().to_vec2();
+    let fit = (max_width / base_galley.size().x.max(1.0)).min(1.0);
+    // Two slight horizontal offsets (`-0.35`, `0.35`) produce a crisp bold face label.
+    for dx_bold in [-0.35_f32, 0.35_f32] {
+        let mut galley = (*base_galley).clone();
+        let mut bounds = egui::Rect::NOTHING;
+        for placed in &mut galley.rows {
+            let row = std::sync::Arc::make_mut(&mut placed.row);
+            for v in &mut row.visuals.mesh.vertices {
+                let q = (v.pos.to_vec2() + placed.pos.to_vec2() - center) * fit + vec2(dx_bold, 0.0);
+                v.pos = (right * q.x + down * q.y).to_pos2();
+            }
+            placed.pos = Pos2::ZERO;
+            row.visuals.mesh_bounds = row.visuals.mesh.calc_bounds();
+            bounds = bounds.union(row.visuals.mesh_bounds);
+        }
+        galley.mesh_bounds = bounds;
+        galley.rect = bounds;
+        painter.add(Shape::Text(egui::epaint::TextShape::new(at, std::sync::Arc::new(galley), ink)));
     }
 }
 
+/// Localized ViewCube face label across all 17 interface languages (`TOP`, `BOTTOM`, `FRONT`,
+/// `BACK`, `LEFT`, `RIGHT`). Uses catalog entries when present and built-in translations for the
+/// remaining 3D face names.
+fn localized_face_label(key: &'static str) -> &'static str {
+    match key {
+        "TOP" => crate::tl!("TOP"),
+        "LEFT" => {
+            let s = crate::i18n::t("Left");
+            if s != "Left" { s } else { face_fallback("LEFT") }
+        }
+        "RIGHT" => {
+            let s = crate::i18n::t("Right");
+            if s != "Right" { s } else { face_fallback("RIGHT") }
+        }
+        "FRONT" => {
+            let s = crate::i18n::t("Front");
+            if s != "Front" { s } else { face_fallback("FRONT") }
+        }
+        "BACK" => {
+            let s = crate::i18n::t("Back");
+            if s != "Back" { s } else { face_fallback("BACK") }
+        }
+        "BOTTOM" => {
+            let s = crate::i18n::t("Bottom");
+            if s != "Bottom" { s } else { face_fallback("BOTTOM") }
+        }
+        other => other,
+    }
+}
+
+fn face_fallback(key: &'static str) -> &'static str {
+    let lang = crate::i18n::t("TOP");
+    match (lang, key) {
+        // Dutch (`TOP` -> `BOVEN`)
+        ("BOVEN", "FRONT") => "VOOR",
+        ("BOVEN", "BACK") => "ACHTER",
+        ("BOVEN", "BOTTOM") => "ONDER",
+        ("BOVEN", "LEFT") => "LINKS",
+        ("BOVEN", "RIGHT") => "RECHTS",
+        // German (`TOP` -> `OBEN`)
+        ("OBEN", "FRONT") => "VORNE",
+        ("OBEN", "BACK") => "HINTEN",
+        ("OBEN", "BOTTOM") => "UNTEN",
+        // French (`TOP` -> `HAUT`)
+        ("HAUT", "FRONT") => "AVANT",
+        ("HAUT", "BACK") => "ARRIÈRE",
+        ("HAUT", "BOTTOM") => "BAS",
+        // Spanish (`TOP` -> `SUP.`)
+        ("SUP.", "FRONT") => "FRENTE",
+        ("SUP.", "BACK") => "POST.",
+        ("SUP.", "BOTTOM") => "INF.",
+        ("SUP.", "LEFT") => "IZQ.",
+        ("SUP.", "RIGHT") => "DER.",
+        // Brazilian Portuguese (`TOP` -> `SUPERIOR`)
+        ("SUPERIOR", "FRONT") => "FRENTE",
+        ("SUPERIOR", "BACK") => "POSTERIOR",
+        ("SUPERIOR", "BOTTOM") => "INFERIOR",
+        // Italian (`TOP` -> `ALTO`)
+        ("ALTO", "FRONT") => "FRONTE",
+        ("ALTO", "BACK") => "RETRO",
+        ("ALTO", "BOTTOM") => "BASSO",
+        // Swedish (`TOP` -> `OVAN`)
+        ("OVAN", "FRONT") => "FRAM",
+        ("OVAN", "BACK") => "BAK",
+        ("OVAN", "BOTTOM") => "UNDER",
+        // Czech (`TOP` -> `SHORA`)
+        ("SHORA", "FRONT") => "VPŘEDU",
+        ("SHORA", "BACK") => "VZADU",
+        ("SHORA", "BOTTOM") => "ZDOLA",
+        // Hungarian (`TOP` -> `FELÜL`)
+        ("FELÜL", "FRONT") => "ELÖL",
+        ("FELÜL", "BACK") => "HÁTUL",
+        ("FELÜL", "BOTTOM") => "ALUL",
+        // Turkish (`TOP` -> `ÜST`)
+        ("ÜST", "FRONT") => "ÖN",
+        ("ÜST", "BACK") => "ARKA",
+        ("ÜST", "BOTTOM") => "ALT",
+        // Greek (`TOP` -> `ΚΑΤΟΨΗ`)
+        ("ΚΑΤΟΨΗ", "FRONT") => "ΠΡΟΣΟΨΗ",
+        ("ΚΑΤΟΨΗ", "BACK") => "ΠΙΣΩ",
+        ("ΚΑΤΟΨΗ", "BOTTOM") => "ΚΑΤΩ",
+        // Ukrainian (`TOP` -> `ЗВЕРХУ`)
+        ("ЗВЕРХУ", "FRONT") => "СПЕРЕДУ",
+        ("ЗВЕРХУ", "BACK") => "ЗЗАДУ",
+        ("ЗВЕРХУ", "BOTTOM") => "ЗНИЗУ",
+        // Russian (`TOP` -> `СВЕРХУ`)
+        ("СВЕРХУ", "FRONT") => "СПЕРЕДИ",
+        ("СВЕРХУ", "BACK") => "СЗАДИ",
+        ("СВЕРХУ", "BOTTOM") => "СНИЗУ",
+        // Chinese (`TOP` -> `俯视`)
+        ("俯视", "FRONT") => "前视",
+        ("俯视", "BACK") => "后视",
+        ("俯视", "BOTTOM") => "仰视",
+        // Korean (`TOP` -> `평면`)
+        ("평면", "FRONT") => "정면",
+        ("평면", "BACK") => "배면",
+        ("평면", "BOTTOM") => "저면",
+        // Arabic (`TOP` -> `أعلى`)
+        ("أعلى", "FRONT") => "أمام",
+        ("أعلى", "BACK") => "خلف",
+        ("أعلى", "BOTTOM") => "أسفل",
+        _ => key,
+    }
+}
