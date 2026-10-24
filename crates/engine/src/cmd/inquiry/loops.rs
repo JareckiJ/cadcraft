@@ -20,12 +20,14 @@ const CMD: &str = "loops";
 
 /// Endpoint pairs compared before the quadratic chaining gives up (reported as `capped`).
 const DEFAULT_PAIR_LIMIT: usize = 1_000_000;
+/// The most pairs a caller may ask for: a bounded amount of work however large the drawing.
+const MAX_PAIR_LIMIT: usize = 100_000_000;
 /// Loops returned, and open chains and junctions kept, by default.
 const DEFAULT_LIMIT: usize = 200;
 /// The smallest default tolerance, for a drawing at the origin.
 const MIN_TOLERANCE: f64 = 1e-12;
 
-pub const PARAMS: &str = "{tolerance?: positive number (default 1e-9 × the extents diagonal), maxPairs? (endpoint pairs compared, default 1000000), limit? (default 200), offset?} → \
+pub const PARAMS: &str = "{tolerance?: positive number (default 1e-9 × the extents diagonal), maxPairs? (endpoint pairs compared, default 1000000, at most 100000000), limit? (default 200), offset?} → \
      {schema: 1, tolerance, pairTests, pairTestsNeeded, pairLimit, capped, count (all closed loops), returned, offset, truncated, \
      loops: [{members: [handle], perimeter, area, winding: ccw|cw}], \
      openChains: {count, truncated, chains: [{members, gap, at: [x, y], ends: [[x, y], [x, y]], length}]}, \
@@ -81,7 +83,7 @@ pub fn run(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let limit = count("limit", DEFAULT_LIMIT)?;
     let offset = count("offset", 0)?;
-    let pair_limit = count("maxPairs", DEFAULT_PAIR_LIMIT)?;
+    let pair_limit = count("maxPairs", DEFAULT_PAIR_LIMIT)?.min(MAX_PAIR_LIMIT);
     let tolerance = given("tolerance")
         .map(|v| v.as_f64().filter(|t| t.is_finite() && *t > 0.0).ok_or_else(|| bad(CMD, "`tolerance` must be a positive number")))
         .transpose()?;
