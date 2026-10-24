@@ -9,7 +9,7 @@ use cadcraft_geom::{Bounds2, Line, PolyVertex, Segment, Vec2, line_line};
 use serde_json::{Value, json};
 
 use super::helpers::{line, lwpoly, rect_vertices};
-use super::modify::{Edges, edge_segments_owned, extend, extend_result, prim_to_segments, trim, trim_result};
+use super::modify::{Edges, edge_segments_owned, extend, extend_result, prim_to_segments, trim, trim_edges, trim_result};
 use super::{bad, point_param, points_param};
 use crate::{Accept, EngineError, Glow, Input, Interactive, Prompt, Result, Session, Step};
 
@@ -344,7 +344,7 @@ impl TrimM {
         {
             return Some(e.clone());
         }
-        let e = Arc::new(edge_segments_owned(s, Edges { only: self.edges.as_deref(), implied }).ok()?);
+        let e = Arc::new(edge_segments_owned(s, Edges { only: self.edges.as_deref(), implied }, None).ok()?);
         *cache = Some((doc, space, implied, e.clone()));
         Some(e)
     }
@@ -359,13 +359,15 @@ impl TrimM {
         }
         let quick = quick_mode(s);
         let implied = !quick && edge_mode(s);
-        let edges = self.cached_edges(s, implied)?;
-        let cut: Vec<Segment> = edges.iter().filter(|(o, _)| *o != h).map(|(_, sg)| *sg).collect();
         if self.extend {
+            let edges = self.cached_edges(s, implied)?;
+            let cut: Vec<Segment> = edges.iter().filter(|(o, _)| *o != h).map(|(_, sg)| *sg).collect();
             let (e, new) = extend_result(s, h, c, &cut).ok()?;
             let kinds = uncovered(&new, std::slice::from_ref(&e.kind));
             return (!kinds.is_empty()).then_some(Glow { kinds, removing: false });
         }
+        // A trim only meets the edges around the object.
+        let cut = trim_edges(s, Edges { only: self.edges.as_deref(), implied }, h).ok()?;
         let kinds = match trim_result(s, h, c, &cut) {
             Ok((e, pieces)) => match &e.kind {
                 EntityKind::Hatch(hatch) => {

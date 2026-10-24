@@ -783,16 +783,41 @@ pub(crate) struct Edges<'a> {
 
 /// All primitives of the cutting edges (excluding `exclude`).
 pub(crate) fn edge_segments(s: &Session, edges: Edges, exclude: Handle) -> Result<Vec<Segment>> {
-    Ok(edge_segments_owned(s, edges)?.into_iter().filter(|(h, _)| *h != exclude).map(|(_, sg)| sg).collect())
+    Ok(edge_segments_owned(s, edges, None)?.into_iter().filter(|(h, _)| *h != exclude).map(|(_, sg)| sg).collect())
 }
 
-/// [`edge_segments`] of every edge object, each with the object it comes from.
-pub(crate) fn edge_segments_owned(s: &Session, edges: Edges) -> Result<Vec<(Handle, Segment)>> {
+/// The cutting edges a trim of `h` can meet: only the objects reaching its extents (all of them
+/// with implied edges, which run on without end).
+pub(crate) fn trim_edges(s: &Session, edges: Edges, h: Handle) -> Result<Vec<Segment>> {
+    let d = s.doc()?;
+    let near = d.entity(h).map(|e| {
+        let b = cadcraft_doc::entity_bounds(d, e, 0);
+        b.expand((b.width() + b.height()) * 0.01 + 1e-6)
+    });
+    Ok(edge_segments_owned(s, edges, near)?.into_iter().filter(|(o, _)| *o != h).map(|(_, sg)| sg).collect())
+}
+
+/// [`edge_segments`] of every edge object (only those reaching `near` when given), each with
+/// the object it comes from.
+pub(crate) fn edge_segments_owned(s: &Session, edges: Edges, near: Option<cadcraft_geom::Bounds2>) -> Result<Vec<(Handle, Segment)>> {
     let d = s.doc()?;
     let space = s.space();
     let store = d.space(&space).ok_or(EngineError::NoDocument)?;
+    let ix = near.filter(|n| !edges.implied && !n.is_empty()).and_then(|_| crate::spatial::index(d, &space));
+    let picked: Option<Vec<std::sync::Arc<Entity>>> = match (&ix, near) {
+        (Some(ix), Some(n)) => ix.query(&n, true).map(|v| v.into_iter().filter_map(|i| ix.entity(i).cloned()).collect()),
+        _ => None,
+    };
+    let all: Vec<std::sync::Arc<Entity>>;
+    let ents: &[std::sync::Arc<Entity>] = match &picked {
+        Some(v) => v,
+        None => {
+            all = store.iter().cloned().collect();
+            &all
+        }
+    };
     let mut out = Vec::new();
-    for e in store.iter() {
+    for e in ents {
         if !d.is_visible(e) {
             continue;
         }
@@ -879,7 +904,7 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
     if super::curves::is_locked(s, h) {
         return Err(EngineError::Other("The object is on a locked layer.".into()));
     }
-    let cut = edge_segments(s, edges, h)?;
+    let cut = trim_edges(s, edges, h)?;
     let (e, pieces) = trim_result(s, h, pick, &cut)?;
     let common = e.common.clone();
     let space = s.space();
