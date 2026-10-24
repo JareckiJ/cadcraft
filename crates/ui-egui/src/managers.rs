@@ -1269,18 +1269,30 @@ mod dimstyle_dialog_tests {
                 "dimstyle",
                 json!({ "name": "ISO", "current": false, "arrowSize": 0.5, "tickSize": 0.25, "arrowBlock": "_ARCHTICK",
                         "textHeight": 3.5, "textGap": 0.8, "textAbove": "1", "textStyle": "Standard",
-                        "linearUnit": "4", "decimals": 1, "scale": 2.0, "tolerance": true, "annotative": false }),
+                        "linearUnit": "4", "decimals": 1, "scale": 2.0, "linearFactor": 1.25,
+                        "extOffset": 0.125, "extExtend": 0.375, "baselineSpacing": 0.75,
+                        "tolerance": true, "annotative": false }),
             )
             .unwrap();
         assert!(r.get("ignored").is_none(), "every field recognised: {r}");
         let d = app.session.doc().unwrap();
         let st = d.dim_style("ISO").unwrap();
+        assert!((st.scale - 2.0).abs() < 1e-9);
         assert!((st.arrow_size - 0.5).abs() < 1e-9);
         assert_eq!(st.arrow_block, "_ARCHTICK");
+        assert!((st.tick_size - 0.25).abs() < 1e-9);
+        assert!((st.text_height - 3.5).abs() < 1e-9);
+        assert!((st.text_gap - 0.8).abs() < 1e-9);
         assert_eq!(st.text_above, 1);
+        assert_eq!(st.text_style, "Standard");
         assert_eq!(st.linear_unit, 4);
         assert_eq!(st.decimals, 1);
+        assert!((st.linear_factor - 1.25).abs() < 1e-9);
+        assert!((st.ext_offset - 0.125).abs() < 1e-9);
+        assert!((st.ext_extend - 0.375).abs() < 1e-9);
+        assert!((st.baseline_spacing - 0.75).abs() < 1e-9);
         assert!(st.tolerance);
+        assert!(!st.annotative);
     }
 
     /// The dialog draws over a drawing with and without dimension styles without panicking.
