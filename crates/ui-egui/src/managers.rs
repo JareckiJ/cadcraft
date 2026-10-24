@@ -1359,10 +1359,12 @@ mod plot_dialog_tests {
 mod plot_sheets_tests {
     use super::*;
 
+    /// Model and three layouts, in tab order.
     fn targets() -> Vec<String> {
         ["Model", "Layout1", "Layout2", "Sheet 3"].map(String::from).to_vec()
     }
 
+    /// Sheets of deleted layouts drop out; one left becomes the target.
     #[test]
     fn deleted_sheets_drop_out_and_a_single_sheet_left_is_the_target() {
         let t = targets();
@@ -1384,6 +1386,7 @@ mod plot_sheets_tests {
         assert!(!sync_sheets(&mut sheets, &mut target, &t));
         assert_eq!((sheets, target.as_str()), (names(&["Layout1"]), "Layout1"));
     }
+    /// Ticking keeps tab order and leaves at least one sheet.
     #[test]
     fn ticking_sheets_keeps_tab_order_and_at_least_one() {
         let t = targets();
@@ -1400,6 +1403,7 @@ mod plot_sheets_tests {
         assert_eq!(sheets, ["Sheet 3"], "an unknown name changes nothing");
     }
 
+    /// Several sheets plot with no page overrides, so each uses its own page setup.
     #[test]
     fn several_sheets_plot_with_their_own_page_setups_into_one_pdf() {
         let p = sheets_params(&["Layout1".to_string(), "Layout2".to_string()]);
@@ -1410,6 +1414,7 @@ mod plot_sheets_tests {
         }
     }
 
+    /// The summary names each sheet's paper and style table.
     #[test]
     fn the_summary_names_each_sheets_paper_and_style() {
         let mut app = crate::CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
