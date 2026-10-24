@@ -114,7 +114,7 @@ impl PathArray {
             && self.count >= 1
             && self.points.iter().all(|p| p.x.is_finite() && p.y.is_finite())
             && self.spacing.is_finite()
-            && (self.divide || self.spacing > 0.0)
+            && (self.divide || (self.spacing > 0.0 && (self.spacing * f64::from(self.count)).is_finite()))
             && self.segments().is_some()
     }
 
@@ -512,6 +512,14 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
         assert_eq!(items.len(), 100_000);
         assert!(items.iter().enumerate().all(|(l, i)| i.level as usize == l && i.insert.xy() == Vec2::ZERO));
+    }
+
+    #[test]
+    fn spacing_that_overflows_the_item_distance_is_invalid() {
+        let sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)];
+        let p = path(&sq, true, 3, false, 1e308, true);
+        assert!(!p.is_valid() && p.items().is_none(), "1e308 x 2 is infinity, which rem_euclid turns into NaN");
+        assert!(path(&sq, true, 3, false, 1e300, true).is_valid());
     }
 
     #[test]
