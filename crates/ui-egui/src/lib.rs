@@ -8,6 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod aliasdlg;
 pub mod animation;
 pub mod autosave;
 pub mod bedit;
@@ -108,6 +109,8 @@ pub struct UiState {
     pub save_version: String,
     /// Drawings opened from a path, newest first (File ▸ Open Recent and the Start page).
     pub recent_files: Vec<String>,
+    /// The folder the last APPLOAD file came from: the next pick starts there.
+    pub last_lisp_dir: Option<String>,
 }
 
 /// A DXF/DWG file version (2000 … 2018).
@@ -179,6 +182,7 @@ impl Default for UiState {
             save_format: SaveFormat::default(),
             save_version: SaveVersion::default().year().to_string(),
             recent_files: Vec::new(),
+            last_lisp_dir: None,
         }
     }
 }
@@ -188,6 +192,13 @@ impl Default for UiState {
 pub struct Services {
     pub pick_open: Option<Box<dyn Fn() -> Option<String>>>,
     pub pick_save: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// Pick a `.lsp` file for APPLOAD, starting in the given folder (empty for the default one).
+    /// `None` where there is no native file dialog: the desktop without one asks for the name,
+    /// and the web (no file system) says to drop the file (`no_file_system`).
+    pub pick_lisp: Option<Box<dyn Fn(&str) -> Option<String>>>,
+    /// The host has no file system to read a path from (the browser): a dropped file's contents
+    /// are what it loads, and APPLOAD says so instead of asking for a name it cannot read.
+    pub no_file_system: bool,
 }
 
 pub struct CadApp {
@@ -241,6 +252,8 @@ pub struct CadApp {
     pub gpu_faults: std::sync::Arc<gpu::GpuFaults>,
     /// The notice shown after one (see [`autosave::gpu_notice`]).
     pub gpu_notice: Option<autosave::GpuNotice>,
+    /// The Command Aliases dialog while open ([`aliasdlg`]).
+    pub alias_dlg: Option<aliasdlg::AliasDlgState>,
     /// The Hatch and Gradient dialog while open or picking ([`hatchdlg`]).
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
@@ -282,6 +295,7 @@ impl CadApp {
             recovery: autosave::Recovery::default(),
             gpu_faults: std::sync::Arc::default(),
             gpu_notice: None,
+            alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
         }
@@ -379,6 +393,9 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if let Some(dir) = &self.ui.last_lisp_dir {
+            prefs["lispDir"] = json!(dir);
+        }
         prefs.to_string()
     }
 
@@ -405,6 +422,9 @@ impl CadApp {
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
+            self.ui.last_lisp_dir = Some(dir.to_string());
         }
     }
 

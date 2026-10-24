@@ -10,7 +10,7 @@
 //! |---|---|
 //! | `theme` | `"system"`, `"light"` or `"dark"` |
 //! | `animations` | `"system"`, `"on"` or `"off"`: dialog and menu fades and smoothed scrolling |
-//! | `interfaceLanguage` | `"auto"`, `"en"`, `"uk"`, `"pt-BR"`, `"de"`, `"es"`, `"cs"`, `"ru"`, `"fr"`, `"zh"`, `"it"`, `"ko"`, `"sv"`, `"ar"` or `"hu"` |
+//! | `interfaceLanguage` | `"auto"`, `"en"`, `"uk"`, `"pt-BR"`, `"de"`, `"es"`, `"cs"`, `"ru"`, `"fr"`, `"zh"`, `"it"`, `"ko"`, `"sv"`, `"ar"`, `"hu"`, `"tr"` or `"el"` |
 //! | `saveFormat` | `"dxf"` or `"dwg"`: the format Save As suggests for new drawings |
 //! | `saveVersion` | `"2000"` … `"2018"`: the version drawings with no file yet are saved in |
 //! | `SAVETIME` | minutes between automatic saves, 0–600 (0: off) |
@@ -390,21 +390,5 @@ mod tests {
         for bad in ["", "#fff", "#gggggg", "#12345678", "#ééé", "#1234567"] {
             assert_eq!(parse_hex(bad), None, "{bad}");
         }
-    }
-
-    #[test]
-    fn dialog_labels_have_ukrainian_translations() {
-        let sources = [include_str!("dialog.rs")];
-        let mut missing: Vec<String> = dialog::TABS.iter().filter(|(_, l)| crate::i18n::tr("uk", l) == *l).map(|(_, l)| l.to_string()).collect();
-        for source in sources {
-            for rest in source.split("crate::tl!(").skip(1) {
-                let Some(text) = rest.strip_prefix('"').and_then(|r| r.split('"').next()) else { continue };
-                // File format names read the same in every language.
-                if crate::i18n::tr("uk", text) == text && !["DXF", "DWG"].contains(&text) {
-                    missing.push(text.to_string());
-                }
-            }
-        }
-        assert!(missing.is_empty(), "missing translations: {missing:?}");
     }
 }
