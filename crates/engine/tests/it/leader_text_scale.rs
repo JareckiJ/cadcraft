@@ -14,8 +14,8 @@ fn leader_text_takes_dimscale() {
     assert!((h - 6.25).abs() < 1e-9, "{h}");
 }
 
-/// An annotative dimension style: the text takes DIMSCALE as the dimension does, and is
-/// annotative, so it follows the annotation scale with the dimension.
+/// An annotative dimension style: the annotation scale takes DIMSCALE's place, as for an
+/// annotative dimension, so the text is DIMTXT high and annotative, scaled with the dimension.
 #[test]
 fn leader_text_of_an_annotative_style_is_annotative() {
     let mut s = Session::new();
@@ -24,6 +24,10 @@ fn leader_text_of_an_annotative_style_is_annotative() {
     let d = s.doc().unwrap();
     let e = d.model.iter().find(|e| matches!(e.kind, EntityKind::MText(_))).unwrap();
     let EntityKind::MText(m) = &e.kind else { unreachable!() };
-    assert!((m.height - 0.5).abs() < 1e-9, "{}", m.height);
+    assert!((m.height - 0.25).abs() < 1e-9, "{}", m.height);
     assert!(cadcraft_engine::doc::is_annotative(e), "annotative like the style");
+    // Drawn at an annotation scale of 1:50, it is as high as the dimension text: DIMTXT × 50.
+    let scaled = cadcraft_engine::doc::anno_scaled(e, 50.0);
+    let EntityKind::MText(m) = &scaled.kind else { unreachable!() };
+    assert!((m.height - 12.5).abs() < 1e-9, "{}", m.height);
 }

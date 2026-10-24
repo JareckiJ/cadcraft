@@ -492,10 +492,11 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         // the drawing's), in the style's text style, as the dimensions beside it (#1056).
         let d = s.doc()?;
         let ds = d.dim_style(&style(s)).cloned().unwrap_or_default();
-        // As a dimension of the style: DIMSCALE always, and an annotative style makes the text
-        // annotative too, so it follows the annotation scale as the dimension does.
-        let k = ds.effective_scale(d.header.f64("DIMSCALE", 1.0));
+        // As a dimension of the style: DIMTXT × DIMSCALE; with an annotative style the annotation
+        // scale takes DIMSCALE's place (as for an annotative dimension), so the text is DIMTXT
+        // high and annotative, scaled with the dimension.
         let annotative = ds.annotative;
+        let k = if annotative { 1.0 } else { ds.effective_scale(d.header.f64("DIMSCALE", 1.0)) };
         let th = if ds.text_height > 0.0 { ds.text_height * k } else { 0.18 * k };
         let text_style = d.text_style(&ds.text_style).map_or_else(|| "Standard".to_string(), |t| t.name.clone());
         out.push(
