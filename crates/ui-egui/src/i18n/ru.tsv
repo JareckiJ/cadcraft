@@ -1608,3 +1608,187 @@
 	No boundary objects selected: select closed objects, or objects that together enclose an area.	Не выбраны объекты контура: выберите замкнутые объекты или объекты, которые вместе ограничивают область.
 	Some of the selected objects don't enclose an area and were left out of the hatch. Together, objects must form a closed boundary.	Некоторые выбранные объекты не ограничивают область и не вошли в штриховку. Вместе объекты должны образовывать замкнутый контур.
 	Analyze Shapes	Анализ фигур
+	3D Mouse	3D-мышь
+	A drawing opened from a file keeps that file's format.	Чертёж, открытый из файла, сохраняется в формате этого файла.
+	A variable name starts with a letter and has only letters, digits and _	Имя переменной начинается с буквы и содержит только буквы, цифры и _
+	Add: Pick points	Добавить: указать точки
+	Add: Select objects	Добавить: выбрать объекты
+	Additional angles	Дополнительные углы
+	Add…	Добавить…
+	Alias	Псевдоним
+	An array that would create more objects than this is refused.	Массив, который создал бы больше объектов, не выполняется.
+	Apply	Применить
+	Associative	Ассоциативная
+	Attach DWG...	Вставить DWG как внешнюю ссылку...
+	Automatic save every	Автосохранение каждые
+	Automatic save file location	Папка файлов автосохранения
+	Bind	Внедрить
+	Block to create or edit	Блок для создания или редактирования
+	Boundaries	Контуры
+	Bulleted list	Маркированный список
+	CADCraft	CADCraft
+	Calibrate	Калибровать
+	Choose the command the alias starts.	Выберите команду, которую запускает псевдоним.
+	Clear History	Очистить историю
+	Click the ruler to add a tab stop, right-click to remove one	Щёлкните по линейке, чтобы добавить позицию табуляции, правый щелчок — удалить
+	Click to set new origin	Щёлкните, чтобы задать новое начало
+	Close Block Editor	Закрыть редактор блоков
+	Close Comparison	Закрыть сравнение
+	Collapse Palettes	Свернуть палитры
+	Color 1	Цвет 1
+	Color 2	Цвет 2
+	Command	Команда
+	Command Aliases	Псевдонимы команд
+	Command line history	История командной строки
+	Convert	Преобразовать
+	Copy as JSON	Копировать как JSON
+	Create separate hatches	Отдельные штриховки
+	Crosshair size	Размер перекрестия
+	Crossing selection color:	Цвет секущей рамки:
+	Curved	Изогнутый
+	Default save version	Версия сохранения по умолчанию
+	Default to boundary extents	По границам контура
+	Define each corner of the selection window with a separate click.	Каждый угол рамки выбора задаётся отдельным щелчком.
+	Detach	Отсоединить
+	Discard	Отменить изменения
+	Don't Save	Не сохранять
+	Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off.	Чертежи, у которых ещё нет файла, сохраняются в версии по умолчанию. 0 минут отключает автосохранение.
+	Edit Block Definition	Редактировать описание блока
+	Edit…	Изменить…
+	Enable 3D mouse navigation	Навигация 3D-мышью
+	Evaluate	Вычислить
+	Exclude:	Исключить:
+	Get from the Drawing	Взять из чертежа
+	Grid snap	Шаговая привязка
+	Grip size	Размер ручек
+	Grips	Ручки
+	Groups	Группы
+	Hatch and Gradient	Штриховка и градиент
+	Hatch origin	Исходная точка штриховки
+	Hatches	Штриховки
+	Hemispherical	Полусферический
+	History	История
+	Hold Shift to add to the selection	Shift — добавить к набору
+	Ignore	Игнорировать
+	Imperial (inches)	Британские (дюймы)
+	Indicate selection area	Показывать область выбора
+	Interface language	Язык интерфейса
+	Interface scale	Масштаб интерфейса
+	Interface theme	Тема интерфейса
+	Inverted	Обратный
+	Island	Островок
+	Island detection	Обнаружение островков
+	Isometric snap	Изометрическая привязка
+	Italic	Курсив
+	Keep the system cursor visible over the drawing area	Показывать системный курсор над областью чертежа
+	Largest array	Наибольший массив
+	Layout paper	Бумага листа
+	Left device button: zoom extents. Right device button: calibrate.	Левая кнопка устройства — показать всё. Правая — калибровка.
+	Lock viewport	Заблокировать видовой экран
+	Make it a block of this drawing, keeping its layer names	Сделать блоком этого чертежа, сохранив имена слоёв
+	Make it a block of this drawing; its layers become NAME$0$LAYER	Сделать блоком этого чертежа; слои станут ИМЯ$0$СЛОЙ
+	Metric (millimetres)	Метрические (миллиметры)
+	Model background	Фон модели
+	Move sideways to pan; push/pull or twist to zoom.	Сдвиг вбок — панорамирование; нажатие, вытягивание или поворот — масштаб.
+	Multiline text	Многострочный текст
+	New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE).	Новые чертежи и первый чертёж при запуске используют эти единицы, если не задан шаблон по умолчанию (QNEWTEMPLATE).
+	New block	Новый блок
+	Next Change	Следующее изменение
+	No alias file loaded. REINIT replaces these aliases with a file's.	Файл псевдонимов не загружен. REINIT заменяет эти псевдонимы псевдонимами из файла.
+	No external references are attached.	Внешние ссылки не вставлены.
+	Normal	Обычное
+	Numbered list	Нумерованный список
+	Object Snap Tracking Settings	Параметры объектного отслеживания
+	Object grouping	Группирование объектов
+	Object selection limit for display of grips	Предел числа выбранных объектов для показа ручек
+	Object snap aperture	Апертура объектной привязки
+	Object snap marker size	Размер маркера объектной привязки
+	Objects on locked layers	Объекты на заблокированных слоях
+	Open in Block Editor	Открыть в редакторе блоков
+	Outer	Внешнее
+	Over-constrained	Переопределено зависимостями
+	Overlay	Наложение
+	Overline	Надчёркивание
+	Pan sensitivity	Чувствительность панорамирования
+	Paste to Command Line	Вставить в командную строку
+	Pickbox size	Размер прицела
+	Polar angle measurement	Отсчёт полярных углов
+	Polar distance	Полярное расстояние
+	PolarSnap	Полярная привязка
+	Previous Change	Предыдущее изменение
+	Rectangular snap	Прямоугольная привязка
+	Reference Name	Имя ссылки
+	Relative to last segment	Относительно последнего сегмента
+	Reload All	Обновить все
+	Reset keeps the interface language.	Сброс сохраняет язык интерфейса.
+	Reset to Defaults	Сбросить по умолчанию
+	Reverse zoom direction	Обратное направление масштабирования
+	Save Block	Сохранить блок
+	Save Block As	Сохранить блок как
+	Save alias	Сохранить псевдоним
+	Save new drawings as	Сохранять новые чертежи как
+	Saved Path	Сохранённый путь
+	Screen magnifiers, screen readers and recorders follow the system cursor.	Экранные лупы, программы чтения экрана и записи следуют за системным курсором.
+	Select boundaries to remove	Выберите контуры для удаления
+	Select objects first, then choose a command	Сначала выбрать объекты, затем команду
+	Select using two clicks only	Выбор только двумя щелчками
+	Selection Area Effect	Эффект области выбора
+	Selection Preview Filter	Фильтр предварительного выбора
+	Selection area opacity:	Непрозрачность области выбора:
+	Selection effect color	Цвет эффекта выбора
+	Selection modes	Режимы выбора
+	Selection preview	Предварительный выбор
+	Shape	Форма
+	Show Quick Properties for selected objects	Показывать быстрые свойства выбранных объектов
+	Show and hide the tools of this category	Показать или скрыть инструменты этой категории
+	Show command prompting near the crosshairs	Показывать запросы команд у перекрестия
+	Show grips	Показывать ручки
+	Show in Tool Sets	Показывать в наборах инструментов
+	Snap type	Тип привязки
+	Snap, grid, polar tracking and Dynamic Input:	Шаг, сетка, полярное отслеживание и динамический ввод:
+	Specified origin	Заданное начало
+	Spherical	Сферический
+	Tables	Таблицы
+	The aperture is how near the cursor must come to a point for an object snap to find it.	Апертура — насколько близко к точке должен подойти курсор, чтобы привязка её нашла.
+	Time-sensitive right-click: a quick click is Enter, holding opens the menu	Правый щелчок с учётом времени: быстрый щелчок — Enter, удержание открывает меню
+	To	В
+	Track orthogonally only	Отслеживать только ортогонально
+	Track using all polar angle settings	Отслеживать по всем полярным углам
+	Turned off, a right-click while a command runs always opens the shortcut menu.	Если выключено, правый щелчок во время команды всегда открывает контекстное меню.
+	Type an alias name.	Введите имя псевдонима.
+	Underline	Подчёркивание
+	Units Conversion	Преобразование единиц
+	Units of new drawings	Единицы новых чертежей
+	Unload	Выгрузить
+	Unlock viewport	Разблокировать видовой экран
+	Unsaved changes	Несохранённые изменения
+	Use current origin	Текущее начало
+	Variables	Переменные
+	Viewport is locked	Видовой экран заблокирован
+	Viewport scale	Масштаб видового экрана
+	Visual Effect Settings	Параметры визуальных эффектов
+	Visual Effect Settings...	Параметры визуальных эффектов...
+	When a command is active	Когда команда выполняется
+	When no command is active	Когда команда не выполняется
+	Window selection color:	Цвет рамки выбора:
+	X	X
+	Xrefs	Внешние ссылки
+	Y	Y
+	Your changes will be lost if you don't save them.	Если не сохранить изменения, они будут потеряны.
+	Zoom sensitivity	Чувствительность масштабирования
+	built-in	встроенный
+	min	мин
+	objects	объектов
+	overrides built-in	заменяет встроенный
+	Justification	Выравнивание
+	Keeps two lines on one straight line.	Удерживает два отрезка на одной прямой.
+	Joins a spline smoothly to another curve.	Плавно сопрягает сплайн с другой кривой.
+	Keeps two objects symmetric about a line.	Удерживает два объекта симметричными относительно линии.
+	Fixes a point or an object in place.	Закрепляет точку или объект на месте.
+	Removes the constraints from the selected objects.	Удаляет зависимости у выбранных объектов.
+	Opens the Parameters Manager: named values and expressions that drive dimensions.	Открывает диспетчер параметров: именованные значения и выражения, управляющие размерами.
+	Fixes a horizontal or vertical distance with a dimensional constraint.	Задаёт горизонтальное или вертикальное расстояние размерной зависимостью.
+	Fixes the distance between two points with a dimensional constraint.	Задаёт расстояние между двумя точками размерной зависимостью.
+	Fixes an angle with a dimensional constraint.	Задаёт угол размерной зависимостью.
+	Fixes the radius of a circle or arc with a dimensional constraint.	Задаёт радиус окружности или дуги размерной зависимостью.
+	Fixes the diameter of a circle or arc with a dimensional constraint.	Задаёт диаметр окружности или дуги размерной зависимостью.

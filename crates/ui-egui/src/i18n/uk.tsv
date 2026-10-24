@@ -1895,3 +1895,15 @@
 	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...
+	Justification	Вирівнювання
+	Keeps two lines on one straight line.	Утримує два відрізки на одній прямій.
+	Joins a spline smoothly to another curve.	Плавно спряжує сплайн з іншою кривою.
+	Keeps two objects symmetric about a line.	Утримує два об'єкти симетричними відносно лінії.
+	Fixes a point or an object in place.	Закріплює точку або об'єкт на місці.
+	Removes the constraints from the selected objects.	Видаляє залежності вибраних об'єктів.
+	Opens the Parameters Manager: named values and expressions that drive dimensions.	Відкриває диспетчер параметрів: іменовані значення й вирази, що керують розмірами.
+	Fixes a horizontal or vertical distance with a dimensional constraint.	Задає горизонтальну або вертикальну відстань розмірною залежністю.
+	Fixes the distance between two points with a dimensional constraint.	Задає відстань між двома точками розмірною залежністю.
+	Fixes an angle with a dimensional constraint.	Задає кут розмірною залежністю.
+	Fixes the radius of a circle or arc with a dimensional constraint.	Задає радіус кола або дуги розмірною залежністю.
+	Fixes the diameter of a circle or arc with a dimensional constraint.	Задає діаметр кола або дуги розмірною залежністю.

@@ -528,25 +528,31 @@ fn formula_xdata(w: &mut W, f: Option<&str>) {
 /// alignment point is only half or a third of a height from the baseline start, must not pass
 /// for AutoCAD's.
 fn text_insert(d: &Drawing, t: &Text) -> Vec3 {
-    let computed = computed_text_insert(d, t);
+    let computed = computed_text_insert(d, t, t.backwards, t.upside_down);
     if t.align_pt.is_some_and(|a| a.xy() == t.insert.xy()) {
         return computed;
     }
     let h = t.height.abs();
-    let off = (t.insert.xy() - computed.xy()).rotate(-t.rotation);
-    let close = if t.value.contains('\n') {
-        // A multiline attribute's lines are placed by its embedded MTEXT: a one-line baseline
-        // start says little about them, so only the distance counts.
-        let width = t.align_pt.map_or(0.0, |a| 2.0 * a.xy().dist(computed.xy()));
-        off.len() <= 0.1 * width + 0.5 * h
-    } else {
-        let width = cadcraft_fonts::line_width(&t.value, h, t.width_factor.abs());
-        off.x.abs() <= 0.1 * width + 0.5 * h && off.y.abs() <= 0.2 * h
+    let close = |computed: Vec3| {
+        let off = (t.insert.xy() - computed.xy()).rotate(-t.rotation);
+        if t.value.contains('\n') {
+            // A multiline attribute's lines are placed by its embedded MTEXT: a one-line baseline
+            // start says little about them, so only the distance counts.
+            let width = t.align_pt.map_or(0.0, |a| 2.0 * a.xy().dist(computed.xy()));
+            off.len() <= 0.1 * width + 0.5 * h
+        } else {
+            let width = cadcraft_fonts::line_width(&t.value, h, t.width_factor.abs());
+            off.x.abs() <= 0.1 * width + 0.5 * h && off.y.abs() <= 0.2 * h
+        }
     };
-    if close { t.insert } else { computed }
+    // The stored point is kept when it is where the text's baseline starts read either way:
+    // mirrored as the text says, or as its style lays it out (files that set the flags on the
+    // text but placed it by the style).
+    let ts = d.text_style(&t.style).cloned().unwrap_or_default();
+    if close(computed) || close(computed_text_insert(d, t, ts.backwards, ts.upside_down)) { t.insert } else { computed }
 }
 
-fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
+fn computed_text_insert(d: &Drawing, t: &Text, backwards: bool, upside_down: bool) -> Vec3 {
     let justified = !matches!((t.halign, t.valign), (HAlign::Left, VAlign::Baseline) | (HAlign::Aligned | HAlign::Fit, _));
     let Some(a) = t.align_pt.filter(|_| justified) else { return t.insert };
     let ts = d.text_style(&t.style).cloned().unwrap_or_default();
@@ -560,8 +566,8 @@ fn computed_text_insert(d: &Drawing, t: &Text) -> Vec3 {
         oblique: t.oblique,
         h,
         v,
-        backwards: t.backwards,
-        upside_down: t.upside_down,
+        backwards,
+        upside_down,
     };
     let q = cadcraft_fonts::baseline_start(&cadcraft_fonts::TextFont::resolve(&ts.font), &t.value, &p);
     if q.is_finite() { Vec3::new(q.x, q.y, a.z) } else { t.insert }

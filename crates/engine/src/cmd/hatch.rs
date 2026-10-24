@@ -244,12 +244,26 @@ pub(crate) fn loops_picked(s: &Session, p: Vec2) -> Result<Vec<HatchLoop>> {
 }
 
 fn loops_near(s: &Session, p: Vec2, picked: bool) -> Result<Vec<HatchLoop>> {
-    let near = s.view_box().filter(|v| v.contains(p)).map(|v| v.expand(v.width().max(v.height()) * 0.5));
+    let view = s.view_box().filter(|v| v.contains(p));
+    let near = view.map(|v| v.expand(v.width().max(v.height()) * 0.5));
     match loops_in(s, p, near) {
-        Err(e) if !picked && near.is_some() => loops_in(s, p, None).map_err(|_| e),
+        // The boundary runs out of the area around the view: look in the whole space. A pick
+        // on screen keeps it only when it is not many times the view's size (a gap that let
+        // the area run out into the rest of the drawing is refused).
+        Err(e) if near.is_some() => match loops_in(s, p, None) {
+            Ok(l) => {
+                let b = Bounds2::from_points(l.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)));
+                let size = view.map_or(f64::INFINITY, |v| v.width().max(v.height()));
+                if !picked || b.width().max(b.height()) <= size * FAR_FACTOR { Ok(l) } else { Err(e) }
+            }
+            Err(_) => Err(e),
+        },
         r => r,
     }
 }
+
+/// How many times larger than the view a boundary found by a pick on screen may be.
+const FAR_FACTOR: f64 = 4.0;
 
 /// Boundary loops around `p` among the objects reaching into `near` (all objects when `None`).
 fn loops_in(s: &Session, p: Vec2, near: Option<Bounds2>) -> Result<Vec<HatchLoop>> {
