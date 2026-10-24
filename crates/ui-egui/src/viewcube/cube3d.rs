@@ -312,28 +312,37 @@ impl CubeProjector {
                 self.paint_zone_highlight_on_face(painter, face, hz);
             }
 
-            // Draw face label when face is sufficiently facing the camera.
+            // Draw face label anchored to the face's 3D orientation so it rotates with the cube
+            // (including upside-down when viewing from the back/north side, as in AutoCAD).
             if ndot > 0.24 {
-                let center_2d = self.project_unit(face.point(0.0, 0.0)).0;
-                let label = match face.key {
-                    "TOP" => crate::tl!("TOP"),
-                    "BOTTOM" => crate::tl!("BOTTOM"),
-                    "FRONT" => crate::tl!("FRONT"),
-                    "BACK" => crate::tl!("BACK"),
-                    "LEFT" => crate::tl!("LEFT"),
-                    "RIGHT" => crate::tl!("RIGHT"),
-                    other => other,
-                };
-                let font_px = (11.5 * (ndot as f32).sqrt()).clamp(8.5, 12.0);
-                painter.text(
-                    center_2d,
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::FontId::proportional(font_px),
-                    Color32::from_rgb(0x2e, 0x32, 0x38),
-                );
+                self.paint_face_label(painter, face, ndot);
             }
         }
+    }
+
+    fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, ndot: f64) {
+        let center_2d = self.project_unit(face.point(0.0, 0.0)).0;
+        let label = match face.key {
+            "TOP" => crate::tl!("TOP"),
+            "BOTTOM" => crate::tl!("BOTTOM"),
+            "FRONT" => crate::tl!("FRONT"),
+            "BACK" => crate::tl!("BACK"),
+            "LEFT" => crate::tl!("LEFT"),
+            "RIGHT" => crate::tl!("RIGHT"),
+            other => other,
+        };
+        let font_px = (11.5 * (ndot as f32).sqrt()).clamp(8.5, 12.0);
+        let font_id = egui::FontId::proportional(font_px);
+        let color = Color32::from_rgb(0x2e, 0x32, 0x38);
+
+        // Compute the projected screen-space direction of the face's local `+u_axis` (baseline right).
+        // In screen coordinates +Y is downward, while in 2D view-plane coordinates +Y is upward.
+        let u_proj = self.orbit.project_vec(face.u_axis);
+        let u_screen = vec2(u_proj.x as f32, -u_proj.y as f32);
+        let angle = if u_screen.length_sq() > 1e-5 { u_screen.y.atan2(u_screen.x) } else { 0.0 };
+
+        let galley = painter.layout_no_wrap(label.to_string(), font_id, color);
+        painter.add(egui::epaint::TextShape::new(center_2d, galley, color).with_angle_and_anchor(angle, egui::Align2::CENTER_CENTER));
     }
 
     fn paint_face_subdivisions(&self, painter: &egui::Painter, face: FaceDef) {
