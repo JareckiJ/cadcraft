@@ -172,17 +172,20 @@ impl CubeProjector {
         (screen, depth)
     }
 
-    /// Project a 3D point on the horizontal `z = 0` plane at pixel radius `r` around `self.center`.
+    /// Project a 3D point on the compass base plane (`z = -1.0` in unit-cube space when tilted, or
+    /// `z = 0.0` in 2D plan view) at pixel radius `r` around `self.center`.
     pub fn project_ring_point(&self, world_xy: Vec3, radius: f32) -> Pos2 {
-        // When close to edge-on (`pitch ≈ ±90°`), keep a minimum vertical opening on the compass
-        // ellipse so the compass ring remains legible and interactive, just like AutoCAD's ViewCube.
         let (sy, cy) = self.orbit.yaw.sin_cos();
-        let cp = self.orbit.pitch.cos();
+        let (sp, cp) = self.orbit.pitch.sin_cos();
         let eff_cp = if cp.abs() < 0.28 { 0.28 * if cp >= 0.0 { 1.0 } else { -1.0 } } else { cp };
+        // In 3D views the compass sits on the bottom plane of the cube (`z = -1.0`), so its center
+        // shifts down by `sp * half_size` and the cube stands on top of the compass disc.
+        let z_plane = -1.0_f64;
         let x1 = world_xy.x * cy - world_xy.y * sy;
-        let y1 = (world_xy.x * sy + world_xy.y * cy) * eff_cp;
+        let y_ring = (world_xy.x * sy + world_xy.y * cy) * eff_cp;
+        let y_z = z_plane * sp * f64::from(self.half_size);
         let r = f64::from(radius);
-        pos2(self.center.x + (x1 * r) as f32, self.center.y - (y1 * r) as f32)
+        pos2(self.center.x + (x1 * r) as f32, self.center.y - (y_ring * r + y_z) as f32)
     }
 
     /// Determine which [`CubeZone`] (face, edge, or corner) is under screen position `pos`.
@@ -237,29 +240,69 @@ impl CubeProjector {
 
     fn paint_compass_ring(&self, painter: &egui::Painter, ring_radius: f32, hovered_ring: bool) {
         const STEPS: usize = 64;
-        let ring_col = if hovered_ring { Color32::from_rgb(0x5c, 0x67, 0x7c) } else { Color32::from_rgb(0x48, 0x50, 0x5c) };
-        let rim_col = Color32::from_rgb(0x5c, 0x65, 0x72);
-        let mut pts_mid = Vec::with_capacity(STEPS);
+        let ring_col = if hovered_ring { Color32::from_rgb(0x5c, 0x67, 0x7c) } else { Color32::from_rgb(0x46, 0x4e, 0x5a) };
+        let rim_col = Color32::from_rgb(0x64, 0x6d, 0x7a);
+        let r_inner = ring_radius - 5.5;
+        let r_outer = ring_radius + 5.5;
+
+        // Render the compass ring as a true 3D flat annulus on the base plane (`z = -1.0`), so its
+        // thickness foreshortens naturally at the front/back and stays wider at the left/right sides.
+        let mut ring_mesh = egui::Mesh::default();
+        let mut pts_inner = Vec::with_capacity(STEPS);
         let mut pts_outer = Vec::with_capacity(STEPS);
         for i in 0..STEPS {
             let a = (i as f64) * std::f64::consts::TAU / (STEPS as f64);
             let dir = Vec3::new(a.cos(), a.sin(), 0.0);
-            pts_mid.push(self.project_ring_point(dir, ring_radius));
-            pts_outer.push(self.project_ring_point(dir, ring_radius + 4.5));
+            let pi = self.project_ring_point(dir, r_inner);
+            let po = self.project_ring_point(dir, r_outer);
+            pts_inner.push(pi);
+            pts_outer.push(po);
+            ring_mesh.colored_vertex(pi, ring_col);
+            ring_mesh.colored_vertex(po, ring_col);
         }
-        painter.add(Shape::Path(PathShape::closed_line(pts_mid, Stroke::new(9.0, ring_col))));
+        for i in 0..STEPS {
+            let next = (i + 1) % STEPS;
+            let i0 = (2 * i) as u32;
+            let i1 = (2 * i + 1) as u32;
+            let n0 = (2 * next) as u32;
+            let n1 = (2 * next + 1) as u32;
+            ring_mesh.add_triangle(i0, i1, n1);
+            ring_mesh.add_triangle(i0, n1, n0);
+        }
+        painter.add(Shape::mesh(ring_mesh));
+        painter.add(Shape::Path(PathShape::closed_line(pts_inner, Stroke::new(1.0, rim_col))));
         painter.add(Shape::Path(PathShape::closed_line(pts_outer, Stroke::new(1.0, rim_col))));
 
-        let font = egui::FontId::proportional(15.5);
-        let lc = Color32::from_rgb(0xc8, 0xcc, 0xd2);
+        // Render the cardinal letters (`N`, `E`/`O`, `S`/`Z`, `W`) as 3D surface-projected bold
+        // vector glyphs on the compass plane right on/outside the ring, just like AutoCAD.
+        let lc = Color32::from_rgb(0xdc, 0xe0, 0xe6);
+        let stroke = Stroke::new(2.1, lc);
         for (dir, label) in [
             (Vec3::new(0.0, 1.0, 0.0), crate::tl!("N")),
             (Vec3::new(0.0, -1.0, 0.0), crate::tl!("S")),
             (Vec3::new(1.0, 0.0, 0.0), crate::tl!("E")),
             (Vec3::new(-1.0, 0.0, 0.0), crate::tl!("W")),
         ] {
-            let pos = self.project_ring_point(dir, ring_radius);
-            painter.text(pos, egui::Align2::CENTER_CENTER, label, font.clone(), lc);
+            let ch = label.chars().next().unwrap_or('N').to_ascii_uppercase();
+            // Tangent right (`+X` in world XY) and up (`+Y` in world XY) on the compass plane so the
+            // letters rotate and tilt in 3D with the compass ring.
+            let char_r = 4.6_f32;
+            for poly in glyph_polylines(ch) {
+                let pts: Vec<Pos2> = poly
+                    .iter()
+                    .map(|&(gx, gy)| {
+                        let local_x = f64::from(gx - 0.5) * f64::from(char_r * 1.55) / f64::from(ring_radius);
+                        let local_y = f64::from(gy - 0.5) * f64::from(char_r * 2.15) / f64::from(ring_radius);
+                        let p_xy = Vec3::new(dir.x + local_x, dir.y + local_y, 0.0);
+                        self.project_ring_point(p_xy, ring_radius)
+                    })
+                    .collect();
+                if pts.len() == 2 {
+                    painter.line_segment([pts[0], pts[1]], stroke);
+                } else if pts.len() > 2 {
+                    painter.add(Shape::line(pts, stroke));
+                }
+            }
         }
     }
 
@@ -336,14 +379,14 @@ impl CubeProjector {
 
         // Character metrics in normalized glyph coordinates (`x in [0, 1]`, `y in [0, 1]`).
         let char_w = 1.0_f64;
-        let gap = 0.34_f64;
+        let gap = 0.36_f64;
         let total_w = (chars.len() as f64) * char_w + ((chars.len().saturating_sub(1)) as f64) * gap;
-        // Fit within `[-0.64, 0.64]` in face `u`-space (inside the `[-0.56, 0.56]` inner band when possible)
-        // and cap vertical height to `0.42` in `v`-space so short words ("TOP") match longer words ("RIGHT").
-        let scale_u = (1.16 / total_w).min(0.28);
-        let scale_v = (scale_u * 1.45).min(0.42);
-        let stroke_px = (1.85 * (ndot as f32).powf(0.25)).clamp(1.35, 2.0);
-        let stroke = Stroke::new(stroke_px, Color32::from_rgb(0x22, 0x26, 0x2c));
+        // Fit comfortably inside the cube face (`[-0.64, 0.64]` in `u`-space) with generous height
+        // on the enlarged cube (`half_size = 28px`) so the face text is crisp and immediately legible.
+        let scale_u = (1.24 / total_w).min(0.31);
+        let scale_v = (scale_u * 1.48).min(0.45);
+        let stroke_px = (2.15 * (ndot as f32).powf(0.22)).clamp(1.55, 2.3);
+        let stroke = Stroke::new(stroke_px, Color32::from_rgb(0x1c, 0x20, 0x26));
 
         let start_x = -0.5 * total_w;
         for (i, ch) in chars.into_iter().enumerate() {

@@ -23,7 +23,7 @@ use cube3d::{CubeProjector, CubeZone};
 pub const NO_TWIST: &str = "ViewCube: rotating the view needs a view twist, which the 2D plan view doesn't support yet.";
 
 /// Half-size (in screen pixels) of the unit 3D ViewCube before projection.
-const CUBE_HALF_SIZE: f32 = 22.0;
+const CUBE_HALF_SIZE: f32 = 28.0;
 
 /// Where the ViewCube's parts are on the canvas.
 #[derive(Clone, Copy, Debug)]
@@ -42,15 +42,15 @@ pub struct Layout {
 impl Layout {
     /// Compute the ViewCube layout rectangles anchored to the top-right of `canvas`.
     pub fn new(canvas: Rect) -> Self {
-        let center = pos2(canvas.right() - 92.0, canvas.top() + 82.0);
-        let ring = 58.0;
+        let center = pos2(canvas.right() - 96.0, canvas.top() + 86.0);
+        let ring = 64.0;
         Layout {
             center,
             ring,
-            face: Rect::from_center_size(center, vec2(44.0, 44.0)),
+            face: Rect::from_center_size(center, vec2(56.0, 56.0)),
             home: Rect::from_center_size(center + vec2(-ring + 2.0, -ring + 2.0), vec2(20.0, 20.0)),
             pill: Rect::from_center_size(center + vec2(0.0, ring + 26.0), vec2(56.0, 16.0)),
-            bounds: Rect::from_center_size(center, vec2(2.0 * (ring + 10.0), 2.0 * (ring + 10.0))),
+            bounds: Rect::from_center_size(center, vec2(2.0 * (ring + 14.0), 2.0 * (ring + 14.0))),
         }
     }
 
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(l.part_at(l.home.center()), Some(Part::Home));
         assert_eq!(l.part_at(l.center + vec2(0.0, -l.ring)), Some(Part::Ring), "N");
         assert_eq!(l.part_at(l.center + vec2(l.ring + 3.0, 0.0)), Some(Part::Ring), "E");
-        assert_eq!(l.part_at(l.center + vec2(30.0, 30.0)), None, "between the face and the ring");
+        assert_eq!(l.part_at(l.center + vec2(34.0, 34.0)), None, "between the face and the ring");
         assert!(l.bounds.contains_rect(l.home) && l.bounds.contains_rect(l.face));
     }
 
@@ -397,7 +397,7 @@ mod tests {
         let (mut app, ctx) = app_and_ctx();
         let l = Layout::new(canvas(&app));
         // Clicking the bottom-right corner of the Top face in 2D plan view selects the Top-Front-Right (SE Isometric) corner.
-        let corner_pos = l.center + vec2(18.0, 18.0);
+        let corner_pos = l.center + vec2(22.0, 22.0);
         let (part, zone) = l.part_at_in_orbit(corner_pos, cadcraft_render::Orbit3d::default());
         assert_eq!(part, Some(Part::Face));
         assert_eq!(zone, Some(CubeZone::new(1, -1, 1)), "Top-Front-Right corner");
