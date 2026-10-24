@@ -2627,12 +2627,15 @@ fn hostile_constraint_groups_never_panic() {
         ),
         vec![Tag::s(0, "ACDBASSOC2DCONSTRAINTGROUP")],
     ];
+    // Each group's content (code, value), unchanged after each mode: a rotation keeps the
+    // length, and a second mode could rotate it back.
+    let pairs = |t: &[Tag]| t.iter().map(|x| (x.code, x.str())).collect::<Vec<_>>();
     for mut tags in cases {
-        let before = tags.clone();
+        let before = pairs(&tags);
         for modern in [false, true] {
             crate::dxf_raw::constraint_node_order(&mut tags, modern);
+            assert_eq!(pairs(&tags), before, "modern: {modern}");
         }
-        assert_eq!(tags.len(), before.len());
     }
 }
 
