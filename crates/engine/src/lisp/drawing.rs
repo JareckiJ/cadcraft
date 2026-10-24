@@ -410,12 +410,20 @@ pub fn entget(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
         && !apps.is_nil()
         && !e.common.xdata.is_empty()
     {
+        let wanted: Vec<String> = apps
+            .iter()
+            .filter_map(|v| match v {
+                Value::Str(s) => Some(s.to_uppercase()),
+                _ => None,
+            })
+            .collect();
+        let keep = |app: &str| wanted.iter().any(|w| super::builtins::wild_match(&app.to_uppercase(), w));
         let mut xapps = Vec::new();
         let mut cur_app: Option<(String, Vec<Value>)> = None;
         for tag in &e.common.xdata {
             let (code, val) = (tag.code, &tag.value);
             if code == 1001 {
-                if let Some((app, list)) = cur_app.take() {
+                if let Some((app, list)) = cur_app.take().filter(|(a, _)| keep(a)) {
                     let mut entry = vec![Value::str(&app)];
                     entry.extend(list);
                     xapps.push(Value::list(entry));
@@ -430,7 +438,7 @@ pub fn entget(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
                 list.push(Value::cons(Value::Int(code), v));
             }
         }
-        if let Some((app, list)) = cur_app.take() {
+        if let Some((app, list)) = cur_app.take().filter(|(a, _)| keep(a)) {
             let mut entry = vec![Value::str(&app)];
             entry.extend(list);
             xapps.push(Value::list(entry));

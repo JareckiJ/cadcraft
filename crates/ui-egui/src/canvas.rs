@@ -2896,11 +2896,11 @@ fn viewport_label(p: &egui::Painter, rect: Rect, orbit: cadcraft_render::Orbit3d
     if orbit.is_top() {
         p.text(at, egui::Align2::LEFT_TOP, crate::tl!("+  |  Top  |  2D Wireframe"), crate::theme::small(), t.canvas_ink);
     } else {
-        let txt = format!(
-            "+  |  {} ({:.0}°, {:.0}°)  |  3D Orbit Wireframe",
-            orbit.label(),
-            orbit.yaw.to_degrees().rem_euclid(360.0),
-            orbit.pitch.to_degrees()
+        let txt = crate::tf!(
+            "+  |  {view} ({yaw}°, {pitch}°)  |  3D Orbit Wireframe",
+            view = crate::i18n::t(orbit.label()),
+            yaw = format!("{:.0}", orbit.yaw.to_degrees().rem_euclid(360.0)),
+            pitch = format!("{:.0}", orbit.pitch.to_degrees())
         );
         p.text(at, egui::Align2::LEFT_TOP, txt, crate::theme::small(), t.canvas_ink);
     }

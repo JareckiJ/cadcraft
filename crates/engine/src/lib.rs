@@ -1185,7 +1185,7 @@ impl Session {
         match input {
             Input::Point(p) => {
                 let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-                let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+                let orbit = self.edit_orbit();
                 if let Some(pw) = self.pending_window.take() {
                     let crossing = p.x < pw.corner.x;
                     let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
@@ -1222,6 +1222,14 @@ impl Session {
         }
     }
 
+    /// The orbit that applies to the edit space: the drawing's in model space, else the default (top).
+    pub(crate) fn edit_orbit(&self) -> cadcraft_render::Orbit3d {
+        self.state()
+            .ok()
+            .filter(|st| matches!(st.edit_space(), Space::Model))
+            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit)
+    }
+
     /// Input while a typed selection mode (W, C, F, WP, CP) collects its points: the selected
     /// objects go to the command as a pick once the mode is complete.
     fn select_mode_input(&mut self, input: Input) -> Result<Option<Input>> {
@@ -1245,11 +1253,7 @@ impl Session {
                 }
             };
         }
-        let orbit = self
-            .state()
-            .ok()
-            .filter(|st| matches!(st.edit_space(), Space::Model))
-            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let orbit = self.edit_orbit();
         match input {
             Input::Point(p) => {
                 if mode.push(p) {
@@ -1404,7 +1408,7 @@ impl Session {
             self.dotnet_pick.status = "cancel".into();
         }
         // Esc stops a LISP routine waiting for input, and the command it paused in.
-        if self.lisp_waiting() || (self.lisp_running() && !self.lisp.executing) {
+        if self.lisp_waiting() {
             if self.running.is_some() {
                 let _ = self.feed(Some(Input::Cancel));
             }
@@ -1473,14 +1477,8 @@ impl Session {
             if r.id.starts_with("zoom") {
                 return false;
             }
-            if r.id == "stretch" && self.point_mods.is_empty() {
-                let msg = r.machine.prompt(self).message;
-                if !matches!(
-                    msg.as_str(),
-                    "Specify base point" | "Specify displacement" | "Specify second point or <use first point as displacement>"
-                ) {
-                    return false;
-                }
+            if !r.machine.collects_work_points() && self.point_mods.is_empty() {
+                return false;
             }
         }
         self.current_prompt().as_ref().is_some_and(pointmod::accepts)
@@ -1770,7 +1768,7 @@ impl Session {
     pub fn idle_click(&mut self, p: Vec2, shift: bool) -> Result<()> {
         let space = self.space();
         let pickadd = self.settings.pickadd;
-        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let orbit = self.edit_orbit();
         if let Some(pw) = self.pending_window.take() {
             let crossing = p.x < pw.corner.x;
             let hs = select::select_window_in_orbit(self.doc()?, &space, orbit, Bounds2::new(pw.corner, p), crossing);
@@ -1834,7 +1832,7 @@ impl Session {
             return Vec::new();
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        let orbit = self.state().ok().filter(|st| matches!(st.edit_space(), Space::Model)).map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let orbit = self.edit_orbit();
         self.doc().map(|d| select::pick_all_in_orbit(d, &self.space(), orbit, p, ap)).unwrap_or_default()
     }
 

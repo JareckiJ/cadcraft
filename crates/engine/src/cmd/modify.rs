@@ -294,11 +294,7 @@ fn stretch_entity(e: &mut Entity, wins: &[StretchArea], d: Vec2) {
 fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
     let d = delta_of("stretch", p)?;
     let space = s.space();
-    let orbit = s
-        .state()
-        .ok()
-        .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-        .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+    let orbit = cadcraft_render::Orbit3d::default();
     let listed = |key: &str, least: usize| -> Result<Option<Vec<Vec2>>> {
         let Some(pts) = points_param(p, key) else { return Ok(None) };
         if pts.len() < least || pts.len() > crate::select::MAX_MODE_POINTS || pts.iter().any(|q| !q.is_finite()) {
@@ -386,11 +382,7 @@ impl StretchM {
     /// of two) the mode is dropped.
     fn finish_mode(&mut self, s: &mut Session, m: SelectMode) -> Result<()> {
         let space = s.space();
-        let orbit = s
-            .state()
-            .ok()
-            .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let orbit = s.edit_orbit();
         let Some(hs) = m.select(s.doc()?, &space, orbit) else { return Ok(()) };
         let area = match (m.kind, m.pts.first().zip(m.pts.get(1))) {
             (SelectKind::WPolygon | SelectKind::CPolygon, _) => Some(StretchArea::polygon(m.pts, orbit)),
@@ -436,11 +428,7 @@ impl StretchM {
         }
         match i {
             Input::Point(p) => {
-                let orbit = s
-                    .state()
-                    .ok()
-                    .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-                    .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+                let orbit = s.edit_orbit();
                 match self.corner.take() {
                     Some(c) => {
                         let bx = cadcraft_geom::Bounds2::new(c, p);
@@ -565,13 +553,12 @@ impl Interactive for StretchM {
             _ => Ok(Step::Continue),
         }
     }
+    fn collects_work_points(&self) -> bool {
+        matches!(self.phase, StretchPhase::Base | StretchPhase::Displacement | StretchPhase::Second)
+    }
     /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
-        let orbit = s
-            .state()
-            .ok()
-            .filter(|st| matches!(st.edit_space(), cadcraft_doc::Space::Model))
-            .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+        let orbit = s.edit_orbit();
         let vline = |p: Vec2, q: Vec2| Some(line(orbit.unproject_xy(p)?, orbit.unproject_xy(q)?));
         let rect = |a: Vec2| -> Vec<EntityKind> {
             let (b, d) = (Vec2::new(c.x, a.y), Vec2::new(a.x, c.y));
@@ -2175,7 +2162,7 @@ impl Interactive for SelectThen {
             _ => Ok(Step::Continue),
         }
     }
-    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
+    /// Rubber-band preview of the selected objects transformed to the cursor (MOVE, COPY, ROTATE, SCALE, MIRROR).
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.op == Op::Rotate && self.reference {
             return self.rotate_reference_preview(s, c);
@@ -2486,7 +2473,7 @@ impl Interactive for OffsetM {
             _ => Ok(Step::Continue),
         }
     }
-    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
+    /// Rubber-band preview of the offset object, or the distance line before the distance is set.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if let Some(base) = self.distance_first
             && c.is_finite()
@@ -3044,7 +3031,7 @@ impl Interactive for DisplaceM {
         }
         self.inner.input(s, i)
     }
-    /// Rubber-band preview for the selection window, fence, polygon or stretched geometry.
+    /// Rubber-band preview for MOVE/COPY; empty while the displacement is typed.
     fn preview(&self, s: &Session, c: Vec2) -> Vec<EntityKind> {
         if self.displacement {
             return Vec::new();

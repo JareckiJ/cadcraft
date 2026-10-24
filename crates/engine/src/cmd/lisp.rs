@@ -804,15 +804,13 @@ fn run_dotnet_bridge(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(json!({ "entities": [dotnet_entity_json(d, new_e)] }))
         }
         "delete_entity" => {
-            if let Some(h) = str_param(p, "handle").and_then(Handle::parse_hex) {
-                let space = s.space();
-                if let Ok(d) = s.doc_mut()
-                    && let Some(st) = d.space_mut(&space)
-                {
-                    st.remove(h);
-                }
-                s.touch();
+            let Some(h) = str_param(p, "handle").and_then(Handle::parse_hex) else { return Ok(json!({ "ok": false })) };
+            let d = s.doc_mut()?;
+            let Some(space) = d.space_of(h) else { return Ok(json!({ "ok": false })) };
+            if let Some(st) = d.space_mut(&space) {
+                st.remove(h);
             }
+            s.touch();
             Ok(json!({ "ok": true }))
         }
         "ensure_layer" => {

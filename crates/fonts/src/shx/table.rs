@@ -69,15 +69,6 @@ fn table() -> MutexGuard<'static, Table> {
                     }
                 }
             }
-            #[cfg(windows)]
-            if let Ok(rd) = std::fs::read_dir(r"C:\Program Files\Autodesk") {
-                for e in rd.flatten() {
-                    let fdir = e.path().join("Fonts");
-                    if fdir.is_dir() && !dirs.contains(&fdir) {
-                        dirs.push(fdir);
-                    }
-                }
-            }
             dirs.truncate(MAX_DIRS);
             dirs
         };

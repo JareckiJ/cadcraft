@@ -360,11 +360,7 @@ impl Session {
                     // Snap the point with this mode alone, within the aperture.
                     let prompt = self.current_prompt();
                     let space = self.space();
-                    let orbit = self
-                        .state()
-                        .ok()
-                        .filter(|st| matches!(st.edit_space(), Space::Model))
-                        .map_or_else(cadcraft_render::Orbit3d::default, |st| st.orbit);
+                    let orbit = self.edit_orbit();
                     let aperture = self.pixel_size() * self.settings.aperture.max(1.0);
                     let hatch = if self.settings.osnaphatch { mode::HATCH } else { 0 };
                     let base = prompt.as_ref().and_then(|q| q.base);

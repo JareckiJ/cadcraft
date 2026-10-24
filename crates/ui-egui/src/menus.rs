@@ -334,7 +334,17 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         "ui.resetpalettes" => {
             let (menu, theme, interface_language, save_format) = (app.ui.in_window_menu, app.ui.theme, app.ui.interface_language, app.ui.save_format);
             let (animations, save_version) = (app.ui.animations, std::mem::take(&mut app.ui.save_version));
-            app.ui = crate::UiState { in_window_menu: menu, theme, animations, interface_language, save_format, save_version, ..Default::default() };
+            let startup_plugins = std::mem::take(&mut app.ui.startup_plugins);
+            app.ui = crate::UiState {
+                in_window_menu: menu,
+                theme,
+                animations,
+                interface_language,
+                save_format,
+                save_version,
+                startup_plugins,
+                ..Default::default()
+            };
             Ok(Value::Null)
         }
         "ui.start" => {

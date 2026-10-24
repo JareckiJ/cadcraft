@@ -795,7 +795,7 @@ impl crate::Session {
         let last = self.last_segment.filter(|(_, b)| q.base.is_some_and(|base| base.near(*b, 1e-9 * (1.0 + b.len())))).map(|(a, b)| a.angle_to(b));
         let cfg = TrackConfig::relative_to(&s, angbase, last);
         let osmode = s.osmode | if s.osnaphatch { mode::HATCH } else { 0 };
-        let orbit = if matches!(space, Space::Model) { st.orbit } else { cadcraft_render::Orbit3d::default() };
+        let orbit = self.edit_orbit();
         let ix = crate::spatial::index(&doc, &space);
         let (hit, near_prims) = if orbit.is_top() {
             super::osnap_with_neighborhood(&doc, &space, &ix, raw, q.aperture, osmode, q.base, q.deferred)
