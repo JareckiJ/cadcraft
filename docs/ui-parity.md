@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (window buttons and resize edges where GNOME on Wayland leaves the frame to the app; previously minor: distinct polyline midpoint grips) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (files dragged from the file manager drop on native Wayland; previously minor: window buttons and resize edges where GNOME on Wayland leaves the frame to the app) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -204,6 +204,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | minor | Linux: files dragged from the file manager open on native Wayland, not only through XWayland (`CADCRAFT_X11=1`). winit is pinned to rust-windowing/winit#4729 and egui-winit 0.36.2 is patched with emilk/egui#8657 (`patches/egui-winit`), so drops and the clipboard share one data device and paste keeps working on Hyprland; both go away once winit and egui release them (ported from GridCraft) |
 | 2026-10-24 | minor | Window frame row: in-app window buttons and resize edges on GNOME Wayland, Use system title bar (ported from WordCraft #3361) |
 | 2026-10-22 | minor | Polyline segment midpoint grips use rectangles, distinct from square vertex grips, with matching hover and pick bounds (#1950) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |

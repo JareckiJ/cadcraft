@@ -330,10 +330,10 @@ fn main() -> eframe::Result {
         });
     }
     // winit runs natively on a Wayland desktop: sharp at fractional scales, with working input
-    // methods. It has no file drag-and-drop there (only on X11), so CADCRAFT_X11=1 runs through
-    // XWayland instead for dropping files from the file manager; any other value, 0 or empty
-    // included, leaves it off. The X11 libraries are only recommended by the packages, so without
-    // them the setting is ignored rather than failing.
+    // methods, and (with the patched winit, Cargo.toml) files dropped from the file manager.
+    // CADCRAFT_X11=1 runs through XWayland instead; any other value, 0 or empty included, leaves it
+    // off. The X11 libraries are only recommended by the packages, so without them the setting is
+    // ignored rather than failing.
     #[cfg(all(unix, not(target_os = "macos")))]
     let x11 = use_x11(std::env::var_os("DISPLAY").is_some(), std::env::var_os("CADCRAFT_X11").as_deref(), x11_libraries_load);
     #[cfg(not(all(unix, not(target_os = "macos"))))]
