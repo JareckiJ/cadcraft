@@ -14,7 +14,7 @@ use cadcraft_doc::{DevicePaper, Orientation, PageSetup, PlotOutput, PlotterConfi
 use cadcraft_geom::{Bounds2, Vec2};
 use serde_json::{Value, json};
 
-use super::{CommandSpec, bad, has_doc};
+use super::*;
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Session, Step};
 
 /// Where plotter configuration files live. Names are file names ending in
