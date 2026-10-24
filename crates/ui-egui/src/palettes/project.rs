@@ -144,7 +144,7 @@ fn field_grid(ui: &mut egui::Ui, salt: &str, fields: &[(&str, &str)], values: &m
         for (key, label) in fields {
             ui.label(crate::i18n::t(label));
             let mut v = values.get(*key).and_then(Value::as_str).unwrap_or("").to_string();
-            if ui.add(egui::TextEdit::singleline(&mut v).desired_width(f32::INFINITY)).changed() {
+            if ui.add(egui::TextEdit::singleline(&mut v).desired_width((ui.available_width() - 8.0).clamp(80.0, 260.0))).changed() {
                 values.insert((*key).to_string(), json!(v));
             }
             ui.end_row();
