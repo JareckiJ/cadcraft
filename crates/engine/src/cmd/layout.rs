@@ -826,13 +826,16 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let path = _path;
-                let tmp = format!("{path}.cadcraft-tmp");
-                std::fs::write(&tmp, &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
-                std::fs::rename(&tmp, path).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
+                // Exclusively create a fresh temporary file and rename it into place so a planted
+                // `<path>.cadcraft-tmp` symlink cannot redirect the plot write (CWE-59).
+                crate::atomic_write::write_atomic(std::path::Path::new(path), &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
                 Ok(json!({ "path": path, "bytes": bytes.len(), "layout": layout, "pages": pages }))
             }
             #[cfg(target_arch = "wasm32")]
-            Err(bad(cmd, "paths are not available on the web; omit `path` to get the PDF as base64 `data`"))
+            {
+                super::exchange::deliver_file(cmd, _path, &bytes, super::file::deliver())?;
+                Ok(json!({ "path": _path, "bytes": bytes.len(), "layout": layout, "pages": pages }))
+            }
         }
         None => Ok(json!({ "data": base64_encode(&bytes), "bytes": bytes.len(), "layout": layout, "pages": pages })),
     }
