@@ -264,7 +264,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             let mut open_path = None;
             let rows = st.sheets.clone();
             for (i, sh) in rows.iter().enumerate() {
-                let title = sh.fields.get("TITLE").and_then(Value::as_str).unwrap_or("");
+                // The sheet's own title: TITLE, or DESCRIPTION where the title is the project's.
+                let field = |k: &str| sh.fields.get(k).and_then(Value::as_str).unwrap_or("");
+                let title = if st.sheet_fields.iter().any(|(k, _)| k == "TITLE") || field("DESCRIPTION").is_empty() {
+                    field("TITLE")
+                } else {
+                    field("DESCRIPTION")
+                };
                 let open =
                     app.session.docs.iter().any(|d| d.path.as_deref().is_some_and(|q| std::path::Path::new(q) == std::path::Path::new(&sh.path)));
                 let label =

@@ -10,6 +10,9 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
+/// The open project is one per process: the tests take turns.
+static PROJECT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn save(h: &mut Harness<'static, CadApp>, name: &str) {
     if let Ok(directory) = std::env::var("CRAFT_UI_VISUAL_DIR") {
         std::fs::create_dir_all(&directory).unwrap();
@@ -19,6 +22,7 @@ fn save(h: &mut Harness<'static, CadApp>, name: &str) {
 
 #[test]
 fn electrical_tool_bar_and_project_manager() {
+    let _turn = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     set_io(IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
@@ -112,6 +116,7 @@ fn electrical_tool_bar_and_project_manager() {
 
 #[test]
 fn electrical_parts_catalogue_and_a3_title_block() {
+    let _turn = PROJECT.lock().unwrap_or_else(|e| e.into_inner());
     set_io(IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
