@@ -247,7 +247,9 @@ fn hatchedit_adding_an_existing_island_keeps_it() {
     let mut s = Session::new();
     s.execute("rectang", &json!({ "p1": [0, 0], "p2": [100, 100] })).unwrap();
     let c = handle(&s.execute("circle", &json!({ "center": [50, 50], "radius": 20 })).unwrap());
-    let hh = hatch_at(&mut s, &[[5.0, 5.0]]);
+    // Not associative: its island is linked to nothing until the circle is added.
+    let hh = handle(&s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID", "associative": false })).unwrap());
+    assert!(hatch(&s, &hh).loops.iter().all(|l| l.sources.is_empty()));
     let before = hatch(&s, &hh).loops.len();
     s.execute("hatchedit", &json!({ "handles": [hh], "addBoundary": [c] })).unwrap();
     let h = hatch(&s, &hh);
@@ -255,4 +257,10 @@ fn hatchedit_adding_an_existing_island_keeps_it() {
     let drawn = cadcraft_engine::render::hatch_fill_loops(&h, 1e-3);
     let centre = cadcraft_engine::geom::Vec2::new(50.0, 50.0);
     assert_eq!(drawn.iter().filter(|l| cadcraft_engine::geom::point_in_polygon(l, centre)).count() % 2, 0, "the island stays empty");
+    // The island is linked to the circle that was added.
+    assert!(
+        h.loops.iter().any(|l| !l.outer && l.sources.iter().any(|x| x.hex() == c)),
+        "{:?}",
+        h.loops.iter().map(|l| (l.outer, l.sources.clone())).collect::<Vec<_>>()
+    );
 }

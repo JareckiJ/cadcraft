@@ -344,9 +344,20 @@ fn edit_loops(h: &mut Hatch, added: &[HatchLoop], removed: &[usize]) -> Result<(
     }
     h.loops = h.loops.drain(..).enumerate().filter_map(|(i, l)| (!removed.contains(&i)).then_some(l)).collect();
     // A boundary the hatch already has is not added again (whatever role it has here): a second
-    // copy would cancel it under the odd-parity fill.
-    let added: Vec<HatchLoop> = added.iter().filter(|a| !h.loops.iter().any(|l| same_loop(l, a))).cloned().collect();
-    h.loops.extend(added);
+    // copy would cancel it under the odd-parity fill. Its objects join the loop there, so picking
+    // it links an unlinked loop to them.
+    for a in added {
+        match h.loops.iter_mut().find(|l| same_loop(l, a)) {
+            Some(l) => {
+                for s in &a.sources {
+                    if !l.sources.contains(s) {
+                        l.sources.push(*s);
+                    }
+                }
+            }
+            None => h.loops.push(a.clone()),
+        }
+    }
     dedup_loops(&mut h.loops);
     if h.loops.is_empty() {
         return Err(bad("hatchedit", "a hatch needs at least one boundary loop"));
