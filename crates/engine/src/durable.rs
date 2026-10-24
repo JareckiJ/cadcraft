@@ -32,14 +32,23 @@ fn sync_parent(path: &Path) {
 }
 
 /// The backup file of the drawing at `path`. A DWG's is `<name>.bak`, as AutoCAD names it (rename
-/// it back to `.dwg` to open it); any other drawing appends `.bak` (`plan.dxf.bak`), so drawings
-/// that differ only in their extension never share, and overwrite, one backup. None for a path
-/// that is itself a `.bak`.
+/// it back to `.dwg` to open it), in the extension's letter case (`plan.DWG` → `plan.BAK`); any
+/// other drawing appends `.bak` (`plan.dxf.bak`). So drawings that differ only in their extension,
+/// or in its case where file names are case-sensitive, never share, and overwrite, one backup.
+/// None for a path that is itself a `.bak`.
 pub fn backup_path(path: &str) -> Option<PathBuf> {
     let p = Path::new(path);
     match p.extension() {
         Some(e) if e.eq_ignore_ascii_case("bak") => None,
-        Some(e) if e.eq_ignore_ascii_case("dwg") => Some(p.with_extension("bak")),
+        Some(e) if e.eq_ignore_ascii_case("dwg") => {
+            let ext: String = e
+                .to_string_lossy()
+                .chars()
+                .zip("bak".chars())
+                .map(|(d, b)| if d.is_ascii_uppercase() { b.to_ascii_uppercase() } else { b })
+                .collect();
+            Some(p.with_extension(ext))
+        }
         _ => Some(PathBuf::from(format!("{path}.bak"))),
     }
 }
@@ -111,8 +120,28 @@ mod tests {
     #[test]
     fn a_bak_file_has_no_backup() {
         assert_eq!(backup_path("/x/a.dwg"), Some(PathBuf::from("/x/a.bak")));
-        assert_eq!(backup_path("/x/a.DWG"), Some(PathBuf::from("/x/a.bak")));
+        assert_eq!(backup_path("/x/a.DWG"), Some(PathBuf::from("/x/a.BAK")));
+        assert_eq!(backup_path("/x/a.Dwg"), Some(PathBuf::from("/x/a.Bak")));
         assert_eq!(backup_path("/x/a.BAK"), None);
+    }
+
+    /// Where file names are case-sensitive, `a.dwg` and `a.DWG` are two drawings with two backups.
+    #[test]
+    fn dwgs_differing_in_case_keep_their_own_backups() {
+        let d = dir("dwg-case");
+        let (lower, upper) = (d.join("a.dwg"), d.join("a.DWG"));
+        fs::write(&lower, b"lower").unwrap();
+        if upper.exists() {
+            // A case-insensitive file system: there is only one file.
+            let _ = fs::remove_dir_all(&d);
+            return;
+        }
+        fs::write(&upper, b"upper").unwrap();
+        assert!(backup_previous(&lower.to_string_lossy(), |_| true).unwrap());
+        assert!(backup_previous(&upper.to_string_lossy(), |_| true).unwrap());
+        assert_eq!(fs::read(d.join("a.bak")).unwrap(), b"lower");
+        assert_eq!(fs::read(d.join("a.BAK")).unwrap(), b"upper");
+        let _ = fs::remove_dir_all(&d);
     }
 
     /// Drawings that differ only in their extension keep separate backups.
