@@ -185,9 +185,15 @@ fn hatch_and_array_variables_reach_their_commands() {
     s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap();
     assert_eq!(associative(&s), (1, 1), "HPASSOC 0 makes plain hatches");
 
-    let c = s.execute("circle", &json!({ "center": [30, 0], "radius": 2 })).unwrap()["handle"].as_str().unwrap().to_string();
-    let array = |s: &mut Session| s.execute("arrayrect", &json!({ "handles": [c], "rows": 1, "cols": 3, "colSpacing": 5 })).unwrap();
+    // An associative array takes its source objects into the array block, so each run needs a new circle.
+    let array = |s: &mut Session| {
+        let c = s.execute("circle", &json!({ "center": [30, 0], "radius": 2 })).unwrap()["handle"].as_str().unwrap().to_string();
+        s.execute("arrayrect", &json!({ "handles": [c], "rows": 1, "cols": 3, "colSpacing": 5 })).unwrap()
+    };
     assert_eq!(array(&mut s)["associative"], true, "ARRAYASSOCIATIVITY 1 is the default");
     assert!(setvar(&mut s, "ARRAYASSOCIATIVITY", json!(0)));
-    assert_ne!(array(&mut s)["associative"], true);
+    // Plain copies report how many were made and no array handle.
+    let plain = array(&mut s);
+    assert!(plain.get("associative").is_none() && plain.get("handle").is_none(), "ARRAYASSOCIATIVITY 0 makes plain copies: {plain}");
+    assert!(plain["created"].as_u64().unwrap_or(0) > 0, "{plain}");
 }
