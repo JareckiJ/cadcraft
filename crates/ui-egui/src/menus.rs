@@ -103,6 +103,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         let panel = if id == "ui.panel.properties" { "properties" } else { "layers" };
         return Some(crate::docking::command(app, false, &json!({"operation":"open", "panel":panel})));
     }
+    if id == "ui.dialog.blocks" || (matches!(id, "blockspalette") && params.is_null()) {
+        return Some(crate::dialogs::open_blocks_palette(app));
+    }
     if id == "ui.toggle.quickcalc" {
         return Some(crate::palettes::quickcalc::toggle(app));
     }
