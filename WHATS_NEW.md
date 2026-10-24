@@ -8,6 +8,48 @@ Please try what is described here and tell us what doesn't work as expected, wha
 
 ---
 
+## 24.10.2026 (0.9.0-b17)
+
+### Русский
+
+**Штриховка: «Добавить: Указать точки»**
+- Контур вокруг указанной точки теперь находится и в больших чертежах. Раньше в поиске участвовали все 17 тысяч объектов чертежа, и в «אריה צוק» контур часто не находился. Теперь, как в AutoCAD, контур ищется среди объектов на экране и рядом с ним.
+- Текст, размеры и рамки вокруг блоков и выносок больше не мешают. Раньше прямоугольник вокруг текста выноски или вокруг блока мог разрезать комнату или ящик пополам. Теперь блоки и выноски ограничивают штриховку только своими линиями.
+- Если область вокруг точки не замкнута, появляется окно «Штриховка — ошибка определения контура» с объяснением, и ничего не создаётся.
+- Если найденный контур уходит далеко за пределы экрана (обычно это значит, что в границе есть разрыв и область «вытекла» наружу), появляется такое же окно с предупреждением. Если область действительно большая, уменьшите масштаб, чтобы она была видна целиком, и укажите точку ещё раз.
+
+**Штриховка: «Добавить: Выбрать объекты»**
+- Выбранные объекты подсвечиваются, пока выбор не закончен.
+- Теперь подходят не только замкнутые полилинии и окружности, но и отрезки, дуги и незамкнутые полилинии, которые вместе образуют замкнутую область. Их можно выбирать по одному: например, четыре отрезка, образующих прямоугольник. Выступающие концы на углах не мешают.
+- Пока выбранные объекты ещё не замыкают область, в командной строке написано «не ограничивают область». Если нажать Enter, появится окно с предупреждением, а команда подождёт недостающие объекты.
+- Если часть выбранных объектов не участвует в контуре, штриховка создаётся по остальным, и появляется предупреждение.
+
+**Обрезка штриховки**
+- Линии внутри блоков теперь тоже служат режущими кромками, для штриховки и для любых других объектов. Раньше блоки при обрезке не учитывались, поэтому в чертежах, где стенки и полки нарисованы блоками, «Обрезать» не находило пересечений и в быстром режиме удаляло штриховку целиком.
+- Щелчок по краю штриховки обрезает часть, прилегающую к этому месту. Раньше такой щелчок удалял штриховку целиком.
+- Штриховка удаляется целиком, только когда её действительно ничто не пересекает. Линия, которая заходит в штриховку и обрывается внутри, не делит её на части, как и в AutoCAD.
+
+### English
+
+**Hatch: Add: Pick points**
+- The boundary around a picked point is now found in large drawings too. Before, all 17,000 objects of the drawing took part in the search, and in "אריה צוק" the boundary was often not found. Now, as in AutoCAD, the boundary is looked for among the objects on screen and near it.
+- Text, dimensions, and the boxes around blocks and leaders no longer get in the way. Before, the box around a leader's text or around a block could cut a room or a drawer in two. Now blocks and leaders bound a hatch only with their own lines.
+- If the area around the point is not closed, a "Hatch - Boundary Definition Error" window explains it, and nothing is created.
+- If the boundary found reaches far outside the screen (usually a gap that let the area run out), the same window warns about it. If the area really is that large, zoom out to show all of it and pick again.
+
+**Hatch: Add: Select objects**
+- The selected objects are highlighted while you select.
+- Not only closed polylines and circles work now, but also lines, arcs and open polylines that together form a closed area. You can pick them one by one, for example four lines forming a rectangle. Ends running past the corners don't matter.
+- While the selected objects don't close an area yet, the command line says "not enclosing an area yet". Pressing Enter shows a warning window, and the command waits for the missing objects.
+- If some of the selected objects take no part in the boundary, the hatch is made from the others, with a warning.
+
+**Trimming hatches**
+- Lines inside blocks now also act as cutting edges, for hatches and for any other object. Before, blocks were ignored by TRIM, so in drawings where walls and shelves are blocks, TRIM found no crossings and in Quick mode erased the whole hatch.
+- Clicking the edge of a hatch trims the part next to that spot. Before, such a click erased the whole hatch.
+- A hatch is erased entirely only when nothing crosses it. A line that enters a hatch and ends inside it does not split it, as in AutoCAD.
+
+---
+
 ## 23.10.2026 (0.9.0-b16)
 
 ### Русский

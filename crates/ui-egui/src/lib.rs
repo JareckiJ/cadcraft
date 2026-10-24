@@ -43,6 +43,7 @@ pub mod icons;
 pub mod layers;
 pub mod managers;
 pub mod menus;
+pub mod notices;
 pub mod opening;
 pub mod options;
 pub mod palettes;
@@ -716,6 +717,7 @@ impl CadApp {
         closing::prompt(self, ui.ctx());
         autosave::show(self, ui.ctx());
         autosave::gpu_notice(self, ui.ctx());
+        notices::show(self, ui.ctx());
         self.frame_ms = now_ms() - t0;
     }
 

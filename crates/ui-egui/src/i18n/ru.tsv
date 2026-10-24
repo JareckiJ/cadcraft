@@ -1600,3 +1600,10 @@
 	Keeps only the part 3D solids or regions share.	Оставляет только общую часть 3D-тел или областей.
 	Undo (Ctrl+Z)	Отменить (Ctrl+Z)
 	Redo (Ctrl+Y)	Вернуть (Ctrl+Y)
+	Hatch - Boundary Definition Error	Штриховка — ошибка определения контура
+	There are too many objects in the view to find the boundary. Zoom in closer to the area to hatch and pick again.	На экране слишком много объектов, чтобы найти контур. Увеличьте область, которую нужно заштриховать, и укажите точку ещё раз.
+	Valid hatch boundary not found: the area around the picked point is not closed. Close the gaps in its boundary and pick again.	Не найден правильный контур штриховки: область вокруг указанной точки не замкнута. Закройте разрывы в её границе и укажите точку ещё раз.
+	The boundary around the picked point reaches far outside the visible area. The area is probably not closed: check its boundary for gaps, or zoom out to show the whole area and pick again.	Контур вокруг указанной точки уходит далеко за пределы видимой области. Скорее всего, область не замкнута: проверьте, нет ли разрывов в её границе, или уменьшите масштаб, чтобы область была видна целиком, и укажите точку ещё раз.
+	The selected objects don't enclose an area: together they must form a closed boundary. Select the missing objects or close the gaps.	Выбранные объекты не ограничивают область: вместе они должны образовывать замкнутый контур. Выберите недостающие объекты или закройте разрывы.
+	No boundary objects selected: select closed objects, or objects that together enclose an area.	Не выбраны объекты контура: выберите замкнутые объекты или объекты, которые вместе ограничивают область.
+	Some of the selected objects don't enclose an area and were left out of the hatch. Together, objects must form a closed boundary.	Некоторые выбранные объекты не ограничивают область и не вошли в штриховку. Вместе объекты должны образовывать замкнутый контур.

@@ -314,3 +314,35 @@ fn trim_cuts_a_hatch_area() {
     assert!(xs.iter().all(|x| *x >= 4.0 - 1e-6), "{xs:?}");
     assert!(xs.iter().any(|x| (*x - 10.0).abs() < 1e-6));
 }
+
+#[test]
+fn lines_inside_a_block_cut_a_hatch() {
+    use cadcraft_engine::doc::{Common, Hatch, HatchLoop, Space};
+    use cadcraft_engine::geom::{PolyVertex, Vec2};
+    let mut s = Session::new();
+    // A block whose line crosses the hatch at x = 4.
+    let l = s.execute("line", &json!({ "points": [[4, -5], [4, 15]] })).unwrap()["handles"][0].as_str().unwrap().to_string();
+    s.execute("block", &json!({ "name": "DIVIDER", "base": [0, 0], "handles": [l], "keep": "convert" })).unwrap();
+    let vertices = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)].iter().map(|(x, y)| PolyVertex::new(Vec2::new(*x, *y))).collect();
+    let hatch = Hatch {
+        pattern: "SOLID".into(),
+        solid: true,
+        loops: vec![HatchLoop { vertices, outer: true, sources: Vec::new() }],
+        scale: 1.0,
+        angle: 0.0,
+        associative: false,
+        style: 0,
+        elevation: 0.0,
+        gradient: None,
+        origin: Vec2::ZERO,
+        background: None,
+        pattern_lines: Vec::new(),
+    };
+    let h = s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Hatch(hatch)).unwrap();
+    // Quick mode: a hatch no edge crossed would be erased.
+    s.execute("trim", &json!({ "handle": h.hex(), "pick": [2.0, 5.0], "mode": "quick" })).unwrap();
+    let left: Vec<_> =
+        s.doc().unwrap().model.iter().filter_map(|e| if let EntityKind::Hatch(h) = &e.kind { Some(h.clone()) } else { None }).collect();
+    assert_eq!(left.len(), 1, "trimmed, not erased");
+    assert!(left[0].loops.iter().flat_map(|l| l.vertices.iter()).all(|v| v.p.x >= 4.0 - 1e-6));
+}

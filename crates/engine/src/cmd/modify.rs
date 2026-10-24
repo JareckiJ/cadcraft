@@ -807,6 +807,18 @@ pub(crate) fn edge_segments_owned(s: &Session, edges: Edges) -> Result<Vec<(Hand
             out.extend(segs.into_iter().map(|sg| (e.handle, sg)));
             continue;
         }
+        if matches!(e.kind, EntityKind::Insert(_) | EntityKind::MLeader(_) | EntityKind::Table(_)) {
+            // A block reference (and a multileader or table) cuts with the lines it draws.
+            let list = cadcraft_render::build_entities(
+                d,
+                std::iter::once(&**e),
+                &cadcraft_render::Options { text: false, fill: false, ..Default::default() },
+            );
+            for p in list.prims.iter().filter(|p| matches!(p.kind, cadcraft_render::Kind::Polyline)) {
+                out.extend(list.points(p).windows(2).filter_map(|w| Some((e.handle, Segment::Line(Line::new(*w.first()?, *w.get(1)?))))));
+            }
+            continue;
+        }
         for p in e.kind.prims() {
             out.extend(prim_to_segments(&p).into_iter().map(|sg| (e.handle, sg)));
         }

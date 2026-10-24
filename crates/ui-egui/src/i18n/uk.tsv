@@ -1853,3 +1853,10 @@
 	Keeps only the part 3D solids or regions share.	Залишає лише спільну частину 3D-тіл або областей.
 	Undo (Ctrl+Z)	Скасувати (Ctrl+Z)
 	Redo (Ctrl+Y)	Повернути (Ctrl+Y)
+	Hatch - Boundary Definition Error	Штрихування — помилка визначення контуру
+	There are too many objects in the view to find the boundary. Zoom in closer to the area to hatch and pick again.	На екрані забагато об'єктів, щоб знайти контур. Збільште область, яку потрібно заштрихувати, і вкажіть точку ще раз.
+	Valid hatch boundary not found: the area around the picked point is not closed. Close the gaps in its boundary and pick again.	Не знайдено правильний контур штрихування: область навколо вказаної точки не замкнена. Закрийте розриви в її межі та вкажіть точку ще раз.
+	The boundary around the picked point reaches far outside the visible area. The area is probably not closed: check its boundary for gaps, or zoom out to show the whole area and pick again.	Контур навколо вказаної точки виходить далеко за межі видимої області. Найімовірніше, область не замкнена: перевірте, чи немає розривів у її межі, або зменште масштаб, щоб область було видно повністю, і вкажіть точку ще раз.
+	The selected objects don't enclose an area: together they must form a closed boundary. Select the missing objects or close the gaps.	Вибрані об'єкти не обмежують область: разом вони мають утворювати замкнений контур. Виберіть відсутні об'єкти або закрийте розриви.
+	No boundary objects selected: select closed objects, or objects that together enclose an area.	Не вибрано об'єкти контуру: виберіть замкнені об'єкти або об'єкти, які разом обмежують область.
+	Some of the selected objects don't enclose an area and were left out of the hatch. Together, objects must form a closed boundary.	Деякі вибрані об'єкти не обмежують область і не увійшли до штрихування. Разом об'єкти мають утворювати замкнений контур.

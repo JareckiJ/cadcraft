@@ -103,9 +103,17 @@ pub(crate) fn trim_hatch(h: &Hatch, cut: &[Segment], pick: Vec2) -> Result<(Opti
         }
     }
     let in_hatch = |p: Vec2| loops.iter().filter(|l| point_in_polygon(l, p)).count() % 2 == 1;
-    if !in_hatch(pick) {
-        return Err(no_cut());
-    }
+    // A pick on the hatch's edge (the hatch is picked along its boundary too) trims the part
+    // just inside it.
+    let pick = if in_hatch(pick) {
+        pick
+    } else {
+        [1e-3, 3e-3, 1e-2, 3e-2]
+            .iter()
+            .flat_map(|r| (0..16).map(move |k| Vec2::polar(pick, size * r, std::f64::consts::TAU * f64::from(k) / 16.0)))
+            .find(|q| in_hatch(*q))
+            .ok_or_else(|| EngineError::Other("Pick the hatch inside its area.".into()))?
+    };
     // The cutting edges near the hatch, as polylines.
     let near = bounds.expand(size * 0.01);
     let mut cuts: Vec<Vec<Vec2>> = Vec::new();
@@ -132,7 +140,8 @@ pub(crate) fn trim_hatch(h: &Hatch, cut: &[Segment], pick: Vec2) -> Result<(Opti
         })
         .collect();
     polys.extend(cuts);
-    let b = region::boundary_at(&polys, pick, tol.max(size * 1e-7)).ok_or_else(no_cut)?;
+    let b = region::boundary_at(&polys, pick, tol.max(size * 1e-7))
+        .ok_or_else(|| EngineError::Other("Could not work out the part of the hatch to trim.".into()))?;
     let snap = size * 1e-7;
     let face: Vec<Vec<Vec2>> = std::iter::once(b.outer.clone())
         .chain(b.islands.iter().map(|i| i.outline.clone()))
@@ -275,5 +284,33 @@ mod tests {
         let _ = trim_hatch(&h, &[], Vec2::ZERO);
         let h = hatch(Vec::new());
         let _ = trim_hatch(&h, &[], Vec2::ZERO);
+    }
+
+    #[test]
+    fn walls_along_the_hatch_boundary_do_not_stop_the_trim() {
+        // The hatch fills a room whose walls run along its boundary and past its corners; a
+        // line crosses the room.
+        let h = hatch(vec![square(0.0, 10.0)]);
+        let l = |a: (f64, f64), b: (f64, f64)| Segment::Line(Line::new(Vec2::new(a.0, a.1), Vec2::new(b.0, b.1)));
+        let cut = [
+            l((-5.0, 0.0), (15.0, 0.0)),
+            l((10.0, -5.0), (10.0, 15.0)),
+            l((15.0, 10.0), (-5.0, 10.0)),
+            l((0.0, 15.0), (0.0, -5.0)),
+            // A wall piece covering part of an edge only.
+            l((2.0, 0.0), (6.0, 0.0)),
+            l((4.0, -5.0), (4.0, 15.0)),
+        ];
+        let (left, _) = trim_hatch(&h, &cut, Vec2::new(2.0, 5.0)).unwrap();
+        assert!((area(&left.unwrap()) - 60.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn a_pick_on_the_hatch_edge_trims_the_part_inside() {
+        let h = hatch(vec![square(0.0, 10.0)]);
+        let cut = [Segment::Line(Line::new(Vec2::new(4.0, -5.0), Vec2::new(4.0, 15.0)))];
+        // On the left edge of the hatch.
+        let (left, _) = trim_hatch(&h, &cut, Vec2::new(0.0, 5.0)).unwrap();
+        assert!((area(&left.unwrap()) - 60.0).abs() < 1.0);
     }
 }
