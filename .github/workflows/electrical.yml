@@ -95,16 +95,31 @@ jobs:
       - name: Electrical UI test with screenshots
         shell: bash
         run: |
+          set +e
           set -o pipefail
+          mkdir -p shots
           CRAFT_UI_VISUAL_DIR="$PWD/shots" cargo test -q -p cadcraft-ui-egui --test it electrical_ui 2>&1 | tee ui.txt
           s=$?
           if [ $s -ne 0 ]; then
-            grep -v "Compiling\|Checking" ui.txt | tail -40 | sed 's/^/::error title=ui-test::/' | head -40
+            msg=$(grep -v "Compiling\|Checking\|Downloaded\|Downloading" ui.txt | sed 's/\x1b\[[0-9;]*m//g' | tail -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=ui-test::$msg"
           fi
           exit $s
-      - uses: actions/upload-artifact@v4
+      # Screenshots go to the ci-screenshots branch (artifact downloads are not reachable from
+      # every review environment).
+      - name: Publish screenshots
         if: always()
-        with:
-          name: electrical-ui-screenshots
-          path: shots
-          retention-days: 7
+        shell: bash
+        run: |
+          set +e
+          ls shots/*.png > /dev/null 2>&1 || exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898+github-actions[bot]@users.noreply.github.com"
+          tmp=$(mktemp -d)
+          cp shots/*.png "$tmp"/
+          git checkout --orphan ci-screenshots-tmp
+          git rm -rfq . > /dev/null
+          cp "$tmp"/*.png .
+          git add *.png
+          git commit -qm "Electrical UI screenshots for ${GITHUB_SHA}"
+          git push -f origin HEAD:ci-screenshots
