@@ -279,6 +279,7 @@ impl Interactive for NewLayoutM {
         Self::show(s, &Space::Paper(name))?;
         Ok(Step::Done)
     }
+    /// Puts back the tab the command started in.
     fn cancelled(&mut self, s: &mut Session) {
         if let Some(from) = self.from.take()
             && let Err(e) = Self::show(s, &from)
@@ -286,6 +287,7 @@ impl Interactive for NewLayoutM {
             s.echo(e.to_string());
         }
     }
+    /// The rectangle following the cursor while the second corner is picked.
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
         let Some(a) = self.first else { return Vec::new() };
         let corners = [a, Vec2::new(c.x, a.y), c, Vec2::new(a.x, c.y), a];
@@ -316,6 +318,8 @@ fn window_param(p: &Value) -> Result<Option<Bounds2>> {
     }
 }
 
+/// LAYOUT.NEW from JSON: add a layout (with a viewport unless `viewport` is false), zoomed to
+/// `window` when it has one and to the model extents otherwise.
 fn run_new(s: &mut Session, p: &Value) -> Result<Value> {
     // Checked before anything is added, so a bad window leaves no layout behind.
     let window = window_param(p)?;
@@ -1108,6 +1112,7 @@ mod tests {
         v.into_iter().next().map(|(_, v)| v).unwrap()
     }
 
+    /// A `window` zooms the new layout's viewport to that part of the model.
     #[test]
     fn a_new_layout_can_show_a_window_of_the_model() {
         let mut s = session_with_model();
@@ -1123,6 +1128,7 @@ mod tests {
         assert!(e.view_height > v.view_height * 2.0, "extents are larger than the window");
     }
 
+    /// A window without area, or not two corners, is an error that leaves no layout behind.
     #[test]
     fn a_bad_layout_window_adds_no_layout() {
         let mut s = session_with_model();
@@ -1140,6 +1146,7 @@ mod tests {
         assert_eq!(s.doc().unwrap().layouts.len(), before, "no layout is left behind");
     }
 
+    /// The interactive command shows the Model tab, takes two corners and shows the new layout.
     #[test]
     fn new_layout_picks_the_model_area_in_the_model_tab() {
         let mut s = session_with_model();
@@ -1163,6 +1170,7 @@ mod tests {
         assert!(s.doc().unwrap().layout("Sheet P").is_none(), "one undo step");
     }
 
+    /// A tab shown while the corners are picked ends the command instead of reading points in that space.
     #[test]
     fn new_layout_ends_if_another_tab_is_shown_while_picking() {
         let mut s = session_with_model();
@@ -1178,6 +1186,7 @@ mod tests {
         assert_eq!(s.doc().unwrap().layouts.len(), before, "no layout was added");
     }
 
+    /// The opposite-corner prompt is a window corner, so ortho does not bend it.
     #[test]
     fn the_opposite_corner_is_not_bent_by_ortho() {
         let mut s = session_with_model();
@@ -1188,6 +1197,7 @@ mod tests {
         assert!(p.corner && p.base == Some(Vec2::new(10.0, 10.0)), "a window's opposite corner prompt");
     }
 
+    /// Esc puts back the tab the command started in and adds no layout.
     #[test]
     fn cancelling_new_layout_puts_the_tab_back() {
         let mut s = session_with_model();

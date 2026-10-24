@@ -66,6 +66,7 @@ impl Interactive for Guarded {
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         catch_unwind(AssertUnwindSafe(|| self.inner.begin(s))).unwrap_or_else(|p| Err(self.internal(&*p)))
     }
+    /// Forwards the cancel hook; a panic in it must not stop the cancel.
     fn cancelled(&mut self, s: &mut Session) {
         // A panic here must not stop the cancel: the command ends either way.
         let _ = catch_unwind(AssertUnwindSafe(|| self.inner.cancelled(s)));
