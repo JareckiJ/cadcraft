@@ -40,7 +40,7 @@ pub struct State {
     /// Non-None while the dialog is hidden for a canvas pick.
     pending: Option<Pending>,
     /// Handles collected by a canvas pick.
-    picked_handles: Vec<String>,
+    pub picked_handles: Vec<String>,
     /// UID of the drawing that was active when the pick started; guards against cross-drawing picks.
     pick_uid: Option<u64>,
 }
@@ -276,7 +276,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
-fn confirm(app: &mut CadApp) -> bool {
+pub fn confirm(app: &mut CadApp) -> bool {
     let path = app.wblock.path.trim().to_string();
     if path.is_empty() {
         app.wblock.error = Some(crate::tl!("A file path is required.").to_string());

@@ -1,9 +1,10 @@
 //! Integration tests for the WBLOCK dialog's confirm() path: verify that the file is written and
 //! contains the expected entities for Entire Drawing and Objects modes.
 
-use cadcraft_doc::Drawing;
+use cadcraft_doc::{Common, Drawing, EntityKind, Line, Space};
 use cadcraft_engine::cmd::file::{IoHooks, set_io};
 use cadcraft_engine::Session;
+use cadcraft_geom::Vec3;
 use cadcraft_ui_egui::{CadApp, Services, wblock};
 use serde_json::json;
 
@@ -33,6 +34,15 @@ fn app_with_two_entities() -> (CadApp, cadcraft_doc::Handle, cadcraft_doc::Handl
     let h1 = cadcraft_doc::Handle::parse_hex(r1["handles"][0].as_str().unwrap()).unwrap();
     let r2 = s.execute("line", &json!({ "points": [[0, 5], [10, 5]] })).unwrap();
     let h2 = cadcraft_doc::Handle::parse_hex(r2["handles"][0].as_str().unwrap()).unwrap();
+    // Add one paper-space entity to verify the whole-drawing mode writes layouts too.
+    s.doc_mut()
+        .unwrap()
+        .add(
+            &Space::Paper("Layout1".into()),
+            Common::default(),
+            EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(10.0, 0.0, 0.0) }),
+        )
+        .unwrap();
     s.set_selection(Vec::new());
     (CadApp::new(s, Services::default()), h1, h2)
 }
@@ -50,16 +60,17 @@ fn read_json(path: &str) -> serde_json::Value {
 }
 
 #[test]
-fn confirm_entire_drawing_writes_all_model_entities() {
+fn confirm_entire_drawing_writes_all_model_and_layout_entities() {
     setup_io();
     let (mut app, _h1, _h2) = app_with_two_entities();
     let path = out_path("entire");
     app.wblock.source = wblock::Source::EntireDrawing;
     app.wblock.path = path.clone();
-    // confirm() returns true when the write succeeds.
-    assert!(app.run("wblock", json!({ "path": path, "name": "*" })).is_ok());
+    // Exercise confirm() — the same code path the dialog's OK button takes.
+    assert!(wblock::confirm(&mut app), "confirm() should succeed: {:?}", app.wblock.error);
     let j = read_json(&path);
     assert_eq!(j["model"].as_u64(), Some(2), "entire-drawing mode must write all model entities");
+    assert_eq!(j["layouts"].as_u64(), Some(1), "entire-drawing mode must write layout entities");
 }
 
 #[test]
@@ -68,11 +79,13 @@ fn confirm_objects_with_base_point_writes_only_selected_entity() {
     let (mut app, h1, _h2) = app_with_two_entities();
     let path = out_path("objects");
     // Only h1 is selected; base point at (5, 3).
-    let result = app.run(
-        "wblock",
-        json!({ "path": path, "handles": [h1.hex()], "base": [5.0, 3.0] }),
-    );
-    assert!(result.is_ok(), "wblock with objects and base point should succeed: {result:?}");
+    app.wblock.source = wblock::Source::Objects;
+    app.wblock.picked_handles = vec![h1.hex()];
+    app.wblock.base_x = "5".into();
+    app.wblock.base_y = "3".into();
+    app.wblock.path = path.clone();
+    // Exercise confirm() — the same code path the dialog's OK button takes.
+    assert!(wblock::confirm(&mut app), "confirm() should succeed: {:?}", app.wblock.error);
     let j = read_json(&path);
     assert_eq!(j["model"].as_u64(), Some(1), "objects mode must write only the selected handle");
     // INSBASE is reset to 0,0 in objects mode (the base subtraction is the offset).
