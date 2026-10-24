@@ -5,10 +5,12 @@
 
 use cadcraft_doc::*;
 
+/// A LINE record in model space with handle `h` at height `y`.
 fn line(h: &str, y: f64) -> String {
     format!("0\nLINE\n5\n{h}\n330\n1F\n8\n0\n10\n0\n20\n{y}\n30\n0\n11\n10\n21\n{y}\n31\n0\n")
 }
 
+/// A DXF with model space, three lines (A1, A2, A3) and `objects` in OBJECTS.
 fn dxf(objects: &str) -> String {
     let mut s = String::from("0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nBLOCK_RECORD\n0\nBLOCK_RECORD\n5\n1F\n2\n*Model_Space\n0\nENDTAB\n0\nENDSEC\n");
     s.push_str("0\nSECTION\n2\nENTITIES\n");
@@ -21,10 +23,12 @@ fn dxf(objects: &str) -> String {
     s
 }
 
+/// Model space's entity handles in draw order.
 fn order(d: &Drawing) -> Vec<String> {
     d.model.iter().map(|e| e.handle.hex()).collect()
 }
 
+/// A table reorders model space; written back with a table, the order survives.
 #[test]
 fn sortentstable_sets_the_draw_order() {
     // A1 is drawn by sort handle A4 (over A2 and A3); A3 by 10 (under everything).
@@ -69,6 +73,7 @@ fn written_table(tags: &[cadcraft_dxf::Tag]) -> Option<(Vec<(String, String)>, b
     Some((pairs, named))
 }
 
+/// A block record whose extension dictionary is the last record of OBJECTS gets the entry inside it.
 #[test]
 fn the_entry_goes_into_a_kept_extension_dictionary_written_last() {
     // Model space's extension dictionary also holds another program's record, and comes last in
@@ -94,6 +99,7 @@ fn the_entry_goes_into_a_kept_extension_dictionary_written_last() {
     assert_eq!(order(&cadcraft_io::read_dxf(text.as_bytes()).unwrap()), ["A3", "A2", "A1"]);
 }
 
+/// Entities in handle order are written without a table.
 #[test]
 fn a_space_in_handle_order_gets_no_table() {
     let d = cadcraft_io::read_dxf(dxf("").as_bytes()).unwrap();
@@ -101,6 +107,7 @@ fn a_space_in_handle_order_gets_no_table() {
     assert!(!text.contains("SORTENTSTABLE"), "no table, and no class for one");
 }
 
+/// Tables that don't parse or name no space change nothing.
 #[test]
 fn broken_sortentstables_are_ignored() {
     for table in [
@@ -145,6 +152,7 @@ mod dwg {
         Ok((DwgWriter::write_to_vec(&doc)?, h))
     }
 
+    /// Model space's entity handles in draw order.
     fn order(d: &cadcraft_doc::Drawing) -> Vec<u64> {
         d.model.iter().map(|e| e.handle.0).collect()
     }
@@ -170,6 +178,7 @@ mod dwg {
         Ok(v)
     }
 
+    /// A table listing only some entities reads in its own order.
     #[test]
     fn a_dwg_table_that_leaves_entities_out_reads_in_its_order() -> TestResult {
         let (bytes, h) = source()?;
@@ -181,6 +190,7 @@ mod dwg {
         Ok(())
     }
 
+    /// The order goes back into the DWG, survives a second save, and a bring-to-front reaches the file.
     #[test]
     fn draw_order_goes_back_into_the_dwg_and_survives_a_second_save() -> TestResult {
         let (bytes, h) = source()?;

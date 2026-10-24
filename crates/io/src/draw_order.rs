@@ -192,16 +192,19 @@ pub(crate) fn finish(tags: &mut Vec<Tag>) {
 mod tests {
     use super::*;
 
+    /// Handles from their values.
     fn hs(v: &[u64]) -> Vec<Handle> {
         v.iter().map(|h| Handle(*h)).collect()
     }
 
+    /// Entities already in handle order (or none) need no table.
     #[test]
     fn a_space_in_handle_order_needs_no_table() {
         assert_eq!(table(&hs(&[0x10, 0x20, 0x30])), None);
         assert_eq!(table(&[]), None);
     }
 
+    /// Moved entities swap handles; repeated or null handles give no table.
     #[test]
     fn the_table_swaps_handles_so_ascending_sort_handles_give_the_order() {
         // 30 drawn first, 10 last: 30 takes 10's place, 10 takes 30's; 20 stays.

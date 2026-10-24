@@ -125,6 +125,7 @@ pub(crate) struct Head {
     has_reactors: bool,
 }
 
+/// A record's [`Head`], from its groups before any xdata.
 pub(crate) fn head(tags: &[Tag]) -> Head {
     let mut h = Head::default();
     let mut group: Option<String> = None;
@@ -150,6 +151,7 @@ pub(crate) fn head(tags: &[Tag]) -> Head {
     h
 }
 
+/// The first value of group `code` before any xdata.
 pub(crate) fn val(tags: &[Tag], code: i32) -> Option<String> {
     tags.iter().take_while(|t| t.code < 1000).find(|t| t.code == code).map(Tag::str)
 }
