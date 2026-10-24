@@ -1,0 +1,25 @@
+{
+  // Terminal > Run Task… (or Ctrl+Shift+B for the default): get the latest changes and run CADCraft.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run ECADCraft (latest)",
+      "type": "shell",
+      "command": "git pull --rebase origin feature/iec-device-tagging; cargo run --release -p cadcraft",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "Run ECADCraft (no pull)",
+      "type": "shell",
+      "command": "cargo run --release -p cadcraft",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "Make the demo project",
+      "type": "shell",
+      "command": "cargo build --release -p cadcraft-cli; bash examples/electrical/make-demo.sh target/release/cadcraft-cli demo",
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}
