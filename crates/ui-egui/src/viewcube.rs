@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(part, Some(Part::Face));
         assert_eq!(zone, Some(CubeZone::new(1, -1, 1)), "Top-Front-Right corner");
         click(&mut app, &ctx, corner_pos, egui::PointerButton::Primary);
-        let orbit = app.session.state().unwrap().orbit;
+        let orbit = app.session.state().map(|s| s.orbit).unwrap_or_default();
         assert!(!orbit.is_top(), "clicking corner rotates into 3D isometric view");
         assert!((orbit.yaw.to_degrees() - -45.0).abs() < 1e-3);
         assert!((orbit.pitch.to_degrees() - 54.7356).abs() < 0.05);
@@ -412,7 +412,7 @@ mod tests {
         let (front_center, _) = proj.project_unit(cadcraft_geom::Vec3::new(0.0, -1.0, 0.0));
         assert_eq!(proj.zone_at(front_center), Some(CubeZone::new(0, -1, 0)), "Front face center");
         click(&mut app, &ctx, front_center, egui::PointerButton::Primary);
-        let orbit_after_front = app.session.state().unwrap().orbit;
+        let orbit_after_front = app.session.state().map(|s| s.orbit).unwrap_or_default();
         assert_eq!(orbit_after_front.label(), "FRONT");
     }
 }

@@ -642,7 +642,10 @@ impl Session {
             st.orbit.pivot = pivot;
         }
         st.orbit.yaw = (st.orbit.yaw - dx * 0.008) % std::f64::consts::TAU;
-        st.orbit.pitch = (st.orbit.pitch - dy * 0.008).clamp(-std::f64::consts::PI, std::f64::consts::PI);
+        st.orbit.pitch = (st.orbit.pitch - dy * 0.008).clamp(0.0, std::f64::consts::PI);
+        if st.orbit.is_top() {
+            st.orbit = cadcraft_render::Orbit3d::default();
+        }
         self.touch();
         Ok(())
     }
@@ -714,7 +717,7 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(preset) = str_param(p, "preset") {
         let (yaw_deg, pitch_rad) = match preset.to_ascii_lowercase().as_str() {
             "top" | "plan" | "reset" => (0.0_f64, 0.0_f64),
-            "bottom" => (180.0, std::f64::consts::PI),
+            "bottom" => (0.0, std::f64::consts::PI),
             "front" => (0.0, std::f64::consts::FRAC_PI_2),
             "back" => (180.0, std::f64::consts::FRAC_PI_2),
             "left" => (90.0, std::f64::consts::FRAC_PI_2),
@@ -737,11 +740,14 @@ fn run_3dorbit(s: &mut Session, p: &Value) -> Result<Value> {
     if st.orbit.is_top() {
         st.orbit.pivot = pivot;
     }
-    if let Some(yaw_deg) = p.get("yaw").and_then(Value::as_f64) {
+    if let Some(yaw_deg) = p.get("yaw").and_then(Value::as_f64).filter(|v| v.is_finite()) {
         st.orbit.yaw = yaw_deg.to_radians();
     }
-    if let Some(pitch_deg) = p.get("pitch").and_then(Value::as_f64) {
-        st.orbit.pitch = pitch_deg.to_radians().clamp(-std::f64::consts::PI, std::f64::consts::PI);
+    if let Some(pitch_deg) = p.get("pitch").and_then(Value::as_f64).filter(|v| v.is_finite()) {
+        st.orbit.pitch = pitch_deg.to_radians().clamp(0.0, std::f64::consts::PI);
+    }
+    if st.orbit.is_top() {
+        st.orbit = cadcraft_render::Orbit3d::default();
     }
     let (y, pt, lbl) = (st.orbit.yaw.to_degrees(), st.orbit.pitch.to_degrees(), st.orbit.label());
     s.touch();

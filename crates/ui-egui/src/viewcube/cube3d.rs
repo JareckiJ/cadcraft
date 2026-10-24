@@ -36,7 +36,7 @@ impl CubeZone {
 
     /// Target `(yaw_deg, pitch_deg)` for `3dorbit` that aligns the camera to look from `self.direction()`
     /// toward the origin.
-    pub fn target_angles_deg(self, current_yaw_deg: f64) -> (f64, f64) {
+    pub fn target_angles_deg(self, _current_yaw_deg: f64) -> (f64, f64) {
         let dir = self.direction();
         // Camera looks along:
         // dir.x = -sin(yaw) * sin(pitch)
@@ -46,9 +46,8 @@ impl CubeZone {
         let pitch_deg = pitch_rad.to_degrees();
         let xy_len = dir.x.hypot(dir.y);
         let yaw_deg = if xy_len < 1e-6 {
-            // Looking straight at Top (0,0,1) or Bottom (0,0,-1): snap current yaw to nearest 90° step
-            // or 0° if already in Top view.
-            if self.nz > 0 { 0.0 } else { (current_yaw_deg / 90.0).round() * 90.0 }
+            // Looking straight at Top (0,0,1) or Bottom (0,0,-1): keep +X pointing right (`yaw = 0°`).
+            0.0
         } else {
             (-dir.x).atan2(-dir.y).to_degrees()
         };
@@ -109,6 +108,7 @@ const FACES: [FaceDef; 6] = [
 ];
 
 impl FaceDef {
+    /// Outward unit normal vector of this cube face.
     fn n_vec(self) -> Vec3 {
         Vec3::new(f64::from(self.normal.0), f64::from(self.normal.1), f64::from(self.normal.2))
     }
@@ -177,7 +177,7 @@ impl CubeProjector {
     pub fn project_ring_point(&self, world_xy: Vec3, radius: f32) -> Pos2 {
         let (sy, cy) = self.orbit.yaw.sin_cos();
         let (sp, cp) = self.orbit.pitch.sin_cos();
-        let eff_cp = if cp.abs() < 0.28 { 0.28 * if cp >= 0.0 { 1.0 } else { -1.0 } } else { cp };
+        let eff_cp = if cp >= -0.15 { cp.max(0.28) } else { cp.min(-0.28) };
         // In 3D views the compass sits on the bottom plane of the cube (`z = -1.0`), so its center
         // shifts down by `sp * half_size` and the cube stands on top of the compass disc.
         let z_plane = -1.0_f64;
@@ -199,7 +199,6 @@ impl CubeProjector {
             }
             let (p00, _) = self.project_unit(face.point(-1.0, -1.0));
             let (p10, _) = self.project_unit(face.point(1.0, -1.0));
-            let (p11, _) = self.project_unit(face.point(1.0, 1.0));
             let (p01, _) = self.project_unit(face.point(-1.0, 1.0));
             if let Some((u, v)) = inverse_parallelogram(pos, p00, p10, p01)
                 && (-1.0..=1.0).contains(&u)
@@ -208,7 +207,6 @@ impl CubeProjector {
                 let p3d = face.point(u, v);
                 let depth = p3d.dot(view_dir);
                 if best.is_none_or(|(best_d, _)| depth > best_d) {
-                    let _ = p11;
                     best = Some((depth, face.zone_at(u, v)));
                 }
             }
@@ -238,6 +236,7 @@ impl CubeProjector {
         self.paint_cube(painter, hovered_zone);
     }
 
+    /// Paint the 3D compass disc and its localized cardinal labels (`N`, `E`, `S`, `W`).
     fn paint_compass_ring(&self, painter: &egui::Painter, ring_radius: f32, hovered_ring: bool) {
         const STEPS: usize = 64;
         let ring_col = if hovered_ring { Color32::from_rgb(0x5c, 0x67, 0x7c) } else { Color32::from_rgb(0x46, 0x4e, 0x5a) };
@@ -289,6 +288,7 @@ impl CubeProjector {
         }
     }
 
+    /// Paint the visible faces of the 3D ViewCube, subdivision lines, hover highlights, and face labels.
     fn paint_cube(&self, painter: &egui::Painter, hovered_zone: Option<CubeZone>) {
         let view_dir = self.view_dir();
         let light_dir = (view_dir + Vec3::new(-0.25, -0.15, 0.45)).normalized();
@@ -345,6 +345,7 @@ impl CubeProjector {
         }
     }
 
+    /// Paint the localized, 3D plane-transformed label centered on `face`.
     fn paint_face_label(&self, painter: &egui::Painter, face: FaceDef, _ndot: f64) {
         let label = localized_face_label(face.key).to_uppercase();
         let center_2d = self.project_unit(face.point(0.0, 0.0)).0;
@@ -355,6 +356,7 @@ impl CubeProjector {
         paint_plane_text(painter, center_2d, &label, 13.0, right, down, max_width, Color32::from_rgb(0x1f, 0x24, 0x2b));
     }
 
+    /// Paint the dashed inner edge/corner subdivision lines on `face`.
     fn paint_face_subdivisions(&self, painter: &egui::Painter, face: FaceDef) {
         const B: f64 = 0.56;
         const SEGMENTS: usize = 7;
@@ -374,6 +376,7 @@ impl CubeProjector {
         }
     }
 
+    /// Highlight the sub-patch of `face` belonging to the hovered edge or corner `zone`.
     fn paint_zone_highlight_on_face(&self, painter: &egui::Painter, face: FaceDef, zone: CubeZone) {
         const B: f64 = 0.56;
         let zv = Vec3::new(f64::from(zone.nx), f64::from(zone.ny), f64::from(zone.nz));
@@ -422,6 +425,7 @@ fn inverse_parallelogram(p: Pos2, p00: Pos2, p10: Pos2, p01: Pos2) -> Option<(f6
     Some((s * 2.0 - 1.0, t * 2.0 - 1.0))
 }
 
+/// Euclidean distance from `p` to the 2D line segment `a..=b`.
 fn dist_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let ab = b - a;
     let len2 = ab.length_sq();
@@ -447,6 +451,9 @@ fn paint_plane_text(
     ink: Color32,
 ) {
     let base_galley = painter.layout_no_wrap(label.to_owned(), egui::FontId::proportional(font_size), ink);
+    if base_galley.is_empty() {
+        return;
+    }
     let center = base_galley.rect.center().to_vec2();
     let fit = (max_width / base_galley.size().x.max(1.0)).min(1.0);
     // Two slight horizontal offsets (`-0.35`, `0.35`) produce a crisp bold face label.
@@ -499,6 +506,8 @@ fn localized_face_label(key: &'static str) -> &'static str {
     }
 }
 
+/// Built-in localized fallback table for the 6 ViewCube face labels keyed by the active language's
+/// `"TOP"` translation.
 fn face_fallback(key: &'static str) -> &'static str {
     let lang = crate::i18n::t("TOP");
     match (lang, key) {
