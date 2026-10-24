@@ -44,6 +44,7 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::MText(MText {
+            defined_height: Default::default(),
             insert: Vec3::new(5.0, 5.0, 0.0),
             height: 0.2,
             width: 3.0,
@@ -79,6 +80,9 @@ fn sample() -> Drawing {
         &Space::Model,
         c("0"),
         EntityKind::Dimension(Dimension {
+            flag_73: Default::default(),
+            flip_arrows: Default::default(),
+            attachment: Default::default(),
             kind: DimKind::Linear { rotation: 0.0 },
             defpt: Vec3::new(0.0, -1.0, 0.0),
             text_mid: Vec3::ZERO,
@@ -565,6 +569,9 @@ fn dxf_roundtrips_page_setup() {
 
 fn dim(kind: DimKind, p13: Vec3, p14: Vec3) -> Dimension {
     Dimension {
+        flag_73: Default::default(),
+        flip_arrows: Default::default(),
+        attachment: Default::default(),
         kind,
         defpt: Vec3::new(p13.x, p13.y - 2.0, 0.0),
         text_mid: Vec3::ZERO,
@@ -1039,17 +1046,17 @@ fn dimension_associativity_roundtrips() {
         .unwrap();
     let mut lin = dim(DimKind::Linear { rotation: 0.0 }, Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
     lin.assoc = vec![
-        DimAssoc { point: "p13".into(), handle: l1, snap: AssocSnap::Start },
-        DimAssoc { point: "p14".into(), handle: l2, snap: AssocSnap::Start },
+        DimAssoc { read: Default::default(), point: "p13".into(), handle: l1, snap: AssocSnap::Start },
+        DimAssoc { read: Default::default(), point: "p14".into(), handle: l2, snap: AssocSnap::Start },
     ];
     let mut ali = dim(DimKind::Aligned, Vec3::new(22.0, 0.0, 0.0), Vec3::new(32.0, 3.0, 0.0));
     ali.assoc = vec![
-        DimAssoc { point: "p13".into(), handle: ci, snap: AssocSnap::OnCircle { angle: 0.0 } },
-        DimAssoc { point: "p14".into(), handle: pl, snap: AssocSnap::Vertex { index: 2 } },
-        DimAssoc { point: "defpt".into(), handle: l1, snap: AssocSnap::Intersection { other: l2 } },
+        DimAssoc { read: Default::default(), point: "p13".into(), handle: ci, snap: AssocSnap::OnCircle { angle: 0.0 } },
+        DimAssoc { read: Default::default(), point: "p14".into(), handle: pl, snap: AssocSnap::Vertex { index: 2 } },
+        DimAssoc { read: Default::default(), point: "defpt".into(), handle: l1, snap: AssocSnap::Intersection { other: l2 } },
     ];
     let mut rad = dim(DimKind::Radius, Vec3::new(20.0, 0.0, 0.0), Vec3::ZERO);
-    rad.assoc = vec![DimAssoc { point: "defpt".into(), handle: ci, snap: AssocSnap::Center }];
+    rad.assoc = vec![DimAssoc { read: Default::default(), point: "defpt".into(), handle: ci, snap: AssocSnap::Center }];
     let hl = d.add(&Space::Model, c(), EntityKind::Dimension(lin.clone())).unwrap();
     let ha = d.add(&Space::Model, c(), EntityKind::Dimension(ali.clone())).unwrap();
     let hr = d.add(&Space::Model, c(), EntityKind::Dimension(rad.clone())).unwrap();
@@ -1150,8 +1157,8 @@ fn polyline_vertex_dimensions_round_trip_by_segment() {
         .unwrap();
     let mut on_pl = dim(DimKind::Linear { rotation: std::f64::consts::FRAC_PI_2 }, Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 210.0, 0.0));
     on_pl.assoc = vec![
-        DimAssoc { point: "p13".into(), handle: pl, snap: AssocSnap::Vertex { index: 0 } },
-        DimAssoc { point: "p14".into(), handle: pl, snap: AssocSnap::Vertex { index: 3 } },
+        DimAssoc { read: Default::default(), point: "p13".into(), handle: pl, snap: AssocSnap::Vertex { index: 0 } },
+        DimAssoc { read: Default::default(), point: "p14".into(), handle: pl, snap: AssocSnap::Vertex { index: 3 } },
     ];
     let hp = d.add(&Space::Model, c(), EntityKind::Dimension(on_pl.clone())).unwrap();
     let text = write_dxf(&d);
@@ -1364,6 +1371,7 @@ fn table_block_is_relative_to_the_insertion_point() {
 fn text_style_flags_roundtrip() {
     let mut d = Drawing::new_imperial();
     let st = TextStyle {
+        handle: Default::default(),
         name: "Mirror".into(),
         font: "romans.shx".into(),
         big_font: "bigfont.shx".into(),
@@ -1416,6 +1424,7 @@ fn intl_sample() -> Drawing {
         &Space::Model,
         on.clone(),
         EntityKind::MText(MText {
+            defined_height: Default::default(),
             insert: Vec3::new(5.0, 5.0, 0.0),
             height: 2.5,
             width: 30.0,
@@ -1595,16 +1604,16 @@ fn extension_sample() -> Drawing {
     let mut dm = dim(DimKind::Linear { rotation: 0.0 }, Vec3::new(0.0, 30.0, 0.0), Vec3::new(8.0, 30.0, 0.0));
     dm.style = "Mech".into();
     dm.assoc = vec![
-        DimAssoc { point: "p13".into(), handle: l1, snap: AssocSnap::Start },
-        DimAssoc { point: "p14".into(), handle: l2, snap: AssocSnap::Start },
+        DimAssoc { read: Default::default(), point: "p13".into(), handle: l1, snap: AssocSnap::Start },
+        DimAssoc { read: Default::default(), point: "p14".into(), handle: l2, snap: AssocSnap::Start },
     ];
     dm.overrides = serde_json::json!({"arrowBlock2": "_BoxFilled", "textColor": 2, "decimals": 1}).as_object().unwrap().clone();
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(dm)).unwrap();
     let ci = d.add(&Space::Model, Common::default(), EntityKind::Circle(Circle { center: Vec3::new(20.0, 30.0, 0.0), radius: 2.0 })).unwrap();
     let mut al = dim(DimKind::Aligned, Vec3::new(22.0, 30.0, 0.0), Vec3::new(8.0, 35.0, 0.0));
     al.assoc = vec![
-        DimAssoc { point: "p13".into(), handle: ci, snap: AssocSnap::OnCircle { angle: 0.0 } },
-        DimAssoc { point: "p14".into(), handle: l2, snap: AssocSnap::Intersection { other: l1 } },
+        DimAssoc { read: Default::default(), point: "p13".into(), handle: ci, snap: AssocSnap::OnCircle { angle: 0.0 } },
+        DimAssoc { read: Default::default(), point: "p14".into(), handle: l2, snap: AssocSnap::Intersection { other: l1 } },
     ];
     d.add(&Space::Model, Common::default(), EntityKind::Dimension(al)).unwrap();
     parametric_sample(&mut d);
@@ -1657,6 +1666,7 @@ fn dwg_roundtrip_keeps_extension_data() {
 fn mleader_is_written_as_multileader() {
     let mut d = Drawing::new_metric();
     let text = cadcraft_doc::MText {
+        defined_height: Default::default(),
         insert: Vec3::new(12.0, 5.0, 0.0),
         height: 2.5,
         width: 0.0,
