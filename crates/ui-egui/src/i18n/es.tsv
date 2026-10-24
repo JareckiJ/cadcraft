@@ -62,6 +62,7 @@
 	Area	Área
 	Arrange Panel	Organizar panel
 	Array	Matriz
+	Arrow size	Tamaño de flecha
 	Attach	Adjuntar
 	Attach DWG...	Adjuntar DWG...
 	Attribute	Atributo
@@ -228,6 +229,7 @@
 	Deselect All	Deseleccionar todo
 	Detach	Desenlazar
 	Diameter	Diámetro
+	Dim scale overall	Escala global de cota
 	Dim style	Estilo de cota
 	Dimension	Acotación
 	Dimension Break	Partir cota
@@ -773,6 +775,7 @@
 	Position X	Posición X
 	Position Y	Posición Y
 	Position Z	Posición Z
+	Precision	Precisión
 	Previous	Anterior
 	Previous Layer	Capa anterior
 	Primitives	Primitivas
@@ -1181,7 +1184,7 @@
 	Viewports	Ventanas gráficas
 	Volume	Volumen
 	W	O
-	WCS ⌄	SCU ⌄
+	WCS	SCU
 	White	Blanco
 	Width factor	Factor de anchura
 	Window	Ventana
@@ -1324,3 +1327,4 @@
 	Swivel	Giro
 	Thicken	Engrosar
 	Wedge	Cuña
+	Analyze Shapes	Analizar formas

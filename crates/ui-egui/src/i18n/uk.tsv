@@ -108,6 +108,7 @@
 	Box	Паралелепіпед
 	Break	Розірвати
 	Break At Point	Розірвати в точці
+	Break-line Symbol	Символ лінії розриву
 	Bring Above Objects	Над об'єктами
 	Bring Annotations to Front	Анотації на передній план
 	Bring to Front	На передній план
@@ -176,6 +177,7 @@
 	Contributors	Учасники
 	Control Vertices	Керувальні вершини
 	Convert	Перетворити
+	Convert Text to Mtext	Перетворити текст на багаторядковий текст
 	Copy	Копіювати
 	Copy Full File Path	Копіювати повний шлях до файлу
 	Copy History	Копіювати історію
@@ -259,6 +261,7 @@
 	Drawing Template (DWT)	Шаблон креслення (DWT)
 	Drawing Utilities	Утиліти креслення
 	Drawings (DWG, DXF)	Креслення (DWG, DXF)
+	AutoLISP (LSP)	AutoLISP (LSP)
 	SVG drawings (SVG, SVGZ)	Креслення SVG (SVG, SVGZ)
 	Dynamic	Динамічно
 	Dynamic Dimensions	Динамічні розміри
@@ -331,10 +334,12 @@
 	Evaluate LISP	Обчислити LISP
 	Exclude from new selection set	Виключити з нового набору вибраних об'єктів
 	Explode	Розчленувати
+	Explode Attributes to Text	Розчленувати атрибути в текст
 	Export	Експортувати
 	Export Comparison	Експортувати порівняння
 	Export Table	Експортувати таблицю
 	Export to PDF...	Експортувати в PDF...
+	Express Tools	Інструменти Express
 	Expression	Вираз
 	Extend	Подовжити
 	Extension	Продовження
@@ -545,6 +550,7 @@
 	Move	Перемістити
 	Move or Copy	Перемістити або копіювати
 	Move or Copy...	Перемістити або копіювати...
+	Move/Copy/Rotate	Перемістити/Копіювати/Повернути
 	Multileader	Мультивиноска
 	Multileader Style...	Стиль мультивиносок...
 	Multileader style	Стиль мультивиносок
@@ -996,6 +1002,10 @@
 	Reset keeps the interface language.	Скидання не змінює мову інтерфейсу.
 	Reset to Defaults	Скинути до типових
 	Save new drawings as	Зберігати нові креслення як
+	Units of new drawings	Одиниці нових креслень
+	Imperial (inches)	Імперські (дюйми)
+	Metric (millimetres)	Метричні (міліметри)
+	New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE).	Команда «Створити» і перше креслення під час запуску використовують ці одиниці, якщо не задано типовий шаблон (QNEWTEMPLATE).
 	Screen magnifiers, screen readers and recorders follow the system cursor.	Екранні лупи, програми читання з екрана та запису стежать за системним курсором.
 	Select objects first, then choose a command	Спочатку вибирати об'єкти, потім команду
 	Selection	Вибір
@@ -1201,7 +1211,7 @@
 	Viewport {id}	Видовий екран {id}
 	Viewports	Видові екрани
 	W	Зх
-	WCS ⌄	ССК ⌄
+	WCS	ССК
 	White	Білий
 	Width factor	Коефіцієнт ширини
 	Window	Вікно
@@ -1242,6 +1252,7 @@
 	Show System Cursor	Показувати системний курсор
 	Animation Effects	Ефекти анімації
 	Animation effects	Ефекти анімації
+	Interface scale	Масштаб інтерфейсу
 	Import...	Імпорт...
 	Export...	Експорт...
 	Batch Publish...	Пакетна публікація...
@@ -1297,6 +1308,9 @@
 	Search for pattern	Пошук зразка
 	Run Script...	Виконати сценарій...
 	Query Texts	Запит текстів
+	Analyze Shapes	Аналіз фігур
+	Analyze Usage	Аналіз використання
+	Implied Loops	Неявні контури
 	Hatch Pick	Вибір для штрихування
 # Hatch and Gradient dialog
 	Hatch and Gradient	Штрихування та градієнт
@@ -1327,6 +1341,8 @@
 	Boundaries to remove: {n}	Контурів для видалення: {n}
 	Inherit Properties	Успадкувати властивості
 	No boundary points or objects selected	Не вибрано точок або об'єктів контуру
+	Select boundaries to remove	Виберіть контури для видалення
+	Island	Острів
 	Associative	Асоціативне
 	Create separate hatches	Створити окремі штрихування
 	Island detection	Виявлення островів
@@ -1444,3 +1460,21 @@
 	Shortcut menu always	Завжди контекстне меню
 	Export Profile...	Експортувати профіль...
 	Import Profile...	Імпортувати профіль...
+	Select using two clicks only	Вибирати лише двома клацаннями
+	Define each corner of the selection window with a separate click.	Задайте кожен кут рамки вибору окремим клацанням.
+	Type an alias name.	Введіть назву псевдоніма.
+	Choose the command the alias starts.	Виберіть команду, яку запускає псевдонім.
+	{command} is an unknown command.	{command} — невідома команда.
+	{alias} is already defined; select it and use Edit.	{alias} уже визначено; виберіть його та натисніть «Змінити».
+	More than {n} aliases.	Понад {n} псевдонімів.
+	Alias file: {file}	Файл псевдонімів: {file}
+	No alias file loaded. REINIT replaces these aliases with a file's.	Файл псевдонімів не завантажено. REINIT замінює ці псевдоніми псевдонімами з файлу.
+	Alias	Псевдонім
+	Command	Команда
+	overrides built-in	замінює вбудований
+	built-in	вбудований
+	Add…	Додати…
+	Edit…	Змінити…
+	Save alias	Зберегти псевдонім
+	Customize	Налаштування інтерфейсу
+	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...

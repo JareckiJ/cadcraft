@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (DWG fidelity: Top 10 row 1 aligned with FF1 closed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (DWG fidelity: Top 10 row 1 aligned with FF1 closed; Command Aliases dialog for ALIASEDIT) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -51,6 +51,11 @@ do them first.
 
 Detail and evidence: [ui-parity.md](ui-parity.md).
 
+Outlined fill highlights now keep deterministic contour starts and directions across pointer
+repaints and GPU rebuilds, preventing the dashed preview from appearing to flicker (U6).
+
+Options ▸ Selection can now require two separate clicks for a selection window (PICKDRAG 0)
+or allow clicks and drag (2, default), saved in the user profile. Drag-only mode (1) remains unavailable.
 | # | Gap | User impact | Est. |
 |---|---|---|---|
 | U4 | ~~Tab snap cycling offers the closest snap of each mode, not every candidate~~ **(done)**: `snap_candidates` gathers and cycles every candidate snap point under the cursor aperture (`snap::osnap_all`). Typed snap overrides (`END`, `MID` … `NON`), the Shift/Ctrl+right-click snap menu and Tab cycling landed (#393), the menu's Temporary track point in #441 | Low | 0 |
@@ -59,7 +64,7 @@ Detail and evidence: [ui-parity.md](ui-parity.md).
 | U7 | ~~Right-click menus and layout management~~ **(done)**: in-place layout tab rename (double-click/menu), Move or Copy layout dialog (reorder/copy before or to end), Select All Layouts action, Paste to command line. Palette menus on Layers rows and Properties background; command menu, selection menu, command line, drawing tab and layout tab menus landed (#512) | None: closed | 0 |
 | U10 | ~~SETVAR variable coverage expansion~~ **(done)**: SETVAR table covers drawing header variables, entity defaults (CECOLOR, CELTYPE, CELWEIGHT, CELTSCALE, LTSCALE, PSLTSCALE, PDMODE, PDSIZE, AUNITS, AUPREC, ANGDIR), and comprehensive dimension variables (DIMSCALE, DIMTXT, DIMASZ, DIMGAP, DIMEXE, DIMEXO, DIMDLI, DIMDLE, DIMLFAC, DIMTAD, DIMTIH, DIMTOH, DIMTOFL, DIMTIX, DIMSOXD, DIMSE1/2, DIMSD1/2, DIMDEC, DIMALT, etc.) with validation, units-aware defaults, and bare command line variable invocation | Low-medium | 0 |
 | U11 | ~~View navigation / MVIEW Restore / VIEW Orthographic~~ **(done)**: MVIEW Restore puts saved viewport configurations into layouts (#626); VIEW command Orthographic option (Top, Bottom, Front, Back, Left, Right) with 3D preset view direction vectors and extents zoom landed; UCS and background settings, Zoom Realtime and Dynamic, ZOOMFACTOR, named views (VIEW) and tiled model viewports with saved configurations (VPORTS) landed | None: closed | 0 |
-| U12 | Workspaces, navigation bar, CUI customisation, alias editor, ViewCube drag (#7) | Low-medium | 15–25 |
+| U12 | Workspaces, navigation bar, CUI customisation, ViewCube drag (#7) (the Command Aliases dialog landed, #1381) | Low-medium | 13–23 |
 | U13 | ~~`.dxf` from Finder fails to open on macOS~~ **(done)**: macOS Finder process serial number argument (`-psn_...`) ignored in command-line argument parsing (#158); window controls fixed (#161) | None: closed | 0 |
 
 ## File formats
@@ -80,7 +85,7 @@ Detail: [file-format-parity.md](file-format-parity.md).
 | FF11 | DWF/DWFx, DGN, WMF, EPS, ACIS/STL and other exchange formats | Low-medium | 50–100 |
 | FF12 | DWG in the web build | Medium | 6–10 |
 | FF13 | R12 binary DXF, pre-R13 DWG | Low | 10–20 |
-| FF14 | SVG import leftovers (shapes, paths, groups and Inkscape layers landed, #636): no CSS classes (`<style>`), `use` references, fills and gradients, text or embedded images; rounded rectangle corners (`rx`/`ry`) are ignored | Low-medium | 2–4 |
+| FF14 | SVG import leftovers (shapes, paths, groups and Inkscape layers landed, #636): no CSS classes (`<style>`), `use` references, fills and gradients, text or embedded images; rounded rectangle corners (`rx`/`ry`) are ignored. Opening such a file names what was left out (#627) | Low-medium | 2–4 |
 
 ## Hardware
 
@@ -127,17 +132,17 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | # | Gap | Est. |
 |---|---|---|
-| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup): Visual LISP ActiveX (`vlax-`, `vla-`), DCL dialogs, reactors, an APPLOAD dialog with a Startup Suite, UCS-aware `trans` | 30–50 |
-| E3 | Express Tools equivalents (TXT2MTXT, BREAKLINE, BURST, NCOPY exists, SUPERHATCH, Move/Copy/Rotate) | 30–50 |
+| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup; #1820 gave APPLOAD its `.lsp` file picker): Visual LISP ActiveX (`vlax-`, `vla-`), DCL dialogs, reactors, an APPLOAD Startup Suite, UCS-aware `trans` | 26–46 |
+| E3 | Express Tools equivalents (SUPERHATCH; NCOPY, BREAKLINE, TXT2MTXT, BURST and MOCORO exist: BREAKLINE's Block option takes a block of the drawing, not a `.dwg` file, and TXT2MTXT's Settings are command-line prompts rather than a dialog, without the uniform line spacing option) | 24–40 |
 | E4 | Plug-in API (owner decision: Rust/WASM plug-ins rather than ObjectARX/.NET) | 30–50 |
-| E5 | CUI customisation and alias (`.pgp`) editor | 15–25 |
+| E5 | CUI customisation (the alias editor, ALIASEDIT's Command Aliases dialog, landed, #1381; edits stay for the session) | 13–23 |
 
 ## AI features
 
 | # | Gap | Est. |
 |---|---|---|
 | A1 | Smart Blocks equivalents (placement suggestions, replace, detect and convert, search), using local open models | 25–50 + model licensing |
-| A2 | An in-app assistant (AutoCAD has Autodesk Assistant); CADCraft's MCP server already lets any agent drive it | 10–20 |
+| A2 | An in-app assistant (AutoCAD has Autodesk Assistant); CADCraft's MCP server already lets any agent drive it, including read-only structured queries of the current selection (`query_entities selected:true`) | 10–20 |
 | A3 | Markup Assist (import markups from PDFs/images) | 10–20 |
 
 ## Revision history
@@ -146,6 +151,7 @@ Detail: [localization-parity.md](localization-parity.md).
 |---|---|---|
 | 2026-10-23 | minor | Command-line interactive SAVEAS format, version and binary DXF prompt machine landed (FF3 narrowed) |
 | 2026-10-23 | minor | F22 closed: COMPARE supports space selection ("model", layout name, or "all" across spaces) with aggregated difference reporting; QuickCalc palette calculation history and user variables persist across restarts in user preferences |
+| 2026-10-22 | minor | APPLOAD typed or from Tools ▸ Load Application opens a `.lsp` file browser starting in the last-used folder (kept in the preferences); a picked file loads interactively like a typed name (routines that ask for input wait), the web says to drop the file (no file system), and the JSON form `{path}` reads the path as given and returns the commands the file defined, never opening a dialog (#1820): E1 narrowed |
 | 2026-10-19 | minor | CI workflow `.github/workflows/ci.yml` runs `cargo xtask ci` on PRs and pushes to main (S1 closed) |
 | 2026-10-19 | minor | In-place external reference (XREF) editing with write-back to source drawing file on save, nested reference hierarchy picking and cycling (F2 closed; remaining to alpha ≈ 65–100 h) |
 | 2026-10-19 | minor | Model-space page setup, margins, plot transparency in DXF, binary style error reporting (F14 closed for alpha; Alpha Gate: layers/layouts/plotting passes; remaining to alpha ≈ 70–110 h) |
@@ -159,6 +165,16 @@ Detail: [localization-parity.md](localization-parity.md).
 | 2026-10-17 | minor | Geometric Tolerance dialog, in-place frame editing, and LEADER/QLEADER tolerance annotation (F8 closed) |
 | 2026-10-17 | minor | Clipped viewports move, scale, rotate, mirror, copy and erase coupled with their clip boundaries (F15 closed) |
 | 2026-10-17 | minor | Unstub prompt options (F1 closed): -ATTEDIT Position, Height, Angle, Style, and colour books in -ATTEDIT/-LAYER Color; -RENAME for materials, plot styles and viewport configurations |
+| 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
+| 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
+| 2026-10-16 | minor | MLEDIT Merged Tee (MT): the first multiline's outer elements stop at the second one's near side, which opens, and its inner elements run on to the second one's inner element: F21 narrowed, hours unchanged |
+| 2026-10-15 | minor | BURST (Tools ▸ Express Tools ▸ Explode Attributes to Text): block references explode as EXPLODE does, visible attribute values become text with the attribute's style, height, position, layer and colour, invisible attributes and the definitions go: E3 narrowed |
+| 2026-10-15 | minor | `entities` / MCP `query_entities` accept `selected:true`, combined with existing filters and paging; selection, drawing and undo/redo stay unchanged. No parity estimate change. |
+| 2026-10-15 | minor | BREAKLINE (Tools ▸ Express Tools ▸ Break-line Symbol): one polyline between two points with a break symbol, Block/Size/Extension options, size times DIMSCALE: E3 narrowed |
+| 2026-10-15 | minor | TXT2MTXT (Tools ▸ Express Tools ▸ Convert Text to Mtext): selected TEXT, and MTEXT, combined into one MTEXT top-down or in selection order with optional word wrap, or one MTEXT per TEXT; SEttings remembered for the session: E3 narrowed |
+| 2026-10-14 | minor | HATCHEDIT adds boundary loops from internal points or closed objects and removes selected loops, in the dialog, command line and JSON command: F13 narrowed |
+| 2026-10-13 | minor | Stabilized filled-object highlight dash anchors by canonicalizing boundary traversal order; renderer, CPU pointer-frame and GPU rebuild tests cover the fix (U6) |
+| 2026-10-13 | minor | Selection window gesture preference (PICKDRAG 0/2) added to Options ▸ Selection and saved in the profile (U6), with Portuguese and Ukrainian labels |
 | 2026-10-12 | minor | Object transparency (entity, ByLayer, ByBlock) is drawn: on screen (TRANSPARENCYDISPLAY, on by default), in PNG/SVG exports, and in plots when the page setup's "Plot transparency" is on (PDF alpha, PNG blending, SVG opacity; PLOTTRANSPARENCYOVERRIDE): F14 narrowed |
 | 2026-10-12 | minor | Hatch and Gradient dialog (HATCH, GRADIENT; HPDLGMODE) and Hatch Edit dialog (HATCHEDIT, right-click, double-click a hatch): F13 narrowed to Preview, Inherit Properties and boundary add/remove in edit mode |
 | 2026-10-12 | minor | A bare system variable name typed at the command line (ORTHOMODE, GRIDMODE…) runs SETVAR on that variable, as in AutoCAD; U10 narrowed |
@@ -170,6 +186,7 @@ Detail: [localization-parity.md](localization-parity.md).
 | 2026-10-12 | minor | Property-based and hostile-input tests for geometry numerics landed (deterministic xorshift generator, no new dependency; known answers at 1e6–1e7 coordinates): S6 removed |
 | 2026-10-12 | trivial | F13: HATCHEDIT refuses a bad scale or angle before editing (#724) |
 | 2026-10-12 | minor | F3: dynamic block references show their grips (distance arrows, position squares, visibility/lookup lists, per visibility state) and drag them (`blocks.reference.grips`, `blocks.reference.grip`) |
+| 2026-10-17 | minor | AUDITCTL system variable and .adt log generation in AUDIT/RECOVER landed: F4 narrowed (no .adt log removed) |
 | 2026-10-12 | minor | Multiline attributes read, drawn and saved (they lost their text before): F17 narrowed to creating them |
 | 2026-10-13 | minor | F3: opening a dynamic block's own drawing (authoring elements in model space) offers the Block Editor on `<Current Drawing>`, as AutoCAD does |
 | 2026-10-12 | minor | Edit Block Definition dialog (block list, preview, description; a new name starts a new block): F3 text updated, hours unchanged |

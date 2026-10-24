@@ -80,10 +80,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(always)
             .noundo()
             .transparent(),
-        CommandSpec::new("selectioncycling", "Selection Cycling", |s, p| toggle(s, p, |st| &mut st.selection_cycling, "Selection Cycling"))
-            .params("{on?: bool}")
-            .enabled(always)
-            .noundo(),
+        CommandSpec::new("selectioncycling", "Selection Cycling", |s, p| {
+            let res = toggle(s, p, |st| &mut st.selection_cycling, "Selection Cycling")?;
+            if s.settings.selection_cycling && s.settings.selection_cycling_display == 0 {
+                s.settings.selection_cycling_display = 2;
+            }
+            Ok(res)
+        })
+        .params("{on?: bool}")
+        .enabled(always)
+        .noundo(),
         CommandSpec::new("osnap", "Object Snap", run_osnap)
             .key("F3")
             .alias(&["os", "ddosnap"])
