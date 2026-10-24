@@ -337,6 +337,18 @@ fn run_attdef(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("wblock", "`path` is required"))?.to_string();
+    let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;
+
+    // Whole-drawing mode (name "*"): clone as-is — all layouts, paper space, INSBASE preserved.
+    if str_param(p, "name") == Some("*") {
+        let d = s.doc()?.clone();
+        let bytes = (hooks.write)(&d, &path).map_err(|e| bad("wblock", e))?;
+        #[cfg(not(target_arch = "wasm32"))]
+        std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;
+        let count = d.model.len() + d.layouts.iter().map(|l| l.entities.len()).sum::<usize>();
+        return Ok(json!({ "path": path, "entities": count, "bytes": bytes.len() }));
+    }
+
     let src = s.doc()?;
     let mut d = cadcraft_doc::Drawing::new_imperial();
     d.layers = src.layers.clone();
@@ -375,7 +387,6 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
         e.handle = d.new_handle();
         d.model.push(e);
     }
-    let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;
     let bytes = (hooks.write)(&d, &path).map_err(|e| bad("wblock", e))?;
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;

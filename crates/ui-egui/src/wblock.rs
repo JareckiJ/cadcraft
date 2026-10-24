@@ -41,6 +41,8 @@ pub struct State {
     pending: Option<Pending>,
     /// Handles collected by a canvas pick.
     picked_handles: Vec<String>,
+    /// UID of the drawing that was active when the pick started; guards against cross-drawing picks.
+    pick_uid: Option<u64>,
 }
 
 impl State {
@@ -74,7 +76,15 @@ pub fn resume(app: &mut CadApp) {
         return;
     }
     let picks = app.session.wblock_picks.take();
+    // Drop picks that came from a different drawing than the one the pick started in.
+    let current_uid = app.session.state().ok().map(|s| s.uid);
+    if current_uid != app.wblock.pick_uid {
+        app.wblock.pending = None;
+        app.wblock.pick_uid = None;
+        return;
+    }
     app.wblock.pending = None;
+    app.wblock.pick_uid = None;
     match (pending, picks) {
         (Pending::Objects, Some(p)) => {
             app.wblock.picked_handles = p.handles.iter().map(|h| h.hex()).collect();
@@ -95,16 +105,22 @@ pub fn resume(app: &mut CadApp) {
 fn start_pick(app: &mut CadApp, mode: Pending) {
     app.wblock.pending = Some(mode);
     app.wblock.error = None;
+    app.wblock.pick_uid = app.session.state().ok().map(|s| s.uid);
     app.session.wblock_picks = None;
     app.ui.dialog = None;
     app.start("wblockpick");
+    if app.session.running.is_none() {
+        // wblockpick failed to start: restore the dialog instead of closing silently.
+        app.wblock.pending = None;
+        app.wblock.pick_uid = None;
+        app.ui.dialog = Some("wblock".into());
+        return;
+    }
     let kw = match mode {
         Pending::Objects => "Objects",
         Pending::Base => "Base",
     };
-    if app.session.running.is_some()
-        && let Err(e) = app.session.input(cadcraft_engine::Input::Keyword(kw.into()))
-    {
+    if let Err(e) = app.session.input(cadcraft_engine::Input::Keyword(kw.into())) {
         app.session.echo(e.to_string());
     }
 }
@@ -277,14 +293,14 @@ fn confirm(app: &mut CadApp) -> bool {
             json!({ "path": path, "name": name })
         }
         Source::EntireDrawing => {
-            let handles: Vec<serde_json::Value> =
-                app.session.doc().map(|d| d.model.iter().map(|e| json!(e.handle.hex())).collect()).unwrap_or_default();
-            json!({ "path": path, "handles": handles })
+            json!({ "path": path, "name": "*" })
         }
         Source::Objects => {
             let parse_coord = |s: &str| -> Option<f64> {
                 let s = s.trim();
-                if s.is_empty() { return Some(0.0); }
+                if s.is_empty() {
+                    return Some(0.0);
+                }
                 s.parse::<f64>().ok().filter(|v| v.is_finite())
             };
             let bx = match parse_coord(&app.wblock.base_x) {
@@ -302,7 +318,7 @@ fn confirm(app: &mut CadApp) -> bool {
                 }
             };
             if app.wblock.picked_handles.is_empty() {
-                app.wblock.error = Some(crate::tl!("No objects selected.").to_string());
+                app.wblock.error = Some(crate::tl!("No objects selected").to_string());
                 return false;
             }
             let handles: Vec<serde_json::Value> = app.wblock.picked_handles.iter().map(|h| json!(h)).collect();
