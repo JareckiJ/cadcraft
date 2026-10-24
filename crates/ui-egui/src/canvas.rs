@@ -1744,7 +1744,6 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // The cursor picks objects (pick box, rollover highlight): "Select objects" and single-object
     // prompts, or no command with PICKFIRST on; SELECTIONPREVIEW says in which of those the
     // rollover highlight shows.
-    let picking = app.session.picking_objects() && app.session.pending_window.is_none();
     if inside && app.session.previews_selection() && app.session.pending_window.is_none() {
         if hover_pos != app.canvas.hover_at
             && let (Some(w), Ok(st)) = (raw_world, app.session.state())
@@ -2035,6 +2034,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             // Use the painted sheet even in MSPACE, where the editing transform follows a
             // model viewport. The whole cursor takes one colour from its centre.
             let ink = paper_rect.map_or(t.crosshair, |paper| crate::theme::crosshair_color(if paper.contains(hp) { t.paper } else { surround }));
+            let picking = app.session.picking_objects() && app.session.pending_window.is_none();
             draw_crosshair(app, &painter, rect, hp, picking, ink);
             if app.canvas.cycle_badge && app.canvas.cycle.is_none() {
                 cycle_badge(&painter, hp);
@@ -2308,11 +2308,14 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
     app.session.cursor_deferred = app.canvas.snap.and_then(|h| h.deferred);
 }
 
+/// Half the side of the pick box (`PICKBOX * 1.5` screen points), or `None` when `PICKBOX` is 0.
 fn pickbox_half(pickbox: f64) -> Option<f32> {
     let half = (pickbox * 1.5) as f32;
     (half.is_finite() && half >= 1.0).then_some(half)
 }
 
+/// Draws the canvas cursor at `at`: the full crosshair with pickbox when idle, crosshair lines
+/// only at point prompts, and the pickbox square alone at command object-selection prompts.
 fn draw_crosshair(app: &CadApp, p: &egui::Painter, rect: Rect, at: Pos2, pickbox: bool, ink: Color32) {
     let st = Stroke::new(1.0, ink);
     let len = (rect.height() * app.session.settings.cursorsize as f32 / 100.0).max(12.0);
@@ -2950,6 +2953,8 @@ pub(crate) mod tests {
         assert!(text.contains(&format!("   {}  <", arch(c.len()))), "no {} in:\n{text}", arch(c.len()));
     }
 
+    /// Verifies that command object-selection prompts draw only the pickbox square while idle and
+    /// point prompts draw the crosshair lines.
     #[test]
     fn cursor_shows_pickbox_only_at_command_object_selection_prompts() {
         let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
