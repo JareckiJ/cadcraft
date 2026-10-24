@@ -1424,7 +1424,7 @@ fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
                 attach: 5,
                 rotation: g.text_angle,
                 style: style.text_style.clone(),
-                contents: g.value.clone(),
+                contents: g.mtext_contents(),
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
@@ -1512,6 +1512,16 @@ fn arrow_block_entities(kind: cadcraft_render::Arrowhead) -> Vec<Entity> {
         }
     }
     out
+}
+
+/// Whether the entities of the block `name` are the arrowhead block CADCraft writes for that
+/// standard arrow name ([`arrow_block_entities`]): the same lines and solids with the same
+/// properties (layer 0, ByBlock). Any other content (AutoCAD's own `_Dot`, a user's
+/// redefinition, an older CADCraft's geometry) is the file's.
+pub(crate) fn is_generated_arrow(name: &str, entities: &[&Entity]) -> bool {
+    let Some((_, kind)) = dxf_ext::arrow_block_name(name) else { return false };
+    let ours = arrow_block_entities(kind);
+    ours.len() == entities.len() && ours.iter().zip(entities).all(|(a, b)| a.kind == b.kind && a.common == b.common)
 }
 
 /// Whether a DIMASSOC point reference to `k` names a point of it without naming a segment:
@@ -1617,6 +1627,15 @@ fn paper_views(d: &Drawing) -> HashMap<Handle, usize> {
         }
     }
     out
+}
+
+/// A layout's entities with its paper-space viewport (id 1) first. DWG stores no viewport ids and
+/// readers number a layout's viewports in order, so the sheet must lead even when the draw order
+/// (SORTENTS) put it behind a model viewport; otherwise that viewport becomes the sheet.
+fn sheet_first(l: &Layout) -> Vec<&Entity> {
+    let sheet = |e: &&Entity| matches!(&e.kind, EntityKind::Viewport(v) if v.id == 1);
+    let all = || l.entities.iter().map(|e| e.as_ref());
+    all().filter(sheet).chain(all().filter(|e| !sheet(e))).collect()
 }
 
 /// The paper-space viewport (id 1) of the layout whose first viewport is `e`, if it needs one
@@ -1752,8 +1771,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         reactors: hatch_reactors(d),
     };
     // Pre-allocate handles for block records.
-    let mut paper_layouts: Vec<&Layout> = d.layouts.iter().collect();
-    paper_layouts.sort_by_key(|l| l.tab_order);
+    let paper_layouts = d.paper_space_layouts();
     let ms_br = w.h();
     // Xrefs are saved as references: without their objects and the symbols that came with them.
     let saved_view = crate::dxf_xref::saved_view(d);
@@ -2331,7 +2349,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         if i == 0 {
             block(&mut w, n, "", h, Vec3::ZERO, 0, &mut std::iter::empty(), true);
         } else {
-            block(&mut w, n, "", h, Vec3::ZERO, 0, &mut l.entities.iter().map(|e| e.as_ref()), true);
+            block(&mut w, n, "", h, Vec3::ZERO, 0, &mut sheet_first(l).into_iter(), true);
         }
     }
     for (n, h, b) in &user_blocks {
@@ -2362,7 +2380,7 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         entity(&mut w, d, e, &ms_br, false, &cx);
     }
     if let Some((_, h, l)) = ps_brs.first() {
-        for e in l.entities.iter() {
+        for e in sheet_first(l) {
             entity(&mut w, d, e, h, true, &cx);
         }
     }
