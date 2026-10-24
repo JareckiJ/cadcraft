@@ -1441,8 +1441,11 @@ fn table_size(t: &Table) -> (usize, usize) {
 
 /// The anonymous `*T` block of a table: cell fills, borders and texts as its cell styles draw
 /// them, for readers that only draw the block.
-fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<Entity> {
-    let g = cadcraft_render::table_geometry(d, t);
+///
+/// The block is relative to its own origin: the ACAD_TABLE reference adds the insertion point.
+pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<Entity> {
+    let at_origin = Table { insert: Vec3::ZERO, ..t.clone() };
+    let g = cadcraft_render::table_geometry(d, &at_origin);
     let c = Common { layer: layer.into(), color: Color::ByBlock, ..Common::default() };
     let mut out = Vec::new();
     for f in &g.fills {
@@ -1509,6 +1512,16 @@ fn arrow_block_entities(kind: cadcraft_render::Arrowhead) -> Vec<Entity> {
         }
     }
     out
+}
+
+/// Whether the entities of the block `name` are the arrowhead block CADCraft writes for that
+/// standard arrow name ([`arrow_block_entities`]): the same lines and solids with the same
+/// properties (layer 0, ByBlock). Any other content (AutoCAD's own `_Dot`, a user's
+/// redefinition, an older CADCraft's geometry) is the file's.
+pub(crate) fn is_generated_arrow(name: &str, entities: &[&Entity]) -> bool {
+    let Some((_, kind)) = dxf_ext::arrow_block_name(name) else { return false };
+    let ours = arrow_block_entities(kind);
+    ours.len() == entities.len() && ours.iter().zip(entities).all(|(a, b)| a.kind == b.kind && a.common == b.common)
 }
 
 /// Whether a DIMASSOC point reference to `k` names a point of it without naming a segment:
@@ -2565,10 +2578,10 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             (45, page.height_mm),
             (46, 0.0),
             (47, 0.0),
-            (48, 0.0),
-            (49, 0.0),
-            (140, 0.0),
-            (141, 0.0),
+            (48, page.plot_window[0]),
+            (49, page.plot_window[1]),
+            (140, page.plot_window[2]),
+            (141, page.plot_window[3]),
             (142, scale),
             (143, 1.0),
         ] {
