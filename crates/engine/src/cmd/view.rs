@@ -642,7 +642,7 @@ impl Session {
             st.orbit.pivot = pivot;
         }
         st.orbit.yaw = (st.orbit.yaw - dx * 0.008) % std::f64::consts::TAU;
-        st.orbit.pitch = (st.orbit.pitch + dy * 0.008).clamp(-std::f64::consts::PI, std::f64::consts::PI);
+        st.orbit.pitch = (st.orbit.pitch - dy * 0.008).clamp(-std::f64::consts::PI, std::f64::consts::PI);
         self.touch();
         Ok(())
     }
