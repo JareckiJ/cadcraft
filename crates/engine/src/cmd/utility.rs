@@ -349,8 +349,8 @@ impl Interactive for MeasureM {
             return m.input(s, i);
         }
         if self.radius {
-            let Input::Point(p) = i else { return Ok(Step::Done) };
-            let Some(h) = super::curves::pick_at(s, p) else { return Ok(Step::Continue) };
+            let Input::Point(pi) = i else { return Ok(Step::Done) };
+            let Some(h) = super::curves::pick_at(s, pi.point()) else { return Ok(Step::Continue) };
             match run_radius(s, &json!({ "handle": h.0 })) {
                 Ok(r) => {
                     for l in r["message"].as_str().unwrap_or_default().lines() {

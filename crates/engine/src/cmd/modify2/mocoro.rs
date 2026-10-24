@@ -217,8 +217,8 @@ impl Interactive for MocoroM {
                     Ok(Step::Continue)
                 }
             },
-            (Mode::BasePoint, Input::Point(p)) => {
-                self.base = p;
+            (Mode::BasePoint, Input::Point(pi)) => {
+                self.base = pi.point();
                 self.mode = Mode::Options;
                 Ok(Step::Continue)
             }
@@ -251,16 +251,16 @@ impl Interactive for MocoroM {
                 self.mode = Mode::Options;
                 Ok(Step::Continue)
             }
-            (Mode::Move, Input::Point(p)) => self.run(s, Op::Move(p)),
-            (Mode::Copy, Input::Point(p)) => self.run(s, Op::Copy(p)),
-            (Mode::Base, Input::Point(p)) => self.run(s, Op::Base(p)),
-            (Mode::Rotate, Input::Point(p)) => self.run(s, Op::Rotate(self.base.angle_to(p))),
+            (Mode::Move, Input::Point(pi)) => self.run(s, Op::Move(pi.point())),
+            (Mode::Copy, Input::Point(pi)) => self.run(s, Op::Copy(pi.point())),
+            (Mode::Base, Input::Point(pi)) => self.run(s, Op::Base(pi.point())),
+            (Mode::Rotate, Input::Point(pi)) => self.run(s, Op::Rotate(self.base.angle_to(pi.point()))),
             (Mode::Rotate, Input::Text(t)) => {
                 let a = s.angle_settings().rotation(&t).filter(|a| a.is_finite()).ok_or_else(|| other("Requires an angle or point."))?;
                 self.run(s, Op::Rotate(a))
             }
-            (Mode::Scale, Input::Point(p)) => {
-                let f = positive_factor(self.base.dist(p)).ok_or_else(|| other("Requires a positive number."))?;
+            (Mode::Scale, Input::Point(pi)) => {
+                let f = positive_factor(self.base.dist(pi.point())).ok_or_else(|| other("Requires a positive number."))?;
                 self.run(s, Op::Scale(f))
             }
             (Mode::Scale, Input::Text(t)) => {

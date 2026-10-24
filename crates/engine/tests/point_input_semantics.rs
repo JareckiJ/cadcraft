@@ -70,4 +70,3 @@ fn from_vec2_is_absolute_not_a_pick() {
     assert!(matches!(pi, PointInput::Absolute(_)), "From<Vec2> must not be a pick");
     assert_eq!(pi.point(), p);
 }
-

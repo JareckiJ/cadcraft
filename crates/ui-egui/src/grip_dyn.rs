@@ -321,7 +321,7 @@ mod tests {
             let text = crate::canvas::tests::painted_text(&mut app, &ctx, at);
             assert_eq!(labels(&text), ["X", "Y"], "the centre is a point:\n{text}");
 
-            app.session.input(Input::Point(Vec2::ZERO)).unwrap();
+            app.session.input(Input::Point(PointInput::Picked(Vec2::ZERO))).unwrap();
             crate::canvas::tests::painted_text(&mut app, &ctx, at);
             let text = crate::canvas::tests::painted_text(&mut app, &ctx, at);
             assert!(labels(&text).is_empty(), "pointer boxes at the radius prompt (DYNPIFORMAT {cartesian}):\n{text}");

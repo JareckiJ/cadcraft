@@ -1,5 +1,5 @@
-use cadcraft_engine::prompt::parse_point_input;
 use cadcraft_engine::PointInput;
+use cadcraft_engine::prompt::parse_point_input;
 use cadcraft_geom::Vec2;
 
 #[test]

@@ -1786,8 +1786,8 @@ impl SelectThen {
                 s.echo(if ellipse { "The elliptical arc is now an ellipse." } else { "The arc is now a circle." });
                 Ok(Step::Done)
             }
-            Input::Point(p) => {
-                if let Some(h) = super::curves::pick_at(s, p)
+            Input::Point(pi) => {
+                if let Some(h) = super::curves::pick_at(s, pi.point())
                     && !self.objs.contains(&h)
                 {
                     self.objs.push(h);

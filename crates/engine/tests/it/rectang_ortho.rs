@@ -2,7 +2,7 @@
 //! its area (#1113).
 
 use cadcraft_engine::snap::tracking::CursorQuery;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 use cadcraft_geom::Vec2;
 use serde_json::json;
 
@@ -27,7 +27,7 @@ fn click_rectangle(ortho: bool) -> ((Vec2, Vec2), (Vec2, Vec2)) {
     for e in s.preview(c) {
         pv = pv.union(&cadcraft_doc::entity_bounds(s.doc().unwrap(), &e, 0));
     }
-    s.input(Input::Point(c)).unwrap();
+    s.input(Input::Point(PointInput::Picked(c))).unwrap();
     assert!(s.current_prompt().is_none(), "RECTANG is done, still at {:?}", s.current_prompt().map(|p| p.message));
     let b = s.doc().unwrap().extents(&s.space());
     ((b.min, b.max), (pv.min, pv.max))
@@ -53,7 +53,7 @@ fn click_unit_cell(ortho: bool) -> (Vec2, Vec2) {
     }
     assert_eq!(s.current_prompt().unwrap().message, "Specify other corner");
     let c = hover(&mut s, Vec2::new(4.0, 2.0));
-    s.input(Input::Point(c)).unwrap();
+    s.input(Input::Point(PointInput::Picked(c))).unwrap();
     s.cmdline("x").unwrap();
     assert!(s.current_prompt().is_none(), "ARRAYRECT is done, still at {:?}", s.current_prompt().map(|p| p.message));
     let b = s.doc().unwrap().extents(&s.space());

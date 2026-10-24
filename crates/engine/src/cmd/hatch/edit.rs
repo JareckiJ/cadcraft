@@ -609,7 +609,10 @@ impl Interactive for HatchEditM {
                 }
                 Ok(Step::Continue)
             }
-            (Ask::AddPoint, Input::Point(p)) => self.apply(s, json!({ "addPoints": [[p.x, p.y]] })),
+            (Ask::AddPoint, Input::Point(pi)) => {
+                let p = pi.point();
+                self.apply(s, json!({ "addPoints": [[p.x, p.y]] }))
+            }
             (Ask::AddObject, Input::Pick(hs)) => self.apply(s, json!({ "addBoundary": hs.iter().map(|h| h.hex()).collect::<Vec<_>>() })),
             (Ask::AddPoint | Ask::AddObject, Input::Enter) => Ok(Step::Done),
             (Ask::AddPoint | Ask::AddObject, _) => Ok(Step::Continue),

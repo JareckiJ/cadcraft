@@ -291,8 +291,8 @@ fn dcangular_constrains_the_drawn_angle_whichever_way_the_lines_run() {
         let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
         let b = line(&mut s, b_pts[0], b_pts[1]);
         s.cmdline("dcangular").unwrap();
-        s.input(Input::Point(Vec2::new(3.0, 0.0))).unwrap();
-        s.input(Input::Point(Vec2::new(0.6, 3.0))).unwrap();
+        s.input(Input::Point(PointInput::Picked(Vec2::new(3.0, 0.0)))).unwrap();
+        s.input(Input::Point(PointInput::Picked(Vec2::new(0.6, 3.0)))).unwrap();
         assert!(s.prompt_text().contains("78.69"), "{b_pts:?}: {}", s.prompt_text());
         s.cmdline("100").unwrap();
         assert!(s.running.is_none());

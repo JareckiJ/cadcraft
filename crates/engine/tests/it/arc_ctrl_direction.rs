@@ -11,7 +11,7 @@
 
 use cadcraft_engine::doc::EntityKind;
 use cadcraft_engine::geom::Vec2;
-use cadcraft_engine::{Input, Session};
+use cadcraft_engine::{Input, PointInput, Session};
 
 /// `(center, radius, start angle, end angle)` of the last arc in the model.
 fn last_arc(s: &Session) -> (Vec2, f64, f64, f64) {
@@ -35,15 +35,15 @@ fn sweep(start: f64, end: f64) -> f64 {
 fn run_continue(ctrl: bool) -> (Vec2, f64, f64, f64) {
     let mut s = Session::new();
     s.cmdline("line").unwrap();
-    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
-    s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(0.0, 0.0)))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(10.0, 0.0)))).unwrap();
     s.input(Input::Enter).unwrap();
     s.cmdline("arc").unwrap();
     // Enter at the first point prompt continues the last curve.
     s.input(Input::Enter).unwrap();
     assert!(s.prompt_text().contains("hold Ctrl"), "Continue prompt should advertise Ctrl: {}", s.prompt_text());
     s.ctrl_down = ctrl;
-    s.input(Input::Point(Vec2::new(20.0, 5.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(20.0, 5.0)))).unwrap();
     last_arc(&s)
 }
 
@@ -51,11 +51,11 @@ fn run_continue(ctrl: bool) -> (Vec2, f64, f64, f64) {
 fn run_cse(ctrl: bool) -> (Vec2, f64, f64, f64) {
     let mut s = Session::new();
     s.cmdline("arc c").unwrap();
-    s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
-    s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(0.0, 0.0)))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(5.0, 0.0)))).unwrap();
     assert!(s.prompt_text().contains("hold Ctrl"), "Cse end-point prompt should advertise Ctrl: {}", s.prompt_text());
     s.ctrl_down = ctrl;
-    s.input(Input::Point(Vec2::new(0.0, 5.0))).unwrap();
+    s.input(Input::Point(PointInput::Picked(Vec2::new(0.0, 5.0)))).unwrap();
     last_arc(&s)
 }
 
