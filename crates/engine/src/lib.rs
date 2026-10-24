@@ -9,9 +9,13 @@
 #![forbid(unsafe_code)]
 
 pub mod assoc;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod atomic_write;
 pub mod audit;
 pub mod autosave;
 pub mod blockedit;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod capped_read;
 pub mod cmd;
 pub mod doc_path;
 mod finite;
@@ -399,6 +403,10 @@ pub struct Settings {
     pub pickfirst: bool,
     /// ACADLSPASDOC: acad.lsp loads into every drawing, not once per session.
     pub acadlspasdoc: bool,
+    /// CMDECHO: kept for routines that switch command echo around their commands; no command reads it yet.
+    pub cmdecho: bool,
+    /// FILEDIA: kept for routines that switch file dialogs off around a script; no command reads it yet.
+    pub filedia: bool,
     pub pickadd: bool,
     /// PICKDRAG: false = two-click windows (0), true = clicks or dragging (2).
     /// Drag-only mode (1) is not supported yet.
@@ -491,6 +499,8 @@ impl Default for Settings {
             aperture: 10.0,
             pickfirst: true,
             acadlspasdoc: false,
+            cmdecho: true,
+            filedia: true,
             pickadd: true,
             pickdrag: true,
             pickstyle: 1,
