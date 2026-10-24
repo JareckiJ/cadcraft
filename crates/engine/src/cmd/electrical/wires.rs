@@ -42,7 +42,8 @@ pub(super) fn specs() -> Vec<CommandSpec> {
                 "{mode?: \"new\" (default: only potentials without a number) | \"all\" (renumber every potential), \
                  layers? (wire layers, wildcards, default \"WIRE*\"), labelLayer? (default \"WIRENO\"), \
                  format? (default \"{sheet}{col2}\", e.g. 105; placeholders {sheet} {column} {col2} {count}), height? (default 2.5), \
-                 tolerance? (default 0.01), origin?, sheetWidth?, columns?, firstSheet?, dryRun? bool} \
+                 tolerance? (default 0.01), plcAddresses? (default true: a wire on a PLC I/O point is numbered with its address), \
+                 origin?, sheetWidth?, columns?, firstSheet?, dryRun? bool} \
                  → {potentials, numbered, kept, wires: [{number, handles: [handle], at: [x, y]}], orphanLabels: [handle]}",
             )
             .interactive(|_| Ok(Box::new(EwireM))),
@@ -395,6 +396,17 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
         pots.push(Potential { wires: g.clone(), at, label_at, vertical, sheet, column, label, fixed: named.get(&gi).cloned() });
     }
     pots.sort_by(|a, b| (a.sheet, a.column).cmp(&(b.sheet, b.column)).then(b.at.y.total_cmp(&a.at.y)).then(a.at.x.total_cmp(&b.at.x)));
+    // A potential wired to a PLC I/O point takes the point's address as its number (I1.00),
+    // as AutoCAD Electrical does.
+    let plc = if bool_or(p, "plcAddresses", true) { super::plc::addressed_points(s)? } else { Vec::new() };
+    let addr_of: Vec<Option<String>> = pots
+        .iter()
+        .map(|pt| {
+            plc.iter()
+                .find(|(at, _)| pt.wires.iter().flat_map(|w| by_wire.get(*w).into_iter().flatten()).any(|sg| sg.dist_to(*at) <= tol.max(1e-6)))
+                .map(|(_, a)| a.clone())
+        })
+        .collect();
 
     // Numbers kept (new mode) are reserved first.
     let keep = |pt: &Potential| !renumber_all && pt.label.as_ref().is_some_and(|(_, v)| !v.is_empty());
@@ -408,7 +420,9 @@ fn run_ewire_inner(s: &mut Session, p: &Value) -> Result<Value> {
         if keep(pt) || pt.fixed.is_some() {
             continue;
         }
-        let number = if counted {
+        let number = if let Some(a) = addr_of.get(i).cloned().flatten() {
+            unique(&a, &used)
+        } else if counted {
             let n = counters.entry(render(format, "", pt.sheet, pt.column, None)).or_insert(0);
             let mut found = None;
             for _ in 0..MAX_SEGMENTS {

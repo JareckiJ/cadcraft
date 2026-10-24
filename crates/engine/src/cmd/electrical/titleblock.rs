@@ -285,11 +285,6 @@ pub(super) fn add_template(d: &mut Drawing, name: &str, sheet_width: f64, values
     d.add(&Space::Model, Common { layer: "FRAME".into(), ..Common::default() }, EntityKind::Insert(ins)).ok()
 }
 
-/// Put the compact title block into drawing `d` with its bottom-right corner at `corner`.
-pub(super) fn add_to(d: &mut Drawing, corner: Vec2, values: &Map<String, Value>) {
-    let _ = add_template(d, TITLE_BLOCK, corner.x, values);
-}
-
 /// The fields of the active drawing's (first) title block, or `None` when it has none.
 pub(super) fn values(s: &Session) -> Result<Option<Map<String, Value>>> {
     let d = s.doc()?;
@@ -568,7 +563,7 @@ mod tests {
         let mut v = Map::new();
         v.insert("TITLE".into(), json!("Pump starter"));
         v.insert("SHEET".into(), json!("2"));
-        add_to(&mut d, Vec2::new(420.0, 0.0), &v);
+        add_template(&mut d, TITLE_BLOCK, 420.0, &v);
         let EntityKind::Insert(i) = &d.model.iter().last().unwrap().kind else { panic!() };
         let get = |t: &str| i.attribs.iter().find(|a| a.tag == t).map(|a| a.text.value.clone()).unwrap();
         assert_eq!((get("TITLE").as_str(), get("SHEET").as_str(), get("REV").as_str()), ("Pump starter", "2", ""));

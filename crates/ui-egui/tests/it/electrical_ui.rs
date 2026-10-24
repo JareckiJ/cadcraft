@@ -109,3 +109,55 @@ fn electrical_tool_bar_and_project_manager() {
     assert_eq!(open_palettes(&h), before - 1);
     save(&mut h, "electrical-5-closed");
 }
+
+#[test]
+fn electrical_parts_catalogue_and_a3_title_block() {
+    set_io(IoHooks {
+        read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
+        write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
+        plot: None,
+    });
+    let dir = std::env::temp_dir().join(format!("cadcraft-ui-eparts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let project = dir.join("CP5.ecproj").to_string_lossy().to_string();
+
+    let mut app = CadApp::new(Session::default(), Services::default());
+    app.run("eproject.new", json!({ "path": project, "name": "CP5 Batter", "sheets": 1 })).unwrap();
+    app.run("eproject.titleblock", json!({ "project": project, "template": "ETITLE_A3" })).unwrap();
+    app.run(
+        "eproject.props",
+        json!({ "project": project, "set": {
+            "COMPANY1": "ACME CONTROLS", "COMPANY2": "Technical Services Ltd", "CUSTOMER1": "WARBURTONS", "CUSTOMER2": "BURNLEY",
+            "DESIGNEDFOR1": "Example Refrigeration", "TITLE": "CP5 BATTER FEED SYSTEM", "JOBNO": "7477", "REV": "B", "DRAWN": "E.G", "DATE": "02/02/26"
+        } }),
+    )
+    .unwrap();
+    app.run("eproject.sheet", json!({ "project": project, "sheet": 1, "set": { "DESCRIPTION": "DIGITAL INPUT", "LOC": "A1" } })).unwrap();
+    app.run("eproject.open", json!({ "path": project })).unwrap();
+    app.run("epart", json!({ "cat": "25B-D010N114", "at": [60, 200] })).unwrap();
+    app.run("epart", json!({ "cat": "5069-IB16", "at": [40, 60], "slot": 1 })).unwrap();
+    app.run("ewire", json!({ "from": [50, 150], "to": [50, 65] })).unwrap();
+    app.run("ewirenum", json!({})).unwrap();
+    app.run("zoom", json!({ "extents": true })).ok();
+    app.ui.start_tab = false;
+
+    let mut h = Harness::builder().with_size(vec2(1400.0, 860.0)).build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(&ui.ctx().clone());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(8);
+    save(&mut h, "electrical-7-parts-and-a3-title-block");
+    assert!(h.query_all_by_label("Parts Catalogue: PLC modules and drives by manufacturer (Allen-Bradley, Siemens, Mitsubishi)").next().is_some());
+
+    // The catalogue: pick a part, see its terminals.
+    h.state_mut().ui.dialog = Some("epart".into());
+    h.run_steps(4);
+    h.get_all_by_label_contains("5069-OB16").next().expect("the part is listed").click();
+    h.run_steps(4);
+    assert!(h.query_by_label_contains("Rack prefix").is_some(), "PLC options");
+    save(&mut h, "electrical-8-parts-catalogue");
+}

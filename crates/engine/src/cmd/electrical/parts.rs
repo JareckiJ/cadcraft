@@ -1205,6 +1205,10 @@ mod tests {
         assert_eq!(addrs[0]["address"], "I1.00");
         assert_eq!(addrs[15]["address"], "I1.15");
         assert_eq!(addrs[16]["address"], "", "NC terminals have no address");
+        // A wire on its first input is numbered with the address.
+        s.execute("ewire", &json!({ "from": [50, 150], "to": [50, 65] })).unwrap();
+        let n = s.execute("ewirenum", &json!({})).unwrap();
+        assert!(n["wires"].as_array().unwrap().iter().any(|w| w["number"] == "I1.00"), "{n}");
         // The I/O list reads it, spare terminals left out.
         let io = s.execute("ereport", &json!({ "kind": "plcio" })).unwrap();
         assert_eq!(io["rows"].as_array().unwrap().len(), 16, "{io}");

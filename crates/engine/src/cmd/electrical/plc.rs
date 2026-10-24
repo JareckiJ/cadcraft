@@ -142,6 +142,26 @@ pub(super) fn run_plc(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "handle": r["handle"], "block": name, "tag": r["tag"], "addresses": addresses }))
 }
 
+/// The connection point and address of every addressed PLC I/O point in the current space.
+pub(super) fn addressed_points(s: &Session) -> Result<Vec<(Vec2, String)>> {
+    let d = s.doc()?;
+    let Some(store) = d.space(&s.space()) else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for e in store.iter() {
+        let EntityKind::Insert(ins) = &e.kind else { continue };
+        if !ins.block.to_ascii_uppercase().starts_with("PLC_") {
+            continue;
+        }
+        for (i, pin) in super::sync::pins_of(ins).iter().enumerate() {
+            let tag = format!("ADDR{:02}", i + 1);
+            if let Some(a) = ins.attribs.iter().find(|a| a.tag.eq_ignore_ascii_case(&tag)).map(|a| a.text.value.trim()).filter(|a| !a.is_empty()) {
+                out.push((Vec2::new(pin.position[0], pin.position[1]), a.to_string()));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// One I/O point and what it is wired to.
 #[derive(Clone, Debug)]
 pub(super) struct IoPoint {
