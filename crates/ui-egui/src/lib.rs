@@ -26,6 +26,7 @@ pub mod hatchdlg;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
+pub mod xdedit;
 pub mod xrefs;
 
 pub mod dyngrips;
@@ -258,6 +259,7 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    pub xdedit_dlg: Option<xdedit::XdEditState>,
 }
 
 impl CadApp {
@@ -298,6 +300,7 @@ impl CadApp {
             alias_dlg: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            xdedit_dlg: None,
         }
     }
 
@@ -602,6 +605,7 @@ impl CadApp {
         self.gpu_fault_tick(ctx);
         managers::plot_window_resume(self, ctx);
         hatchdlg::resume(self);
+        xdedit::resume(self);
         self.autosave_tick(ctx);
         menus::shortcuts(self, ctx);
         #[cfg(not(target_arch = "wasm32"))]
