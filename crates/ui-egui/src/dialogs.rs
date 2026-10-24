@@ -427,7 +427,7 @@ fn block_preview(app: &mut CadApp, name: &str) -> Option<Arc<DisplayList>> {
 }
 
 /// Whether block `name`'s preview is already built for the current drawing revision.
-fn block_preview_ready(app: &CadApp, name: &str) -> bool {
+pub fn block_preview_ready(app: &CadApp, name: &str) -> bool {
     let Ok(st) = app.session.state() else { return false };
     app.block_previews.key == Some((st.uid, st.revision)) && app.block_previews.lists.contains_key(&name.to_ascii_uppercase())
 }

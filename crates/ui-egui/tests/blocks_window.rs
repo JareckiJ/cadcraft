@@ -35,8 +35,10 @@ fn a_long_block_list_scrolls_to_its_last_block() {
     );
     h.run_steps(5);
     let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("Blocks"))).unwrap();
+    assert!(!cadcraft_ui_egui::dialogs::block_preview_ready(h.state(), &last));
     h.get_by_label(&last).scroll_to_me();
-    h.run_steps(5);
+    h.run_steps(8);
+    assert!(cadcraft_ui_egui::dialogs::block_preview_ready(h.state(), &last));
     let mut found = Vec::new();
     for s in &h.output().shapes {
         texts(&s.shape, s.clip_rect, &mut found);
