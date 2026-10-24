@@ -2602,19 +2602,31 @@ fn drawing_without_insunits_stays_unitless() {
 }
 
 #[test]
-fn pdf_leaves_out_a_primitive_beyond_the_coordinate_range() {
+fn pdf_clips_a_primitive_beyond_the_coordinate_range() {
     let mut d = Drawing::new_metric();
     let paper = Space::Paper("Layout1".into());
-    let line = |a: (f64, f64), b: (f64, f64)| EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
-    d.add(&paper, Common::default(), line((10.0, 10.0), (100.0, 10.0))).unwrap();
+    let v = |x: f64, y: f64| Vec3::new(x, y, 0.0);
     // 4e7 mm at 1:1 is about 1.1e8 pt, past the range the writer's f32 geometry takes.
-    d.add(&paper, Common::default(), line((10.0, 20.0), (4.0e7, 20.0))).unwrap();
+    d.add(&paper, Common::default(), EntityKind::Line(Line { a: v(10.0, 20.0), b: v(4.0e7, 20.0) })).unwrap();
+    d.add(&paper, Common::default(), EntityKind::Solid(Solid { corners: [v(10.0, 50.0), v(4.0e7, 50.0), v(10.0, 60.0), v(10.0, 60.0)] })).unwrap();
     let bytes = plot(&d, &paper, &serde_json::json!({"fit": false, "scale": 1.0, "compress": false})).unwrap();
     let content = check_pdf(&bytes);
-    let pts: Vec<Vec<f64>> = pdf_read::drawn(&content).into_iter().filter(|o| matches!(o.op.as_str(), "m" | "l")).map(|o| o.nums).collect();
-    // Only the 90 mm line is drawn.
-    assert_eq!(pts.len(), 2, "{content}");
-    assert!(((pts[1][0] - pts[0][0]).abs() - 90.0 * 72.0 / 25.4).abs() < 0.01, "{content}");
+    let clip = pdf_read::clip_rect(&content).unwrap();
+    // The x extent of what each paint operator paints.
+    let (mut xs, mut painted) = (Vec::new(), Vec::new());
+    for o in pdf_read::drawn(&content) {
+        match o.op.as_str() {
+            "m" | "l" => xs.push(o.nums[0]),
+            "S" | "f" => painted.push((o.op, xs.drain(..).fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x))))),
+            _ => {}
+        }
+    }
+    let (stroke, fill) = (painted.iter().find(|p| p.0 == "S"), painted.iter().find(|p| p.0 == "f"));
+    // Both run from inside the plot area to its right edge: the stroke to just past it.
+    let (_, (lo, hi)) = stroke.expect("the line is drawn");
+    assert!(*lo < clip[2] && *hi > clip[2] && *hi < clip[2] + 5.0, "line from {lo} to {hi}, clip {clip:?}");
+    let (_, (lo, hi)) = fill.expect("the solid is filled");
+    assert!(*lo < clip[2] && (*hi - clip[2]).abs() < 1e-3, "fill from {lo} to {hi}, clip {clip:?}");
 }
 
 #[test]

@@ -158,15 +158,16 @@ pub fn read(bytes: &[u8]) -> Doc {
                     .unwrap_or_default(),
             })
             .collect();
+        let bytes = page.page_stream().expect("a decodable page content stream");
         // The writer flips its y-down surface back, so the plot area is drawn in PDF points.
-        let content = String::from_utf8_lossy(page.page_stream().unwrap_or(&[])).into_owned();
+        let content = String::from_utf8_lossy(bytes).into_owned();
         if let Some(ctm) = clip_ctm(&content) {
             assert!(ctm.iter().zip(IDENTITY).all(|(a, b)| (a - b).abs() < 1e-6), "the plot area is drawn under {ctm:?}, not in page space");
         }
         pages.push(Page {
             media: [m.x0, m.y0, m.x1, m.y1],
             content,
-            content_bytes: page.page_stream().unwrap_or(&[]).to_vec(),
+            content_bytes: bytes.to_vec(),
             compressed: raw
                 .get::<Stream<'_>>(b"Contents")
                 .map(|c| vec![c])

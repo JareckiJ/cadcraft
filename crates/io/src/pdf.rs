@@ -673,8 +673,8 @@ pub(crate) fn plot_scale(b: &Bounds2, sheet: &Sheet, fit: bool, scale: Option<f6
     if s.is_finite() && s > 0.0 { s } else { 1.0 }
 }
 
-/// Largest coordinate written (points); a primitive reaching further is left out. The PDF
-/// writer's geometry is `f32`.
+/// Largest coordinate written (points); a primitive reaching further is clipped to the plot
+/// area first. The PDF writer's geometry is `f32`.
 const MAX_COORD: f64 = 1.0e7;
 
 /// A point in points as the writer's `f32`, or `None` when it is not finite or out of range.
@@ -845,32 +845,37 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
                     },
                     _ => raw.iter().map(|q| map.pt(*q)).collect(),
                 };
-                let Some(pts) = pts.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { continue };
                 if pts.len() < 2 {
                     continue;
                 }
-                // The writer leaves out a path without extent, so a zero-length line is
-                // painted as the round-cap dot its stroke would make.
-                if let Some(&(x, y)) = pts.first()
-                    && pts.iter().all(|q| *q == (x, y))
-                {
-                    flush(s, &mut batch);
-                    let d = if w > 0.0 { w as f32 } else { HAIRLINE_DOT_PT };
-                    if let Some(path) = circle_path(x, y, d / 2.0) {
-                        fill_path(s, &path, rgb, t);
-                    }
-                    continue;
-                }
+                // With a vertex out of range, keep the pieces inside the plot area, widened so
+                // a wide stroke just outside it still shows its edge.
+                let runs = if pts.iter().all(|q| coord(*q).is_some()) { vec![pts] } else { clip::clip_polyline(&pts, &p.clip_pt.expand(w + 1.0)) };
                 let style = StrokeStyle { rgb, width: w as f32, transparency: t };
                 if t > 0 || batch.as_ref().is_some_and(|(b, _)| *b != style) {
                     flush(s, &mut batch);
                 }
-                let (_, pb) = batch.get_or_insert_with(|| (style, PathBuilder::new()));
-                for (j, (x, y)) in pts.iter().enumerate() {
-                    if j == 0 {
-                        pb.move_to(*x, *y);
-                    } else {
-                        pb.line_to(*x, *y);
+                for run in runs {
+                    let Some(pts) = run.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { continue };
+                    // The writer leaves out a path without extent, so a zero-length line is
+                    // painted as the round-cap dot its stroke would make.
+                    if let Some(&(x, y)) = pts.first()
+                        && pts.iter().all(|q| *q == (x, y))
+                    {
+                        flush(s, &mut batch);
+                        let d = if w > 0.0 { w as f32 } else { HAIRLINE_DOT_PT };
+                        if let Some(path) = circle_path(x, y, d / 2.0) {
+                            fill_path(s, &path, rgb, t);
+                        }
+                        continue;
+                    }
+                    let (_, pb) = batch.get_or_insert_with(|| (style, PathBuilder::new()));
+                    for (j, (x, y)) in pts.iter().enumerate() {
+                        if j == 0 {
+                            pb.move_to(*x, *y);
+                        } else {
+                            pb.line_to(*x, *y);
+                        }
                     }
                 }
             }
@@ -884,13 +889,12 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
                     glyph(s, font, text, map, rgb, t);
                     continue;
                 }
+                let mapped: Vec<Vec2> = raw.iter().map(|q| map.pt(*q)).collect();
+                // With a vertex out of range, keep the parts inside the plot area.
+                let tris = if mapped.iter().all(|q| coord(*q).is_some()) { mapped } else { clip::clip_triangles(&mapped, &p.clip_pt) };
                 let mut pb = PathBuilder::new();
-                let mut ok = true;
-                for tri in raw.as_chunks::<3>().0 {
-                    let Some(v) = tri.iter().map(|q| coord(map.pt(*q))).collect::<Option<Vec<_>>>() else {
-                        ok = false;
-                        break;
-                    };
+                for tri in tris.as_chunks::<3>().0 {
+                    let Some(v) = tri.iter().map(|q| coord(*q)).collect::<Option<Vec<_>>>() else { continue };
                     for (j, (x, y)) in v.iter().enumerate() {
                         if j == 0 {
                             pb.move_to(*x, *y);
@@ -900,7 +904,7 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts:
                     }
                     pb.close();
                 }
-                if ok && let Some(path) = pb.finish() {
+                if let Some(path) = pb.finish() {
                     fill_path(s, &path, rgb, t);
                 }
             }
