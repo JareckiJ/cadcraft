@@ -158,9 +158,14 @@ pub fn read(bytes: &[u8]) -> Doc {
                     .unwrap_or_default(),
             })
             .collect();
+        // The writer flips its y-down surface back, so the plot area is drawn in PDF points.
+        let content = String::from_utf8_lossy(page.page_stream().unwrap_or(&[])).into_owned();
+        if let Some(ctm) = clip_ctm(&content) {
+            assert!(ctm.iter().zip(IDENTITY).all(|(a, b)| (a - b).abs() < 1e-6), "the plot area is drawn under {ctm:?}, not in page space");
+        }
         pages.push(Page {
             media: [m.x0, m.y0, m.x1, m.y1],
-            content: String::from_utf8_lossy(page.page_stream().unwrap_or(&[])).into_owned(),
+            content,
             content_bytes: page.page_stream().unwrap_or(&[]).to_vec(),
             compressed: raw
                 .get::<Stream<'_>>(b"Contents")
@@ -313,9 +318,71 @@ pub fn count(content: &str, op: &str) -> usize {
     ops(content).iter().filter(|o| o.op == op).count()
 }
 
-/// The clip rectangle: the bounds of the path closed by the first `W n`.
+const IDENTITY: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+/// Apply matrix `m` to the point `(x, y)`.
+fn apply(m: [f64; 6], x: f64, y: f64) -> (f64, f64) {
+    (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+}
+
+/// The operators of content text with path coordinates (`m`, `l`, `c`, `v`, `y`, `re`) mapped
+/// through the current transformation matrix, so they are in page space. A `re` becomes the
+/// rectangle between its mapped corners, which holds for the axis-aligned matrices plots use.
+pub fn page_ops(content: &str) -> Vec<Op> {
+    let mut stack = vec![IDENTITY];
+    let mut out = ops(content);
+    for o in &mut out {
+        let ctm = *stack.last().expect("a graphics state");
+        match o.op.as_str() {
+            "q" => stack.push(ctm),
+            "Q" => {
+                stack.pop();
+                assert!(!stack.is_empty(), "unbalanced Q");
+            }
+            "cm" if o.nums.len() == 6 => {
+                let m = [o.nums[0], o.nums[1], o.nums[2], o.nums[3], o.nums[4], o.nums[5]];
+                *stack.last_mut().expect("a graphics state") = mul(m, ctm);
+            }
+            "m" | "l" | "c" | "v" | "y" => {
+                for [x, y] in o.nums.as_chunks_mut::<2>().0 {
+                    (*x, *y) = apply(ctm, *x, *y);
+                }
+            }
+            "re" if o.nums.len() == 4 => {
+                let (x0, y0) = apply(ctm, o.nums[0], o.nums[1]);
+                let (x1, y1) = apply(ctm, o.nums[0] + o.nums[2], o.nums[1] + o.nums[3]);
+                o.nums = vec![x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs()];
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The current transformation matrix at the first clip (`W`): what the plot area is drawn under.
+pub fn clip_ctm(content: &str) -> Option<[f64; 6]> {
+    let mut stack = vec![IDENTITY];
+    for o in ops(content) {
+        let ctm = *stack.last().expect("a graphics state");
+        match o.op.as_str() {
+            "W" => return Some(ctm),
+            "q" => stack.push(ctm),
+            "Q" => {
+                stack.pop();
+            }
+            "cm" if o.nums.len() == 6 => {
+                let m = [o.nums[0], o.nums[1], o.nums[2], o.nums[3], o.nums[4], o.nums[5]];
+                *stack.last_mut().expect("a graphics state") = mul(m, ctm);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The clip rectangle in page space: the bounds of the path closed by the first `W n`.
 pub fn clip_rect(content: &str) -> Option<[f64; 4]> {
-    let all = ops(content);
+    let all = page_ops(content);
     let end = all.iter().position(|o| o.op == "W")?;
     let start = all[..end].iter().rposition(|o| !matches!(o.op.as_str(), "m" | "l" | "h" | "re")).map_or(0, |i| i + 1);
     let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
@@ -332,9 +399,10 @@ pub fn clip_rect(content: &str) -> Option<[f64; 4]> {
     Some(b)
 }
 
-/// The operators after the clip (the marks drawn inside the plot area).
+/// The operators after the clip (the marks drawn inside the plot area), with path coordinates
+/// in page space.
 pub fn drawn(content: &str) -> Vec<Op> {
-    let all = ops(content);
+    let all = page_ops(content);
     let after = all.iter().position(|o| o.op == "W").map_or(0, |i| i + 1);
     all.into_iter().skip(after).collect()
 }
@@ -354,9 +422,8 @@ pub fn mul(a: [f64; 6], b: [f64; 6]) -> [f64; 6] {
 /// The glyph-space-to-page matrix of each text-showing operator (`Tj`/`TJ`), in order: the text
 /// matrix scaled by the font size, under the current transformation matrix.
 pub fn text_matrices(content: &str) -> Vec<[f64; 6]> {
-    const ID: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-    let mut stack = vec![ID];
-    let (mut tm, mut size) = (ID, 1.0);
+    let mut stack = vec![IDENTITY];
+    let (mut tm, mut size) = (IDENTITY, 1.0);
     let mut out = Vec::new();
     for o in ops(content) {
         let ctm = *stack.last().expect("a graphics state");
@@ -369,7 +436,7 @@ pub fn text_matrices(content: &str) -> Vec<[f64; 6]> {
                 let m = [o.nums[0], o.nums[1], o.nums[2], o.nums[3], o.nums[4], o.nums[5]];
                 *stack.last_mut().expect("a graphics state") = mul(m, ctm);
             }
-            "BT" => tm = ID,
+            "BT" => tm = IDENTITY,
             "Tm" if o.nums.len() == 6 => tm = [o.nums[0], o.nums[1], o.nums[2], o.nums[3], o.nums[4], o.nums[5]],
             "Tf" => size = o.nums.first().copied().unwrap_or(1.0),
             "Tj" | "TJ" => out.push(mul(mul([size, 0.0, 0.0, size, 0.0, 0.0], tm), ctm)),

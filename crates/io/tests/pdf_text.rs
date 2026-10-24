@@ -51,8 +51,9 @@ fn simple_glyph(pts: &[(i16, i16)]) -> Vec<u8> {
     g
 }
 
-/// A TrueType font with glyphs .notdef (empty), A and B, and OS/2 `fsType`.
-fn test_font(fs_type: u16) -> Vec<u8> {
+/// A TrueType font with glyphs .notdef (empty), A and B, and OS/2 `fsType`. `hmtx` holds
+/// `metrics` of the three metrics `hhea` declares.
+fn test_font(fs_type: u16, metrics: usize) -> Vec<u8> {
     let glyphs = [Vec::new(), simple_glyph(&[(50, 0), (550, 0), (300, 700)]), simple_glyph(&[(50, 0), (550, 0), (550, 700), (50, 700)])];
     let mut glyf = Vec::new();
     let mut loca = Vec::new();
@@ -87,7 +88,7 @@ fn test_font(fs_type: u16) -> Vec<u8> {
         be16(&mut maxp, v);
     }
     let mut hmtx = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..metrics {
         be16(&mut hmtx, 600);
         be16(&mut hmtx, 50);
     }
@@ -147,12 +148,14 @@ fn test_font(fs_type: u16) -> Vec<u8> {
     out
 }
 
-/// Register the test fonts once: an embeddable one and one with a restricted licence.
+/// Register the test fonts once: an embeddable one, one with a restricted licence, and one
+/// the PDF writer accepts but can't subset (its `hmtx` is short).
 fn fonts() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        cadcraft_fonts::ttf::register("cadcraft-pdf-test.ttf", test_font(0));
-        cadcraft_fonts::ttf::register("cadcraft-pdf-restricted.ttf", test_font(0x0002));
+        cadcraft_fonts::ttf::register("cadcraft-pdf-test.ttf", test_font(0, 3));
+        cadcraft_fonts::ttf::register("cadcraft-pdf-restricted.ttf", test_font(0x0002, 3));
+        cadcraft_fonts::ttf::register("cadcraft-pdf-short-hmtx.ttf", test_font(0, 1));
     });
 }
 
@@ -183,6 +186,7 @@ fn drawing() -> Drawing {
     let mut d = Drawing::new_metric();
     style(&mut d, "Real", "cadcraft-pdf-test.ttf");
     style(&mut d, "Locked", "cadcraft-pdf-restricted.ttf");
+    style(&mut d, "Short", "cadcraft-pdf-short-hmtx.ttf");
     d
 }
 
@@ -262,7 +266,7 @@ fn the_subset_is_a_valid_truetype_font() {
     let face = cadcraft_fonts::ttf::Face::new(std::sync::Arc::new(file.clone()), 0).expect("the subset parses");
     assert_eq!(cadcraft_fonts::subset::embedding(&face), cadcraft_fonts::subset::Embedding::Allowed);
     // Glyph A kept, B (unused) left out: the subset is smaller than the font.
-    assert!(file.len() < test_font(0).len());
+    assert!(file.len() < test_font(0, 3).len());
 }
 
 #[test]
@@ -285,6 +289,14 @@ fn rotation_width_factor_and_obliquing_go_into_the_text_matrix() {
     let em_pt = m[1][3];
     let em_mm = em_pt * 25.4 / 72.0;
     assert!(em_mm > 0.0);
+}
+
+#[test]
+fn a_font_the_writer_cannot_subset_plots_as_outlines() {
+    let mut d = drawing();
+    text(&mut d, &Space::Model, "Short", (0.0, 0.0), "AB", 0.0, 1.0, 0.0);
+    let p = pdf(&d, &Space::Model, json!({}));
+    assert!(font_files(&p) == 0 && pdf_read::count(p.content(), "BT") == 0 && fills(&p) > 0, "outlines: {}", p.content());
 }
 
 #[test]

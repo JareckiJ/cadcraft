@@ -489,7 +489,8 @@ fn pdf_layout_one_to_one_with_viewport() {
     // ANSI A landscape (inches → points).
     assert_eq!(media_box(&bytes), (792.0, 612.0));
     // Viewport border at 1:1: x from 1in to 9in = 72pt..648pt.
-    assert!(content.contains("72 72 m") || content.contains("72 72 l"), "{content}");
+    let corner = |o: &pdf_read::Op| matches!(o.op.as_str(), "m" | "l") && (o.nums[0] - 72.0).abs() < 1e-6 && (o.nums[1] - 72.0).abs() < 1e-6;
+    assert!(pdf_read::drawn(&content).iter().any(corner), "{content}");
     // Lineweights on: default 0.25 mm = 0.709 pt.
     assert!(widths(&content).iter().any(|w| (w - 0.709).abs() < 0.001), "{content}");
     let off = plot(&d, &paper, &serde_json::json!({"lineweights": false})).unwrap();
@@ -2598,6 +2599,22 @@ fn drawing_without_insunits_stays_unitless() {
     assert_eq!(rewritten("9\n$INSUNITS\n70\n6\n"), Some("6".into()), "declared metres");
     assert_eq!(insunits(&write_dxf(&Drawing::new_metric())), Some("4".into()));
     assert_eq!(insunits(&write_dxf(&Drawing::new_imperial())), Some("1".into()));
+}
+
+#[test]
+fn pdf_leaves_out_a_primitive_beyond_the_coordinate_range() {
+    let mut d = Drawing::new_metric();
+    let paper = Space::Paper("Layout1".into());
+    let line = |a: (f64, f64), b: (f64, f64)| EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
+    d.add(&paper, Common::default(), line((10.0, 10.0), (100.0, 10.0))).unwrap();
+    // 4e7 mm at 1:1 is about 1.1e8 pt, past the range the writer's f32 geometry takes.
+    d.add(&paper, Common::default(), line((10.0, 20.0), (4.0e7, 20.0))).unwrap();
+    let bytes = plot(&d, &paper, &serde_json::json!({"fit": false, "scale": 1.0, "compress": false})).unwrap();
+    let content = check_pdf(&bytes);
+    let pts: Vec<Vec<f64>> = pdf_read::drawn(&content).into_iter().filter(|o| matches!(o.op.as_str(), "m" | "l")).map(|o| o.nums).collect();
+    // Only the 90 mm line is drawn.
+    assert_eq!(pts.len(), 2, "{content}");
+    assert!(((pts[1][0] - pts[0][0]).abs() - 90.0 * 72.0 / 25.4).abs() < 0.01, "{content}");
 }
 
 #[test]
