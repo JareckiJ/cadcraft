@@ -264,3 +264,34 @@ fn hatchedit_adding_an_existing_island_keeps_it() {
         h.loops.iter().map(|l| (l.outer, l.sources.clone())).collect::<Vec<_>>()
     );
 }
+
+/// AREA tests a loop's nesting at an edge's middle, as the fill does: an island whose first vertex
+/// lies on the outer loop (here on its right edge, where a vertex test says "outside") is still
+/// subtracted.
+#[test]
+fn area_subtracts_an_island_touching_the_outer_loop() {
+    use cadcraft_engine::geom::{PolyVertex, Vec2};
+    let lp = |pts: &[(f64, f64)], outer: bool| HatchLoop {
+        vertices: pts.iter().map(|&(x, y)| PolyVertex::new(Vec2::new(x, y))).collect(),
+        outer,
+        sources: vec![],
+    };
+    let mut s = Session::new();
+    let h = Hatch {
+        loops: vec![lp(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], true), lp(&[(10.0, 5.0), (5.0, 4.0), (5.0, 6.0)], false)],
+        pattern: "SOLID".into(),
+        solid: true,
+        scale: 1.0,
+        ..hatch_template(&mut s)
+    };
+    let id = s.add_entity(EntityKind::Hatch(h)).unwrap();
+    let a = s.execute("area", &json!({ "handle": id.hex() })).unwrap()["area"].as_f64().unwrap();
+    assert!(close(a, 100.0 - 5.0), "{a}");
+}
+
+/// Any hatch's fields, to build one by hand.
+fn hatch_template(s: &mut Session) -> Hatch {
+    s.execute("rectang", &json!({ "p1": [200, 200], "p2": [210, 210] })).unwrap();
+    let hh = hatch_at(s, &[[205.0, 205.0]]);
+    hatch(s, &hh)
+}

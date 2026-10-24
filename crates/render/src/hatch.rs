@@ -193,7 +193,7 @@ pub fn fill_loop_indices(h: &Hatch, tol: f64) -> Vec<(usize, Vec<Vec2>)> {
 
 /// A point of a loop to test its nesting with: the middle of its first non-degenerate edge
 /// (vertices may touch an enclosing loop; edge midpoints rarely do).
-fn probe(l: &[Vec2]) -> Option<Vec2> {
+pub fn probe(l: &[Vec2]) -> Option<Vec2> {
     let n = l.len();
     (0..n).find_map(|i| {
         let (a, b) = (*l.get(i)?, *l.get((i + 1) % n)?);
