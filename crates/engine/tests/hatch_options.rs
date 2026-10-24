@@ -52,7 +52,7 @@ fn lines_ending_on_an_ellipse_close_a_boundary() {
         let y = 5.0 * (1.0 - x * x / 100.0).sqrt();
         s.execute("line", &json!({ "points": [[x, 8.0], [x, y]] })).unwrap();
     }
-    let top = handle(&s.execute("line", &json!({ "points": [[0, 8], [3, 8]] })).unwrap());
+    let top = s.execute("line", &json!({ "points": [[0, 8], [3, 8]] })).unwrap()["handles"][0].clone();
     let h = handle(&s.execute("hatch", &json!({ "points": [[1.5, 7]] })).unwrap());
     let hh = hatch(&s, &h);
     assert_eq!(hh.loops.len(), 1);
