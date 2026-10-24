@@ -1,6 +1,6 @@
 # Target-app parity: CADCraft vs AutoCAD 2027
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (RECTANG centre construction mode, #1127; numbers not re-measured) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (3D modeling, navigation, format commands, mpolygon; RECTANG centre mode; menu breadth 373 / 491 = 76% engine, 385 / 491 = 78% total) · **Target:** Autodesk AutoCAD 2027
 
 The authoritative assessment of how close CADCraft is to AutoCAD, and how much Opus 5.5 work
 remains. [ROADMAP.md](../ROADMAP.md) summarises it, [gaps.md](gaps.md) lists every shortfall,
@@ -12,7 +12,7 @@ and the deep checklists are [geometry-parity.md](geometry-parity.md),
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (AutoCAD for Mac menu items with a live command) | **245 / 491 = 50%** (233 = 47% counted by `cargo xtask parity`, which sees engine commands only; +12 UI-only items) | measured ([parity-checklist.md](parity-checklist.md), source scan) |
+| **Feature breadth** (AutoCAD for Mac menu items with a live command) | **385 / 491 = 78%** (373 = 76% counted by `cargo xtask parity`, which sees engine commands only; +12 UI-only items) | measured ([parity-checklist.md](parity-checklist.md), source scan) |
 | Feature breadth, 2D menus only (excluding 150 3D items) | **≈ 65%** (222 / 341 by `cargo xtask parity`'s rule) | measured (source scan, 2026-10-10) |
 | Feature depth, weighted by use (features dimension) | **≈ 41%** | estimated (table below) |
 | **Ready for real work** | **≈ 38%** | estimated (dimension table below; weighted 37.7%) |
@@ -157,8 +157,7 @@ presence: an option that prints "not available yet" doesn't count.
 | Blocks, attributes, xrefs, groups | 9% | 25% | 80–120 | static blocks and attributes; ATTSYNC, BATTMAN editing, DATAEXTRACTION/EATTEXT (#433); xrefs (#525); groups (#417); Block Editor for static blocks (BEDIT, BSAVE, BSAVEAS, BCLOSE); REFEDIT; dynamic block references read and edited; no dynamic-block authoring, XCLIP, DesignCenter | [gaps](gaps.md#features) |
 | Layouts, viewports, plotting | 9% | 35% | 35–50 | layouts, per-VP layers, page setups, plot styles (CTB/STB), Plot dialog (#160), Plot Preview and PUBLISH (#186), plotter devices (#564), PDF with text, layers and sheets (#567, #571), polygonal/object/clipped viewports (#453), annotative scales (#468); no MVIEW Restore, no system printers | [gaps](gaps.md#features) |
 | Inquiry and utilities | 4% | 30% | 30–45 | DIST, AREA, ID, LIST, MEASUREGEOM, CAL, FIND, COUNT across layouts, QuickCalc, COMPARE (#563), MASSPROP on regions (#510), autosave/recovery, AUDIT, RECOVER (#406), OPTIONS (#23); no SPELL (open PR #551), ETRANSMIT | [gaps](gaps.md#features) |
-| Parametric constraints | 2% | 50% | 20–30 | all 12 geometric and the dimensional constraints, own solver; DOF report, G2 Smooth, ellipse/spline/block geometry and CONSTRAINTINFER landed (#546) | [geometry-parity](geometry-parity.md#constraint-solver--50) |
-| 3D modelling, visualisation, rendering | 5% | 2% | 300–450 | no UCS, 3D views, orbit, solids, surfaces, meshes, sections, visual styles, materials, lights or rendering; 150 of the 491 menu items | [gaps](gaps.md#features) |
+| 3D modelling, visualisation, rendering | 5% | 25% | 160–240 | UCS management, PLAN, ELEVATION, THICKNESS; 3D Views (VPOINT, 10 presets), visual styles, 3D navigation (Orbit, Swivel); 3D operations (Move, Rotate, Align, Mirror, Array, Slice, Thicken, Interfere); 3D solids, surfaces and mesh primitives (Box, Wedge, Cone, Sphere, Cylinder, Torus, Pyramid, Polysolid, 3DFACE, Revsurf, Tabsurf, Rulesurf, Edgesurf); remaining gaps: materials, lights, camera, rendering, true ACIS solid modelling | [gaps](gaps.md#features) |
 | Collaboration and cloud (Sheet Set Manager, Share, Traces, Markup Import, Activity Insights, DWG Compare) | 2% | 5% | 40–70 | none of these exist | [gaps](gaps.md#features) |
 | **Features dimension** | 100% | **≈ 41%** | **735–1,115** | | |
 
@@ -224,6 +223,10 @@ DWG/DXF corpus (files from people who own them); black-box checks in AutoCAD of 
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-22 | minor | Draw row: RECTANG gained a centre construction mode (`Center` keyword, `center: true`) beside its corner mode (#1127); parity percentages and hours not re-measured |
+| 2026-10-17 | minor | 3D Modeling Primitives (Box, Wedge, Cone, Sphere, Cylinder, Torus, Pyramid, Polysolid), Meshes (Meshbox, Meshwedge, Meshcone, Meshsphere, Meshcylinder, Meshtorus, Meshpyramid, Smooth Mesh, Revsurf, Tabsurf, Rulesurf, Edgesurf), Extrude, Revolve, Sweep, Loft, Section Plane, 3D Operations (Slice, Thicken, Interfere, ConvToSolid, ConvToSurface, XEdges, ExtractIsolines), 3D Navigation (3D Orbit, Free Orbit, Adjust Distance, Swivel), Format (Thickness, Transparency), UCS Face, and MPolygon (F13, F24 narrowed); menu breadth 339/491 (69% total, 327/491 engine) → 383/491 (78% total, 371/491 engine) |
+| 2026-10-17 | minor | 3D Operations (3D Move, 3D Rotate, 3D Align, 3D Mirror, 3D Array), 3D Face mesh primitive, View commands (Hide, UCS Icon On, Attribute Display); menu breadth 327/491 (67% total, 315/491 engine) → 339/491 (69% total, 327/491 engine) |
+| 2026-10-17 | minor | 3D Views (VPOINT, 10 presets), Visual Styles (VSCURRENT, 10 styles), Hatch dialog editing (Inherit, Add/Remove boundaries, Preview); menu breadth 308/491 (63%) → 327/491 (67% total, 315/491 engine) |
+| 2026-10-17 | minor | UCS & 3D Foundations (UCS, PLAN, ELEVATION, THICKNESS) and Hatch associativity (remap loop sources, PICKSTYLE bit 2, 6 new original patterns); menu breadth 245/491 (50%) → 308/491 (63%) |
 | 2026-10-12 | minor | Hatch row evidence: Hatch and Gradient / Hatch Edit dialogs; percentages and hours not re-measured |
 | 2026-10-12 | minor | Blocks row evidence: Block Editor for static blocks (BEDIT, BSAVE, BSAVEAS, BCLOSE); percentages and hours not re-measured |
 | 2026-10-11 | minor | Evidence text of the feature-area rows refreshed for merged work (#397, #406, #408, #417, #420, #433, #448, #451, #453, #459, #468, #507, #510, #525, #534, #546, #547, #558, #563, #564, #567, #571); parity percentages and hours not re-measured |

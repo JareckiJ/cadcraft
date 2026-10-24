@@ -41,6 +41,7 @@ fn insert_block(s: &mut Session, name: &str, at: Vec2) -> String {
                 rows: 1,
                 col_spacing: 0.0,
                 row_spacing: 0.0,
+                clip: None,
             }),
         )
         .unwrap()
@@ -343,6 +344,7 @@ fn sysvars_polarmode_polaraddang_autosnap() {
     assert_eq!(get(&s, "POLARMODE"), json!(6));
     setvar(&mut s, "POLARADDANG", json!("15;22.5"));
     assert_eq!(get(&s, "POLARADDANG"), json!("15;22.5"));
+    // Default: marker(1) + tooltip(4) + polarmode(8) + otrack(16) + track_tooltip(32) = 61
     assert_eq!(get(&s, "AUTOSNAP"), json!(61));
     s.execute("otrack", &json!({})).unwrap();
     assert!(!s.settings.otrack, "F11 toggles tracking");

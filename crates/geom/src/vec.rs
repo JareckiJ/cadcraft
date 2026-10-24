@@ -150,6 +150,8 @@ pub struct Vec3 {
 
 impl Vec3 {
     pub const ZERO: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
+    pub const X: Vec3 = Vec3 { x: 1.0, y: 0.0, z: 0.0 };
+    pub const Y: Vec3 = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
     pub const Z: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 1.0 };
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
         Vec3 { x, y, z }
@@ -170,6 +172,12 @@ impl Vec3 {
     pub fn normalized(self) -> Vec3 {
         let l = self.len();
         if l > crate::EPS { self * (1.0 / l) } else { Vec3::ZERO }
+    }
+    pub fn near(self, o: Vec3, tol: f64) -> bool {
+        if !tol.is_finite() || tol < 0.0 {
+            return false;
+        }
+        (self - o).len() <= tol
     }
     pub fn is_finite(self) -> bool {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
@@ -192,6 +200,12 @@ impl Mul<f64> for Vec3 {
     type Output = Vec3;
     fn mul(self, s: f64) -> Vec3 {
         Vec3::new(self.x * s, self.y * s, self.z * s)
+    }
+}
+impl Div<f64> for Vec3 {
+    type Output = Vec3;
+    fn div(self, s: f64) -> Vec3 {
+        Vec3::new(self.x / s, self.y / s, self.z / s)
     }
 }
 impl Neg for Vec3 {

@@ -40,6 +40,12 @@ pub fn plot(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
             with_margins = c;
             &with_margins
         }
+        (Space::Model, Some(m)) => {
+            let mut c = d.clone();
+            c.model_page.margins_mm = m;
+            with_margins = c;
+            &with_margins
+        }
         _ => d,
     };
     match opts.get("output").and_then(Value::as_str).map(str::to_ascii_lowercase).as_deref() {

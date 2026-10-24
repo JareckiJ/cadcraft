@@ -53,6 +53,7 @@ fn command_line_menu() {
     assert!(find(&g, "Recent Commands/LINE").is_some());
     assert!(find(&g, "Dynamic Input").is_some() && find(&g, "Command History").is_some());
     assert!(find(&g, "Copy History").is_some_and(|(_, e)| e));
+    assert!(find(&g, "Paste to Command Line").is_some_and(|(_, e)| e));
     choose(&mut app, &g, "Lines of Command History/5");
     assert_eq!(app.ui.history_lines, 5);
     choose(&mut app, &g, "Recent Commands/LINE");
@@ -113,6 +114,11 @@ fn layout_tab_menu() {
     // Page Setup acts on the right-clicked tab.
     let g = sm::layout_tab_entries(&app, "Sheet A");
     assert!(find(&g, "Page Setup Manager...").is_some() && find(&g, "Print...").is_some());
+    assert!(find(&g, "Move or Copy...").is_some());
+    assert!(find(&g, "Select All Layouts").is_some());
+
+    choose(&mut app, &g, "Move or Copy...");
+    assert_eq!(app.ui.dialog, Some("move_copy_layout:Sheet A".to_string()));
 }
 
 #[test]

@@ -244,6 +244,7 @@
 	Dimensional Constraint Parameters	Parametrar för måttvillkor
 	Dimensional Constraints	Måttvillkor
 	Disassociate Dimensions	Lösgör mått
+	Discard	Ignorera
 	Display	Visning
 	Display name	Visningsnamn
 	Distance	Avstånd
@@ -1367,7 +1368,6 @@ menu	Modify	Ändra
 	Add…	Lägg till…
 	Edit…	Redigera…
 	Save alias	Spara alias
-	Discard	Släng
 	Customize	Anpassa
 	Edit Command Aliases (PGP)...	Redigera kommandoalias (PGP)...
 	Apply to Layout	Använd på layout

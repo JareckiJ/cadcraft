@@ -845,6 +845,14 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
             // Line spacing style: 1 = at least, 2 = exactly.
             w.i(73, if t.line_spacing_exact { 2 } else { 1 });
             w.f(44, t.line_spacing);
+            if let Some(bg) = t.background {
+                w.i(90, 1);
+                w.f(45, t.background_scale.unwrap_or(1.5));
+                w.i(63, i64::from(bg.to_aci()));
+                if let cadcraft_color::Color::True(rgb) = bg {
+                    w.i(420, i64::from(rgb.to_u32()));
+                }
+            }
             w.t.extend(crate::dxf_read::mtext_dxf::column_tags(t));
         }
         EntityKind::Insert(i) => {
@@ -864,6 +872,18 @@ fn entity(w: &mut W, d: &Drawing, e: &Entity, owner: &str, paper: bool, cx: &Ctx
                 w.i(71, i64::from(i.rows));
                 w.f(44, i.col_spacing);
                 w.f(45, i.row_spacing);
+            }
+            if let Some(clip) = &i.clip {
+                w.s(1001, dxf_ext::APP);
+                w.s(1000, "XCLIP");
+                w.i(1070, if clip.enabled { 1 } else { 0 });
+                w.i(1070, if clip.inverted { 1 } else { 0 });
+                w.i(1070, clip.points.len() as i64);
+                for pt in &clip.points {
+                    w.f(1010, pt.x);
+                    w.f(1020, pt.y);
+                    w.f(1030, 0.0);
+                }
             }
             if !i.attribs.is_empty() {
                 for a in &i.attribs {
@@ -1428,6 +1448,8 @@ fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
                 line_spacing: 1.0,
                 line_spacing_exact: false,
                 columns: None,
+                background: None,
+                background_scale: None,
             }),
         });
     }
@@ -1474,7 +1496,7 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
                 kind: EntityKind::MText(MText {
                     insert: cell.at.to3(0.0),
                     height: cell.height,
-                    width: 0.0,
+                    width: cell.width,
                     attach: cell.attach,
                     rotation: 0.0,
                     style,
@@ -1482,6 +1504,8 @@ pub(crate) fn table_block_entities(d: &Drawing, t: &Table, layer: &str) -> Vec<E
                     line_spacing: 1.0,
                     line_spacing_exact: false,
                     columns: None,
+                    background: None,
+                    background_scale: None,
                 }),
             });
         }
@@ -1974,6 +1998,9 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     if let Some(chunks) = dxf_ext::layer_state_chunks(&d.layer_states) {
         xrecords.push((dxf_ext::LAYER_STATES_KEY, w.h(), chunks));
     }
+    if let Some(chunks) = dxf_ext::isolation_chunks(&d.hidden_objects) {
+        xrecords.push((dxf_ext::ISOLATION_KEY, w.h(), chunks));
+    }
     if let Some(chunks) = dxf_ext::plot_style_chunks(&d.plot_style_tables) {
         xrecords.push((dxf_ext::PLOT_STYLES_KEY, w.h(), chunks));
     }
@@ -2242,8 +2269,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.p(10, u.origin);
         w.p(11, u.x_axis);
         w.p(12, u.y_axis);
-        w.i(79, 0);
-        w.f(146, 0.0);
+        w.i(79, i64::from(u.ortho_type));
+        w.f(146, u.elevation);
     }
     w.s(0, "ENDTAB");
     let apps = ["ACAD", dxf_ext::APP, "AcadAnnotative", dxf_ext::LAYER_TRANSPARENCY_APP, dxf_ext::LAYER_DESCRIPTION_APP];
@@ -2667,13 +2694,16 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
             w.f(1040, height);
             w.s(1002, "}");
         }
+        if page.plot_transparency {
+            w.s(1001, dxf_ext::APP);
+            w.s(1000, "PLOTTRANSPARENCY");
+            w.s(1002, "{");
+            w.i(1071, 1);
+            w.s(1002, "}");
+        }
     };
-    // Model space has no page setup of its own: write what PLOT does for it, the drawing extents
-    // fitted to the paper (plot type 1, scaled to fit). The default page's "layout" area is
-    // plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group 74), which means
-    // nothing for model space: another program's Plot dialog then shows no plot area or scale.
-    let model_page = PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() };
-    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None);
+    // Model space's page setup.
+    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &d.model_page, None);
     for (i, (_, brh, l)) in ps_brs.iter().enumerate() {
         let h = layout_handles.get(i).cloned().unwrap_or_default();
         layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, 1, &l.page, l.view);
@@ -2810,9 +2840,9 @@ fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, byblock_l
     w.s(330, dict);
     w.s(100, "AcDbMLeaderStyle");
     w.i(179, 2);
-    w.i(170, 2);
+    w.i(170, i64::from(s.leader_type));
     w.i(171, 1);
-    w.i(172, 0);
+    w.i(172, i64::from(s.content_type));
     w.i(90, 2);
     w.f(40, 0.0);
     w.f(41, 0.0);

@@ -62,6 +62,11 @@ real_name = "Chester Fung"
 display_name = "Chester Fung"
 sync_github_name = true
 
+[people.aljormon84]
+real_name = "Alex Ortiz"
+display_name = "Alex Ortiz"
+sync_github_name = false
+
 [people.C00kieMonsta]
 real_name = "Antoine Boxho"
 display_name = "Antoine Boxho"
@@ -86,4 +91,3 @@ sync_github_name = false
 real_name = "Richard Sauer"
 display_name = "Richard Sauer"
 sync_github_name = false
-

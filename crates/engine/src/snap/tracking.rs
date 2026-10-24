@@ -804,7 +804,8 @@ impl crate::Session {
         let wait = self.tracking.hover(cand, q.now, cfg.shift_acquire, q.shift);
         if let Some(h) = hit {
             self.tracking.last = None;
-            return CursorSnap { point: h.point, snap: Some(h), track: None, wait };
+            let pt = if s.autosnap_magnet { h.point } else { raw };
+            return CursorSnap { point: pt, snap: Some(h), track: None, wait };
         }
         // Isometric snap (SNAPSTYL 1): its lattice in place of the rectangular grid.
         let (raw, s) = super::iso::grid_snap(&doc, s, raw);

@@ -241,3 +241,61 @@ fn polygonal_viewport_menu_item_asks_for_points() {
     s.execute("mview.polygonal", &json!({"points": [[120, 10], [200, 10], [160, 80]]})).unwrap();
     assert_eq!(layout_viewports(&s).len(), 2);
 }
+
+#[test]
+fn clipped_viewport_moves_scales_copies_and_erases_with_boundary() {
+    let mut s = session();
+    let r = s.execute("mview", &json!({"option": "polygonal", "points": L})).unwrap();
+    let vh = r["viewport"].as_str().unwrap().to_string();
+    let bh_str = r["boundary"].as_str().unwrap().to_string();
+    let b_handle = Handle::parse_hex(&bh_str).unwrap();
+
+    let v0 = viewport(&s, &vh);
+    assert_eq!(v0.clip, Some(b_handle));
+    assert!(v0.center.xy().near(Vec2::new(60.0, 60.0), 1e-9));
+
+    // 1. Move the viewport: boundary moves along with it
+    s.execute("move", &json!({"handles": [vh], "delta": [20, 30]})).unwrap();
+    let v1 = viewport(&s, &vh);
+    assert!(v1.center.xy().near(Vec2::new(80.0, 90.0), 1e-9));
+    let be = s.doc().unwrap().entity(b_handle).unwrap();
+    let EntityKind::LwPolyline(pl) = &be.kind else { panic!("not pline") };
+    // L[0] was [10, 10] -> now [30, 40]
+    assert!(pl.vertices[0].p.near(Vec2::new(30.0, 40.0), 1e-9));
+
+    // 2. Scale the viewport by 2.0 around [80, 90]: boundary scales along with it
+    s.execute("scale", &json!({"handles": [vh], "base": [80, 90], "factor": 2.0})).unwrap();
+    let v2 = viewport(&s, &vh);
+    assert!((v2.width - 200.0).abs() < 1e-9 && (v2.height - 200.0).abs() < 1e-9);
+    assert!(v2.center.xy().near(Vec2::new(80.0, 90.0), 1e-9));
+    let be = s.doc().unwrap().entity(b_handle).unwrap();
+    let EntityKind::LwPolyline(pl) = &be.kind else { panic!("not pline") };
+    // Vertex [30, 40] scaled 2x from [80, 90] becomes [80 + 2*(-50), 90 + 2*(-50)] = [-20, -10]
+    assert!(pl.vertices[0].p.near(Vec2::new(-20.0, -10.0), 1e-9));
+
+    // 3. Move the boundary directly: viewport moves along with it
+    s.execute("move", &json!({"handles": [bh_str], "delta": [10, 10]})).unwrap();
+    let v3 = viewport(&s, &vh);
+    assert!(v3.center.xy().near(Vec2::new(90.0, 100.0), 1e-9));
+
+    // 4. Copy the viewport: a new boundary copy is created and linked
+    let cr = s.execute("copy", &json!({"handles": [vh], "delta": [300, 0]})).unwrap();
+    let new_vh = cr["handles"][0].as_str().unwrap().to_string();
+    let new_v = viewport(&s, &new_vh);
+    assert!(new_v.clip.is_some() && new_v.clip != Some(b_handle));
+    let new_b = new_v.clip.unwrap();
+    assert!(s.doc().unwrap().entity(new_b).is_some());
+    let be_new = s.doc().unwrap().entity(new_b).unwrap();
+    let EntityKind::LwPolyline(pl_new) = &be_new.kind else { panic!("not pline") };
+    assert!(pl_new.vertices[0].p.near(Vec2::new(290.0, 0.0), 1e-9));
+
+    // 5. Erase the boundary of the original viewport: viewport is unclipped (clip = None)
+    s.execute("erase", &json!({"handles": [bh_str]})).unwrap();
+    let v_unclipped = viewport(&s, &vh);
+    assert_eq!(v_unclipped.clip, None);
+    assert!(s.doc().unwrap().entity(b_handle).is_none());
+
+    // 6. Erase the copied viewport: its boundary is erased too
+    s.execute("erase", &json!({"handles": [new_vh]})).unwrap();
+    assert!(s.doc().unwrap().entity(new_b).is_none());
+}

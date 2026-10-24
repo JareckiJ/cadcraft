@@ -11,12 +11,11 @@ use super::attribs::{blocks_with_attdefs, has_attdefs, reference_count, rename_t
 use crate::cmd::curves::KW;
 use crate::cmd::{CommandSpec, bad, bool_or, str_param};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
-
 pub(super) fn battman_spec() -> CommandSpec {
     CommandSpec::new("battman", "Block Attribute Manager...", run)
         .menu(&["Modify", "Object", "Attribute", "Block Attribute Manager..."])
         .params(
-            "{name, action?: \"list\" (default) | \"edit\" | \"remove\" | \"up\" | \"down\" | \"order\" | \"sync\", tag? (the definition to edit, remove or move; any case), newTag?, prompt?, default?, invisible?, constant?, height?, layer?, order?: [every tag, in the new order], sync?: bool (default true: existing references follow, as with ATTSYNC)} → {block, attributes: [{tag, prompt, default, invisible, constant, height, layer}], references, synced?}",
+            "{name, action?: \"list\" (default) | \"edit\" | \"remove\" | \"up\" | \"down\" | \"order\" | \"sync\", tag? (the definition to edit, remove or move; any case), newTag?, prompt?, default?, invisible?, constant?, verify?: bool, preset?: bool, lockPosition?: bool, multiline?: bool, height?, layer?, order?: [every tag, in the new order], sync?: bool (default true: existing references follow, as with ATTSYNC)} → {block, attributes: [{tag, prompt, default, invisible, constant, verify, preset, lockPosition, multiline, height, layer}], references, synced?}",
         )
         .interactive(|s| Ok(Box::new(BattmanM::new(s))))
 }
@@ -29,6 +28,10 @@ struct Change {
     default: Option<String>,
     invisible: Option<bool>,
     constant: Option<bool>,
+    verify: Option<bool>,
+    preset: Option<bool>,
+    lock_position: Option<bool>,
+    multiline: Option<bool>,
     height: Option<f64>,
     layer: Option<String>,
 }
@@ -63,7 +66,27 @@ fn listing(s: &Session, name: &str) -> Result<Value> {
     let atts: Vec<Value> = defs(&b)
         .into_iter()
         .map(|(_, a, layer)| {
-            json!({"tag": a.tag, "prompt": a.prompt, "default": a.text.value, "invisible": a.invisible, "constant": a.constant, "height": a.text.height, "layer": layer})
+            let mut obj = serde_json::Map::new();
+            obj.insert("tag".into(), json!(a.tag));
+            obj.insert("prompt".into(), json!(a.prompt));
+            obj.insert("default".into(), json!(a.text.value));
+            obj.insert("invisible".into(), json!(a.invisible));
+            obj.insert("constant".into(), json!(a.constant));
+            if a.modes.verify {
+                obj.insert("verify".into(), json!(true));
+            }
+            if a.modes.preset {
+                obj.insert("preset".into(), json!(true));
+            }
+            if a.modes.lock_position {
+                obj.insert("lockPosition".into(), json!(true));
+            }
+            if a.multiline.is_some() {
+                obj.insert("multiline".into(), json!(true));
+            }
+            obj.insert("height".into(), json!(a.text.height));
+            obj.insert("layer".into(), json!(layer));
+            Value::Object(obj)
         })
         .collect();
     Ok(json!({ "block": b.name, "attributes": atts, "references": reference_count(s.doc()?, &b.name) }))
@@ -130,8 +153,41 @@ fn edit(s: &mut Session, name: &str, tag: &str, c: &Change) -> Result<String> {
                 if let Some(v) = c.constant {
                     a.constant = v;
                 }
+                if let Some(v) = c.verify {
+                    a.modes.verify = v;
+                }
+                if let Some(v) = c.preset {
+                    a.modes.preset = v;
+                }
+                if let Some(v) = c.lock_position {
+                    a.modes.lock_position = v;
+                }
+                if let Some(ml) = c.multiline {
+                    if ml && a.multiline.is_none() {
+                        let mtext = cadcraft_doc::MText {
+                            insert: a.text.insert,
+                            height: a.text.height,
+                            width: 0.0,
+                            attach: 1,
+                            rotation: a.text.rotation,
+                            style: a.text.style.clone(),
+                            contents: a.text.value.clone(),
+                            line_spacing: 1.0,
+                            line_spacing_exact: false,
+                            columns: None,
+                            background: None,
+                            background_scale: None,
+                        };
+                        a.multiline = Some(cadcraft_doc::MultilineAttrib { mtext, read_as: a.text.value.clone() });
+                    } else if !ml && a.multiline.is_some() {
+                        a.multiline = None;
+                    }
+                }
                 if let Some(v) = c.height {
                     a.text.height = v;
+                    if let Some(m) = &mut a.multiline {
+                        m.mtext.height = v;
+                    }
                 }
                 result = a.tag.clone();
             }
@@ -228,6 +284,10 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 default: opt_str("default"),
                 invisible: opt_bool("invisible"),
                 constant: opt_bool("constant"),
+                verify: opt_bool("verify"),
+                preset: opt_bool("preset"),
+                lock_position: opt_bool("lockPosition").or_else(|| opt_bool("lock_position")),
+                multiline: opt_bool("multiline"),
                 height,
                 layer: opt_str("layer"),
             };

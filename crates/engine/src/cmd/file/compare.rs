@@ -63,13 +63,16 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("compare", "Compare Drawings...", run_compare)
             .menu(&["Tools", "Compare Drawings..."])
             .params(
-                "{path} | {data: base64, name} | {document: index or title} → {other, added: [{handle, type}], removed, \
+                "({path} | {data: base64, name} | {document: index or title}) [, space: \"model\" | layout name | \"all\"] → {other, space, added: [{handle, type}], removed, \
                  changed: [{handle, other, type, what}], counts: {added, removed, changed, common}, regions, truncated, message}",
             )
             .noundo()
             .interactive(|_| Ok(Box::new(CompareM))),
         CommandSpec::new("compare.next", "Next Change", |s, _| step(s, 1)).params("→ {region, of}: zoom to the next area with changes").noundo(),
         CommandSpec::new("compare.previous", "Previous Change", |s, _| step(s, -1)).params("→ {region, of}").noundo(),
+        CommandSpec::new("compareexport", "Export Comparison", run_export)
+            .params("{path?: string} → {other, added, removed, changed, common, regions, path?: string, message}")
+            .noundo(),
         CommandSpec::new("compareclose", "Close Comparison", run_close).params("{}: end the comparison and its overlay").noundo(),
     ]
 }
@@ -309,14 +312,56 @@ fn listed(d: &Drawing, hs: &[Handle]) -> Vec<Value> {
     hs.iter().take(MAX_LISTED).filter_map(|h| d.entity(*h)).map(|e| json!({ "handle": e.handle.hex(), "type": e.kind.type_name() })).collect()
 }
 
+/// Resolve the space or spaces to compare from `{space}` parameter.
+fn resolve_spaces(d: &Drawing, current: &Space, p: &Value) -> Result<Vec<Space>> {
+    let Some(raw) = p.get("space").filter(|v| !v.is_null()) else {
+        return Ok(vec![current.clone()]);
+    };
+    let s = raw.as_str().ok_or_else(|| bad("compare", "`space` must be a string"))?.trim();
+    if s.is_empty() || s.eq_ignore_ascii_case("current") {
+        return Ok(vec![current.clone()]);
+    }
+    if s.eq_ignore_ascii_case("model") {
+        return Ok(vec![Space::Model]);
+    }
+    if s.eq_ignore_ascii_case("all") {
+        let mut spaces = vec![Space::Model];
+        for l in &d.layouts {
+            spaces.push(Space::Paper(l.name.clone()));
+        }
+        return Ok(spaces);
+    }
+    if let Some(l) = d.layouts.iter().find(|l| l.name.eq_ignore_ascii_case(s)) {
+        return Ok(vec![Space::Paper(l.name.clone())]);
+    }
+    Err(bad("compare", format!("no space or layout named \"{s}\"")))
+}
+
 fn run_compare(s: &mut Session, p: &Value) -> Result<Value> {
     let (other, name) = other_drawing(s, p)?;
     let st = s.state()?;
-    let (uid, space, cur) = (st.uid, st.space.clone(), st.doc.clone());
+    let (uid, current_space, cur) = (st.uid, st.space.clone(), st.doc.clone());
     if Arc::ptr_eq(&cur, &other) {
         return Err(bad("compare", "a drawing can't be compared with itself"));
     }
-    let Diff { added, removed, changed, common, truncated } = diff(&cur, &other, &space);
+    let spaces = resolve_spaces(&cur, &current_space, p)?;
+    let is_all = spaces.len() > 1;
+
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+    let mut common = 0;
+    let mut truncated = false;
+
+    for sp in &spaces {
+        let d = diff(&cur, &other, sp);
+        added.extend(d.added);
+        removed.extend(d.removed);
+        changed.extend(d.changed);
+        common += d.common;
+        truncated |= d.truncated;
+    }
+
     let mut boxes = Vec::new();
     let mut bound = |d: &Drawing, h: Handle| {
         if let Some(b) = d.entity(h).map(|e| entity_bounds(d, e, 0)).filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) {
@@ -343,8 +388,16 @@ fn run_compare(s: &mut Session, p: &Value) -> Result<Value> {
             Some(json!({ "handle": a.hex(), "other": b.hex(), "type": x.kind.type_name(), "what": what }))
         })
         .collect();
+    let space_label = if is_all {
+        "all spaces".to_string()
+    } else if let Some(sp) = spaces.first() {
+        sp.tab_name().to_string()
+    } else {
+        "current space".to_string()
+    };
+    let space_suffix = if p.get("space").is_some() || is_all { format!(" ({space_label})") } else { String::new() };
     let message = format!(
-        "Compared with {name}: {} only in this drawing, {} only in {name}, {} changed, {common} the same{}.",
+        "Compared with {name}{space_suffix}: {} only in this drawing, {} only in {name}, {} changed, {common} the same{}.",
         added.len(),
         removed.len(),
         changed.len(),
@@ -352,6 +405,7 @@ fn run_compare(s: &mut Session, p: &Value) -> Result<Value> {
     );
     let out = json!({
         "other": name,
+        "space": space_label,
         "added": listed(&cur, &added),
         "removed": listed(&other, &removed),
         "changed": ch,
@@ -361,7 +415,10 @@ fn run_compare(s: &mut Session, p: &Value) -> Result<Value> {
         "message": message,
     });
     let changed = changed.into_iter().map(|(a, b, _, _)| (a, b)).collect();
-    s.compare = Some(Comparison { uid, space, other_name: name, other, added, removed, changed, common, truncated, regions, at: None });
+    // For overlay, if a single space was chosen, store that space; if "all", use current space so overlay is active
+    let active_compare_space = if !is_all && let Some(sp) = spaces.first() { sp.clone() } else { current_space };
+    s.compare =
+        Some(Comparison { uid, space: active_compare_space, other_name: name, other, added, removed, changed, common, truncated, regions, at: None });
     s.touch();
     Ok(out)
 }
@@ -387,6 +444,36 @@ fn step(s: &mut Session, dir: i64) -> Result<Value> {
     let (p1, p2) = (b.min - Vec2::new(pad, pad), b.max + Vec2::new(pad, pad));
     s.execute("zoom", &json!({ "mode": "window", "p1": [p1.x, p1.y], "p2": [p2.x, p2.y] }))?;
     Ok(json!({ "region": i, "of": n, "message": format!("Change area {} of {n}.", i + 1) }))
+}
+
+fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
+    let uid = s.state()?.uid;
+    let c = s.compare.as_ref().filter(|c| c.uid == uid).ok_or_else(|| bad("compareexport", "no comparison: run COMPARE first"))?;
+    let path = str_param(p, "path");
+    let report = json!({
+        "other": c.other_name,
+        "counts": {
+            "added": c.added.len(),
+            "removed": c.removed.len(),
+            "changed": c.changed.len(),
+            "common": c.common,
+        },
+        "added": c.added.iter().map(|h| h.hex()).collect::<Vec<_>>(),
+        "removed": c.removed.iter().map(|h| h.hex()).collect::<Vec<_>>(),
+        "changed": c.changed.iter().map(|(a, b)| json!({ "this": a.hex(), "other": b.hex() })).collect::<Vec<_>>(),
+        "regions": c.regions.iter().map(|b| json!([[b.min.x, b.min.y], [b.max.x, b.max.y]])).collect::<Vec<_>>(),
+        "truncated": c.truncated,
+        "message": format!(
+            "Comparison report with {}: {} added, {} removed, {} changed, {} common.",
+            c.other_name, c.added.len(), c.removed.len(), c.changed.len(), c.common
+        )
+    });
+    if let Some(target) = path {
+        let text = serde_json::to_string_pretty(&report).map_err(|e| bad("compareexport", format!("failed to serialize report: {e}")))?;
+        std::fs::write(target, text.as_bytes()).map_err(|e| bad("compareexport", format!("{target}: {e}")))?;
+        s.echo(format!("Comparison report exported to \"{target}\"."));
+    }
+    Ok(report)
 }
 
 fn run_close(s: &mut Session, _p: &Value) -> Result<Value> {

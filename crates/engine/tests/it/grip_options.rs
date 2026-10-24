@@ -267,6 +267,32 @@ fn polyline_segment_converts_to_arc_and_back() {
 }
 
 #[test]
+fn polyline_arc_segment_add_vertex_preserves_arc() {
+    let mut s = Session::new();
+    let h = pline(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], false);
+    s.set_selection(vec![h]);
+    let mid = grip_index(&s, h, 5.0, 0.0);
+    s.start_grip_edit(&[(h, mid)]).unwrap();
+    // Convert first segment (0,0)->(10,0) to a semi-circle bulge=-1.0 through (5,5)
+    typed(&mut s, &["V", "5,5"]);
+    let v_before = vertices(&s, h);
+    assert!((v_before[0].1.abs() - 1.0).abs() < 1e-6, "bulge magnitude is 1.0: {}", v_before[0].1);
+
+    // Now add a vertex along this arc segment at (5, 5)
+    let arc_mid = grip_index(&s, h, 5.0, 5.0);
+    s.start_grip_edit(&[(h, arc_mid)]).unwrap();
+    typed(&mut s, &["A", "5,5"]);
+
+    let v_after = vertices(&s, h);
+    assert_eq!(v_after.len(), 4);
+    assert!(near(v_after[1].0, 5.0, 5.0), "new vertex at (5,5): {:?}", v_after[1].0);
+    // Both split segments should retain the arc curvature (bulge ~ -tan(pi/8) ~ -0.4142)
+    let expected_sub_bulge = -(std::f64::consts::FRAC_PI_4 / 2.0).tan(); // -tan(pi/8) ≈ -0.41421356
+    assert!((v_after[0].1 - expected_sub_bulge).abs() < 1e-4, "sub-bulge 1: {}", v_after[0].1);
+    assert!((v_after[1].1 - expected_sub_bulge).abs() < 1e-4, "sub-bulge 2: {}", v_after[1].1);
+}
+
+#[test]
 fn line_and_arc_lengthen_and_radius() {
     let mut s = Session::new();
     let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
@@ -324,4 +350,74 @@ fn grip_option_json_form() {
     ] {
         assert!(s.execute("grip.option", &p).is_err(), "{p}");
     }
+}
+
+#[test]
+fn test_cycling_multifunctional_grip_options() {
+    let mut s = Session::new();
+    let h = pline(&mut s, &[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], false);
+    s.set_selection(vec![h]);
+    // Grip 0 on polyline has Add Vertex and Remove Vertex
+    s.start_grip_edit(&[(h, 0)]).unwrap();
+    assert!(s.prompt_text().contains("** STRETCH **"));
+
+    // Next cycles into the first action: Add Vertex
+    typed(&mut s, &["Next"]);
+    assert!(s.prompt_text().contains("** ADD VERTEX **"));
+
+    // Next from Add Vertex cycles to Remove Vertex (which removes the vertex immediately)
+    typed(&mut s, &["Next"]);
+    assert_eq!(vertices(&s, h).len(), 2);
+    assert!(s.running.is_none());
+
+    // Line end grip has Lengthen
+    let mut s2 = Session::new();
+    let l = line(&mut s2, [0.0, 0.0], [10.0, 0.0]);
+    s2.set_selection(vec![l]);
+    s2.start_grip_edit(&[(l, 2)]).unwrap();
+    assert!(s2.prompt_text().contains("** STRETCH **"));
+
+    typed(&mut s2, &["Next"]);
+    assert!(s2.prompt_text().contains("** LENGTHEN **"));
+
+    // Next from Lengthen cycles back to STRETCH mode
+    typed(&mut s2, &["Next"]);
+    assert!(s2.prompt_text().contains("** STRETCH **"));
+}
+
+#[test]
+fn test_mleader_multifunctional_grips() {
+    let mut s = Session::new();
+    let res = s.execute("mleader", &json!({ "points": [[0.0, 0.0], [5.0, 5.0]], "text": "Note" })).unwrap();
+    let h = Handle::parse_hex(res.get("handle").and_then(|v| v.as_str()).unwrap()).unwrap();
+    s.set_selection(vec![h]);
+
+    // Grip 0 is the arrowhead; grip 1 is the landing.
+    // Check grip_actions on arrowhead: Add Leader
+    let e = s.doc().unwrap().entity(h).unwrap().clone();
+    assert_eq!(cadcraft_engine::grips::grip_actions(&e.kind, 0), vec![cadcraft_engine::grips::GripAction::AddLeader]);
+    assert_eq!(cadcraft_engine::grips::grip_actions(&e.kind, 1), vec![cadcraft_engine::grips::GripAction::AddLeader]);
+
+    // Use grip.option to Add Leader
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": 0, "option": "addLeader", "to": [0.0, 10.0] })).unwrap();
+    let m = match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::MLeader(m) => m.clone(),
+        _ => panic!("expected mleader"),
+    };
+    assert_eq!(m.leaders.len(), 2);
+
+    // Now with 2 leaders, grip_actions on an arrowhead offers Add Leader and Remove Leader
+    let e = s.doc().unwrap().entity(h).unwrap().clone();
+    assert_eq!(
+        cadcraft_engine::grips::grip_actions(&e.kind, 0),
+        vec![cadcraft_engine::grips::GripAction::AddLeader, cadcraft_engine::grips::GripAction::RemoveLeader]
+    );
+
+    // Remove Leader option
+    s.execute("grip.option", &json!({ "handle": h.hex(), "index": 0, "option": "removeLeader" })).unwrap();
+    let m = match &s.doc().unwrap().entity(h).unwrap().kind {
+        EntityKind::MLeader(m) => m.clone(),
+        _ => panic!("expected mleader"),
+    };
+    assert_eq!(m.leaders.len(), 1);
 }

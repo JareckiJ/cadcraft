@@ -20,8 +20,11 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("matchprop", "Match Properties", matchprop::run_matchprop)
             .menu(&["Modify", "Match Properties"])
             .alias(&["ma", "painter"])
-            .params("{source, targets?: [hex] (default: selection), properties?: [name] | {name: bool} (default: all; names: color, layer, linetype, ltscale, lineweight, transparency, thickness, plotStyle, dimension, text, hatch, polyline, viewport, table, multileader)} → {changed}")
+            .params("{source, targets?: [hex] (default: selection), properties?: [name] | {name: bool} (default: active settings; names: color, layer, linetype, ltscale, lineweight, transparency, thickness, plotStyle, material, shadow, dimension, text, hatch, polyline, viewport, table, multileader, center)} → {changed}")
             .interactive(|_| Ok(Box::new(matchprop::MatchPropM::new()))),
+        CommandSpec::new("matchprop.settings", "Match Properties Settings", matchprop::run_matchprop_settings)
+            .params("{properties?: [name] | {name: bool}} → current settings")
+            .noundo(),
         CommandSpec::new("color", "Color...", run_color).menu(&["Format", "Color..."]).alias(&["col", "colour"]).params("{color: \"ByLayer\" | \"red\" | 1..255 | \"r,g,b\"}"),
         CommandSpec::new("linetype", "Linetype...", run_linetype).menu(&["Format", "Linetype..."]).alias(&["lt", "ltype"]).params("{current?: name, load?: name | \"*\" (with a file: comma-separated names, wildcards), file?: path to a .lin file | text?: its contents, reload?: bool}"),
         CommandSpec::new("hatch.patterns", "Hatch Patterns", super::hatch::run_patterns)
@@ -67,7 +70,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("rename", "Rename...", run_rename)
             .menu(&["Format", "Rename..."])
             .alias(&["ren", "-rename"])
-            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs, from, to}")
+            .params("{table: layer|linetype|style|dimstyle|block|mleaderstyle|tablestyle|view|ucs|vport|plotstyle|material, from, to}")
             .interactive(|_| Ok(Box::new(rename::RenameM::default()))),
     ]
 }
@@ -669,6 +672,7 @@ fn run_style_rename(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let st = d.text_styles.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&from)).ok_or_else(|| bad("style.rename", "no such style"))?;
     st.name = to.clone();
+    d.rename_foreign_record("STYLE", &from, &to);
     // References follow the new name.
     let fix = |n: &mut String| {
         if n.eq_ignore_ascii_case(&from) {
@@ -851,6 +855,7 @@ fn run_dimstyle_rename(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let st = d.dim_styles.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&from)).ok_or_else(|| bad("dimstyle.rename", "no such dimension style"))?;
     st.name = to.clone();
+    d.rename_foreign_record("DIMSTYLE", &from, &to);
     if d.header.str("DIMSTYLE", "Standard").eq_ignore_ascii_case(&from) {
         d.header.set_str("DIMSTYLE", &to);
     }
@@ -1014,6 +1019,33 @@ fn run_mleaderstyle(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(a) = p.get("annotative").and_then(Value::as_bool) {
                 st.annotative = a;
             }
+            if let Some(lt) = p.get("leaderType") {
+                if let Some(s) = lt.as_str() {
+                    match s.to_ascii_lowercase().as_str() {
+                        "none" => st.leader_type = 0,
+                        "straight" => st.leader_type = 1,
+                        "spline" => st.leader_type = 2,
+                        _ => {}
+                    }
+                } else if let Some(n) = lt.as_u64() {
+                    st.leader_type = (n as u8).min(2);
+                }
+            }
+            if let Some(ct) = p.get("contentType") {
+                if let Some(s) = ct.as_str() {
+                    match s.to_ascii_lowercase().as_str() {
+                        "none" => st.content_type = 0,
+                        "mtext" => st.content_type = 1,
+                        "block" => st.content_type = 2,
+                        _ => {}
+                    }
+                } else if let Some(n) = ct.as_u64() {
+                    st.content_type = (n as u8).min(2);
+                }
+            }
+            if let Some(b) = str_param(p, "block") {
+                st.block_name = b.to_string();
+            }
         }
         if bool_or(p, "current", true) {
             d.header.set_str("CMLEADERSTYLE", name);
@@ -1069,6 +1101,7 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let st = d.linetypes.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&from)).ok_or_else(|| bad("rename", "no such linetype"))?;
             st.name = to.clone();
+            d.rename_foreign_record("LTYPE", &from, &to);
             // References follow the new name.
             let fix = |n: &mut String| {
                 if n.eq_ignore_ascii_case(&from) {
@@ -1097,6 +1130,9 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        "vport" | "vports" | "viewport" => rename::vport(s, &from, &to)?,
+        "plotstyle" => rename::plotstyle(s, &from, &to)?,
+        "material" => rename::material(s, &from, &to)?,
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()

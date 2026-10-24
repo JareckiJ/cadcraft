@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Bounds2, EPS, PI, TAU, Vec2, angle_in_sweep, arc_segments, ccw_sweep, norm_angle};
+use crate::{Bounds2, EPS, Mat3, PI, TAU, Vec2, angle_in_sweep, arc_segments, ccw_sweep, norm_angle};
 
 /// A straight segment.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -408,6 +408,71 @@ impl Segment {
             }
         }
     }
+    /// Transform the segment by affine matrix `m`.
+    pub fn transformed(&self, m: &Mat3) -> Segment {
+        match *self {
+            Segment::Line(l) => Segment::Line(Line { a: m.apply(l.a), b: m.apply(l.b) }),
+            Segment::Arc { arc, ccw } => {
+                let center = m.apply(arc.center);
+                let sp = m.apply(arc.start_point());
+                let ep = m.apply(arc.end_point());
+                let radius = sp.dist(center);
+                let start = norm_angle(center.angle_to(sp));
+                let end = norm_angle(center.angle_to(ep));
+                let new_ccw = if m.det() < 0.0 { !ccw } else { ccw };
+                Segment::Arc { arc: Arc::new(center, radius, start, end), ccw: new_ccw }
+            }
+        }
+    }
+    /// Transform this segment in place.
+    pub fn transform(&mut self, m: &Mat3) {
+        *self = self.transformed(m);
+    }
+}
+
+/// Point and unit tangent at arc length `d` along a slice of segments.
+pub fn segments_at_length(segs: &[Segment], d: f64) -> Option<(Vec2, Vec2)> {
+    let mut acc = 0.0;
+    for s in segs {
+        let l = s.len();
+        if d <= acc + l + 1e-12 && l > 0.0 {
+            let t = ((d - acc) / l).clamp(0.0, 1.0);
+            return Some((s.at(t), s.tangent(t)));
+        }
+        acc += l;
+    }
+    segs.last().map(|s| (s.end(), s.tangent(1.0)))
+}
+
+/// Arc length along segments of the point closest to `p`.
+pub fn segments_length_of(segs: &[Segment], p: Vec2) -> f64 {
+    let mut acc = 0.0;
+    let mut best = (f64::INFINITY, 0.0);
+    for s in segs {
+        let c = s.closest(p);
+        let dd = c.dist(p);
+        if dd < best.0 {
+            let seg_param = match s {
+                Segment::Line(l) => {
+                    let len = l.len();
+                    if len > EPS { ((c - l.a).dot(l.dir()) / len).clamp(0.0, 1.0) } else { 0.0 }
+                }
+                Segment::Arc { arc, ccw } => {
+                    let a = arc.center.angle_to(c);
+                    let sw = arc.sweep();
+                    if sw > EPS {
+                        let param = norm_angle(a - arc.start) / sw;
+                        if *ccw { param.clamp(0.0, 1.0) } else { (1.0 - param).clamp(0.0, 1.0) }
+                    } else {
+                        0.0
+                    }
+                }
+            };
+            best = (dd, acc + seg_param * s.len());
+        }
+        acc += s.len();
+    }
+    best.1
 }
 
 /// A polyline vertex: position, bulge to the next vertex (tan(θ/4)), and optional widths.

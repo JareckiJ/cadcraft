@@ -6,6 +6,7 @@ mod annotate;
 mod array;
 mod audit;
 pub(crate) mod blocks;
+pub(crate) mod clip;
 pub mod clipboard;
 pub mod constraints;
 mod draw;
@@ -34,6 +35,9 @@ mod props;
 pub use draw2::breakline::BreaklineOptions;
 pub use props::MatchProps;
 pub(crate) use props::set_current_color_value;
+pub(crate) mod face3d;
+pub(crate) mod modeling3d;
+pub(crate) mod ops3d;
 mod qselect;
 mod selecttools;
 mod settings;
@@ -43,8 +47,10 @@ mod tolerance;
 mod trimextend;
 mod txt2mtxt;
 pub use txt2mtxt::Txt2MtxtOptions;
+pub(crate) mod ucs;
 mod utility;
 mod view;
+pub(crate) mod views3d;
 
 pub mod curves;
 pub mod helpers;
@@ -207,6 +213,12 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(txt2mtxt::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
+        v.extend(ucs::specs());
+        v.extend(views3d::specs());
+        v.extend(ops3d::specs());
+        v.extend(face3d::specs());
+        v.extend(modeling3d::specs());
+        v.extend(clip::specs());
         v
     })
 }

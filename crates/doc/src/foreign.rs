@@ -93,4 +93,22 @@ impl Foreign {
     pub fn data_store_entities(&self) -> std::collections::BTreeSet<Handle> {
         self.data_store.iter().filter(|t| t.code == 320).filter_map(|t| Handle::parse_hex(t.value.trim())).collect()
     }
+
+    /// Update foreign record keys and targets when a table record, table or block is renamed,
+    /// so the renamed item preserves its extension dictionary, xdata and persistent reactors.
+    pub fn rename_record(&mut self, kind: &str, from: &str, to: &str) {
+        let from_key = (kind.to_ascii_uppercase(), from.to_ascii_uppercase());
+        let to_key = (kind.to_ascii_uppercase(), to.to_ascii_uppercase());
+        if from_key == to_key {
+            return;
+        }
+        if let Some(extra) = self.records.remove(&from_key) {
+            self.records.insert(to_key.clone(), extra);
+        }
+        for target in self.targets.values_mut() {
+            if *target == from_key {
+                *target = to_key.clone();
+            }
+        }
+    }
 }

@@ -5,8 +5,10 @@
 # Empty context = ordinary label; @plural = one|few|many forms with {n}.
 # Keep command IDs, keywords, technology/product names and user data unchanged.
 # External References palette (#525).
+	(move to end)	(перемістити в кінець)
 	Apply	Застосувати
 	Attach DWG...	Приєднати DWG...
+	Before layout:	Перед аркушем:
 	Bind	Вбудувати
 	Detach	Від'єднати
 	Loaded	Завантажено
@@ -137,7 +139,9 @@
 	Clear History	Очистити журнал
 	Clear	Очистити
 	Clip	Обрізати
+	Clip Image	Обрізати зображення
 	Clip Viewport	Обрізати видовий екран
+	Clip Xref	Обрізати зовнішнє посилання
 	Clipboard	Буфер обміну
 	Close	Закрити
 	Close All	Закрити всі
@@ -185,6 +189,7 @@
 	Count List	Список підрахунку
 	Count Table	Таблиця підрахунку
 	Create Block	Створити блок
+	Create a copy	Створити копію
 	Creates a user parameter	Створює параметр користувача
 	Ctrl+Enter to finish	Ctrl+Enter для завершення
 	Current layer	Поточний шар
@@ -237,6 +242,7 @@
 	Dimensional Constraint Parameters	Параметри розмірних обмежень
 	Dimensional Constraints	Розмірні обмеження
 	Disassociate Dimensions	Скасувати асоціативність розмірів
+	Discard	Відхилити
 	Display name	Відображуване ім'я
 	Distance	Відстань
 	Divide	Поділити
@@ -265,6 +271,7 @@
 	Edit	Редагування
 	Edit Attributes...	Редагувати атрибути...
 	Edit Text...	Редагувати текст...
+	Edit Tolerance	Редагувати допуск
 	Edit Table Cell	Редагувати комірку таблиці
 	Elevation	Відмітка
 	Ellipse	Еліпс
@@ -329,6 +336,7 @@
 	Explode	Розчленувати
 	Explode Attributes to Text	Розчленувати атрибути в текст
 	Export	Експортувати
+	Export Comparison	Експортувати порівняння
 	Export Table	Експортувати таблицю
 	Export to PDF...	Експортувати в PDF...
 	Express Tools	Інструменти Express
@@ -365,6 +373,7 @@
 	Geometric Center	Геометричний центр
 	Geometric Constraint	Геометричне обмеження
 	Geometric Constraints	Геометричні обмеження
+	Geometric Tolerance	Геометричний допуск
 	Geometry	Геометрія
 	Get from the Drawing	Взяти з креслення
 	Get Variable	Отримати змінну
@@ -410,6 +419,7 @@
 	HorizontalDistance	Горизонтальна відстань
 	How to apply:	Спосіб застосування:
 	ID Point	Координати точки
+	Image	Зображення
 	Import	Імпортувати
 	Align Multileaders	Вирівняти мультивиноски
 	Collect	Зібрати
@@ -523,6 +533,7 @@
 	Make...	Створити...
 	Match Layer	Узгодити шар
 	Match Properties	Копіювати властивості
+	Match Properties Settings	Налаштування копіювання властивостей
 	Measure	Розмітити
 	Measure Distance	Виміряти відстань
 	Measure Geometry	Виміряти геометрію
@@ -537,6 +548,8 @@
 	Models	Моделі
 	Modify	Модифікація
 	Move	Перемістити
+	Move or Copy	Перемістити або копіювати
+	Move or Copy...	Перемістити або копіювати...
 	Move/Copy/Rotate	Перемістити/Копіювати/Повернути
 	Multileader	Мультивиноска
 	Multileader Style...	Стиль мультивиносок...
@@ -705,6 +718,7 @@
 	Query Entities	Запит об'єктів
 	Quick	Швидкий
 	Quick Dimension	Швидкий розмір
+	Quick Leader	Швидка виноска
 	Quick Properties	Швидкі властивості
 	Quick Select	Швидкий вибір
 	Quick Select Properties	Властивості швидкого вибору
@@ -745,6 +759,7 @@
 	Rename Layer	Перейменувати шар
 	Rename Layer State	Перейменувати стан шарів
 	Rename Layout	Перейменувати аркуш
+	Reorder Layout	Змінити порядок аркушів
 	Rename Text Style	Перейменувати текстовий стиль
 	Rename...	Перейменувати...
 	Repeat {command}	Повторити {command}
@@ -773,6 +788,7 @@
 	Select	Вибрати
 	Select 2D polyline	Виберіть 2D-полілінію
 	Select All	Вибрати все
+	Select All Layouts	Вибрати всі аркуші
 	Select Objects	Вибрати об'єкти
 	Select Similar	Вибрати подібні
 	Select a 2D polyline.	Виберіть 2D-полілінію.
@@ -973,6 +989,11 @@
 	Object snap marker size	Розмір маркера об'єктної прив'язки
 	Objects on locked layers	Об'єкти на заблокованих шарах
 	Open and Save	Відкриття та збереження
+	AutoSnap	АвтоПрив'язка
+	AutoSnap magnet (jump cursor to snap point)	Магніт АвтоПрив'язки (прив'язати курсор до точки)
+	Display AutoSnap marker	Показувати маркер АвтоПрив'язки
+	Display AutoSnap tooltip	Показувати підказку АвтоПрив'язки
+	Display polar / tracking tooltips	Показувати підказки полярного/об'єктного стеження
 	Options	Параметри
 	Options...	Параметри...
 	Pickbox size	Розмір прицілу вибору
@@ -1103,6 +1124,7 @@
 	To	До
 	Toggle PICKADD (off: each pick replaces the selection)	Перемкнути PICKADD (вимкнено: кожен вибір замінює набір вибраних об'єктів)
 	Toggle PICKADD (on: picks add to the selection)	Перемкнути PICKADD (увімкнено: вибране додається до набору вибраних об'єктів)
+	Toggle Object Isolation	Перемкнути ізоляцію об'єктів
 	TOP	ЗВЕРХУ
 	Table	Таблиця
 	Table Breaks	Розриви таблиці
@@ -1197,6 +1219,7 @@
 	Workspace Switching	Перемикання робочого простору
 	Write Block	Записати блок у файл
 	Xline	Допоміжна пряма
+	Xref	Зовнішнє посилання
 	Yellow	Жовтий
 	Yes	Так
 	Zoom	Масштабування виду
@@ -1311,7 +1334,13 @@
 	Boundaries	Контури
 	Add: Pick points	Додати: вказати точки
 	Add: Select objects	Додати: вибрати об'єкти
+	Add boundaries	Додати контури
+	Remove boundaries	Видалити контури
 	Boundaries picked: {n}	Вибрано контурів: {n}
+	Boundaries to add: {n}	Контурів для додавання: {n}
+	Boundaries to remove: {n}	Контурів для видалення: {n}
+	Inherit Properties	Успадкувати властивості
+	No boundary points or objects selected	Не вибрано точок або об'єктів контуру
 	Select boundaries to remove	Виберіть контури для видалення
 	Island	Острів
 	Associative	Асоціативне
@@ -1346,6 +1375,91 @@
 	Justify	За шириною
 	Text color	Колір тексту
 	Click the ruler to add a tab stop, right-click to remove one	Натисніть на лінійку, щоб додати табуляцію; права кнопка видаляє її
+# User Coordinate System (UCS) and 3D Views (#F24, #M11).
+	3 Point	3 точки
+	3D Views	3D-види
+	Current UCS	Поточна СКК
+	Named UCS	Іменована СКК
+	Named UCS...	Іменовані СКК...
+	New UCS	Нова СКК
+	Origin	Початок координат
+	Plan View	Вид у плані
+	UCS	СКК
+	World	Світова
+	World UCS	Світова СКК
+	X	X
+	Y	Y
+	Z	Z
+	Z Axis Vector	Вектор осі Z
+# 3D Preset Views and Visual Styles (#F24, #M11).
+	2D Wireframe	2D-каркас
+	Back	Ззаду
+	Bottom	Знизу
+	Conceptual	Концептуальний
+	Front	Спереду
+	Hidden	Приховані лінії
+	NE Isometric	Пн-Сх ізометрія
+	NW Isometric	Пн-Зх ізометрія
+	Realistic	Реалістичний
+	SE Isometric	Пд-Сх ізометрія
+	SW Isometric	Пд-Зх ізометрія
+	Shaded	Тонований
+	Shaded with Edges	Тонований із ребрами
+	Shades of Gray	Відтінки сірого
+	Sketchy	Ескізний
+	Top	Зверху
+	Viewpoint	Точка огляду
+	Visual Styles	Візуальні стилі
+	Wireframe	Каркас
+	X-Ray	Рентген
+# 3D-операції
+	3D Move	3D-переміщення
+	3D Rotate	3D-обертання
+	3D Align	3D-вирівнювання
+	3D Mirror	3D-дзеркало
+	3D Array	3D-масив
+	3D Modeling	3D-моделювання
+	Meshes	Сітки
+	Hide	Приховати
+	Adjust Distance	Налаштувати відстань
+	Camera	Камера
+	Constrained Orbit	Обмежена орбіта
+	Convert to Solid	Перетворити на тіло
+	Convert to Surface	Перетворити на поверхню
+	Extract Edges	Видобути ребра
+	Extract Isolines	Видобути ізолінії
+	Face	Грань
+	Free Orbit	Вільна орбіта
+	Interference Checking	Перевірка перетинів
+	Lights	Джерела світла
+	MPolygon	MPolygon
+	Meshes, Edge Surface	Сітки, поверхня з'єднання країв
+	Meshes, Revolved Surface	Сітки, поверхня обертання
+	Meshes, Ruled Surface	Сітки, лінійчата поверхня
+	Meshes, Tabulated Surface	Сітки, зсувна поверхня
+	Polysolid	Полісолід
+	Properties...	Властивості...
+	Section Plane	Площина перерізу
+	Settings	Налаштування
+	Slice	Переріз
+	Smooth Mesh	Згладжена сітка
+	Swivel	Поворот
+	Thicken	Потовщення
+	Wedge	Клин
+	Crosshair color	Колір перехрестя
+	Snap marker color	Колір маркера прив'язки
+	Grip color	Колір ручок
+	Right-Click Customization	Налаштування правої кнопки миші
+	Right-Click Customization...	Налаштування правої кнопки миші...
+	Time-Sensitive Right-Click	Контекстне клацання за часом
+	Turn on time-sensitive right-click	Увімкнути контекстне клацання за часом
+	Quick click (< 250 ms) equals Enter. Longer click (>= 250 ms) displays Shortcut menu.	Швидке клацання (< 250 мс) діє як Enter. Довге клацання (>= 250 мс) відкриває контекстне меню.
+	Command and Edit Modes	Режими команд і редагування
+	When a command is in progress, right-click means:	Під час виконання команди права кнопка означає:
+	ENTER (holding opens Shortcut menu)	ENTER (утримування відкриває контекстне меню)
+	Shortcut menu always	Завжди контекстне меню
+	Export Profile...	Експортувати профіль...
+	Import Profile...	Імпортувати профіль...
 	Select using two clicks only	Вибирати лише двома клацаннями
 	Define each corner of the selection window with a separate click.	Задайте кожен кут рамки вибору окремим клацанням.
 	Type an alias name.	Введіть назву псевдоніма.
@@ -1362,6 +1476,5 @@
 	Add…	Додати…
 	Edit…	Змінити…
 	Save alias	Зберегти псевдонім
-	Discard	Скасувати зміни
 	Customize	Налаштування інтерфейсу
 	Edit Command Aliases (PGP)...	Редагувати псевдоніми команд (PGP)...

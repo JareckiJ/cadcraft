@@ -2,7 +2,8 @@
 
 use cadcraft_color::Color;
 use cadcraft_geom::{
-    Arc as GArc, Bounds2, Circle as GCircle, Ellipse as GEllipse, Line as GLine, Mat3, PolyVertex, Polyline, Segment, Spline as GSpline, Vec2, Vec3,
+    Arc as GArc, Bounds2, Circle as GCircle, Ellipse as GEllipse, Line as GLine, Mat3, Mat4, PolyVertex, Polyline, Segment, Spline as GSpline, Vec2,
+    Vec3,
 };
 use serde::{Deserialize, Serialize};
 
@@ -280,6 +281,12 @@ pub struct MText {
     /// one column.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub columns: Option<MTextColumns>,
+    /// Background fill colour (DXF 90/63/420); `None` when background fill is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<cadcraft_color::Color>,
+    /// Fill box scale (DXF 45); 1.5 default when background fill is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_scale: Option<f64>,
 }
 fn attach_tl() -> u8 {
     1
@@ -494,6 +501,43 @@ pub struct Insert {
     pub col_spacing: f64,
     #[serde(default)]
     pub row_spacing: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipBoundary>,
+}
+
+/// A 2D clipping boundary for block references and xrefs (XCLIP).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipBoundary {
+    /// 2D boundary vertices in the block reference's coordinate space.
+    pub points: Vec<Vec2>,
+    /// Whether the clipping boundary is active (default true).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Invert clipping boundary: show outside, cut inside (default false).
+    #[serde(default)]
+    pub inverted: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Insert {
+    fn default() -> Self {
+        Insert {
+            block: String::new(),
+            insert: Vec3::ZERO,
+            scale: unit_scale(),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+            clip: None,
+        }
+    }
 }
 fn unit_scale() -> Vec3 {
     Vec3::new(1.0, 1.0, 1.0)
@@ -1377,6 +1421,145 @@ impl EntityKind {
                 // Like text with MIRRTEXT = 0: a mirrored frame keeps reading left to right.
                 let a = if mirror { t.rotation() } else { t.rotation() + rot };
                 t.dir = Vec2::from_angle(cadcraft_geom::norm_angle(a)).to3(0.0);
+            }
+            EntityKind::Unknown(_) => {}
+        }
+    }
+
+    /// Apply a 3D affine transform (translation, rotation, scale, mirror, alignment).
+    pub fn transform3d(&mut self, m: &Mat4) {
+        let t3 = |p: &mut Vec3| {
+            *p = m.apply(*p);
+        };
+        let t_dir = |d: &mut Vec3| {
+            let p0 = m.apply(Vec3::ZERO);
+            let p1 = m.apply(*d);
+            let v = p1 - p0;
+            if v.len() > 1e-12 {
+                *d = v.normalized();
+            }
+        };
+        match self {
+            EntityKind::Line(l) => {
+                t3(&mut l.a);
+                t3(&mut l.b);
+            }
+            EntityKind::Point(p) => t3(&mut p.p),
+            EntityKind::Face3d(f) => f.corners.iter_mut().for_each(t3),
+            EntityKind::Polyline3d(p) => p.points.iter_mut().for_each(t3),
+            EntityKind::Solid(s) | EntityKind::Trace(s) => s.corners.iter_mut().for_each(t3),
+            EntityKind::Ray(r) | EntityKind::XLine(r) => {
+                t3(&mut r.base);
+                t_dir(&mut r.dir);
+            }
+            EntityKind::Circle(c) => {
+                let p_rim = c.center + Vec3::new(c.radius, 0.0, 0.0);
+                t3(&mut c.center);
+                let p_rim_t = m.apply(p_rim);
+                let new_r = (p_rim_t - c.center).len();
+                if new_r > 1e-12 {
+                    c.radius = new_r;
+                }
+            }
+            EntityKind::Arc(a) => {
+                let p_rim = a.center + Vec3::new(a.radius, 0.0, 0.0);
+                t3(&mut a.center);
+                let p_rim_t = m.apply(p_rim);
+                let new_r = (p_rim_t - a.center).len();
+                if new_r > 1e-12 {
+                    a.radius = new_r;
+                }
+            }
+            EntityKind::Insert(i) => {
+                t3(&mut i.insert);
+            }
+            EntityKind::Text(t) => {
+                t3(&mut t.insert);
+            }
+            EntityKind::MText(t) => {
+                t3(&mut t.insert);
+            }
+            EntityKind::AttDef(a) => {
+                t3(&mut a.text.insert);
+            }
+            EntityKind::Dimension(d) => {
+                for p in [&mut d.defpt, &mut d.text_mid, &mut d.p13, &mut d.p14, &mut d.p15, &mut d.p16] {
+                    t3(p);
+                }
+                d.block = None;
+            }
+            EntityKind::Leader(l) => l.vertices.iter_mut().for_each(t3),
+            EntityKind::MLeader(ml) => {
+                for l in &mut ml.leaders {
+                    l.iter_mut().for_each(t3);
+                }
+                t3(&mut ml.landing);
+                if let Some(t) = &mut ml.text {
+                    t3(&mut t.insert);
+                }
+            }
+            EntityKind::Helix(h) => {
+                t3(&mut h.center);
+            }
+            EntityKind::LwPolyline(p) => {
+                for v in &mut p.vertices {
+                    let v3 = m.apply(Vec3::new(v.p.x, v.p.y, p.elevation));
+                    v.p = v3.xy();
+                }
+                let elev3 = m.apply(Vec3::new(0.0, 0.0, p.elevation));
+                p.elevation = elev3.z;
+            }
+            EntityKind::Hatch(h) => {
+                for l in &mut h.loops {
+                    for v in &mut l.vertices {
+                        let v3 = m.apply(Vec3::new(v.p.x, v.p.y, h.elevation));
+                        v.p = v3.xy();
+                    }
+                }
+                let orig = m.apply(Vec3::new(h.origin.x, h.origin.y, h.elevation));
+                h.origin = orig.xy();
+                h.elevation = orig.z;
+            }
+            EntityKind::Region(r) => {
+                for v in r.loops.iter_mut().flat_map(|l| l.vertices.iter_mut()) {
+                    let v3 = m.apply(Vec3::new(v.p.x, v.p.y, 0.0));
+                    v.p = v3.xy();
+                }
+            }
+            EntityKind::Viewport(v) => {
+                t3(&mut v.center);
+            }
+            EntityKind::Image(i) => {
+                t3(&mut i.insert);
+                t_dir(&mut i.u);
+                t_dir(&mut i.v);
+            }
+            EntityKind::Wipeout(w) => {
+                for p in &mut w.boundary {
+                    let p3 = m.apply(Vec3::new(p.x, p.y, 0.0));
+                    *p = p3.xy();
+                }
+            }
+            EntityKind::Table(t) => {
+                t3(&mut t.insert);
+            }
+            EntityKind::Tolerance(t) => {
+                t3(&mut t.insert);
+            }
+            EntityKind::MLine(ml) => {
+                ml.vertices.iter_mut().for_each(|v| t3(&mut v.p));
+            }
+            EntityKind::Spline(sp) => {
+                for cp in &mut sp.control {
+                    let p3 = m.apply(Vec3::new(cp.x, cp.y, 0.0));
+                    *cp = p3.xy();
+                }
+            }
+            EntityKind::Ellipse(e) => {
+                t3(&mut e.center);
+                let p_maj = e.center + e.major;
+                let p_maj_t = m.apply(p_maj);
+                e.major = p_maj_t - e.center;
             }
             EntityKind::Unknown(_) => {}
         }

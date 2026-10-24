@@ -202,6 +202,7 @@ fn insert_entity(blk: &Block, at: Vec2, scale: Vec2, rotation: f64, base: Option
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     };
     if let Some(b) = base {
         let landed = ins.transform(blk.base.xy()).apply(b);
@@ -371,6 +372,11 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     for mut e in ents {
         e.handle = d.new_handle();
         d.model.push(e);
+    }
+    if let Some(name) = str_param(p, "name")
+        && crate::blockedit::has_dynamic_data(src, name)
+    {
+        cadcraft_doc::dynblock::export_dynamic_block_to_model_space(&mut d, src, name);
     }
     let hooks = super::file::io().ok_or_else(|| bad("wblock", "file formats are not available in this build"))?;
     let bytes = (hooks.write)(&d, &path).map_err(|e| bad("wblock", e))?;

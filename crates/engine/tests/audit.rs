@@ -24,6 +24,7 @@ fn insert(block: &str) -> EntityKind {
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     })
 }
 
@@ -325,6 +326,5 @@ fn auditctl_generates_adt_report_file() {
     let content = std::fs::read_to_string(&adt_path).unwrap();
     assert!(content.contains("Audit of drawing:"), "{content}");
     assert!(content.contains("Audit: 0 errors found"), "{content}");
-
     let _ = std::fs::remove_dir_all(&dir);
 }

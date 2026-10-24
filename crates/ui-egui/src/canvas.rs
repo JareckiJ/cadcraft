@@ -100,12 +100,16 @@ pub struct CanvasState {
     /// Hot grips (object, grip index): the ones Shift+clicked while idle, then the ones the
     /// running GRIP edit works on (the engine's grip modes take them from there).
     pub hot_grips: Vec<(Handle, usize)>,
+    /// Hot group-centre grips (group indices from `selected_groups()`): Shift+clicked ones.
+    pub hot_group_grips: Vec<usize>,
     /// Grip dimensional input: the value fields of the grip being stretched.
     pub grip_dyn: crate::grip_dyn::GripDyn,
     /// A GRIP edit was running last frame (its grips go cold when it ends).
     grip_editing: bool,
-    /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click opened.
+    /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click or hover opened.
     grip_menu: Option<(Handle, usize)>,
+    /// Hover tracking for opening grip menu on pause over a multifunctional grip.
+    grip_hover: Option<((Handle, usize), f64)>,
     /// Dynamic block grips of the selection (cached), the one being dragged, and the list grip
     /// whose choices are open (and whether it opened this frame).
     pub(crate) dyn_grips: crate::dyngrips::Cache,
@@ -121,6 +125,8 @@ pub struct CanvasState {
     pub param: crate::parametric::Cache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
+    /// A lasso selection opened by a press-and-drag.
+    drag_lasso: bool,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -1173,67 +1179,70 @@ fn selection_area_fill(s: &cadcraft_engine::Settings, crossing: bool) -> Option<
     s.selectionarea.then(|| Color32::from_rgb(c.0, c.1, c.2).gamma_multiply(f32::from(s.selectionareaopacity.min(100)) / 100.0))
 }
 
-fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit) {
+fn draw_snap_marker(p: &egui::Painter, at: Pos2, hit: &SnapHit, marker: bool, tooltip_on: bool) {
     let t = Tokens::get();
     let s = crate::theme::snap_marker_half();
     let st = Stroke::new(2.0, t.snap);
     use snap::mode;
-    match hit.mode {
-        mode::END => {
-            p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
-        }
-        mode::MID => {
-            p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, s * 0.8), at + vec2(-s, s * 0.8)], st));
-        }
-        mode::CEN | mode::GCEN => {
-            p.circle_stroke(at, s, st);
-        }
-        mode::QUA => {
-            p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, 0.0), at + vec2(0.0, s), at + vec2(-s, 0.0)], st));
-        }
-        mode::INT | mode::APP => {
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
-            p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
-            if hit.mode == mode::APP {
+    if marker {
+        match hit.mode {
+            mode::END => {
                 p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
             }
-        }
-        mode::PER => {
-            p.line(vec![at + vec2(-s, -s), at + vec2(-s, s), at + vec2(s, s)], st);
-            p.line(vec![at + vec2(-s, 0.0), at + vec2(0.0, 0.0), at + vec2(0.0, s)], st);
-        }
-        mode::TAN => {
-            p.circle_stroke(at, s * 0.8, st);
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, -s)], st);
-        }
-        mode::NOD => {
-            p.circle_stroke(at, s, st);
-            p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
-            p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
-        }
-        mode::INS => {
-            p.line(
-                vec![
-                    at + vec2(-s, -s),
-                    at + vec2(0.0, -s),
-                    at + vec2(0.0, 0.0),
-                    at + vec2(s, 0.0),
-                    at + vec2(s, s),
-                    at + vec2(-s, s),
-                    at + vec2(-s, -s),
-                ],
-                st,
-            );
-        }
-        _ => {
-            p.line(vec![at + vec2(-s, -s), at + vec2(s, -s), at + vec2(-s, s), at + vec2(s, s), at + vec2(-s, -s)], st);
+            mode::MID => {
+                p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, s * 0.8), at + vec2(-s, s * 0.8)], st));
+            }
+            mode::CEN | mode::GCEN => {
+                p.circle_stroke(at, s, st);
+            }
+            mode::QUA => {
+                p.add(Shape::closed_line(vec![at + vec2(0.0, -s), at + vec2(s, 0.0), at + vec2(0.0, s), at + vec2(-s, 0.0)], st));
+            }
+            mode::INT | mode::APP => {
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
+                p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
+                if hit.mode == mode::APP {
+                    p.rect_stroke(Rect::from_center_size(at, vec2(2.0 * s, 2.0 * s)), 0.0, st, egui::StrokeKind::Middle);
+                }
+            }
+            mode::PER => {
+                p.line(vec![at + vec2(-s, -s), at + vec2(-s, s), at + vec2(s, s)], st);
+                p.line(vec![at + vec2(-s, 0.0), at + vec2(0.0, 0.0), at + vec2(0.0, s)], st);
+            }
+            mode::TAN => {
+                p.circle_stroke(at, s * 0.8, st);
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, -s)], st);
+            }
+            mode::NOD => {
+                p.circle_stroke(at, s, st);
+                p.line_segment([at + vec2(-s, -s), at + vec2(s, s)], st);
+                p.line_segment([at + vec2(s, -s), at + vec2(-s, s)], st);
+            }
+            mode::INS => {
+                p.line(
+                    vec![
+                        at + vec2(-s, -s),
+                        at + vec2(0.0, -s),
+                        at + vec2(0.0, 0.0),
+                        at + vec2(s, 0.0),
+                        at + vec2(s, s),
+                        at + vec2(-s, s),
+                        at + vec2(-s, -s),
+                    ],
+                    st,
+                );
+            }
+            _ => {
+                p.line(vec![at + vec2(-s, -s), at + vec2(s, -s), at + vec2(-s, s), at + vec2(s, s), at + vec2(-s, -s)], st);
+            }
         }
     }
-    p.text(at + vec2(12.0, 12.0), egui::Align2::LEFT_TOP, crate::i18n::t(hit.name), crate::theme::small(), Color32::BLACK);
-    let galley = p.layout_no_wrap(crate::i18n::t(hit.name).to_string(), crate::theme::small(), Color32::BLACK);
-    let r = Rect::from_min_size(at + vec2(10.0, 10.0), galley.size() + vec2(6.0, 2.0));
-    p.rect_filled(r, 2.0, Color32::from_rgb(0xff, 0xff, 0xe1));
-    p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
+    if tooltip_on {
+        let galley = p.layout_no_wrap(crate::i18n::t(hit.name).to_string(), crate::theme::small(), Color32::BLACK);
+        let r = Rect::from_min_size(at + vec2(10.0, 10.0), galley.size() + vec2(6.0, 2.0));
+        p.rect_filled(r, 2.0, Color32::from_rgb(0xff, 0xff, 0xe1));
+        p.galley(r.min + vec2(3.0, 1.0), galley, Color32::BLACK);
+    }
 }
 
 /// Acquired tracking points (small `+`, `//` for a Parallel line), the dotted paths the cursor
@@ -1516,12 +1525,16 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         if !in_active {
             app.canvas.hot_grips.clear();
             app.session.pending_window = None;
+            app.session.pending_lasso = None;
             app.canvas.drag_window = false;
+            app.canvas.drag_lasso = false;
             if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_err() && active_vp.is_some() {
                 let _ = app.run("pspace", serde_json::json!({}));
             }
             app.session.pending_window = None;
+            app.session.pending_lasso = None;
             app.canvas.drag_window = false;
+            app.canvas.drag_lasso = false;
             app.canvas.list = None;
             return;
         }
@@ -1536,18 +1549,24 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         return;
     }
 
-    // Double-click a hatch (no command running) to edit it in the Hatch Edit dialog. The click is
-    // used up: it must not also start a grip edit on the hatch's centre grip below.
+    // Double-click a hatch or tolerance (no command running) to edit it. The click is
+    // used up: it must not also start a grip edit on the centre grip below.
     let mut hatch_dialog = false;
     if inside
         && dbl_primary
         && app.session.running.is_none()
         && let Some(hp) = hover_pos
-        && let Some(h) = hatch_at(app, xf.to_world(hp), scale)
     {
-        app.session.set_selection(vec![h]);
-        crate::hatchdlg::open_edit(app);
-        hatch_dialog = true;
+        let wp = xf.to_world(hp);
+        if let Some(h) = hatch_at(app, wp, scale) {
+            app.session.set_selection(vec![h]);
+            crate::hatchdlg::open_edit(app);
+            hatch_dialog = true;
+        } else if let Some(h) = tolerance_at(app, wp, scale) {
+            app.session.set_selection(vec![h]);
+            crate::tolerancedlg::open_edit(app, h);
+            hatch_dialog = true;
+        }
     }
 
     // While a command asks for a point, every click places one, however fast the drafting (#815).
@@ -1638,7 +1657,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let idle_dbl = dbl_primary && app.session.running.is_none();
     if idle_dbl {
         app.session.pending_window = None;
+        app.session.pending_lasso = None;
         app.canvas.drag_window = false;
+        app.canvas.drag_lasso = false;
     }
     let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
     let key: CycleKey = (
@@ -1683,14 +1704,16 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         } else if let Some(g) = crate::dyngrips::at(app, &xf, hover_pos) {
             crate::dyngrips::click(app, g);
+        } else if let Some(gi) = group_grip_at(app, &xf, hover_pos) {
+            click_group_grip(app, gi, mods.shift);
         } else if let Some(g) = grip_at(app, &xf, hover_pos) {
             click_grip(app, g, mods.shift);
         } else if let Err(e) = app.session.idle_click(raw_world.unwrap_or(p), mods.shift) {
             app.session.echo(e.to_string());
         }
     }
-    // Press-and-drag selection window (PICKDRAG = 2; click-click still works): a drag
-    // that starts while objects are being selected opens a window where the button went down,
+    // Press-and-drag selection window or lasso (AutoCAD's PICKDRAG = 2; click-click still works):
+    // a drag that starts while objects are being selected opens a lasso/window where the button went down,
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
     if !app.session.settings.pickdrag {
         app.canvas.drag_window = false;
@@ -1700,12 +1723,42 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && !middle_down
         && app.canvas.cycle.is_none()
         && app.session.pending_window.is_none()
+        && app.session.pending_lasso.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
+        && group_grip_at(app, &xf, Some(origin)).is_none()
         && grip_at(app, &xf, Some(origin)).is_none()
         && crate::dyngrips::at(app, &xf, Some(origin)).is_none()
     {
-        app.canvas.drag_window = app.session.begin_window(xf.to_world(origin));
+        let start = xf.to_world(origin);
+        app.canvas.drag_lasso = app.session.begin_lasso(start);
+        if !app.canvas.drag_lasso {
+            app.canvas.drag_window = app.session.begin_window(start);
+        }
+    }
+    if app.canvas.drag_lasso
+        && resp.dragged_by(egui::PointerButton::Primary)
+        && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+    {
+        app.session.push_lasso(xf.to_world(pos));
+    }
+    if app.canvas.drag_lasso && resp.drag_stopped_by(egui::PointerButton::Primary) {
+        app.canvas.drag_lasso = false;
+        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+            app.session.push_lasso(xf.to_world(pos));
+        }
+        let done = if app.session.prompting() {
+            match app.session.finish_command_lasso() {
+                Ok(Some(hs)) => app.session.input(Input::Pick(hs)),
+                Ok(None) => Ok(()),
+                Err(e) => Err(e),
+            }
+        } else {
+            app.session.idle_lasso(mods.shift)
+        };
+        if let Err(e) = done {
+            app.session.echo(e.to_string());
+        }
     }
     if app.canvas.drag_window && resp.drag_stopped_by(egui::PointerButton::Primary) {
         app.canvas.drag_window = false;
@@ -1729,13 +1782,32 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if crate::context_menu::in_command(app, ui, inside, pressed_secondary) {
         let _ = app.session.input(Input::Enter);
     }
-    // Right-click on a grip with options (polyline vertex, line end…) opens the grip menu.
+    // Right-click or hover on a grip with options (polyline vertex, line end, mleader…) opens the grip menu.
     if inside && pressed_secondary && idle && !app.canvas.snap_menu {
         app.canvas.grip_menu = grip_at(app, &xf, hover_pos).filter(|g| !grip_options(app, *g).is_empty());
+    } else if inside && idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_none() {
+        let hover_grip = grip_at(app, &xf, hover_pos).filter(|g| !grip_options(app, *g).is_empty());
+        let now = crate::now_ms();
+        match (app.canvas.grip_hover, hover_grip) {
+            (Some((prev_g, start_t)), Some(curr_g)) if prev_g == curr_g => {
+                if now - start_t >= 400.0 {
+                    app.canvas.grip_menu = Some(curr_g);
+                    app.canvas.grip_hover = None;
+                }
+            }
+            (_, Some(curr_g)) => {
+                app.canvas.grip_hover = Some((curr_g, now));
+            }
+            _ => {
+                app.canvas.grip_hover = None;
+            }
+        }
+    } else if !inside || !idle {
+        app.canvas.grip_hover = None;
     }
     crate::dyngrips::menu(app, ui.ctx(), &xf);
     if idle && !app.canvas.snap_menu && app.canvas.grip_menu.is_some() {
-        grip_menu(app, &resp);
+        grip_menu(app, &resp, ui.ctx(), &xf);
     } else if idle || app.canvas.snap_menu {
         crate::context_menu::show(app, &resp);
     }
@@ -1908,6 +1980,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     app.canvas.draw_ms = crate::now_ms() - t0;
     compare::paint(app, ui.ctx(), &painter, &xf_paper, rect);
     blockedit::paint(app, ui.ctx(), &painter, &xf_paper, rect);
+    refedit::paint(app, ui.ctx(), &painter, &xf_paper, rect);
     // Constraint bars and dynamic dimensional constraints (model space, or inside a viewport).
     if sheet.is_none() || active_vp.is_some() {
         let clip = match &active_vp {
@@ -1925,6 +1998,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let grip_edit = app.session.running.as_ref().is_some_and(|r| r.id == "grip");
     if (!grip_edit && (app.canvas.grip_editing || app.session.prompting())) || sel.is_empty() {
         app.canvas.hot_grips.clear();
+        app.canvas.hot_group_grips.clear();
     }
     if !grip_edit {
         app.canvas.dyn_hot = None;
@@ -1937,7 +2011,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
             if let Some(e) = st.doc.entity(*h) {
-                let grips = e.kind.grips();
+                let grips = st.doc.entity_grips(e);
                 let count = grips.len();
                 for (gi, g) in grips.into_iter().enumerate() {
                     let sp = xf.to_screen(g);
@@ -1962,6 +2036,47 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             }
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
+
+        // GROUPDISPLAYMODE: bounding box (mode 2) and centre grip (mode >= 1) for selected groups.
+        let gdm = app.session.settings.groupdisplaymode;
+        if gdm >= 1 {
+            let gs = app.session.settings.gripsize as f32;
+            let groups = app.session.selected_groups();
+            for (gi, bounds, _members) in &groups {
+                if bounds.is_empty() {
+                    continue;
+                }
+                let center = bounds.center();
+                let sc = xf.to_screen(center);
+                // Bounding box outline (mode 2 only).
+                if gdm >= 2 {
+                    let corners: Vec<Pos2> = bounds.corners().iter().map(|p| xf.to_screen(*p)).collect();
+                    let bbox_color = Color32::from_rgba_premultiplied(0x40, 0xa0, 0xff, 0xb0);
+                    let stroke = Stroke::new(1.0, bbox_color);
+                    // Draw the 4 sides as dashed segments.
+                    let pairs = [(0, 1), (1, 2), (2, 3), (3, 0)];
+                    for (a, b) in pairs {
+                        draw_dashed_line(&painter, corners[a], corners[b], stroke);
+                    }
+                }
+                // Centre grip square.
+                let gr = Rect::from_center_size(sc, vec2(gs * 2.0, gs * 2.0));
+                let warm = hover_pos.is_some_and(|hp| gr.expand(2.0).contains(hp));
+                let hot_gi = app.canvas.hot_group_grips.contains(gi);
+                painter.rect_filled(
+                    gr,
+                    0.0,
+                    if hot_gi {
+                        t.grip_hot
+                    } else if warm {
+                        Color32::from_rgb(0xff, 0x7f, 0x9f)
+                    } else {
+                        t.grip
+                    },
+                );
+                painter.rect_stroke(gr, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
+            }
+        }
     }
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
@@ -2003,12 +2118,44 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
         }
     }
+    // Pending selection lasso.
+    if let Some(pl) = &app.session.pending_lasso
+        && pl.pts.len() >= 2
+    {
+        let mut screen_pts: Vec<Pos2> = pl.pts.iter().map(|p| xf.to_screen(*p)).collect();
+        let crossing = pl.is_crossing();
+        if let Some(fill) = selection_area_fill(&app.session.settings, crossing)
+            && screen_pts.len() >= 3
+        {
+            let mut mesh = egui::Mesh::default();
+            for (i, p) in screen_pts.iter().enumerate() {
+                mesh.colored_vertex(*p, fill);
+                if i >= 2 {
+                    mesh.indices.extend_from_slice(&[0, (i - 1) as u32, i as u32]);
+                }
+            }
+            if !mesh.is_empty() {
+                painter.add(Shape::mesh(mesh));
+            }
+        }
+        let st = Stroke::new(1.0, if crossing { t.crossing_stroke } else { t.window_stroke });
+        if let Some(first) = screen_pts.first().copied() {
+            screen_pts.push(first);
+        }
+        if crossing {
+            painter.extend(Shape::dashed_line(&screen_pts, st, 5.0, 3.0));
+        } else {
+            painter.add(Shape::line(screen_pts, st));
+        }
+    }
     // Acquired tracking points and the polar / tracking paths under the cursor.
-    if app.canvas.cursor.is_some() {
+    if app.canvas.cursor.is_some() && app.session.settings.autosnap_track_tooltip {
         draw_tracking(&painter, &xf, &app.session.tracking.acquired, app.canvas.track.as_ref(), view.height * 4.0);
     }
     if let (Some(hit), Some(_)) = (app.canvas.snap, app.canvas.cursor) {
-        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit);
+        let marker = app.session.settings.autosnap_marker;
+        let tooltip_on = app.session.settings.autosnap_tooltip;
+        draw_snap_marker(&painter, xf.to_screen(hit.point), &hit, marker, tooltip_on);
     }
     draw_tiles(app, ui, &tiles);
     // UCS icon, ViewCube and viewport label.
@@ -2249,6 +2396,13 @@ fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
     let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
+}
+
+fn tolerance_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
+    let st = app.session.state().ok()?;
+    let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
+    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Tolerance(_)).then_some(h)
 }
 
 /// Half the side of the pick box: the pick aperture (PICKBOX × 1.5 pixels, as `select::pick` is
@@ -2557,7 +2711,28 @@ fn dynamic_input_boxes(
     r
 }
 
-/// A small padlock, drawn in code: body plus shackle.
+/// Draw a dashed line between two screen points, used for group bounding box overlays.
+fn draw_dashed_line(p: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
+    let dash_len: f32 = 6.0;
+    let gap_len: f32 = 4.0;
+    let d = b - a;
+    let total = d.length();
+    if total < 1.0 {
+        return;
+    }
+    let dir = d / total;
+    let mut t = 0.0_f32;
+    let mut drawing = true;
+    while t < total {
+        let t_end = (t + if drawing { dash_len } else { gap_len }).min(total);
+        if drawing {
+            p.line_segment([a + dir * t, a + dir * t_end], stroke);
+        }
+        t = t_end;
+        drawing = !drawing;
+    }
+}
+
 fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {
     p.rect_filled(Rect::from_center_size(c + vec2(0.0, 1.5), vec2(7.0, 5.0)), 1.0, color);
     p.add(Shape::line(
@@ -2628,6 +2803,74 @@ fn click_grip(app: &mut CadApp, g: (Handle, usize), shift: bool) {
     }
 }
 
+/// The group index (into `selected_groups()`) whose centre grip is under the cursor, if any.
+/// Only active when `groupdisplaymode >= 1`.
+fn group_grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<usize> {
+    let hp = hover?;
+    if app.session.settings.groupdisplaymode == 0 {
+        return None;
+    }
+    if !app.session.shows_grips(app.session.selection().len()) {
+        return None;
+    }
+    let gs = app.session.settings.gripsize as f32 + 3.0;
+    let groups = app.session.selected_groups();
+    for (gi, bounds, _) in &groups {
+        if bounds.is_empty() {
+            continue;
+        }
+        let sc = xf.to_screen(bounds.center());
+        if (sc.x - hp.x).abs() <= gs && (sc.y - hp.y).abs() <= gs {
+            return Some(*gi);
+        }
+    }
+    None
+}
+
+/// Click on a group centre grip: Shift toggles it hot/cold; a plain click starts a GRIP
+/// stretch-move on the first available grip of each visible group member.
+fn click_group_grip(app: &mut CadApp, gi: usize, shift: bool) {
+    if shift {
+        let hot = &mut app.canvas.hot_group_grips;
+        match hot.iter().position(|x| *x == gi) {
+            Some(i) => {
+                hot.remove(i);
+            }
+            None => hot.push(gi),
+        }
+        return;
+    }
+    // Build a list of (Handle, grip_index=0) for every member that has grips, to
+    // use as the hot set. This makes the GRIP command treat the whole group as
+    // one stretch base, exactly like AutoCAD.
+    let groups = app.session.selected_groups();
+    let Some((_, _, members)) = groups.iter().find(|(g, _, _)| *g == gi) else { return };
+    let hot: Vec<(Handle, usize)> = {
+        let Ok(st) = app.session.state() else { return };
+        members
+            .iter()
+            .filter_map(|h| {
+                let e = st.doc.entity(*h)?;
+                if st.doc.entity_grips(e).is_empty() {
+                    return None;
+                }
+                Some((*h, 0))
+            })
+            .collect()
+    };
+    if hot.is_empty() {
+        return;
+    }
+    app.canvas.hot_group_grips.clear();
+    app.canvas.hot_group_grips.push(gi);
+    app.canvas.hot_grips = hot.clone();
+    if let Err(e) = app.session.start_grip_edit(&hot) {
+        app.canvas.hot_grips.clear();
+        app.canvas.hot_group_grips.clear();
+        app.session.echo(e.to_string());
+    }
+}
+
 /// The multifunctional options of grip `g` (Add Vertex, Lengthen…; empty: Stretch only).
 fn grip_options(app: &CadApp, (h, i): (Handle, usize)) -> Vec<cadcraft_engine::grips::GripAction> {
     let Ok(st) = app.session.state() else { return Vec::new() };
@@ -2636,28 +2879,47 @@ fn grip_options(app: &CadApp, (h, i): (Handle, usize)) -> Vec<cadcraft_engine::g
 
 /// The menu of a multifunctional grip: Stretch and its options. A choice makes the grip hot and
 /// runs the option at the grip prompt, as typing its keyword would.
-fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
+fn grip_menu(app: &mut CadApp, resp: &egui::Response, ctx: &egui::Context, xf: &Xf) {
     let Some(g) = app.canvas.grip_menu else { return };
     let options = grip_options(app, g);
+    if options.is_empty() {
+        app.canvas.grip_menu = None;
+        return;
+    }
+    let grip_pos = app.session.state().ok().and_then(|st| st.doc.entity(g.0).and_then(|e| st.doc.entity_grips(e).into_iter().nth(g.1)));
+    let gs = app.session.settings.gripsize as f32;
+    let at = match grip_pos {
+        Some(w) => xf.to_screen(w) + egui::vec2(gs + 4.0, -gs),
+        None => resp.hover_pos().unwrap_or_default(),
+    };
+
     let mut chosen: Option<Option<cadcraft_engine::grips::GripAction>> = None;
-    let open = resp
-        .context_menu(|ui| {
+    let mut closed = false;
+
+    let area = egui::Area::new(egui::Id::new(("grip-menu-popup", g.0, g.1))).order(egui::Order::Foreground).fixed_pos(at).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(120.0);
             let vertex = options.contains(&cadcraft_engine::grips::GripAction::RemoveVertex);
             if ui.button(crate::i18n::t(if vertex { "Stretch Vertex" } else { "Stretch" })).clicked() {
                 chosen = Some(None);
-                ui.close();
             }
             for a in &options {
                 if ui.button(crate::i18n::t(a.label())).clicked() {
                     chosen = Some(Some(*a));
-                    ui.close();
                 }
             }
-        })
-        .is_some();
-    if !open || chosen.is_some() {
+        });
+    });
+
+    let clicked_elsewhere = ctx.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+    if clicked_elsewhere || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        closed = true;
+    }
+
+    if closed || chosen.is_some() {
         app.canvas.grip_menu = None;
     }
+
     let Some(choice) = chosen else { return };
     app.canvas.hot_grips = vec![g];
     let r = app.session.start_grip_edit(&[g]).and_then(|()| match choice {
@@ -2691,7 +2953,7 @@ fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        let grips = e.kind.grips();
+        let grips = st.doc.entity_grips(e);
         let count = grips.len();
         for (i, g) in grips.into_iter().enumerate() {
             let sp = xf.to_screen(g);
@@ -2938,12 +3200,32 @@ pub(crate) mod tests {
         let text = painted_text(&mut app, &ctx, at);
         assert!(text.contains(&format!("   {}  <", arch(c.len()))), "no {} in:\n{text}", arch(c.len()));
     }
+
+    #[test]
+    fn pending_lasso_renders_without_panic() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let at = pos2(700.0, 450.0);
+        painted_text(&mut app, &ctx, at);
+        app.session.pending_lasso = Some(cadcraft_engine::PendingLasso {
+            pts: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)],
+            during_command: false,
+        });
+        // Render with pending lasso
+        let _ = painted_text(&mut app, &ctx, at);
+        // Crossing lasso (initial point moving to left)
+        app.session.pending_lasso =
+            Some(cadcraft_engine::PendingLasso { pts: vec![Vec2::new(10.0, 0.0), Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0)], during_command: false });
+        let _ = painted_text(&mut app, &ctx, at);
+    }
 }
 
 /// The Block Editor's tint, base point and bar.
 mod blockedit;
 /// The COMPARE overlay.
 mod compare;
+/// The Reference Edit banner and controls.
+mod refedit;
 
 /// Background rebuilds of the display list for a new view.
 mod rebuild;

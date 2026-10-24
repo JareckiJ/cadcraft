@@ -387,6 +387,167 @@ pub fn compose_frame(f: &GdtFrame) -> String {
     lines.join("^J")
 }
 
+/// Deconstruct a feature control frame string into a [`GdtFrame`].
+pub fn deconstruct_frame(text: &str) -> GdtFrame {
+    let rows = parse_frame(text);
+    let mut lines = Vec::new();
+    let mut height = String::new();
+    let mut projected = false;
+    let mut datum_id = String::new();
+
+    let parse_tol_cell = |comp: &[GdtRun]| -> Option<GdtTol> {
+        if comp.iter().all(|r| matches!(r, GdtRun::Text(t) if t.trim().is_empty())) {
+            return None;
+        }
+        let mut diameter = false;
+        let mut val = String::new();
+        let mut mat = None;
+        for run in comp {
+            match run {
+                GdtRun::Symbol(GdtSymbol::Diameter) => diameter = true,
+                GdtRun::Symbol(s) if s.is_material() => {
+                    mat = Some(match s {
+                        GdtSymbol::Mmc => "M".to_string(),
+                        GdtSymbol::Lmc => "L".to_string(),
+                        GdtSymbol::Rfs => "S".to_string(),
+                        _ => s.name().to_string(),
+                    });
+                }
+                GdtRun::Symbol(_) => {}
+                GdtRun::Text(t) => val.push_str(t),
+            }
+        }
+        let v = val.trim();
+        if v.is_empty() && !diameter && mat.is_none() { None } else { Some(GdtTol { diameter, value: v.to_string(), material: mat }) }
+    };
+
+    let parse_datum_cell = |comp: &[GdtRun]| -> Option<GdtDatum> {
+        if comp.iter().all(|r| matches!(r, GdtRun::Text(t) if t.trim().is_empty())) {
+            return None;
+        }
+        let mut letter = String::new();
+        let mut mat = None;
+        for run in comp {
+            match run {
+                GdtRun::Symbol(s) if s.is_material() => {
+                    mat = Some(match s {
+                        GdtSymbol::Mmc => "M".to_string(),
+                        GdtSymbol::Lmc => "L".to_string(),
+                        GdtSymbol::Rfs => "S".to_string(),
+                        _ => s.name().to_string(),
+                    });
+                }
+                GdtRun::Symbol(_) => {}
+                GdtRun::Text(t) => letter.push_str(t),
+            }
+        }
+        let l = letter.trim();
+        if l.is_empty() && mat.is_none() { None } else { Some(GdtDatum { letter: l.to_string(), material: mat }) }
+    };
+
+    let non_empty_rows: Vec<Vec<Vec<GdtRun>>> = rows.into_iter().filter(|r| !r.iter().all(compartment_is_empty)).collect();
+    let mut main_rows = non_empty_rows;
+    let mut trailing = Vec::new();
+    while let Some(last) = main_rows.last() {
+        if last.len() == 1 && !last[0].iter().any(|r| matches!(r, GdtRun::Symbol(s) if s.is_characteristic())) {
+            if let Some(r) = main_rows.pop() {
+                trailing.push(r);
+            }
+        } else {
+            break;
+        }
+    }
+    trailing.reverse();
+
+    let cell_info = |row: &[Vec<GdtRun>]| -> (String, bool) {
+        if let Some(comp) = row.first() {
+            let has_proj = comp.iter().any(|r| matches!(r, GdtRun::Symbol(GdtSymbol::Projected)));
+            let txt: String = comp
+                .iter()
+                .filter_map(|r| match r {
+                    GdtRun::Text(t) => Some(t.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (txt.trim().to_string(), has_proj)
+        } else {
+            (String::new(), false)
+        }
+    };
+
+    if trailing.len() == 2 {
+        let (txt0, proj0) = cell_info(&trailing[0]);
+        let (txt1, proj1) = cell_info(&trailing[1]);
+        if proj0 {
+            height = txt0;
+            projected = true;
+            datum_id = txt1;
+        } else if proj1 {
+            datum_id = txt0;
+            height = txt1;
+            projected = true;
+        } else {
+            height = txt0;
+            projected = false;
+            datum_id = txt1;
+        }
+    } else if trailing.len() == 1 {
+        let (txt, proj) = cell_info(&trailing[0]);
+        if proj {
+            height = txt;
+            projected = true;
+        } else {
+            datum_id = txt;
+        }
+    } else if trailing.len() > 2 {
+        for row in &trailing {
+            let (txt, proj) = cell_info(row);
+            if proj {
+                height = txt;
+                projected = true;
+            } else if datum_id.is_empty() {
+                datum_id = txt;
+            }
+        }
+    }
+
+    for row in main_rows {
+        let mut sym_opt = None;
+        let mut tol1 = None;
+        let mut tol2 = None;
+        let mut datums = Vec::new();
+
+        for (idx, comp) in row.iter().enumerate() {
+            match idx {
+                0 => {
+                    sym_opt = comp.iter().find_map(|r| match r {
+                        GdtRun::Symbol(s) if s.is_characteristic() => Some(*s),
+                        _ => None,
+                    });
+                }
+                1 => {
+                    tol1 = parse_tol_cell(comp);
+                }
+                2 => {
+                    tol2 = parse_tol_cell(comp);
+                }
+                3..=5 => {
+                    if let Some(d) = parse_datum_cell(comp) {
+                        datums.push(d);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if sym_opt.is_some() || tol1.is_some() || tol2.is_some() || !datums.is_empty() {
+            lines.push(GdtLine { symbol: sym_opt, tol1, tol2, datums });
+        }
+    }
+
+    GdtFrame { lines, height, projected, datum_id }
+}
+
 /// A primitive of a laid-out frame, in WCS.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GdtPrim {
@@ -622,5 +783,53 @@ mod tests {
         assert_eq!(l.texts.len(), 2);
         assert!((l.bounds.min.y + 1.0).abs() < 1e-9 && (l.bounds.max.y - 1.0).abs() < 1e-9);
         assert!(l.bounds.min.x.abs() < 1e-9 && l.bounds.max.x > 6.0);
+    }
+
+    #[test]
+    fn deconstruct_roundtrip() {
+        let f = GdtFrame {
+            lines: vec![
+                GdtLine {
+                    symbol: Some(GdtSymbol::Position),
+                    tol1: Some(GdtTol { diameter: true, value: "0.1".into(), material: Some("M".into()) }),
+                    tol2: None,
+                    datums: vec![
+                        GdtDatum { letter: "A".into(), material: None },
+                        GdtDatum { letter: "B".into(), material: Some("L".into()) },
+                        GdtDatum { letter: "C".into(), material: Some("S".into()) },
+                    ],
+                },
+                GdtLine {
+                    symbol: Some(GdtSymbol::Flatness),
+                    tol1: Some(GdtTol { diameter: false, value: "0.02".into(), material: None }),
+                    tol2: None,
+                    datums: Vec::new(),
+                },
+            ],
+            height: "2.5".into(),
+            projected: true,
+            datum_id: "D".into(),
+        };
+        let s = compose_frame(&f);
+        let back = deconstruct_frame(&s);
+        assert_eq!(f, back);
+    }
+
+    #[test]
+    fn deconstruct_roundtrip_projected_false_with_height_and_datum() {
+        let f = GdtFrame {
+            lines: vec![GdtLine {
+                symbol: Some(GdtSymbol::Position),
+                tol1: Some(GdtTol { diameter: true, value: "0.1".into(), material: None }),
+                tol2: None,
+                datums: vec![GdtDatum { letter: "A".into(), material: None }],
+            }],
+            height: "2.5".into(),
+            projected: false,
+            datum_id: "D".into(),
+        };
+        let s = compose_frame(&f);
+        let back = deconstruct_frame(&s);
+        assert_eq!(f, back);
     }
 }

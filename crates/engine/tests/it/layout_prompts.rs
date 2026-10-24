@@ -55,3 +55,21 @@ fn typed_layout_options_prompt_for_names() {
     s.undo().unwrap();
     assert_eq!(layouts(&s), ["Layout1", "Sheet A", "Sheet A (2)"]);
 }
+
+#[test]
+fn test_layout_reorder_and_copy_before() {
+    let mut s = Session::new();
+    assert_eq!(layouts(&s), ["Layout1", "Layout2"]);
+
+    // Reorder Layout2 before Layout1
+    s.execute("layout.reorder", &serde_json::json!({ "name": "Layout2", "before": "Layout1" })).unwrap();
+    assert_eq!(layouts(&s), ["Layout2", "Layout1"]);
+
+    // Move Layout2 to end
+    s.execute("layout.reorder", &serde_json::json!({ "name": "Layout2" })).unwrap();
+    assert_eq!(layouts(&s), ["Layout1", "Layout2"]);
+
+    // Copy Layout1 before Layout1 -> new copy inserted before Layout1
+    s.execute("layout.copy", &serde_json::json!({ "from": "Layout1", "before": "Layout1" })).unwrap();
+    assert_eq!(layouts(&s), ["Layout1 (2)", "Layout1", "Layout2"]);
+}

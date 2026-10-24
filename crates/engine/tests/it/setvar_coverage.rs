@@ -104,4 +104,82 @@ fn metric_defaults() {
     assert_eq!(getvar(&mut s, "REVCLOUDARCLEN"), json!(15.0));
     assert_eq!(getvar(&mut s, "CMLSCALE"), json!(20.0));
     assert_eq!(getvar(&mut s, "CENTEREXE"), json!(3.5));
+    assert_eq!(getvar(&mut s, "DIMTXT"), json!(2.5));
+    assert_eq!(getvar(&mut s, "DIMASZ"), json!(2.5));
+    assert_eq!(getvar(&mut s, "DIMGAP"), json!(0.625));
+    assert_eq!(getvar(&mut s, "DIMEXE"), json!(1.25));
+    assert_eq!(getvar(&mut s, "DIMEXO"), json!(0.625));
+}
+
+#[test]
+fn expanded_coverage_drawing_and_dim_vars() {
+    let mut s = Session::new();
+    // Test setting and getting entity defaults and scaling
+    assert!(setvar(&mut s, "LTSCALE", json!(2.5)));
+    assert_eq!(getvar(&mut s, "LTSCALE"), json!(2.5));
+    assert!(setvar(&mut s, "CELTSCALE", json!(0.5)));
+    assert_eq!(getvar(&mut s, "CELTSCALE"), json!(0.5));
+    assert!(setvar(&mut s, "PSLTSCALE", json!(0)));
+    assert_eq!(getvar(&mut s, "PSLTSCALE"), json!(0));
+    assert!(setvar(&mut s, "CELWEIGHT", json!(50)));
+    assert_eq!(getvar(&mut s, "CELWEIGHT"), json!(50));
+    assert!(setvar(&mut s, "CELWEIGHT", json!(-1))); // ByLayer
+    assert_eq!(getvar(&mut s, "CELWEIGHT"), json!(-1));
+
+    // Point display mode & size
+    assert!(setvar(&mut s, "PDMODE", json!(34)));
+    assert_eq!(getvar(&mut s, "PDMODE"), json!(34));
+    assert!(setvar(&mut s, "PDSIZE", json!(1.5)));
+    assert_eq!(getvar(&mut s, "PDSIZE"), json!(1.5));
+
+    // Dimension variables
+    assert!(setvar(&mut s, "DIMSCALE", json!(5.0)));
+    assert_eq!(getvar(&mut s, "DIMSCALE"), json!(5.0));
+    assert!(setvar(&mut s, "DIMTXT", json!(3.0)));
+    assert_eq!(getvar(&mut s, "DIMTXT"), json!(3.0));
+    assert!(setvar(&mut s, "DIMASZ", json!(2.0)));
+    assert_eq!(getvar(&mut s, "DIMASZ"), json!(2.0));
+    assert!(setvar(&mut s, "DIMEXE", json!(1.5)));
+    assert_eq!(getvar(&mut s, "DIMEXE"), json!(1.5));
+    assert!(setvar(&mut s, "DIMEXO", json!(0.8)));
+    assert_eq!(getvar(&mut s, "DIMEXO"), json!(0.8));
+    assert!(setvar(&mut s, "DIMDLI", json!(4.0)));
+    assert_eq!(getvar(&mut s, "DIMDLI"), json!(4.0));
+    assert!(setvar(&mut s, "DIMDLE", json!(0.5)));
+    assert_eq!(getvar(&mut s, "DIMDLE"), json!(0.5));
+    assert!(setvar(&mut s, "DIMLFAC", json!(2.0)));
+    assert_eq!(getvar(&mut s, "DIMLFAC"), json!(2.0));
+    assert!(setvar(&mut s, "DIMTAD", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMTAD"), json!(1));
+    assert!(setvar(&mut s, "DIMTIH", json!(0)));
+    assert_eq!(getvar(&mut s, "DIMTIH"), json!(0));
+    assert!(setvar(&mut s, "DIMTOH", json!(0)));
+    assert_eq!(getvar(&mut s, "DIMTOH"), json!(0));
+    assert!(setvar(&mut s, "DIMTOFL", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMTOFL"), json!(1));
+    assert!(setvar(&mut s, "DIMTIX", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMTIX"), json!(1));
+    assert!(setvar(&mut s, "DIMSOXD", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMSOXD"), json!(1));
+    assert!(setvar(&mut s, "DIMSE1", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMSE1"), json!(1));
+    assert!(setvar(&mut s, "DIMSE2", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMSE2"), json!(1));
+    assert!(setvar(&mut s, "DIMSD1", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMSD1"), json!(1));
+    assert!(setvar(&mut s, "DIMSD2", json!(1)));
+    assert_eq!(getvar(&mut s, "DIMSD2"), json!(1));
+
+    // Bare command line invocation of variable
+    s.cmdline("DIMSCALE 10").unwrap();
+    assert_eq!(getvar(&mut s, "DIMSCALE"), json!(10.0));
+
+    // In-range and out-of-range validation checks
+    assert!(!setvar(&mut s, "LTSCALE", json!(0.0)));
+    assert!(!setvar(&mut s, "LTSCALE", json!(-1.0)));
+    assert!(!setvar(&mut s, "CELWEIGHT", json!(999)));
+    assert!(!setvar(&mut s, "DIMTAD", json!(5)));
+    assert!(!setvar(&mut s, "DIMLUNIT", json!(7)));
+    assert!(!setvar(&mut s, "DIMLFAC", json!(0.0)));
+    assert!(!setvar(&mut s, "DIMLFAC", json!(-2.0)));
 }

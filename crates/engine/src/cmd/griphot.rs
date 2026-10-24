@@ -191,6 +191,29 @@ impl GripEdit {
         match i {
             Input::Point(p) => self.act(s, action, Some(p), None),
             Input::Deferred(d) => self.act(s, action, Some(d.at), None),
+            Input::Text(t) if t.trim().eq_ignore_ascii_case("next") => {
+                let actions = self.actions(s);
+                if let Some(pos) = actions.iter().position(|a| *a == action) {
+                    if pos + 1 < actions.len() {
+                        let next_a = actions[pos + 1];
+                        if next_a.needs_point() {
+                            self.ask = Ask::Action(next_a);
+                            s.echo(next_a.title());
+                            Ok(Step::Continue)
+                        } else {
+                            self.act(s, next_a, None, None)
+                        }
+                    } else {
+                        self.ask = Ask::Mode;
+                        s.echo(self.label());
+                        Ok(Step::Continue)
+                    }
+                } else {
+                    self.ask = Ask::Mode;
+                    s.echo(self.label());
+                    Ok(Step::Continue)
+                }
+            }
             Input::Text(t) if matches!(action, GripAction::Lengthen | GripAction::Radius) => {
                 let v = number(&t).filter(|v| v.is_finite()).ok_or_else(|| other("Requires a number or point."))?;
                 self.act(s, action, None, Some(v))
@@ -251,6 +274,23 @@ impl GripEdit {
                     self.ask = Ask::RefFirst;
                     Ok(Step::Continue)
                 }
+                "Next" => {
+                    let actions = self.actions(s);
+                    if self.mode == GripMode::Stretch && !actions.is_empty() {
+                        let first = actions[0];
+                        if first.needs_point() {
+                            self.ask = Ask::Action(first);
+                            s.echo(first.title());
+                            Ok(Step::Continue)
+                        } else {
+                            self.act(s, first, None, None)
+                        }
+                    } else {
+                        self.next_mode();
+                        s.echo(self.label());
+                        Ok(Step::Continue)
+                    }
+                }
                 "eXit" => Ok(Step::Done),
                 other_kw => match self.actions(s).into_iter().find(|a| a.keyword() == other_kw) {
                     Some(a) if a.needs_point() => {
@@ -279,17 +319,37 @@ impl GripEdit {
                 let m = self.matrix(d.at);
                 self.edit(s, d.at, m)
             }
-            Input::Text(t) => match self.mode {
-                GripMode::Rotate => {
-                    let a = s.angle_settings().rotation(&t).filter(|a| a.is_finite()).ok_or_else(|| other("Requires an angle or point."))?;
-                    self.edit(s, self.base, Some(Mat3::rotate_about(self.base, a)))
+            Input::Text(t) => {
+                if t.trim().eq_ignore_ascii_case("next") {
+                    let actions = self.actions(s);
+                    if self.mode == GripMode::Stretch && !actions.is_empty() {
+                        let first = actions[0];
+                        if first.needs_point() {
+                            self.ask = Ask::Action(first);
+                            s.echo(first.title());
+                            Ok(Step::Continue)
+                        } else {
+                            self.act(s, first, None, None)
+                        }
+                    } else {
+                        self.next_mode();
+                        s.echo(self.label());
+                        Ok(Step::Continue)
+                    }
+                } else {
+                    match self.mode {
+                        GripMode::Rotate => {
+                            let a = s.angle_settings().rotation(&t).filter(|a| a.is_finite()).ok_or_else(|| other("Requires an angle or point."))?;
+                            self.edit(s, self.base, Some(Mat3::rotate_about(self.base, a)))
+                        }
+                        GripMode::Scale => {
+                            let f = positive(number(&t))?;
+                            self.edit(s, self.base, Some(Mat3::scale_about(self.base, f)))
+                        }
+                        _ => Err(other("Requires a point or an option keyword.")),
+                    }
                 }
-                GripMode::Scale => {
-                    let f = positive(number(&t))?;
-                    self.edit(s, self.base, Some(Mat3::scale_about(self.base, f)))
-                }
-                _ => Err(other("Requires a point or an option keyword.")),
-            },
+            }
             Input::Pick(_) | Input::Cancel => Ok(Step::Continue),
         }
     }
@@ -357,9 +417,14 @@ impl Interactive for GripEdit {
                     GripAction::ToArc => ("Specify a point on the arc", Accept::POINT),
                     GripAction::Lengthen => ("Specify end point or length change", Accept::POINT_OR_NUMBER),
                     GripAction::Radius => ("Specify radius", Accept::POINT_OR_NUMBER),
-                    GripAction::RemoveVertex | GripAction::ToLine => ("", Accept::POINT),
+                    GripAction::AddLeader => ("Specify leader arrowhead location", Accept::POINT),
+                    GripAction::RemoveVertex | GripAction::ToLine | GripAction::RemoveLeader => ("", Accept::POINT),
                 };
-                Prompt::new(format!("{} {msg}", a.title()), accept).kw(&["eXit"]).base(base)
+                let p = Prompt::new(format!("{} {msg}", a.title()), accept).kw(&["eXit"]).base(base);
+                match self.hot.as_slice() {
+                    [g] => p.grip(*g),
+                    _ => p,
+                }
             }
             Ask::Mode => {
                 let (msg, accept, kw): (&str, Accept, &[&str]) = match self.mode {

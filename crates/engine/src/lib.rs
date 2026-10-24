@@ -141,6 +141,7 @@ pub struct DocState {
     pub mspace: Option<Handle>,
     pub views: Vec<(Space, View)>,
     pub view_history: Vec<View>,
+    pub ucs_history: Vec<cadcraft_doc::Ucs>,
     pub uid: u64,
     /// The drawing is saved as binary DXF (it was opened from one, or last saved as one).
     pub binary_dxf: bool,
@@ -170,6 +171,7 @@ impl DocState {
             mspace: None,
             views: Vec::new(),
             view_history: Vec::new(),
+            ucs_history: Vec::new(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
@@ -445,6 +447,9 @@ pub struct Settings {
     pub grips: u8,
     /// GRIPOBJLIMIT: no grips while more objects than this are selected (0: no limit).
     pub gripobjlimit: u32,
+    /// GROUPDISPLAYMODE: 0 shows grips on all group members; 1 shows a single grip at group center;
+    /// 2 (default) shows group bounding box and a single grip at group center.
+    pub groupdisplaymode: u8,
     /// SELECTIONAREA: the selection window and crossing areas are filled.
     pub selectionarea: bool,
     /// WINDOWAREACOLOR, CROSSINGAREACOLOR: their colours (ACI 1-255).
@@ -462,6 +467,16 @@ pub struct Settings {
     pub polarsnap: bool,
     /// POLARDIST: the PolarSnap step; 0 uses the snap X spacing.
     pub polardist: f64,
+    /// OBJECTISOLATIONMODE: 0 (default) isolation lasts for the session; 1 isolation is saved with the drawing.
+    pub objectisolationmode: u8,
+    /// AUTOSNAP bit 1: display AutoSnap marker.
+    pub autosnap_marker: bool,
+    /// AUTOSNAP bit 2: turn AutoSnap magnet on (cursor snaps to osnap point).
+    pub autosnap_magnet: bool,
+    /// AUTOSNAP bit 4: display AutoSnap tooltip.
+    pub autosnap_tooltip: bool,
+    /// AUTOSNAP bit 32: display polar/object tracking tooltips.
+    pub autosnap_track_tooltip: bool,
     /// AUDITCTL: 1 creates an audit report (.adt) file when AUDIT is run (default: 0).
     pub auditctl: bool,
 }
@@ -519,6 +534,7 @@ impl Default for Settings {
             previewfilter: 3,
             grips: 1,
             gripobjlimit: 100,
+            groupdisplaymode: 2,
             selectionarea: true,
             windowareacolor: 150,
             crossingareacolor: 100,
@@ -527,6 +543,11 @@ impl Default for Settings {
             polaraddang: Vec::new(),
             polarsnap: false,
             polardist: 0.0,
+            objectisolationmode: 0,
+            autosnap_marker: true,
+            autosnap_magnet: false,
+            autosnap_tooltip: true,
+            autosnap_track_tooltip: true,
             auditctl: false,
         }
     }
@@ -545,6 +566,32 @@ pub struct Running {
 pub struct PendingWindow {
     pub corner: Vec2,
     pub during_command: bool,
+}
+
+/// A pending lasso selection started by a press-and-drag, collecting freehand polygon points.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PendingLasso {
+    pub pts: Vec<Vec2>,
+    pub during_command: bool,
+}
+
+impl PendingLasso {
+    /// Whether the lasso is in crossing mode: AutoCAD standard is crossing when dragged to the
+    /// left from its start (first move `x < start.x`) or counter-clockwise; Window when dragged
+    /// to the right (`x > start.x`) or clockwise.
+    pub fn is_crossing(&self) -> bool {
+        let (Some(first), Some(second)) = (self.pts.first(), self.pts.get(1)) else { return false };
+        if (second.x - first.x).abs() > 1e-6 {
+            return second.x < first.x;
+        }
+        // If initial horizontal movement was tiny, check any later point or polygon signed area.
+        for p in &self.pts[2..] {
+            if (p.x - first.x).abs() > 1e-6 {
+                return p.x < first.x;
+            }
+        }
+        false
+    }
 }
 
 /// Options and values the interactive commands remember for the rest of the session, offered as
@@ -689,6 +736,7 @@ pub struct Session {
     pub clipboard: Vec<Entity>,
     pub clipboard_base: Vec2,
     pub pending_window: Option<PendingWindow>,
+    pub pending_lasso: Option<PendingLasso>,
     /// A selection mode typed at "Select objects" (W, C, F, WP, CP) collecting its points.
     pub select_mode: Option<select::SelectMode>,
     /// SIngle typed at "Select objects": the next selection ends the prompt.
@@ -747,6 +795,7 @@ impl Session {
             clipboard: Vec::new(),
             clipboard_base: Vec2::ZERO,
             pending_window: None,
+            pending_lasso: None,
             select_mode: None,
             select_single: false,
             untitled_counter: 0,
@@ -843,6 +892,25 @@ impl Session {
             let mut seen = std::collections::HashSet::new();
             st.selection = sel.into_iter().filter(|h| seen.insert(*h)).collect();
         }
+    }
+
+    /// The active User Coordinate System (UCS) of the drawing.
+    pub fn current_ucs(&self) -> cadcraft_doc::Ucs {
+        self.doc().map(|d| d.header.ucs()).unwrap_or_else(|_| cadcraft_doc::Ucs::world())
+    }
+
+    /// Set the active User Coordinate System (UCS), keeping the previous one in history.
+    pub fn set_current_ucs(&mut self, ucs: cadcraft_doc::Ucs) -> Result<()> {
+        let old = self.current_ucs();
+        if let Ok(st) = self.state_mut() {
+            if st.ucs_history.len() >= 10 {
+                st.ucs_history.remove(0);
+            }
+            st.ucs_history.push(old);
+        }
+        self.doc_mut()?.header.set_ucs(&ucs);
+        self.touch();
+        Ok(())
     }
 
     /// Message on the command line history.
@@ -971,21 +1039,35 @@ impl Session {
             Some(n) => (true, n),
             None => (false, name),
         };
-        let lower = name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase();
-        // A command-line form with an id of its own (-ATTEDIT) is not the command it prefixes.
-        let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
-        let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
-        let Some(spec) = find_command(&id) else {
-            // A command defined in LISP: (defun c:NAME …).
-            if !transparent && let Some(f) = self.lisp_command(&lower) {
-                if self.running.is_some() {
-                    self.cancel();
-                }
-                self.last_command = Some(lower.clone());
-                self.echo(format!("Command: {}", lower.to_ascii_uppercase()));
-                return self.lisp_run_command(&lower, f);
+        let unadorned = name.trim_start_matches(['_', '.']).to_ascii_lowercase();
+        let lower = unadorned.trim_start_matches('-').to_string();
+
+        // AutoCAD command precedence:
+        // 1. Direct built-in command name (e.g. LINE, HIDE, -ATTEDIT)
+        // 2. AutoLISP command (c:NAME) takes precedence over aliases (acad.pgp)
+        // 3. Command alias (e.g. L -> LINE, HI -> HIDE)
+        // 4. Bare system variable (e.g. ORTHOMODE)
+        let spec = if let Some(spec) = find_command(&unadorned) {
+            Some(spec)
+        } else if unadorned.starts_with('-') {
+            let dashed = cmd::resolve_alias(&unadorned);
+            find_command(&dashed).or_else(|| find_command(&lower))
+        } else if let Some(spec) = find_command(&lower) {
+            Some(spec)
+        } else if !transparent && let Some(f) = self.lisp_command(&lower) {
+            if self.running.is_some() {
+                self.cancel();
             }
-            // A bare system variable name (ORTHOMODE, GRIDMODE…) acts as SETVAR on that variable.
+            self.last_command = Some(lower.clone());
+            self.echo(format!("Command: {}", lower.to_ascii_uppercase()));
+            return self.lisp_run_command(&lower, f);
+        } else {
+            let dashed = cmd::resolve_alias(&unadorned);
+            let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
+            find_command(&id)
+        };
+
+        let Some(spec) = spec else {
             let var = lower.to_ascii_uppercase();
             if !name.starts_with(['_', '.', '-']) && sysvars::get(self, &var).is_some() {
                 self.start(if transparent { "'setvar" } else { "setvar" })?;
@@ -1133,6 +1215,7 @@ impl Session {
             && let Some(m) = select::SelectMode::from_keyword(t)
         {
             self.pending_window = None;
+            self.pending_lasso = None;
             self.select_mode = Some(m);
             return Ok(None);
         }
@@ -1159,12 +1242,22 @@ impl Session {
                     let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
-                match select::pick(self.doc()?, &space, p, ap) {
-                    Some(h) => Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h])))),
-                    None => {
-                        self.pending_window = Some(PendingWindow { corner: p, during_command: true });
-                        Ok(None)
-                    }
+                let cands = if self.settings.selection_cycling {
+                    select::pick_all(self.doc()?, &space, p, ap)
+                } else {
+                    select::pick(self.doc()?, &space, p, ap).into_iter().collect()
+                };
+                if !cands.is_empty() {
+                    let h = if self.settings.selection_cycling && cands.len() > 1 {
+                        let sel = self.selection();
+                        cands.iter().find(|cand| !sel.contains(cand)).copied().unwrap_or(cands[0])
+                    } else {
+                        cands[0]
+                    };
+                    Ok(Some(Input::Pick(cmd::groups::expand(self, vec![h]))))
+                } else {
+                    self.pending_window = Some(PendingWindow { corner: p, during_command: true });
+                    Ok(None)
                 }
             }
             Input::Text(ref t) | Input::Keyword(ref t) => {
@@ -1184,6 +1277,7 @@ impl Session {
             }
             Input::Cancel => {
                 self.pending_window = None;
+                self.pending_lasso = None;
                 Ok(Some(Input::Cancel))
             }
             other => Ok(Some(other)),
@@ -1208,6 +1302,24 @@ impl Session {
                 Input::Enter => Ok(None),
                 _ => {
                     self.echo("Invalid group name.");
+                    self.select_mode = Some(mode);
+                    Ok(None)
+                }
+            };
+        }
+        if mode.kind == select::SelectKind::Class {
+            return match input {
+                Input::Text(name) | Input::Keyword(name) => match select::select_class(self.doc()?, &self.space(), &name) {
+                    Some(hs) => Ok(Some(Input::Pick(hs))),
+                    None => {
+                        self.echo(format!("No objects of class \"{}\".", name.trim()));
+                        Ok(None)
+                    }
+                },
+                Input::Cancel => Ok(Some(input)),
+                Input::Enter => Ok(None),
+                _ => {
+                    self.echo("Invalid class name.");
                     self.select_mode = Some(mode);
                     Ok(None)
                 }
@@ -1430,15 +1542,59 @@ impl Session {
         self.settings.grips > 0 && (limit == 0 || selected <= limit as usize)
     }
 
+    /// For selected objects belonging to selectable groups (when `pickstyle & 1 != 0`),
+    /// returns the group index, group bounding box (if non-empty) and the member handles in the current space.
+    pub fn selected_groups(&self) -> Vec<(usize, Bounds2, Vec<Handle>)> {
+        if self.settings.pickstyle & 1 == 0 {
+            return Vec::new();
+        }
+        let Ok(d) = self.doc() else { return Vec::new() };
+        let space = self.space();
+        let Some(store) = d.space(&space) else { return Vec::new() };
+        let sel = self.selection();
+        if sel.is_empty() {
+            return Vec::new();
+        }
+
+        let mut groups: Vec<(usize, Bounds2, Vec<Handle>)> = Vec::new();
+        let mut seen_groups = std::collections::HashSet::new();
+
+        for h in &sel {
+            for gi in cmd::groups::groups_of(d, *h) {
+                if !seen_groups.insert(gi) {
+                    continue;
+                }
+                let Some(g) = d.groups.get(gi) else { continue };
+                if !g.selectable {
+                    continue;
+                }
+                // Group members that exist in current space and are visible
+                let members: Vec<Handle> = g.members.iter().copied().filter(|m| store.get(*m).is_some_and(|e| d.is_visible(e))).collect();
+                if members.is_empty() {
+                    continue;
+                }
+                let mut b = Bounds2::EMPTY;
+                for m in &members {
+                    if let Some(e) = store.get(*m) {
+                        b = b.union(&cadcraft_doc::entity_bounds(d, e, 0));
+                    }
+                }
+                groups.push((gi, b, members));
+            }
+        }
+        groups
+    }
+
     /// The text shown on the command line: the active prompt, or "Command:".
     pub fn prompt_text(&self) -> String {
         if let Some(p) = self.lisp_prompt() {
             return p.display();
         }
-        match &self.running {
-            Some(r) if self.suspended.is_some() => format!(">>{} {}", r.id.to_ascii_uppercase(), r.machine.prompt(self).display()),
-            Some(r) => format!("{} {}", r.id.to_ascii_uppercase(), r.machine.prompt(self).display()),
-            None => "Command:".into(),
+        match (&self.running, self.current_prompt()) {
+            (Some(r), Some(p)) if self.suspended.is_some() => format!(">>{} {}", r.id.to_ascii_uppercase(), p.display()),
+            (Some(r), Some(p)) => format!("{} {}", r.id.to_ascii_uppercase(), p.display()),
+            (Some(r), None) => format!("{} ", r.id.to_ascii_uppercase()),
+            (None, _) => "Command:".into(),
         }
     }
 
@@ -1589,8 +1745,17 @@ impl Session {
         {
             return self.input(Input::Keyword(k));
         }
-        if prompt.accept.point {
-            if let Some(p) = prompt::parse_point_with(tt, self.last_point, &self.angle_settings()) {
+        let is_3d_coord = prompt.accept.text && {
+            let t = tt.trim();
+            let body = t.strip_prefix('*').unwrap_or(t);
+            let body = body.strip_prefix('@').or_else(|| body.strip_prefix('#')).unwrap_or(body);
+            let body = body.strip_prefix('*').unwrap_or(body);
+            let parts: Vec<&str> = body.split(',').collect();
+            parts.len() == 3 && parts.iter().all(|s| crate::units::parse_distance(s.trim()).is_some())
+        };
+        if prompt.accept.point && !is_3d_coord {
+            let ucs = self.doc().ok().map(|d| d.header.ucs());
+            if let Some(p) = prompt::parse_point_ucs(tt, self.last_point, &self.angle_settings(), ucs.as_ref()) {
                 self.last_polar = prompt::parse_polar_text(tt, &self.angle_settings());
                 return self.input(Input::Point(p));
             }
@@ -1681,8 +1846,77 @@ impl Session {
         if !self.settings.pickdrag || !corner.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
             return false;
         }
+        self.pending_lasso = None;
         self.pending_window = Some(PendingWindow { corner, during_command });
         true
+    }
+
+    /// Open a lasso selection at `start`, collecting freehand polygon points during a drag.
+    pub fn begin_lasso(&mut self, start: Vec2) -> bool {
+        let during_command = self.running.is_some();
+        if !start.is_finite() || (during_command && !self.current_prompt().is_some_and(|p| p.accept.select)) {
+            return false;
+        }
+        self.pending_window = None;
+        self.pending_lasso = Some(PendingLasso { pts: vec![start], during_command });
+        true
+    }
+
+    /// Add a point to the pending lasso selection if it meets a minimum distance threshold.
+    pub fn push_lasso(&mut self, p: Vec2) {
+        if !p.is_finite() {
+            return;
+        }
+        if let Some(pl) = &mut self.pending_lasso {
+            if pl.pts.len() >= select::MAX_MODE_POINTS {
+                return;
+            }
+            if let Some(last) = pl.pts.last()
+                && (p.x - last.x).hypot(p.y - last.y) < 1e-5
+            {
+                return;
+            }
+            pl.pts.push(p);
+        }
+    }
+
+    /// Complete a lasso selection during an active command prompt, returning the selected handles.
+    pub fn finish_command_lasso(&mut self) -> Result<Option<Vec<Handle>>> {
+        let Some(pl) = self.pending_lasso.take() else { return Ok(None) };
+        let space = self.space();
+        let crossing = pl.is_crossing();
+        let hs = if pl.pts.len() >= 3 && geom::shoelace(&pl.pts).abs() > 1e-4 {
+            select::select_polygon(self.doc()?, &space, &pl.pts, crossing)
+        } else if let (Some(a), Some(b)) = (pl.pts.first(), pl.pts.last()) {
+            select::select_window(self.doc()?, &space, Bounds2::new(*a, *b), crossing)
+        } else {
+            Vec::new()
+        };
+        Ok(Some(cmd::groups::expand(self, hs)))
+    }
+
+    /// Complete a lasso selection while idle (no command active), updating the session selection.
+    pub fn idle_lasso(&mut self, shift: bool) -> Result<()> {
+        let Some(pl) = self.pending_lasso.take() else { return Ok(()) };
+        let space = self.space();
+        let pickadd = self.settings.pickadd;
+        let crossing = pl.is_crossing();
+        let hs = if pl.pts.len() >= 3 && geom::shoelace(&pl.pts).abs() > 1e-4 {
+            select::select_polygon(self.doc()?, &space, &pl.pts, crossing)
+        } else if let (Some(a), Some(b)) = (pl.pts.first(), pl.pts.last()) {
+            select::select_window(self.doc()?, &space, Bounds2::new(*a, *b), crossing)
+        } else {
+            Vec::new()
+        };
+        let hs = cmd::groups::expand(self, hs);
+        let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
+        if shift && pickadd {
+            sel.retain(|h| !hs.contains(h));
+        } else {
+            sel.extend(hs);
+        }
+        self.set_selection(sel);
+        Ok(())
     }
 
     /// A click with no command running: pick/toggle objects or start a selection window.
@@ -1692,6 +1926,7 @@ impl Session {
     pub fn idle_click(&mut self, p: Vec2, shift: bool) -> Result<()> {
         let space = self.space();
         let pickadd = self.settings.pickadd;
+        self.pending_lasso = None;
         if let Some(pw) = self.pending_window.take() {
             let crossing = p.x < pw.corner.x;
             let hs = select::select_window(self.doc()?, &space, Bounds2::new(pw.corner, p), crossing);
@@ -1706,9 +1941,36 @@ impl Session {
             return Ok(());
         }
         let ap = self.pixel_size() * self.settings.pickbox.max(1.0) * 1.5;
-        match select::pick(self.doc()?, &space, p, ap) {
-            Some(h) => self.idle_pick(h, shift),
-            None => self.pending_window = Some(PendingWindow { corner: p, during_command: false }),
+        let cands = if self.settings.selection_cycling {
+            select::pick_all(self.doc()?, &space, p, ap)
+        } else {
+            select::pick(self.doc()?, &space, p, ap).into_iter().collect()
+        };
+        if !cands.is_empty() {
+            let mut sel = if pickadd || shift { self.selection() } else { Vec::new() };
+            // If cycling is active and multiple objects overlap, cycle through the candidates:
+            // replacing any previously selected candidate from the overlapping group.
+            let h = if self.settings.selection_cycling && cands.len() > 1 {
+                let current_idx = cands.iter().position(|cand| sel.contains(cand));
+                let next_idx = match current_idx {
+                    Some(idx) => (idx + 1) % cands.len(),
+                    None => 0,
+                };
+                sel.retain(|s_cand| !cands.contains(s_cand));
+                cands[next_idx]
+            } else {
+                cands[0]
+            };
+            let hs = cmd::groups::expand(self, vec![h]);
+            let had = sel.contains(&h);
+            if shift && (pickadd || had) {
+                sel.retain(|x| !hs.contains(x));
+            } else if !had {
+                sel.extend(hs);
+            }
+            self.set_selection(sel);
+        } else {
+            self.pending_window = Some(PendingWindow { corner: p, during_command: false });
         }
         Ok(())
     }

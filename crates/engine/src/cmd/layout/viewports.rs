@@ -289,7 +289,7 @@ pub(super) fn mview_option(s: &mut Session, p: &Value) -> Option<Result<Value>> 
 }
 
 /// VPCLIP: `{handle? (viewport; default: the selected or active one), object? | points? (+ bulges?), delete?: bool}`.
-pub(super) fn run_vpclip(s: &mut Session, p: &Value) -> Result<Value> {
+pub(crate) fn run_vpclip(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "vpclip";
     let space = target_layout(s, cmd, p)?;
     let d = s.doc()?;
@@ -834,7 +834,7 @@ enum ClipStage {
 
 /// VPCLIP typed at the command line.
 #[derive(Default)]
-pub(super) struct VpclipM {
+pub(crate) struct VpclipM {
     stage: ClipStage,
 }
 

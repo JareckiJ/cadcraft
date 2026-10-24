@@ -283,18 +283,18 @@ pub fn page_device(cmd: &str, p: &Value, page: &mut PageSetup) -> Result<bool> {
 /// without a device are unchanged.
 pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     let given = str_param(p, "device").map(str::trim);
-    let layout = match str_param(p, "layout") {
-        Some(n) if n.eq_ignore_ascii_case("model") => None,
-        Some(n) => s.doc()?.layout(n).map(|l| l.page.clone()),
+    let (is_model, page) = match str_param(p, "layout") {
+        Some(n) if n.eq_ignore_ascii_case("model") => (true, Some(s.doc()?.model_page.clone())),
+        Some(n) => (false, s.doc()?.layout(n).map(|l| l.page.clone())),
         None => match s.space().layout() {
-            Some(n) => s.doc()?.layout(n).map(|l| l.page.clone()),
-            None => None,
+            Some(n) => (false, s.doc()?.layout(n).map(|l| l.page.clone())),
+            None => (true, Some(s.doc()?.model_page.clone())),
         },
     };
     let dev = match given {
         Some(n) if n.is_empty() || n.eq_ignore_ascii_case(NO_DEVICE) => None,
         Some(n) => Some(find_device(n).ok_or_else(|| unknown_device(cmd, n))?),
-        None => layout.as_ref().and_then(|pg| find_device(&pg.device)),
+        None => page.as_ref().and_then(|pg| find_device(&pg.device)),
     };
     let mut out = if p.is_object() { p.clone() } else { json!({}) };
     let (Some(dev), Some(o)) = (dev, out.as_object_mut()) else { return Ok(out) };
@@ -310,8 +310,8 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
                 return Err(bad(cmd, format!("plotter `{}` has no paper `{name}` (papers: {})", dev.name, known.join(", "))));
             }
         },
-        // A layout keeps its page setup's paper; model space takes the device's default.
-        None if layout.is_none() => dev.default_paper(),
+        // A layout keeps its page setup's paper; model space takes its page setup's paper or device default.
+        None if is_model => page.as_ref().and_then(|pg| device_paper(&dev, &pg.paper)).or_else(|| dev.default_paper()),
         None => None,
     };
     if let Some(pp) = paper {
@@ -319,8 +319,9 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         o.insert("width".into(), json!(pp.width));
         o.insert("height".into(), json!(pp.height));
         o.insert("margins".into(), json!(pp.margins));
-        if p.get("landscape").is_none() && layout.is_none() {
-            o.insert("landscape".into(), json!(dev.orientation == Orientation::Landscape));
+        if p.get("landscape").is_none() && is_model {
+            let landscape = page.as_ref().map_or(dev.orientation == Orientation::Landscape, |pg| pg.landscape);
+            o.insert("landscape".into(), json!(landscape));
         }
     }
     Ok(out)

@@ -15,7 +15,7 @@ use viewports::MviewM;
 
 mod plotstyle;
 mod prompts;
-mod viewports;
+pub(crate) mod viewports;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -29,7 +29,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(NewLayoutM))),
         CommandSpec::new("layout.delete", "Delete Layout", run_delete).params("{name}"),
         CommandSpec::new("layout.rename", "Rename Layout", run_rename).params("{from?: current layout, to}"),
-        CommandSpec::new("layout.copy", "Copy Layout", run_copy).params("{from, to?}"),
+        CommandSpec::new("layout.copy", "Copy Layout", run_copy).params("{from, to?, before?}"),
+        CommandSpec::new("layout.reorder", "Reorder Layout", run_reorder).params("{name, before?}"),
         CommandSpec::new("layout.list", "List Layouts", run_list).params("→ [{name, tabOrder, page, viewports}]").noundo(),
         CommandSpec::new("mview", "Viewports", run_mview)
             .alias(&["mv"])
@@ -301,16 +302,48 @@ fn run_copy(s: &mut Session, p: &Value) -> Result<Value> {
             (2..=10_000).map(|i| format!("{from} ({i})")).find(|n| d.layout(n).is_none()).ok_or_else(|| bad("layout.copy", "no free name"))?
         }
     };
+    let before = str_param(p, "before");
     let d = s.doc_mut()?;
     let Some(src) = d.layouts.iter().find(|l| l.name == from).cloned() else { return Err(bad("layout.copy", "no such layout")) };
-    let order = d.layouts.iter().map(|l| l.tab_order).max().unwrap_or(0).saturating_add(1);
     let mut store = EntityStore::new();
     for e in src.entities.iter() {
         let h = d.new_handle();
         store.push(Entity { handle: h, ..Entity::clone(e) });
     }
-    d.layouts.push(Layout { name: to.clone(), tab_order: order, page: src.page, entities: store, view: src.view });
+    let new_layout = Layout { name: to.clone(), tab_order: 0, page: src.page, entities: store, view: src.view };
+    if let Some(target) = before {
+        let insert_idx = d.layouts.iter().position(|l| l.name.eq_ignore_ascii_case(target)).unwrap_or(d.layouts.len());
+        d.layouts.insert(insert_idx, new_layout);
+    } else {
+        d.layouts.push(new_layout);
+    }
+    for (i, l) in d.layouts.iter_mut().enumerate() {
+        l.tab_order = (i + 1) as u32;
+    }
+    s.touch();
     Ok(json!({ "name": to }))
+}
+
+fn run_reorder(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = str_param(p, "name").ok_or_else(|| bad("layout.reorder", "`name` is required"))?;
+    let name = layout_name("layout.reorder", s.doc()?, name)?;
+    let before = str_param(p, "before");
+    let d = s.doc_mut()?;
+    let Some(idx) = d.layouts.iter().position(|l| l.name == name) else {
+        return Err(bad("layout.reorder", "no such layout"));
+    };
+    let layout = d.layouts.remove(idx);
+    if let Some(target) = before {
+        let insert_idx = d.layouts.iter().position(|l| l.name.eq_ignore_ascii_case(target)).unwrap_or(d.layouts.len());
+        d.layouts.insert(insert_idx, layout);
+    } else {
+        d.layouts.push(layout);
+    }
+    for (i, l) in d.layouts.iter_mut().enumerate() {
+        l.tab_order = (i + 1) as u32;
+    }
+    s.touch();
+    Ok(json!({ "reordered": name }))
 }
 
 fn run_list(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -643,24 +676,26 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         "plotTransparency",
     ];
     let changes = keys.iter().any(|k| p.get(k).is_some());
-    let name = match str_param(p, "layout") {
-        Some(n) => Some(layout_name(cmd, s.doc()?, n)?),
-        None => s.space().layout().map(str::to_string),
-    };
-    let Some(name) = name else {
-        if changes {
-            return Err(bad(cmd, "pass `layout` (model-space page setups are not stored yet)"));
-        }
-        // Report every layout's page setup.
+    if !changes && p.get("layout").is_none() {
+        // Report every layout's page setup and model space.
         let d = s.doc()?;
         return Ok(json!({
+            "model": serde_json::to_value(&d.model_page).unwrap_or(Value::Null),
             "layouts": d.layouts.iter().map(|l| json!({"name": l.name, "page": serde_json::to_value(&l.page).unwrap_or(Value::Null)})).collect::<Vec<_>>(),
             "papers": cadcraft_render::PAPER_SIZES.iter().map(|p| p.name).collect::<Vec<_>>(),
             "plotStyleTables": cadcraft_doc::BUILTIN_PLOT_STYLE_TABLES,
             "devices": super::plotters::device_names(),
         }));
+    }
+    let (name, is_model) = match str_param(p, "layout") {
+        Some(n) if n.eq_ignore_ascii_case("model") => ("Model".to_string(), true),
+        Some(n) => (layout_name(cmd, s.doc()?, n)?, false),
+        None => match s.space().layout() {
+            Some(n) => (n.to_string(), false),
+            None => ("Model".to_string(), true),
+        },
     };
-    let mut page = s.doc()?.layout(&name).map(|l| l.page.clone()).unwrap_or_default();
+    let mut page = if is_model { s.doc()?.model_page.clone() } else { s.doc()?.layout(&name).map(|l| l.page.clone()).unwrap_or_default() };
     // A plotter's own papers (with their printable areas) come first.
     let device_paper = super::plotters::page_device(cmd, p, &mut page)?;
     if let Some(paper) = p.get("paper").filter(|_| !device_paper) {
@@ -672,6 +707,7 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         page.paper = ps.name.into();
         page.width_mm = ps.width_mm;
         page.height_mm = ps.height_mm;
+        page.margins_mm = ps.margins_mm();
     }
     let mm = |k: &str| p.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0 && *v <= 5080.0);
     match (mm("width"), mm("height")) {
@@ -707,12 +743,18 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(v) = str_param(p, "plotArea") {
         let v = v.to_ascii_lowercase();
-        if !["layout", "extents", "display", "window", "limits"].contains(&v.as_str()) {
-            return Err(bad(cmd, "`plotArea` must be layout, extents, display, window or limits"));
-        }
-        // Layout plotting always prints the whole sheet; the other areas are only stored for DXF round trips.
-        if v != "layout" && v != page.plot_area {
-            return Err(bad(cmd, format!("plot area `{v}` is not available yet; layouts plot the whole sheet (`layout`)")));
+        if is_model {
+            if !["extents", "display", "limits", "window"].contains(&v.as_str()) {
+                return Err(bad(cmd, "`plotArea` must be extents, display, limits or window"));
+            }
+        } else {
+            if !["layout", "extents", "display", "window", "limits"].contains(&v.as_str()) {
+                return Err(bad(cmd, "`plotArea` must be layout, extents, display, window or limits"));
+            }
+            // Layout plotting always prints the whole sheet; the other areas are only stored for DXF round trips.
+            if v != "layout" && v != page.plot_area {
+                return Err(bad(cmd, format!("plot area `{v}` is not available yet; layouts plot the whole sheet (`layout`)")));
+            }
         }
         page.plot_area = v;
     }
@@ -726,7 +768,9 @@ fn run_pagesetup(s: &mut Session, p: &Value) -> Result<Value> {
         page.plot_transparency = v;
     }
     if changes {
-        if let Some(l) = s.doc_mut()?.layouts.iter_mut().find(|l| l.name == name) {
+        if is_model {
+            s.doc_mut()?.model_page = page.clone();
+        } else if let Some(l) = s.doc_mut()?.layouts.iter_mut().find(|l| l.name == name) {
             l.page = page.clone();
         }
         s.touch();
@@ -806,6 +850,18 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         return Err(bad(cmd, "model-space plot offsets are not supported for SVG; choose PDF/PNG or center the plot"));
     }
     if let Some(o) = opts.as_object_mut() {
+        if matches!(space, Space::Model) {
+            let mp = &s.doc()?.model_page;
+            if p.get("fit").is_none() && mp.scale_to_fit {
+                o.insert("fit".into(), json!(true));
+            }
+            if p.get("scale").is_none() && !mp.scale_to_fit && mp.scale > 0.0 {
+                o.insert("scale".into(), json!(mp.scale));
+            }
+            if p.get("plotStyleTable").is_none() && !mp.plot_style_table.is_empty() {
+                o.insert("plotStyleTable".into(), json!(mp.plot_style_table));
+            }
+        }
         if let Some(v) = p.get("scale") {
             let k = parse_scale(v).ok_or_else(|| bad(cmd, "`scale` must be positive: paper units per drawing unit, or a ratio such as \"1:50\""))?;
             o.insert("scale".into(), json!(k));
@@ -849,7 +905,9 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
 /// `display` the current model view, `limits` the drawing limits, `window` the `window` corners.
 /// Layouts plot their sheet (`layout`).
 fn plot_window(s: &Session, p: &Value, cmd: &str, space: &Space) -> Result<Option<Bounds2>> {
-    let area = str_param(p, "plotArea").map(str::to_ascii_lowercase);
+    let area = str_param(p, "plotArea")
+        .map(str::to_ascii_lowercase)
+        .or_else(|| if matches!(space, Space::Model) { s.doc().ok().map(|d| d.model_page.plot_area.to_ascii_lowercase()) } else { None });
     let w = match (space, area.as_deref()) {
         (_, None) | (Space::Model, Some("extents")) | (Space::Paper(_), Some("layout")) => return Ok(None),
         (Space::Paper(_), Some(_)) => return Err(bad(cmd, "a layout plots its whole sheet: `plotArea` must be layout")),
@@ -1064,8 +1122,13 @@ mod tests {
         assert!((sheet.size.x - 420.0 / 25.4).abs() < 1e-9 && (sheet.size.y - 297.0 / 25.4).abs() < 1e-9);
         assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "paper": "Z12"})).is_err());
         assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "margins": [1, 2]})).is_err());
-        assert!(s.execute("pagesetup", &json!({"layout": "Layout1", "width": 1e308, "height": 5})).is_err());
-        assert!(s.execute("pagesetup", &json!({"paper": "A4"})).is_err(), "model tab needs a layout");
+        assert!(s.execute("pagesetup", &json!({"layout": "Nope", "paper": "A4"})).is_err());
+        let r_mod = s.execute("pagesetup", &json!({"layout": "Model", "paper": "A4", "margins": [5, 5, 5, 5]})).unwrap();
+        assert_eq!(r_mod["layout"], "Model");
+        assert_eq!(r_mod["page"]["paper"], "ISO A4 (210.00 x 297.00 MM)");
+        assert_eq!(r_mod["page"]["marginsMm"], json!([5.0, 5.0, 5.0, 5.0]));
+        let r_mod_area = s.execute("pagesetup", &json!({"layout": "Model", "plotArea": "display"})).unwrap();
+        assert_eq!(r_mod_area["page"]["plotArea"], "display");
         for area in ["extents", "display", "window", "limits"] {
             let e = s.execute("pagesetup", &json!({"layout": "Layout1", "plotArea": area})).unwrap_err();
             assert!(e.to_string().contains("not available yet"), "{area}: {e}");
@@ -1073,6 +1136,7 @@ mod tests {
         let r = s.execute("pagesetup", &json!({"layout": "Layout1", "plotArea": "Layout"})).unwrap();
         assert_eq!(r["page"]["plotArea"], "layout");
         let report = s.execute("pagesetup", &Value::Null).unwrap();
+        assert!(report["model"].is_object());
         assert!(report["papers"].as_array().unwrap().len() >= 10);
         s.execute("pagesetup", &json!({"layout": "Layout2", "width": 500, "height": 300})).unwrap();
         let p = &s.doc().unwrap().layout("Layout2").unwrap().page;

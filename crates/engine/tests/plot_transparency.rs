@@ -59,6 +59,18 @@ fn page_setup_stores_plot_transparency() {
 }
 
 #[test]
+fn page_setup_stores_plot_transparency_on_model() {
+    let mut s = session();
+    let r = s.execute("pagesetup", &json!({"layout": "Model"})).unwrap();
+    assert_eq!(r["page"]["plotTransparency"], json!(false), "off by default on model");
+    let r = s.execute("pagesetup", &json!({"layout": "Model", "plotTransparency": true})).unwrap();
+    assert_eq!(r["page"]["plotTransparency"], json!(true));
+    assert!(s.doc().unwrap().model_page.plot_transparency);
+    s.undo().unwrap();
+    assert!(!s.doc().unwrap().model_page.plot_transparency);
+}
+
+#[test]
 fn preview_follows_the_plot_setting() {
     let mut s = session();
     // A red solid hatch at 50 % over the line.

@@ -55,6 +55,11 @@ pub struct HatchDlgState {
     /// Internal points and boundary objects picked so far (create mode).
     pub points: Vec<[f64; 2]>,
     pub handles: Vec<Handle>,
+    pub add_boundaries: Vec<Handle>,
+    pub remove_boundaries: Vec<Handle>,
+    pub inherit_picking: bool,
+    pub add_picking: bool,
+    pub remove_picking: bool,
     /// The loops of the first edited hatch; geometry edits require exactly one hatch.
     pub loop_outer: Vec<bool>,
     /// Zero-based loop numbers to remove on OK.
@@ -102,6 +107,11 @@ pub fn create_state(d: &Drawing, uid: u64, gradient: bool) -> HatchDlgState {
         separate: h.i64("HPSEPARATE", 0) != 0,
         points: Vec::new(),
         handles: Vec::new(),
+        add_boundaries: Vec::new(),
+        remove_boundaries: Vec::new(),
+        inherit_picking: false,
+        add_picking: false,
+        remove_picking: false,
         loop_outer: Vec::new(),
         remove_loops: Vec::new(),
         picking: None,
@@ -250,6 +260,12 @@ pub fn ok_call(st: &HatchDlgState) -> Option<(&'static str, Value)> {
             None => p.insert("originMode".into(), json!(f.origin_mode)),
         };
     }
+    if !st.add_boundaries.is_empty() {
+        p.insert("addBoundaries".into(), hexes(&st.add_boundaries));
+    }
+    if !st.remove_boundaries.is_empty() {
+        p.insert("removeBoundaries".into(), hexes(&st.remove_boundaries));
+    }
     if p.is_empty() {
         return None;
     }
@@ -350,7 +366,55 @@ pub fn resume(app: &mut CadApp) {
         return;
     }
     st.picking = None;
-    if mode == PickMode::Hatch {
+    if st.inherit_picking {
+        st.inherit_picking = false;
+        if let Some(p) = picks
+            && let Some(h) = p.handles.first()
+            && let Ok(doc) = app.session.doc()
+            && let Some(e) = doc.entity(*h)
+            && let EntityKind::Hatch(hx) = &e.kind
+        {
+            st.fill.gradient = hx.gradient.is_some();
+            if hx.gradient.is_none() {
+                st.fill.pattern = hx.pattern.clone();
+            }
+            st.fill.scale = if hx.scale.is_finite() && hx.scale > 0.0 { hx.scale } else { 1.0 };
+            st.fill.angle = hx.angle.to_degrees();
+            st.fill.associative = hx.associative;
+            st.fill.style = hx.style.min(2);
+            if let Some(g) = &hx.gradient {
+                let up = g.name.trim().to_ascii_uppercase();
+                let (inverted, base) = match up.strip_prefix("INV") {
+                    Some(b) => (true, b.to_string()),
+                    None => (false, up.clone()),
+                };
+                st.fill.shape = if SHAPES.contains(&base.as_str()) { base } else { "LINEAR".into() };
+                st.fill.inverted = inverted;
+                st.fill.color1 = g.color1;
+                st.fill.color2 = g.color2;
+                st.fill.angle = g.angle.to_degrees();
+                st.fill.centered = g.centered;
+            }
+        }
+    } else if st.add_picking {
+        st.add_picking = false;
+        if let Some(p) = picks {
+            for h in p.handles {
+                if !st.add_boundaries.contains(&h) {
+                    st.add_boundaries.push(h);
+                }
+            }
+        }
+    } else if st.remove_picking {
+        st.remove_picking = false;
+        if let Some(p) = picks {
+            for h in p.handles {
+                if !st.remove_boundaries.contains(&h) {
+                    st.remove_boundaries.push(h);
+                }
+            }
+        }
+    } else if mode == PickMode::Hatch {
         let next = picks.and_then(|p| app.session.doc().ok().and_then(|d| edit_state(d, st.uid, p.handles)));
         let Some(mut next) = next else { return };
         next.space = st.space.clone();
@@ -389,6 +453,9 @@ enum Action {
     Ok,
     Cancel,
     Pick(PickMode),
+    Inherit,
+    AddBoundaries,
+    RemoveBoundaries,
 }
 
 fn shape_label(name: &str) -> &'static str {
@@ -470,6 +537,24 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             *open = false;
         }
         Action::Pick(mode) => start_pick(app, mode),
+        Action::Inherit => {
+            if let Some(s) = app.hatch_dlg.as_mut() {
+                s.inherit_picking = true;
+            }
+            start_pick(app, PickMode::Hatch);
+        }
+        Action::AddBoundaries => {
+            if let Some(s) = app.hatch_dlg.as_mut() {
+                s.add_picking = true;
+            }
+            start_pick(app, PickMode::Objects);
+        }
+        Action::RemoveBoundaries => {
+            if let Some(s) = app.hatch_dlg.as_mut() {
+                s.remove_picking = true;
+            }
+            start_pick(app, PickMode::Objects);
+        }
         Action::None => {
             if !*open {
                 app.hatch_dlg = None;
@@ -587,7 +672,26 @@ fn options_ui(ui: &mut egui::Ui, st: &mut HatchDlgState, action: &mut Action) {
             ui.label(crate::tl!("Select boundaries to remove"));
         }
         ui.separator();
+    } else {
+        ui.strong(crate::tl!("Boundaries"));
+        if ui.button(crate::tl!("Add boundaries")).clicked() {
+            *action = Action::AddBoundaries;
+        }
+        if ui.button(crate::tl!("Remove boundaries")).clicked() {
+            *action = Action::RemoveBoundaries;
+        }
+        if !st.add_boundaries.is_empty() {
+            ui.label(crate::tf!("Boundaries to add: {n}", n = st.add_boundaries.len()));
+        }
+        if !st.remove_boundaries.is_empty() {
+            ui.label(crate::tf!("Boundaries to remove: {n}", n = st.remove_boundaries.len()));
+        }
+        ui.separator();
     }
+    if ui.button(crate::tl!("Inherit Properties")).clicked() {
+        *action = Action::Inherit;
+    }
+    ui.separator();
     ui.strong(crate::tl!("Options"));
     ui.checkbox(&mut st.fill.associative, crate::tl!("Associative"));
     if st.edit.is_empty() {
@@ -1021,5 +1125,44 @@ mod tests {
             cadcraft_doc::EntityKind::Hatch(x) => assert!(x.gradient.is_none() && x.pattern == "ANSI31"),
             k => panic!("{k:?}"),
         }
+    }
+
+    #[test]
+    fn inherit_properties_copies_from_picked_hatch() {
+        let (mut app, _) = app_with_rect();
+        let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "CROSS30", "scale": 2.5, "angle": 45 })).unwrap()["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let h = Handle::parse_hex(&hx).unwrap();
+        open_create(&mut app, false);
+        let mut st = app.hatch_dlg.take().unwrap();
+        assert_ne!(st.fill.pattern, "CROSS30");
+        st.inherit_picking = true;
+        app.hatch_dlg = Some(st);
+        start_pick(&mut app, PickMode::Hatch);
+        app.session.input(cadcraft_engine::Input::Pick(vec![h])).unwrap();
+        resume(&mut app);
+        let updated = app.hatch_dlg.as_ref().unwrap();
+        assert_eq!(updated.fill.pattern, "CROSS30");
+        assert_eq!(updated.fill.scale, 2.5);
+        assert_eq!(updated.fill.angle, 45.0);
+    }
+
+    #[test]
+    fn edit_mode_add_and_remove_boundaries_updates_hatchedit() {
+        let (mut app, r) = app_with_rect();
+        let hx = app.session.execute("hatch", &json!({ "handles": [r.hex()], "pattern": "ANSI31" })).unwrap()["handle"].as_str().unwrap().to_string();
+        let h = Handle::parse_hex(&hx).unwrap();
+        let c2 = app.session.execute("circle", &json!({ "center": [20, 20], "radius": 5 })).unwrap()["handle"].as_str().unwrap().to_string();
+        let r2 = Handle::parse_hex(&c2).unwrap();
+        let doc = app.session.doc().unwrap();
+        let mut st = edit_state(doc, 1, vec![h]).unwrap();
+        st.add_boundaries.push(r2);
+        st.remove_boundaries.push(r);
+        let (cmd, p) = ok_call(&st).unwrap();
+        assert_eq!(cmd, "hatchedit");
+        assert_eq!(p["addBoundaries"], json!([r2.hex()]));
+        assert_eq!(p["removeBoundaries"], json!([r.hex()]));
     }
 }

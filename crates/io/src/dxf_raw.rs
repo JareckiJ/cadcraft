@@ -335,12 +335,14 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let ids = identities(&tables, &blocks, &objects);
     // Extension dictionaries of entities and records: owner → dictionary.
     let mut xdict_of: HashMap<String, String> = HashMap::new();
+    let mut owner_of_xdict: HashMap<String, String> = HashMap::new();
     for (kind, _, t) in tables.iter().chain(&blocks).chain(&entities) {
         if kind == "ENDBLK" {
             continue;
         }
         let h = head(t);
         if let (Some(o), Some(x)) = (h.handle, h.xdict) {
+            owner_of_xdict.entry(x.clone()).or_insert(o.clone());
             xdict_of.entry(o).or_insert(x);
         }
     }
@@ -351,6 +353,16 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             by_handle.entry(h).or_insert(i);
         }
     }
+    let mut dict_parent: HashMap<String, String> = HashMap::new();
+    for (_, _, t) in &objects {
+        if let Some(h) = head(t).handle {
+            for tag in t.iter() {
+                if matches!(tag.code, 350 | 360) {
+                    dict_parent.entry(norm(&tag.str())).or_insert_with(|| h.clone());
+                }
+            }
+        }
+    }
     let root = objects.first().filter(|(k, _, _)| is_dictionary(k)).and_then(|(_, _, t)| head(t).handle);
     let root_entries = objects.first().filter(|(k, _, _)| is_dictionary(k)).map(|(_, _, t)| entries(t)).unwrap_or_default();
     let root_key = |h: &str| root_entries.iter().find(|(_, eh)| eh == h).map(|(k, _)| k.clone());
@@ -358,7 +370,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
     let is_xdict = |k: usize| {
         let Some((_, _, t)) = objects.get(k) else { return false };
         let hd = head(t);
-        let (Some(h), Some(o)) = (hd.handle, hd.owner) else { return false };
+        let Some(h) = hd.handle else { return false };
+        let o = hd.owner.or_else(|| owner_of_xdict.get(&h).cloned());
+        let Some(o) = o else { return false };
         !by_handle.contains_key(&o) && xdict_of.get(&o) == Some(&h) && (ents.contains_key(&o) || ids.contains_key(&o))
     };
     let modelled_entry = |t: &[Tag], h: &str| entries(t).iter().any(|(k, eh)| eh == h && MODELLED_XDICT_KEYS.contains(&up(k).as_str()));
@@ -380,7 +394,9 @@ pub(crate) fn read(secs: &[Section], d: &mut Drawing) {
             path.push(cur);
             let Some((_, _, t)) = objects.get(cur) else { break false };
             let hd = head(t);
-            let (Some(h), Some(o)) = (hd.handle, hd.owner) else { break false };
+            let Some(h) = hd.handle else { break false };
+            let o = hd.owner.or_else(|| owner_of_xdict.get(&h).cloned()).or_else(|| dict_parent.get(&h).cloned());
+            let Some(o) = o else { break false };
             if by_handle.get(&h) != Some(&cur) {
                 break false;
             }
@@ -615,8 +631,8 @@ pub(crate) fn unknown_entity(u: &Unknown, e: &Entity, owner: &str, paper: bool) 
     let fixed = out.len();
     let mut in_group = false;
     let mut owner_seen = false;
-    let mut layer = false;
     let mut paper_done = !paper;
+    let mut past_acdb_entity = false;
     for r in u.tags.iter().take_while(|r| r.code < 1000) {
         match r.code {
             102 => {
@@ -629,25 +645,55 @@ pub(crate) fn unknown_entity(u: &Unknown, e: &Entity, owner: &str, paper: bool) 
                 owner_seen = true;
                 continue;
             }
-            8 => {
-                layer = true;
-                out.push(Tag::s(8, e.common.layer.clone()));
+            8 | 6 | 62 | 420 | 430 | 370 | 48 | 60 | 440 if !past_acdb_entity => {
                 continue;
             }
             _ => {}
         }
         out.push(tag(r));
-        if r.code == 100 && r.value.trim() == "AcDbEntity" && !paper_done {
-            out.push(Tag::i(67, 1));
-            paper_done = true;
+        if r.code == 100 {
+            if r.value.trim() == "AcDbEntity" {
+                if !paper_done {
+                    out.push(Tag::i(67, 1));
+                    paper_done = true;
+                }
+            } else {
+                past_acdb_entity = true;
+            }
         }
     }
     let mut lead = Vec::new();
     if !paper_done {
         lead.push(Tag::i(67, 1));
     }
-    if !layer {
-        lead.push(Tag::s(8, e.common.layer.clone()));
+    lead.push(Tag::s(8, e.common.layer.clone()));
+    if !e.common.linetype.eq_ignore_ascii_case("bylayer") {
+        lead.push(Tag::s(6, e.common.linetype.clone()));
+    }
+    match e.common.color {
+        cadcraft_color::Color::ByLayer => {}
+        cadcraft_color::Color::ByBlock => lead.push(Tag::i(62, 0)),
+        cadcraft_color::Color::Index(i) => lead.push(Tag::i(62, i64::from(i))),
+        cadcraft_color::Color::True(rgb) => {
+            lead.push(Tag::i(62, i64::from(cadcraft_color::nearest_aci(rgb))));
+            lead.push(Tag::i(420, i64::from(rgb.to_u32())));
+        }
+    }
+    if e.common.lineweight != cadcraft_doc::Lineweight::ByLayer {
+        lead.push(Tag::i(370, i64::from(e.common.lineweight.to_dxf())));
+    }
+    if (e.common.ltscale - 1.0).abs() > 1e-12 {
+        lead.push(Tag::f(48, e.common.ltscale));
+    }
+    if !e.common.visible {
+        lead.push(Tag::i(60, 1));
+    }
+    match e.common.transparency {
+        cadcraft_doc::Transparency::ByLayer => {}
+        cadcraft_doc::Transparency::ByBlock => lead.push(Tag::i(440, 0x0100_0000)),
+        cadcraft_doc::Transparency::Percent(p) => {
+            lead.push(Tag::i(440, i64::from(0x0200_0000 | ((100 - u32::from(p.min(90))) * 255 / 100))));
+        }
     }
     out.splice(fixed..fixed, lead);
     out
@@ -727,6 +773,10 @@ impl Map<'_> {
     fn object(&self, o: &ForeignObject, out: &mut Vec<Tag>) {
         out.push(Tag::s(0, o.kind.clone()));
         let dict = is_dictionary(&o.kind);
+        if !o.tags.iter().any(|t| t.code == 5) {
+            let h = self.get(&o.handle.hex()).unwrap_or_else(|| o.handle.hex());
+            out.push(Tag::s(5, h));
+        }
         let mut i = 0;
         while let Some(r) = o.tags.get(i) {
             i += 1;
@@ -885,11 +935,18 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
     let objs: HashMap<String, &ForeignObject> = f.objects.iter().map(|o| (o.handle.hex(), o)).collect();
     let dict_entries: HashMap<String, &str> = f.dictionary.iter().map(|(k, h)| (h.hex(), k.as_str())).collect();
     let nod = f.targets.iter().filter(|(_, k)| k.0 == "NOD" && k.1.is_empty()).map(|(h, _)| h.hex()).collect::<HashSet<_>>();
-    let owners: HashMap<String, String> = f
+    let mut owners: HashMap<String, String> = f
         .objects
         .iter()
         .filter_map(|o| Some((o.handle.hex(), head(&o.tags.iter().take_while(|t| t.code < 1000).map(tag).collect::<Vec<_>>()).owner?)))
         .collect();
+    for o in &f.objects {
+        for t in &o.tags {
+            if matches!(t.code, 350 | 360) {
+                owners.entry(norm(&t.value)).or_insert_with(|| o.handle.hex());
+            }
+        }
+    }
     let mut alive_memo: HashMap<String, bool> = HashMap::new();
     for o in f.objects.iter().filter(|o| is_proxy(&o.kind) && renumber(class_number(o.tags.iter().map(|r| (r.code, r.value.as_str())))).is_none()) {
         alive_memo.insert(o.handle.hex(), false);
@@ -905,6 +962,9 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
                 break false;
             }
             path.push(cur.clone());
+            if attached.contains(&cur) {
+                break true;
+            }
             let Some(owner) = owners.get(&cur).cloned() else { break false };
             if objs.contains_key(&owner) {
                 cur = owner;
@@ -912,9 +972,6 @@ pub(crate) fn finish(tags: &mut Vec<Tag>, d: &Drawing) {
             }
             if nod.contains(&owner) {
                 break dict_entries.get(&cur).is_some_and(|k| !root_keys.contains(&up(k))) && root.is_some();
-            }
-            if attached.contains(&cur) {
-                break true;
             }
             break unknown.contains(&owner) && written.contains(&owner);
         };

@@ -339,6 +339,8 @@ fn truetype_mtext_and_dimension_text() {
             line_spacing: 1.0,
             line_spacing_exact: false,
             columns: None,
+            background: None,
+            background_scale: None,
         }),
     )
     .unwrap();
@@ -632,6 +634,7 @@ fn hatch_in_a_squashed_block_keeps_lines_that_show() {
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::Insert(ins)).unwrap();
     // One pixel = 1 unit: 0.125 spacing × 100 along x is far more than a pixel.
@@ -676,6 +679,7 @@ fn insert_of(block: &str) -> EntityKind {
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     })
 }
 
@@ -871,6 +875,8 @@ fn mtext_exact_spacing_ignores_taller_lines() {
         line_spacing,
         line_spacing_exact,
         columns: None,
+        background: None,
+        background_scale: None,
     };
     let d = Drawing::new_imperial();
     let height = |contents: &str, ls: f64, exact: bool| layout_mtext_entity(&d, &mtext(contents, ls, exact)).bounds.height();
@@ -925,6 +931,104 @@ fn cancelled_build_stops_early() {
     assert!(crate::hatch::pattern_lines_until(&drawing, &h, &loops, 0.0, None, set.as_deref()).is_empty());
 }
 
+#[test]
+fn insert_clipping_clips_block_geometry() {
+    let mut d = Drawing::new_metric();
+    let mut blk = cadcraft_doc::Block::new("TEST_BLK");
+    blk.entities.push(cadcraft_doc::Entity::new(
+        cadcraft_doc::Handle(1),
+        EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(100.0, 0.0, 0.0) }),
+    ));
+    d.blocks.insert("TEST_BLK".into(), std::sync::Arc::new(blk));
+
+    let mut ins = cadcraft_doc::Insert {
+        block: "TEST_BLK".into(),
+        insert: Vec3::ZERO,
+        clip: Some(cadcraft_doc::ClipBoundary { points: vec![Vec2::new(20.0, -10.0), Vec2::new(50.0, 10.0)], enabled: true, inverted: false }),
+        ..Default::default()
+    };
+    let h = d.add(&Space::Model, Common::default(), EntityKind::Insert(ins.clone())).unwrap();
+
+    let list = build(&d, &Space::Model, &Options::default());
+    // Should have clipped line segment around [20, 0] to [50, 0]
+    let line_pts: Vec<_> = list.prims.iter().filter(|p| p.kind == Kind::Polyline).map(|p| list.points(p)).collect();
+    assert!(!line_pts.is_empty(), "clipped piece should be present");
+    let piece = line_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(20.0, 0.0), 1e-4) && pts[1].near(Vec2::new(50.0, 0.0), 1e-4));
+    assert!(piece.is_some(), "found piece from 20 to 50: {line_pts:?}");
+
+    // Now test inverted clipping:
+    ins.clip = Some(cadcraft_doc::ClipBoundary { points: vec![Vec2::new(20.0, -10.0), Vec2::new(50.0, 10.0)], enabled: true, inverted: true });
+    d.modify_entity(h, |e| e.kind = EntityKind::Insert(ins)).unwrap();
+    let inv_list = build(&d, &Space::Model, &Options::default());
+    let inv_pts: Vec<_> = inv_list.prims.iter().filter(|p| p.kind == Kind::Polyline).map(|p| inv_list.points(p)).collect();
+    // Inverted should keep [0, 20] and [50, 100]
+    let piece1 = inv_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(0.0, 0.0), 1e-4) && pts[1].near(Vec2::new(20.0, 0.0), 1e-4));
+    let piece2 = inv_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(50.0, 0.0), 1e-4) && pts[1].near(Vec2::new(100.0, 0.0), 1e-4));
+    assert!(piece1.is_some() && piece2.is_some(), "inverted keeps both outside pieces: {inv_pts:?}");
+
+    // Test clipped block nested inside a transformed parent insert:
+    let mut parent_blk = cadcraft_doc::Block::new("PARENT_BLK");
+    parent_blk.entities.push(cadcraft_doc::Entity::new(
+        cadcraft_doc::Handle(2),
+        EntityKind::Insert(cadcraft_doc::Insert {
+            block: "TEST_BLK".into(),
+            insert: Vec3::ZERO,
+            clip: Some(cadcraft_doc::ClipBoundary { points: vec![Vec2::new(20.0, -10.0), Vec2::new(50.0, 10.0)], enabled: true, inverted: false }),
+            ..Default::default()
+        }),
+    ));
+    d.blocks.insert("PARENT_BLK".into(), std::sync::Arc::new(parent_blk));
+
+    let parent_ins = cadcraft_doc::Insert { block: "PARENT_BLK".into(), insert: Vec3::new(100.0, 200.0, 0.0), ..Default::default() };
+    d.add(&Space::Model, Common::default(), EntityKind::Insert(parent_ins)).unwrap();
+
+    let nested_list = build(&d, &Space::Model, &Options::default());
+    let nested_pts: Vec<_> = nested_list.prims.iter().filter(|p| p.kind == Kind::Polyline).map(|p| nested_list.points(p)).collect();
+    let nested_piece =
+        nested_pts.iter().find(|pts| pts.len() >= 2 && pts[0].near(Vec2::new(120.0, 200.0), 1e-4) && pts[1].near(Vec2::new(150.0, 200.0), 1e-4));
+    assert!(nested_piece.is_some(), "found transformed nested piece from 120 to 150: {nested_pts:?}");
+}
+
+#[test]
+fn refedit_dims_locked_drawing_and_faded_block_copies() {
+    let mut d = Drawing::new_metric();
+    let h_work = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 0.0, 0.0), b: Vec3::new(10.0, 0.0, 0.0) }))
+        .unwrap();
+    let h_lock = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 5.0, 0.0), b: Vec3::new(10.0, 5.0, 0.0) }))
+        .unwrap();
+    let h_ghost = d
+        .add(&Space::Model, Common::default(), EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(0.0, 10.0, 0.0), b: Vec3::new(10.0, 10.0, 0.0) }))
+        .unwrap();
+
+    d.refedit = Some(cadcraft_doc::RefEdit {
+        block: "BLK".into(),
+        insert: cadcraft_doc::Handle(999),
+        insert_was_visible: true,
+        space: Space::Model,
+        to_world: cadcraft_geom::Mat3::IDENTITY,
+        items: vec![cadcraft_doc::WorkItem { copy: h_work, source: None }],
+        ghosts: vec![(h_ghost, cadcraft_doc::Handle(888))],
+        released: Vec::new(),
+        xref_file: None,
+        nested_path: Vec::new(),
+    });
+
+    let list = build(&d, &Space::Model, &Options::default());
+    let p_work = list.prims.iter().find(|p| p.handle == h_work).unwrap();
+    let p_lock = list.prims.iter().find(|p| p.handle == h_lock).unwrap();
+    let p_ghost = list.prims.iter().find(|p| p.handle == h_ghost).unwrap();
+
+    assert_eq!(p_work.transparency, 0, "working set entity is not dimmed");
+    assert_eq!(p_lock.transparency, 70, "locked drawing entity outside working set is dimmed");
+    assert_eq!(p_ghost.transparency, 70, "ghost entity of block is dimmed");
+
+    // Plotting does not apply in-place edit dimming
+    let plot_list = build_plot(&d, &Space::Model, &Options::default());
+    let plot_lock = plot_list.prims.iter().find(|p| p.handle == h_lock).unwrap();
+    assert_eq!(plot_lock.transparency, 0, "plotting does not dim locked drawing entities");
+}
 /// #1434: a closed polyline with a global width narrower than a pixel loses whole sides at
 /// some zooms, while the same polyline with width 0 always shows every side.
 #[test]

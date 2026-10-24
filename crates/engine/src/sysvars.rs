@@ -47,6 +47,7 @@ const SESSION_VARS: &[&str] = &[
     "PREVIEWFILTER",
     "GRIPS",
     "GRIPOBJLIMIT",
+    "GROUPDISPLAYMODE",
     "SELECTIONAREA",
     "WINDOWAREACOLOR",
     "CROSSINGAREACOLOR",
@@ -70,6 +71,7 @@ const SESSION_VARS: &[&str] = &[
     "FONTFALLBACK",
     "SAVETIME",
     "SAVEFILEPATH",
+    "AUDITCTL",
 ];
 
 pub fn get(s: &Session, name: &str) -> Option<Value> {
@@ -87,8 +89,15 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "POLARADDANG" => json!(format_angle_list(&st.polaraddang)),
         "POLARDIST" => json!(st.polardist),
         "SNAPTYPE" => json!(i32::from(st.polarsnap)),
-        // Marker, tooltip and tracking tooltip always on (1 + 4 + 32); polar 8, tracking 16.
-        "AUTOSNAP" => json!(37 + 8 * u32::from(st.polarmode) + 16 * u32::from(st.otrack)),
+        "AUTOSNAP" => {
+            let bits = u32::from(st.autosnap_marker)
+                | (u32::from(st.autosnap_magnet) << 1)
+                | (u32::from(st.autosnap_tooltip) << 2)
+                | (u32::from(st.polarmode) << 3)
+                | (u32::from(st.otrack) << 4)
+                | (u32::from(st.autosnap_track_tooltip) << 5);
+            json!(bits)
+        }
         "POLARANG" => json!(st.polarang.to_degrees()),
         "GRIDMODE" => json!(i32::from(st.gridmode)),
         "SNAPMODE" => json!(i32::from(st.snapmode)),
@@ -114,8 +123,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             json!(if st.selection_cycling { d } else { -d })
         }
         "SELECTSIMILARMODE" => json!(st.selectsimilarmode),
-        // Isolation is temporary: hidden objects show again when the drawing is reopened.
-        "OBJECTISOLATIONMODE" => json!(0),
+        "OBJECTISOLATIONMODE" => json!(st.objectisolationmode),
         "QPMODE" => json!(i32::from(st.qpmode)),
         "HIGHLIGHT" => json!(i32::from(st.highlight)),
         "SELECTIONEFFECT" => json!(st.selectioneffect),
@@ -124,6 +132,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "PREVIEWFILTER" => json!(st.previewfilter),
         "GRIPS" => json!(st.grips),
         "GRIPOBJLIMIT" => json!(st.gripobjlimit),
+        "GROUPDISPLAYMODE" => json!(st.groupdisplaymode),
         "SELECTIONAREA" => json!(i32::from(st.selectionarea)),
         "WINDOWAREACOLOR" => json!(st.windowareacolor),
         "CROSSINGAREACOLOR" => json!(st.crossingareacolor),
@@ -152,6 +161,7 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         // Autosave (profile settings too).
         "SAVETIME" => json!(crate::autosave::savetime()),
         "SAVEFILEPATH" => json!(crate::autosave::savefilepath()),
+        "AUDITCTL" => json!(crate::audit::auditctl()),
         "CMDNAMES" => json!(s.running.as_ref().map(|r| r.id.to_ascii_uppercase()).unwrap_or_default()),
         "DWGNAME" => json!(s.state().map(|d| d.title.clone()).unwrap_or_default()),
         "DBMOD" => json!(s.state().map(|d| i32::from(d.is_dirty())).unwrap_or(0)),
@@ -179,6 +189,30 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             let p = if n == "EXTMIN" { e.min } else { e.max };
             json!([p.x, p.y, 0.0])
         }
+        "UCSNAME" => json!(s.doc().ok()?.header.str("UCSNAME", "")),
+        "UCSORG" => {
+            let p = s.doc().ok()?.header.point("UCSORG").unwrap_or(cadcraft_geom::Vec3::ZERO);
+            json!([p.x, p.y, p.z])
+        }
+        "UCSXDIR" => {
+            let p = s.doc().ok()?.header.point("UCSXDIR").unwrap_or(cadcraft_geom::Vec3::new(1.0, 0.0, 0.0));
+            json!([p.x, p.y, p.z])
+        }
+        "UCSYDIR" => {
+            let p = s.doc().ok()?.header.point("UCSYDIR").unwrap_or(cadcraft_geom::Vec3::new(0.0, 1.0, 0.0));
+            json!([p.x, p.y, p.z])
+        }
+        "VIEWDIR" => {
+            let p = s.doc().ok()?.header.view_dir();
+            json!([p.x, p.y, p.z])
+        }
+        "TARGET" => {
+            let p = s.doc().ok()?.header.target();
+            json!([p.x, p.y, p.z])
+        }
+        "VSCURRENT" => json!(s.doc().ok()?.header.visual_style()),
+        "ELEVATION" => json!(s.doc().ok()?.header.f64("ELEVATION", 0.0)),
+        "THICKNESS" => json!(s.doc().ok()?.header.f64("THICKNESS", 0.0)),
         _ => {
             if let Some(v) = table::get(s, &n) {
                 return Some(v);
@@ -250,6 +284,10 @@ const READ_ONLY: &[&str] = &[
     "EXTMAX",
     "UNDOCTL",
     "UNDOMARKS",
+    "UCSNAME",
+    "UCSORG",
+    "UCSXDIR",
+    "UCSYDIR",
 ];
 
 pub fn is_read_only(name: &str) -> bool {
@@ -295,8 +333,12 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         "SNAPTYPE" => st.polarsnap = as_i(v).filter(|b| (0..=1).contains(b)).ok_or_else(bad)? == 1,
         "AUTOSNAP" => {
             let bits = as_i(v).filter(|b| (0..=63).contains(b)).ok_or_else(bad)?;
+            st.autosnap_marker = bits & 1 != 0;
+            st.autosnap_magnet = bits & 2 != 0;
+            st.autosnap_tooltip = bits & 4 != 0;
             st.polarmode = bits & 8 != 0;
             st.otrack = bits & 16 != 0;
+            st.autosnap_track_tooltip = bits & 32 != 0;
         }
         "QNEWTEMPLATE" => crate::cmd::file::set_qnew_template(v.as_str().ok_or_else(bad)?),
         "POLARANG" => st.polarang = as_f64(v).filter(|a| *a > 0.0).ok_or_else(bad)?.to_radians(),
@@ -328,8 +370,7 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         }
         "SELECTSIMILARMODE" => st.selectsimilarmode = as_i(v).filter(|b| (0..=255).contains(b)).ok_or_else(bad)? as u32,
         "OBJECTISOLATIONMODE" => match as_i(v) {
-            Some(0) => {}
-            Some(1) => return Err(EngineError::Other("OBJECTISOLATIONMODE 1 (isolation saved with the drawing) is not available yet".into())),
+            Some(m @ (0 | 1)) => st.objectisolationmode = m as u8,
             _ => return Err(bad()),
         },
         "QPMODE" => st.qpmode = as_i(v).ok_or_else(bad)? > 0,
@@ -340,6 +381,7 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         "PREVIEWFILTER" => st.previewfilter = small(v, 63).ok_or_else(bad)?,
         "GRIPS" => st.grips = small(v, 2).ok_or_else(bad)?,
         "GRIPOBJLIMIT" => st.gripobjlimit = as_i(v).filter(|n| (0..=32_767).contains(n)).and_then(|n| u32::try_from(n).ok()).ok_or_else(bad)?,
+        "GROUPDISPLAYMODE" => st.groupdisplaymode = small(v, 2).ok_or_else(bad)?,
         "SELECTIONAREA" => st.selectionarea = as_bool(v).ok_or_else(bad)?,
         "WINDOWAREACOLOR" => st.windowareacolor = small(v, 255).filter(|c| *c >= 1).ok_or_else(bad)?,
         "CROSSINGAREACOLOR" => st.crossingareacolor = small(v, 255).filter(|c| *c >= 1).ok_or_else(bad)?,
@@ -364,7 +406,11 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             as_f64(v).filter(|m| *m >= 0.0 && *m <= f64::from(crate::autosave::MAX_SAVETIME)).ok_or_else(bad)?.round() as u32,
         ),
         "SAVEFILEPATH" => crate::autosave::set_savefilepath(v.as_str().ok_or_else(bad)?),
-        // A number is in degrees; text is an angle typed in AUNITS (SETVAR at the command line).
+        "AUDITCTL" => {
+            let val = as_i(v).filter(|b| (0..=1).contains(b)).ok_or_else(bad)? as i32;
+            s.settings.auditctl = val != 0;
+            crate::audit::set_auditctl(val);
+        }
         "ANGBASE" => {
             let a = match v {
                 Value::String(t) => s.angle_settings().amount(t),
@@ -374,6 +420,19 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
             s.doc_mut()?.header.set_f64("ANGBASE", cadcraft_geom::norm_angle(a));
         }
         "CONSTRAINTINFER" => s.doc_mut()?.parametric.settings.infer = as_bool(v).ok_or_else(bad)?,
+        "VIEWDIR" => {
+            let pt = as_vec3(v).filter(|p| p.len() > 1e-6).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_view_dir(pt);
+        }
+        "TARGET" => {
+            let pt = as_vec3(v).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_target(pt);
+        }
+        "VSCURRENT" => {
+            let style = v.as_str().ok_or_else(bad)?;
+            let canonical = canonical_visual_style(style).ok_or_else(bad)?;
+            s.doc_mut()?.header.set_visual_style(canonical);
+        }
         _ => {
             if let Some(r) = table::set(s, &n, v) {
                 return r;
@@ -449,4 +508,40 @@ pub fn list(s: &Session) -> Value {
     }
     table::list(s, &mut m);
     Value::Object(m)
+}
+
+pub fn canonical_visual_style(s: &str) -> Option<&'static str> {
+    let lower = s.trim().to_ascii_lowercase().replace([' ', '-', '_'], "");
+    match lower.as_str() {
+        "2dwireframe" | "2d" => Some("2dWireframe"),
+        "wireframe" | "w" => Some("Wireframe"),
+        "hidden" | "h" => Some("Hidden"),
+        "realistic" | "r" => Some("Realistic"),
+        "conceptual" | "c" => Some("Conceptual"),
+        "shaded" | "s" => Some("Shaded"),
+        "shadedwithedges" | "shadededges" | "edges" | "e" => Some("Shaded with Edges"),
+        "shadesofgray" | "shades" | "gray" | "g" => Some("Shades of Gray"),
+        "sketchy" | "k" => Some("Sketchy"),
+        "xray" | "x" => Some("X-Ray"),
+        _ => None,
+    }
+}
+
+fn as_vec3(v: &Value) -> Option<cadcraft_geom::Vec3> {
+    match v {
+        Value::Array(a) => {
+            let x = a.first()?.as_f64()?;
+            let y = a.get(1)?.as_f64()?;
+            let z = a.get(2).and_then(Value::as_f64).unwrap_or(0.0);
+            if x.is_finite() && y.is_finite() && z.is_finite() { Some(cadcraft_geom::Vec3::new(x, y, z)) } else { None }
+        }
+        Value::String(s) => {
+            let parts: Vec<&str> = s.split(',').map(str::trim).collect();
+            let x = parts.first()?.parse().ok()?;
+            let y = parts.get(1)?.parse().ok()?;
+            let z = parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0.0);
+            Some(cadcraft_geom::Vec3::new(x, y, z))
+        }
+        _ => None,
+    }
 }

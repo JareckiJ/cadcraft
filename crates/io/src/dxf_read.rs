@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::*;
-use cadcraft_dxf::{Tag, records, sections};
+use cadcraft_dxf::{Section, Tag, records, sections};
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
 
 use crate::{IoError, Result};
@@ -161,6 +161,20 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
             a => a,
         };
     }
+    let (background, background_scale) = if let Some(flag) = t.i(90).filter(|&f| f != 0) {
+        let bg = if let Some(tc) = t.i(420) {
+            Some(Color::True(Rgb::from_u32(tc as u32)))
+        } else if let Some(aci) = t.i(63) {
+            Some(Color::from_aci(aci as i16))
+        } else if flag == 2 {
+            Some(Color::ByBlock)
+        } else {
+            Some(Color::WHITE)
+        };
+        (bg, t.f(45))
+    } else {
+        (None, None)
+    };
     MText {
         insert: t.p(10),
         height: t.fd(40, 0.2).max(1e-9),
@@ -175,6 +189,8 @@ fn mtext_from(tags: &[Tag], c: &Common) -> MText {
         line_spacing: t.fd(44, 1.0),
         line_spacing_exact: t.i(73) == Some(2),
         columns: columns.map(|(c, _)| c),
+        background,
+        background_scale,
     }
 }
 
@@ -411,6 +427,27 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 rotation = -rotation;
                 col_spacing = -col_spacing;
             }
+            let clip = t.0.iter().position(|tag| tag.code == 1001 && tag.str().eq_ignore_ascii_case("CADCRAFT")).and_then(|pos| {
+                let sub = &t.0[pos + 1..];
+                if sub.first().is_some_and(|g| g.code == 1000 && g.str().eq_ignore_ascii_case("XCLIP")) {
+                    let enabled = sub.get(1).map(Tag::i64).map(|v| v != 0).unwrap_or(true);
+                    let inverted = sub.get(2).map(Tag::i64).map(|v| v != 0).unwrap_or(false);
+                    let count = sub.get(3).map(Tag::i64).unwrap_or(0).max(0) as usize;
+                    let mut points = Vec::new();
+                    let mut idx = 4;
+                    while idx < sub.len() && points.len() < count {
+                        if sub[idx].code == 1010 {
+                            let x = sub[idx].f64();
+                            let y = sub.get(idx + 1).filter(|g| g.code == 1020).map(Tag::f64).unwrap_or(0.0);
+                            points.push(Vec2::new(x, y));
+                        }
+                        idx += 1;
+                    }
+                    if !points.is_empty() { Some(cadcraft_doc::ClipBoundary { points, enabled, inverted }) } else { None }
+                } else {
+                    None
+                }
+            });
             EntityKind::Insert(Insert {
                 block: t.s(2).unwrap_or_default(),
                 insert: p,
@@ -421,6 +458,7 @@ fn entity_with_table_budget(kind: &str, tags: &[Tag], table_cells_left: &mut usi
                 rows: t.i(71).unwrap_or(1).clamp(1, 10_000) as u32,
                 col_spacing,
                 row_spacing: t.fd(45, 0.0),
+                clip,
             })
         }
         "DIMENSION" => {
@@ -1119,6 +1157,10 @@ fn parse_entities(
     let mut out = Vec::new();
     let mut i = 0;
     while let Some((kind, tags)) = recs.get(i) {
+        if kind == "EOF" || kind == "ENDSEC" {
+            i += 1;
+            continue;
+        }
         let t = T(tags);
         let owner = crate::dxf_ext::owner(tags);
         let paper = t.i(67) == Some(1);
@@ -1573,7 +1615,9 @@ fn tables(tags: &[Tag], d: &mut Drawing, rx: &mut Rx) {
                 if name.is_empty() || !finite || d.ucss.len() >= MAX_OBJECTS {
                     continue;
                 }
-                let u = Ucs { name: name.clone(), origin, x_axis, y_axis };
+                let elevation = t.fd(146, 0.0);
+                let ortho_type = t.i(79).unwrap_or(0) as i16;
+                let u = Ucs { name: name.clone(), origin, x_axis, y_axis, elevation, ortho_type };
                 match d.ucss.iter_mut().find(|x| x.name.eq_ignore_ascii_case(&name)) {
                     Some(x) => *x = u,
                     None => d.ucss.push(u),
@@ -1684,11 +1728,28 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
 }
 
 /// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
-fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
+fn read_budgeted(bytes: &[u8], table_cells_left: usize) -> Result<Drawing> {
     let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
-    let secs = sections(&tags);
+    read_from_tags(&tags, table_cells_left)
+}
+
+/// Read a DXF file tolerantly in RECOVER mode, salvaging damaged or truncated files.
+pub fn read_recovering(bytes: &[u8]) -> Result<Drawing> {
+    let tags = cadcraft_dxf::parse_recovering(bytes).map_err(|e| IoError::Format(e.to_string()))?;
+    let mut d = read_from_tags(&tags, 4_000_000)?;
+    d.read_notes.push("RECOVER: parsed damaged DXF file in tolerant recovery mode".into());
+    Ok(d)
+}
+
+/// Read a drawing from a stream of parsed DXF tags while sharing one materialized-table-cell budget.
+fn read_from_tags(tags: &[Tag], mut table_cells_left: usize) -> Result<Drawing> {
+    let mut secs = sections(tags);
     if secs.is_empty() {
-        return Err(IoError::Format("no sections found".into()));
+        if !tags.is_empty() {
+            secs.push(Section { name: "ENTITIES".into(), tags: tags.to_vec() });
+        } else {
+            return Err(IoError::Format("no sections found".into()));
+        }
     }
     let mut d = Drawing::new_imperial();
     d.layouts.clear();
@@ -1711,7 +1772,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         }
     }
     let mut skipped = std::collections::BTreeMap::new();
-    count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
+    count_skipped(&mut skipped, "(no section)", outside_sections(tags));
     for s in &secs {
         match s.name.as_str() {
             "HEADER" => header(&s.tags, &mut d),
@@ -1769,7 +1830,12 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
                         // LAYOUT has two 330s: owner dict and the block record; take the last.
                         let br = tg.iter().rfind(|x| x.code == 330).map(Tag::str).unwrap_or_default();
                         let plot = T(tg.get(..start).unwrap_or(&[]));
-                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page_setup(&plot)));
+                        let mut page = page_setup(&plot);
+                        let pt_list = crate::dxf_ext::xdata_list(crate::dxf_ext::xdata(&tg, crate::dxf_ext::APP), "PLOTTRANSPARENCY");
+                        if pt_list.iter().any(|tag| tag.code == 1071 && tag.i64() == 1) {
+                            page.plot_transparency = true;
+                        }
+                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page));
                     }
                 }
             }
@@ -1784,6 +1850,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     layout_objs.sort_by_key(|l| l.1);
     for (name, order, br, page) in &layout_objs {
         if name.eq_ignore_ascii_case("Model") {
+            d.model_page = page.clone();
             continue;
         }
         d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
@@ -2098,6 +2165,10 @@ impl Objects {
         if let Some(states) = self.xrecord_text(crate::dxf_ext::LAYER_STATES_KEY).and_then(|t| crate::dxf_ext::parse_layer_states(&t)) {
             d.layer_states = states;
         }
+        // Saved object isolation (OBJECTISOLATIONMODE 1).
+        if let Some(hidden) = self.xrecord_text(crate::dxf_ext::ISOLATION_KEY).and_then(|t| crate::dxf_ext::parse_isolation(&t)) {
+            d.hidden_objects = hidden;
+        }
         // The drawing's plot style tables.
         if let Some(tables) = self.xrecord_text(crate::dxf_ext::PLOT_STYLES_KEY).and_then(|t| crate::dxf_ext::parse_plot_styles(&t)) {
             d.plot_style_tables = tables;
@@ -2109,6 +2180,9 @@ impl Objects {
             let def = MLeaderStyle::default();
             let num = |code: i32, d: f64, min: f64| t.f(code).filter(|v| v.is_finite() && *v >= min).unwrap_or(d);
             let text_style = t.s(342).and_then(|sh| rx.styles.get(&sh.trim().to_ascii_uppercase()).cloned()).filter(|n| !n.is_empty());
+            let leader_type = t.i(170).map(|v| (v as u8).min(2)).unwrap_or(def.leader_type);
+            let content_type = t.i(172).map(|v| (v as u8).min(2)).unwrap_or(def.content_type);
+            let block_name = t.s(344).and_then(|sh| self.names.get(&sh).cloned()).unwrap_or_default();
             let st = MLeaderStyle {
                 name: name.clone(),
                 arrow_size: num(44, def.arrow_size, 0.0),
@@ -2117,6 +2191,9 @@ impl Objects {
                 dogleg: num(43, def.dogleg, 0.0),
                 text_style: text_style.unwrap_or(def.text_style),
                 annotative: t.i(296).unwrap_or(0) != 0,
+                leader_type,
+                content_type,
+                block_name,
             };
             match d.mleader_styles.iter_mut().find(|s| s.name.eq_ignore_ascii_case(name)) {
                 Some(x) => *x = st,

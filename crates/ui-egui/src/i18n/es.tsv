@@ -133,7 +133,9 @@
 	Clear Command History	Borrar el historial de comandos
 	Clear History	Borrar historial
 	Clip	Delimitar
+	Clip Image	Delimitar imagen
 	Clip Viewport	Delimitar ventana gráfica
+	Clip Xref	Delimitar referencia externa
 	Clipboard	Portapapeles
 	Close	Cerrar
 	Close All	Cerrar todo
@@ -242,6 +244,7 @@
 	Dimensional Constraint Parameters	Parámetros de restricciones dimensionales
 	Dimensional Constraints	Restricciones dimensionales
 	Disassociate Dimensions	Desasociar cotas
+	Discard	Descartar
 	Display	Visualización
 	Display name	Nombre visible
 	Distance	Distancia
@@ -418,6 +421,7 @@
 	HorizontalDistance	Distancia horizontal
 	How to apply:	Cómo aplicar:
 	ID Point	Coordenadas de un punto
+	Image	Imagen
 	Import	Importar
 	Import...	Importar...
 	In	Acercar
@@ -1189,6 +1193,7 @@
 	Write Block	Escribir bloque
 	X	X
 	Xline	Línea auxiliar
+	Xref	Referencia externa
 	Y	Y
 	Yellow	Amarillo
 	Yes	Sí
@@ -1246,4 +1251,80 @@
 	Search for pattern	Buscar patrón
 	Not a number or distance: {text}	No es un número ni una distancia: {text}
 	Query Texts	Consultar textos
+# Sistema de coordenadas personales (SCP) y vistas 3D.
+	3 Point	3 puntos
+	3D Views	Vistas 3D
+	Current UCS	SCP actual
+	Named UCS	SCP guardado
+	Named UCS...	SCP guardado...
+	New UCS	Nuevo SCP
+	Origin	Origen
+	Plan View	Vista en planta
+	UCS	SCP
+	World	Universal
+	World UCS	SCU
+	Z	Z
+	Z Axis Vector	Vector eje Z
+# Cuadro de diálogo de sombreado y gradiente (Hatch & Gradient).
+	Add boundaries	Añadir contornos
+	Remove boundaries	Eliminar contornos
+	Boundaries to add: {n}	Contornos para añadir: {n}
+	Boundaries to remove: {n}	Contornos para eliminar: {n}
+	Inherit Properties	Heredar propiedades
+	No boundary points or objects selected	No se han seleccionado puntos ni objetos de contorno
+# Vistas 3D predefinidas y estilos visuales.
+	2D Wireframe	Estructura alámbrica 2D
+	Back	Posterior
+	Bottom	Inferior
+	Conceptual	Conceptual
+	Front	Frontal
+	Hidden	Líneas ocultas
+	NE Isometric	Isométrica NE
+	NW Isometric	Isométrica NO
+	Realistic	Realista
+	SE Isometric	Isométrica SE
+	SW Isometric	Isométrica SO
+	Shaded	Sombreado
+	Shaded with Edges	Sombreado con aristas
+	Shades of Gray	Tonos de gris
+	Sketchy	Esbozo
+	Top	Superior
+	Viewpoint	Punto de vista
+	Visual Styles	Estilos visuales
+	Wireframe	Estructura alámbrica
+	X-Ray	Rayos X
+# Operaciones 3D
+	3D Move	Desplazamiento 3D
+	3D Rotate	Giro 3D
+	3D Align	Alinear 3D
+	3D Mirror	Simetría 3D
+	3D Array	Matriz 3D
+	3D Modeling	Modelado 3D
+	Meshes	Mallas
+	Hide	Ocultar
+	Adjust Distance	Ajustar distancia
+	Camera	Cámara
+	Constrained Orbit	Órbita restringida
+	Convert to Solid	Convertir en sólido
+	Convert to Surface	Convertir en superficie
+	Extract Edges	Extraer aristas
+	Extract Isolines	Extraer isolíneas
+	Face	Cara
+	Free Orbit	Órbita libre
+	Interference Checking	Comprobación de interferencias
+	Lights	Luces
+	MPolygon	MPolygon
+	Meshes, Edge Surface	Mallas, superficie reglada por aristas
+	Meshes, Revolved Surface	Mallas, superficie de revolución
+	Meshes, Ruled Surface	Mallas, superficie reglada
+	Meshes, Tabulated Surface	Mallas, superficie tabulada
+	Polysolid	Polisólido
+	Properties...	Propiedades...
+	Section Plane	Plano de sección
+	Settings	Configuración
+	Slice	Corte
+	Smooth Mesh	Malla suave
+	Swivel	Giro
+	Thicken	Engrosar
+	Wedge	Cuña
 	Analyze Shapes	Analizar formas

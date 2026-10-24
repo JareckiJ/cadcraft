@@ -76,13 +76,16 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(SelOp::new(SelKind::Flatten)))),
         CommandSpec::new("arraypath", "Path Array", run_arraypath)
             .menu(&["Modify", "Array", "Path Array"])
-            .params("{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true)}")
+            .params(
+                "{handles?, path (handle), count? (default 6) | spacing?, align?: bool (default true), rows?, rowSpacing?, rowElevation?, levels?, levelSpacing?, base? ([x, y]), associative?: bool (default ARRAYASSOCIATIVITY, on)} → {handle (the array, when associative), created (copies), associative?: bool}",
+            )
             .interactive(|_| Ok(Box::new(PathArrayM::default()))),
         CommandSpec::new("textedit", "Edit Text...", run_textedit)
             .menu(&["Modify", "Object", "Edit Text..."])
-            .alias(&["ed", "ddedit"])
-            .params("{handle, text} (text, mtext, attribute definitions, dimension text override)")
+            .alias(&["ed", "ddedit", "mtedit"])
+            .params("{handle, text} (text, mtext, attribute definitions, dimension text override, tolerance frame)")
             .interactive(|_| Ok(Box::new(TextEditM::default()))),
+
     ]
 }
 
@@ -2092,7 +2095,63 @@ fn run_arraypath(s: &mut Session, p: &Value) -> Result<Value> {
     let path = curves::handle_param(p, "path").ok_or_else(|| bad("arraypath", "`path` (handle) is required"))?;
     let count = p.get("count").and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
     let spacing = p.get("spacing").and_then(Value::as_f64);
-    let r = arraypath(s, &hs, path, count, spacing, bool_or(p, "align", true))?;
+    let align = bool_or(p, "align", true);
+    let associative = bool_or(p, "associative", false);
+    if associative {
+        let pk = curves::entity(s, path)?.kind;
+        let c = Chain::of(&pk).ok_or_else(|| other("Select a line, arc, circle, polyline, ellipse or spline as the path."))?;
+        let l = c.len();
+        if l <= 1e-12 {
+            return Err(other("The path has no length."));
+        }
+        let objs: Vec<Handle> = hs.iter().copied().filter(|h| *h != path).collect();
+        if objs.is_empty() {
+            return Err(other("Select objects to array."));
+        }
+        let (n, step) = match (count, spacing) {
+            (_, Some(sp)) if sp.is_finite() && sp > 0.0 => (((l / sp).floor() as usize).saturating_add(1), sp),
+            (Some(n), _) => {
+                let n = n.max(1);
+                (n, if c.closed { l / n as f64 } else { l / (n.max(2) - 1) as f64 })
+            }
+            _ => (6, if c.closed { l / 6.0 } else { l / 5.0 }),
+        };
+        super::array::check_size(s, n as u64, objs.len())?;
+        let (p0, _) = c.at_length(0.0).ok_or_else(|| other("The path has no length."))?;
+        let base = point_param(p, "base").unwrap_or(p0);
+        let to_local = Mat3::translate(-base);
+        let mut local_segs = c.segs;
+        for seg in &mut local_segs {
+            seg.transform(&to_local);
+        }
+        let rows = p.get("rows").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(1).max(1);
+        let row_spacing = p.get("rowSpacing").and_then(Value::as_f64).unwrap_or(1.0);
+        let row_elevation = p.get("rowElevation").and_then(Value::as_f64).unwrap_or(0.0);
+        let levels = p.get("levels").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(1).max(1);
+        let level_spacing = p.get("levelSpacing").and_then(Value::as_f64).unwrap_or(1.0);
+        let pa = cadcraft_doc::PathArray {
+            path: local_segs,
+            closed: c.closed,
+            items: u32::try_from(n).unwrap_or(u32::MAX),
+            spacing: step,
+            align,
+            rows,
+            row_spacing,
+            row_elevation,
+        };
+        let p2 = cadcraft_doc::ArrayParams {
+            source: "*".into(),
+            kind: cadcraft_doc::ArrayKind::Path(pa),
+            levels,
+            level_spacing,
+            replaced: Vec::new(),
+            editing: None,
+            erased: Vec::new(),
+        };
+        let h = super::array::make_assoc(s, &objs, base, p2)?;
+        return Ok(json!({ "handle": h.hex(), "created": n.saturating_sub(1), "associative": true }));
+    }
+    let r = arraypath(s, &hs, path, count, spacing, align)?;
     Ok(json!({ "handles": r.iter().map(|h| h.hex()).collect::<Vec<_>>() }))
 }
 
@@ -2174,6 +2233,7 @@ fn text_of(k: &EntityKind) -> Option<String> {
         EntityKind::AttDef(a) => Some(a.text.value.clone()),
         EntityKind::MText(t) => Some(t.contents.replace("\\P", "\n")),
         EntityKind::Dimension(d) => Some(if d.text.is_empty() { "<>".into() } else { d.text.clone() }),
+        EntityKind::Tolerance(t) => Some(t.text.clone()),
         _ => None,
     }
 }
@@ -2191,7 +2251,13 @@ pub(crate) fn set_text(s: &mut Session, h: Handle, text: &str) -> Result<()> {
             d.text = if text == "<>" { String::new() } else { text.to_string() };
             d.block = None;
         }
-        _ => return Err(other("Select a text, mtext, attribute definition or dimension.")),
+        EntityKind::Tolerance(t) => {
+            if cadcraft_doc::parse_frame(text).iter().flatten().all(cadcraft_doc::compartment_is_empty) {
+                return Err(other("The feature control frame is empty."));
+            }
+            t.text = text.chars().take(cadcraft_doc::MAX_FRAME_CHARS).collect();
+        }
+        _ => return Err(other("Select a text, mtext, attribute definition, dimension or tolerance.")),
     }
     set_kind(s, h, k)
 }
@@ -2209,6 +2275,8 @@ fn run_textedit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 struct TextEditM {
     h: Option<(Handle, String)>,
+    /// When editing an MTEXT entity, its current definition (for the on-canvas MTEXT editor).
+    mtext: Option<cadcraft_doc::MText>,
     /// Edits made in this run, newest last: each object as it was before (the Undo option).
     edits: Vec<(Handle, EntityKind)>,
     /// Single mode: end after one edit (the Mode option; Multiple by default).
@@ -2220,6 +2288,9 @@ struct TextEditM {
 impl Interactive for TextEditM {
     fn name(&self) -> &'static str {
         "TEXTEDIT"
+    }
+    fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
+        self.mtext.clone()
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         if self.mode {
@@ -2245,7 +2316,12 @@ impl Interactive for TextEditM {
         match (&self.h, i) {
             (None, Input::Point(p)) => {
                 let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
-                let old = text_of(&curves::entity(s, h)?.kind).ok_or_else(|| other("Select a text, mtext, attribute definition or dimension."))?;
+                let ent = curves::entity(s, h)?;
+                let old = text_of(&ent.kind).ok_or_else(|| other("Select a text, mtext, attribute definition, dimension or tolerance."))?;
+                self.mtext = match &ent.kind {
+                    EntityKind::MText(m) => Some(m.clone()),
+                    _ => None,
+                };
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }
@@ -2255,10 +2331,12 @@ impl Interactive for TextEditM {
                 set_text(s, h, &t)?;
                 self.edits.push((h, before));
                 self.h = None;
+                self.mtext = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (Some(_), Input::Enter) => {
                 self.h = None;
+                self.mtext = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (None, Input::Enter) => Ok(Step::Done),

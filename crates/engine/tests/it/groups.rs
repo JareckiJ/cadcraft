@@ -155,3 +155,26 @@ fn erased_members_leave_groups() {
     s.cmdline("").unwrap();
     assert_eq!(groups(&s).iter().map(|g| g.0.as_str()).collect::<Vec<_>>(), ["B"]);
 }
+
+#[test]
+fn group_replication_on_copy() {
+    let (mut s, hs) = three_lines();
+    // Group "Door" contains line 0 and line 1.
+    s.execute("group", &json!({ "name": "Door", "description": "two lines", "handles": hex(&hs[..2]) })).unwrap();
+
+    // Partial copy: copying only line 0 does not create a new group.
+    s.execute("copy", &json!({ "handles": [hs[0].hex()], "from": [0, 0], "to": [0, 100] })).unwrap();
+    assert_eq!(s.doc().unwrap().groups.len(), 1);
+
+    // Full copy: copying both members of "Door" replicates the group as an unnamed group.
+    let r = s.execute("copy", &json!({ "handles": hex(&hs[..2]), "from": [0, 0], "to": [0, 200] })).unwrap();
+    let copied_handles = r["handles"].as_array().unwrap();
+    assert_eq!(copied_handles.len(), 2);
+    assert_eq!(s.doc().unwrap().groups.len(), 2);
+    let new_group = &s.doc().unwrap().groups[1];
+    assert_eq!(new_group.name, "*A1");
+    assert_eq!(new_group.description, "two lines");
+    let copied_h0 = copied_handles[0].as_str().unwrap();
+    let copied_h1 = copied_handles[1].as_str().unwrap();
+    assert_eq!(new_group.members.iter().map(|h| h.hex()).collect::<Vec<_>>(), vec![copied_h0, copied_h1]);
+}

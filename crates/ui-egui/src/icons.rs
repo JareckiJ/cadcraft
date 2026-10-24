@@ -149,6 +149,8 @@ pub enum Icon {
     PickAdd,
     SelectObjects,
     QuickSelect,
+    IsolateObjects,
+    SelectionCycling,
 }
 
 struct Pen<'a> {
@@ -937,6 +939,23 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             // A filter funnel with a spark.
             pen.poly(&[(3.0, 4.0), (19.0, 4.0), (13.0, 11.0), (13.0, 19.0), (9.0, 17.0), (9.0, 11.0)], true, b);
             pen.poly(&[(20.0, 10.0), (16.5, 15.5), (20.0, 15.5), (17.0, 21.0)], false, a);
+        }
+        IsolateObjects => {
+            // An isolated box with dotted/dim surrounding frame
+            pen.rect(7.0, 7.0, 10.0, 10.0, a);
+            pen.poly(&[(3.0, 3.0), (5.0, 3.0)], false, b);
+            pen.poly(&[(3.0, 3.0), (3.0, 5.0)], false, b);
+            pen.poly(&[(21.0, 3.0), (19.0, 3.0)], false, b);
+            pen.poly(&[(21.0, 3.0), (21.0, 5.0)], false, b);
+            pen.poly(&[(3.0, 21.0), (5.0, 21.0)], false, b);
+            pen.poly(&[(3.0, 21.0), (3.0, 19.0)], false, b);
+            pen.poly(&[(21.0, 21.0), (19.0, 21.0)], false, b);
+            pen.poly(&[(21.0, 21.0), (21.0, 19.0)], false, b);
+        }
+        SelectionCycling => {
+            // Two overlapping offset squares with a cycle badge
+            pen.rect(4.0, 4.0, 11.0, 11.0, b);
+            pen.rect(9.0, 9.0, 11.0, 11.0, a);
         }
     }
 }

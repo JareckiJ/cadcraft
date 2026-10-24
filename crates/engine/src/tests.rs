@@ -1375,3 +1375,46 @@ fn hostile_variable_like_input_never_panics() {
     s.cmdline("pickadd").unwrap();
     assert!(setvar_prompt_open(&s));
 }
+
+#[test]
+fn lasso_selection_idle_and_command() {
+    let mut s = Session::new();
+    // Create two lines: line1 from (0,0) to (10,0), line2 from (20,0) to (30,0)
+    s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    let l1 = s.doc().unwrap().model.last().unwrap().handle;
+    s.execute("line", &json!({"points": [[20, 0], [30, 0]]})).unwrap();
+    let l2 = s.doc().unwrap().model.last().unwrap().handle;
+
+    // 1. Idle lasso window (dragged to right): enclosing line 1
+    assert!(s.begin_lasso(Vec2::new(-2.0, -2.0)));
+    s.push_lasso(Vec2::new(12.0, -2.0));
+    s.push_lasso(Vec2::new(12.0, 5.0));
+    s.push_lasso(Vec2::new(-2.0, 5.0));
+    assert!(!s.pending_lasso.as_ref().unwrap().is_crossing());
+    s.idle_lasso(false).unwrap();
+    assert_eq!(s.selection(), vec![l1]);
+
+    // 2. Idle lasso crossing (dragged to left): crossing line 2
+    assert!(s.begin_lasso(Vec2::new(28.0, -2.0)));
+    s.push_lasso(Vec2::new(22.0, -2.0));
+    s.push_lasso(Vec2::new(22.0, 2.0));
+    s.push_lasso(Vec2::new(28.0, 2.0));
+    assert!(s.pending_lasso.as_ref().unwrap().is_crossing());
+    s.idle_lasso(false).unwrap(); // PICKADD is true by default, so l1 + l2
+    assert_eq!(s.selection(), vec![l1, l2]);
+
+    // 3. Command prompt lasso: start MOVE command
+    s.set_selection(Vec::new());
+    s.cmdline("MOVE").unwrap();
+    assert!(s.prompting());
+    assert!(s.begin_lasso(Vec2::new(18.0, -2.0)));
+    s.push_lasso(Vec2::new(32.0, -2.0));
+    s.push_lasso(Vec2::new(32.0, 5.0));
+    s.push_lasso(Vec2::new(18.0, 5.0));
+    let picked = s.finish_command_lasso().unwrap().unwrap();
+    assert_eq!(picked, vec![l2]);
+    s.input(crate::Input::Pick(picked)).unwrap();
+    s.input(crate::Input::Enter).unwrap(); // End selection
+    // Complete or cancel move
+    s.cancel();
+}

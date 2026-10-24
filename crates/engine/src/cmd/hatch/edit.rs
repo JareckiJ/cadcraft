@@ -404,6 +404,14 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) => Some(a.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex)).take(MAX_EDITED).collect()),
         Some(_) => return Err(bad("hatchedit", "`boundary` is an array of object handles")),
     };
+    let add_bounds: Vec<Handle> = match p.get("addBoundaries").or_else(|| p.get("add_boundaries")) {
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))).collect(),
+        _ => Vec::new(),
+    };
+    let remove_bounds: Vec<Handle> = match p.get("removeBoundaries").or_else(|| p.get("remove_boundaries")) {
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex).or_else(|| v.as_u64().map(Handle))).collect(),
+        _ => Vec::new(),
+    };
     let associate = bool_or(p, "associate", false);
     let mut created = Vec::new();
     let mut notes = Vec::new();
@@ -427,6 +435,32 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if origin.is_some() || mode.is_some() {
             h.origin = mode.unwrap_or_default().origin(&h.loops, origin.unwrap_or(h.origin));
+        }
+        if !remove_bounds.is_empty() {
+            let before = h.loops.len();
+            h.loops.retain(|l| !l.sources.iter().any(|s| remove_bounds.contains(s)));
+            if h.loops.is_empty() {
+                return Err(bad("hatchedit", "removing these boundaries would leave the hatch without loops"));
+            }
+            if h.loops.len() == before {
+                notes.push(format!("Hatch {}: no loop is linked to the given boundaries.", handle.hex()));
+            }
+            if !h.loops.iter().any(|l| l.outer)
+                && let Some(first) = h.loops.first_mut()
+            {
+                first.outer = true;
+            }
+        }
+        if !add_bounds.is_empty() {
+            let d = s.doc()?;
+            for &abh in &add_bounds {
+                if let Some(e) = d.entity(abh)
+                    && let Some(vs) = closed_loop(d, e)
+                {
+                    let outer = h.loops.is_empty();
+                    h.loops.push(HatchLoop { vertices: vs, outer, sources: vec![abh] });
+                }
+            }
         }
         match p.get("associative").and_then(Value::as_bool) {
             Some(false) => detach(&mut h),

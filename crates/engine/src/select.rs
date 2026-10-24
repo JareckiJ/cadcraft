@@ -393,10 +393,31 @@ pub enum SelectKind {
     Box,
     /// `G`: the objects of a group, by name.
     Group,
+    /// `CL`: the objects of a class (entity type), by name.
+    Class,
 }
 
 /// Most points a fence or polygon collects (typed input is hostile).
 pub(crate) const MAX_MODE_POINTS: usize = 10_000;
+
+/// The visible objects in `space` whose entity class / DXF type matches `name` (e.g. "LINE", "CIRCLE", "LWPOLYLINE").
+pub fn select_class(d: &Drawing, space: &Space, name: &str) -> Option<Vec<Handle>> {
+    let target = name.trim().to_ascii_uppercase();
+    if target.is_empty() {
+        return None;
+    }
+    let store = d.space(space)?;
+    let hs: Vec<Handle> = store
+        .iter()
+        .filter(|e| {
+            d.is_visible(e)
+                && (e.kind.dxf_name().eq_ignore_ascii_case(&target)
+                    || matches!(&e.kind, EntityKind::LwPolyline(_) | EntityKind::Polyline3d(_) if target == "POLYLINE"))
+        })
+        .map(|e| e.handle)
+        .collect();
+    if hs.is_empty() { None } else { Some(hs) }
+}
 
 /// A typed selection mode in progress and the points given so far.
 #[derive(Clone, Debug, PartialEq)]
@@ -416,6 +437,7 @@ impl SelectMode {
             "cp" | "cpolygon" => SelectKind::CPolygon,
             "box" => SelectKind::Box,
             "g" | "group" => SelectKind::Group,
+            "cl" | "class" => SelectKind::Class,
             _ => return None,
         };
         Some(SelectMode { kind, pts: Vec::new() })
@@ -428,6 +450,7 @@ impl SelectMode {
         let last = self.pts.last().copied();
         let (first, next) = match self.kind {
             SelectKind::Group => return Prompt::new("Enter group name", Accept::TEXT),
+            SelectKind::Class => return Prompt::new("Enter class name", Accept::TEXT),
             SelectKind::Window | SelectKind::Crossing | SelectKind::Box => ("Specify first corner", "Specify opposite corner"),
             SelectKind::Fence => ("Specify first fence point", "Specify next fence point"),
             SelectKind::WPolygon | SelectKind::CPolygon => ("Specify first polygon point", "Specify endpoint of line"),

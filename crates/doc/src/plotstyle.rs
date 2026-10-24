@@ -361,7 +361,14 @@ impl PlotStyleTable {
         if text.len() > MAX_TABLE_FILE {
             return Err("the plot style table file is too large".into());
         }
-        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not a CADCraft plot style table: {e}"))?;
+        let v: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+            if text.as_bytes().iter().take(128).any(|&b| b == 0) || text.as_bytes().starts_with(b"\x1f\x8b") || text.as_bytes().starts_with(b"PK") {
+                "binary AutoCAD .ctb/.stb plot style tables are not supported (use CADCraft JSON tables or built-in monochrome/grayscale/default)"
+                    .to_string()
+            } else {
+                format!("not a CADCraft plot style table: {e}")
+            }
+        })?;
         match v.get(FILE_MARKER).and_then(serde_json::Value::as_u64) {
             Some(FILE_VERSION) => {}
             Some(n) => return Err(format!("plot style table format version {n} is newer than this CADCraft reads")),

@@ -21,9 +21,11 @@ use crate::{Drawing, Handle, RawTag};
 
 mod apply;
 mod grips;
+mod persist;
 mod reference;
 pub use apply::{drag_grip, set_property};
 pub use grips::{DynGrip, GripPart, GripShape, grips};
+pub use persist::{clone_dynamic_block, export_dynamic_block_to_model_space, import_dynamic_block, refresh_dynamic_references};
 pub use reference::{CustomProperty, Reference, Value, custom_properties, reference};
 
 /// Most objects one evaluation graph is read with.

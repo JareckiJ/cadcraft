@@ -600,6 +600,12 @@ pub struct MLeaderStyle {
     pub text_style: String,
     /// New multileaders of this style are annotative.
     pub annotative: bool,
+    /// Leader line type: 0 = None, 1 = Straight, 2 = Spline (default 1).
+    pub leader_type: u8,
+    /// Content type: 0 = None, 1 = MText, 2 = Block (default 1).
+    pub content_type: u8,
+    /// Default block name for block content.
+    pub block_name: String,
 }
 
 impl Default for MLeaderStyle {
@@ -612,6 +618,9 @@ impl Default for MLeaderStyle {
             dogleg: 0.36,
             text_style: "Standard".into(),
             annotative: false,
+            leader_type: 1,
+            content_type: 1,
+            block_name: String::new(),
         }
     }
 }
@@ -764,7 +773,7 @@ pub struct PageSetup {
     /// applied ("Display plot styles"; DXF plot layout flag 2).
     pub show_plot_styles: bool,
     /// Plot objects with their transparency ("Plot transparency"; PLOTTRANSPARENCYOVERRIDE can
-    /// override it). The DXF plot layout flags have no bit for it, so it is not saved in DXF.
+    /// override it). Saved in CADCraft xdata on the LAYOUT object (PLOTTRANSPARENCY).
     pub plot_transparency: bool,
     /// The layout's paper units are millimetres (plot paper units 1 in DXF) whatever the
     /// drawing's MEASUREMENT says; otherwise paper units follow MEASUREMENT (#1058).
@@ -870,6 +879,43 @@ pub struct Ucs {
     pub origin: Vec3,
     pub x_axis: Vec3,
     pub y_axis: Vec3,
+    #[serde(default)]
+    pub elevation: f64,
+    #[serde(default)]
+    pub ortho_type: i16,
+}
+
+impl Ucs {
+    pub fn world() -> Self {
+        Self {
+            name: String::new(),
+            origin: Vec3::ZERO,
+            x_axis: Vec3::new(1.0, 0.0, 0.0),
+            y_axis: Vec3::new(0.0, 1.0, 0.0),
+            elevation: 0.0,
+            ortho_type: 0,
+        }
+    }
+
+    pub fn is_world(&self) -> bool {
+        self.origin.len() < 1e-9 && (self.x_axis - Vec3::new(1.0, 0.0, 0.0)).len() < 1e-9 && (self.y_axis - Vec3::new(0.0, 1.0, 0.0)).len() < 1e-9
+    }
+
+    pub fn z_axis(&self) -> Vec3 {
+        let z = self.x_axis.cross(self.y_axis);
+        if z.len() > 1e-9 { z.normalized() } else { Vec3::new(0.0, 0.0, 1.0) }
+    }
+
+    /// Transform a point in UCS coordinates to WCS coordinates.
+    pub fn to_wcs(&self, p: Vec3) -> Vec3 {
+        self.origin + self.x_axis * p.x + self.y_axis * p.y + self.z_axis() * p.z
+    }
+
+    /// Transform a point in WCS coordinates to UCS coordinates.
+    pub fn to_ucs(&self, p: Vec3) -> Vec3 {
+        let d = p - self.origin;
+        Vec3::new(d.dot(self.x_axis), d.dot(self.y_axis), d.dot(self.z_axis()))
+    }
 }
 
 /// A saved layer state (LAYERSTATE).
@@ -886,6 +932,22 @@ pub struct Group {
     pub description: String,
     pub selectable: bool,
     pub members: Vec<crate::Handle>,
+}
+
+/// A material definition (MATERIAL).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Material {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+impl Material {
+    pub const GLOBAL: &'static str = "Global";
+    pub fn global() -> Material {
+        Material { name: Self::GLOBAL.into(), description: String::new() }
+    }
 }
 
 /// Shared ownership helper: blocks are cloned on write.

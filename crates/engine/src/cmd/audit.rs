@@ -64,7 +64,7 @@ fn recoverable_files() -> Vec<crate::autosave::Recoverable> {
 
 #[cfg(target_arch = "wasm32")]
 fn recoverable_files() -> Vec<crate::autosave::Recoverable> {
-    Vec::new()
+    crate::autosave::storage().map(|s| (s.list)()).unwrap_or_default()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,7 +73,11 @@ fn discard_file(path: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn discard_file(_: &str) {}
+fn discard_file(path: &str) {
+    if let Some(s) = crate::autosave::storage() {
+        let _ = (s.delete)(path);
+    }
+}
 
 /// Check the current drawing; with `fix`, repair it (one undo step).
 fn run_audit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -85,7 +89,7 @@ fn run_audit(s: &mut Session, p: &Value) -> Result<Value> {
         s.state_mut()?.doc = Arc::new(copy);
     }
     let report = crate::audit::Report { issues, fixed: fix };
-    if s.settings.auditctl {
+    if s.settings.auditctl || crate::audit::auditctl() != 0 {
         write_audit_log(s, &report);
     }
     Ok(report.to_json())
@@ -105,13 +109,16 @@ fn run_recover(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad("recover", "`path` or `data` (base64) is required")),
     };
     let hooks = file::io().ok_or_else(|| bad("recover", "file formats are not available in this build"))?;
-    let d = (hooks.read)(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?;
+    let d = match file::recover_hook() {
+        Some(recover_fn) => recover_fn(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?,
+        None => (hooks.read)(&bytes, &name).map_err(|e| bad("recover", format!("{name} can't be read: {e}")))?,
+    };
     let title = match str_param(p, "title") {
         Some(t) => t.to_string(),
         None => std::path::Path::new(&name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| name.clone()),
     };
     let copy = bool_or(p, "copy", false);
-    let i = s.open_drawing(d, &title, if copy { None } else { path });
+    let i = s.open_drawing(d, &title, if copy { None } else { path.clone() });
     let st = s.state_mut()?;
     let report = crate::audit::fix(Arc::make_mut(&mut st.doc));
     if report.issues.is_empty() {
@@ -123,7 +130,7 @@ fn run_recover(s: &mut Session, p: &Value) -> Result<Value> {
         st.saved = Arc::new((*st.doc).clone());
     }
     let uid = st.uid;
-    if s.settings.auditctl {
+    if s.settings.auditctl || crate::audit::auditctl() != 0 {
         write_audit_log(s, &report);
     }
     let mut r = report.to_json();
@@ -159,7 +166,10 @@ fn read_path(cmd: &str, path: &str) -> Result<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_path(cmd: &str, _path: &str) -> Result<Vec<u8>> {
+fn read_path(cmd: &str, path: &str) -> Result<Vec<u8>> {
+    if let Some(s) = crate::autosave::storage() {
+        return (s.read)(path).map_err(|e| bad(cmd, format!("{path}: {e}")));
+    }
     Err(bad(cmd, "paths are not available on the web; pass `data`"))
 }
 

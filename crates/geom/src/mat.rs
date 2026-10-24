@@ -146,4 +146,131 @@ impl Mat4 {
         let ay = n.cross(ax).normalized();
         Mat4 { m: [[ax.x, ay.x, n.x, 0.0], [ax.y, ay.y, n.y, 0.0], [ax.z, ay.z, n.z, 0.0], [0.0, 0.0, 0.0, 1.0]] }
     }
+
+    /// Translation by a 3D displacement vector.
+    pub fn translate(v: Vec3) -> Mat4 {
+        Mat4 { m: [[1.0, 0.0, 0.0, v.x], [0.0, 1.0, 0.0, v.y], [0.0, 0.0, 1.0, v.z], [0.0, 0.0, 0.0, 1.0]] }
+    }
+
+    /// Non-uniform scale along X, Y, Z axes.
+    pub fn scale(s: Vec3) -> Mat4 {
+        Mat4 { m: [[s.x, 0.0, 0.0, 0.0], [0.0, s.y, 0.0, 0.0], [0.0, 0.0, s.z, 0.0], [0.0, 0.0, 0.0, 1.0]] }
+    }
+
+    /// Scale about a 3D base point.
+    pub fn scale_about(base: Vec3, s: Vec3) -> Mat4 {
+        Mat4::translate(base).mul(&Mat4::scale(s)).mul(&Mat4::translate(-base))
+    }
+
+    /// Rotation around an arbitrary axis in 3D (specified by base origin and axis direction vector).
+    pub fn rotate_axis(origin: Vec3, axis_dir: Vec3, angle_rad: f64) -> Mat4 {
+        let u = axis_dir.normalized();
+        if u.len() < 1e-12 {
+            return Mat4::IDENTITY;
+        }
+        let (s, c) = angle_rad.sin_cos();
+        let c1 = 1.0 - c;
+        let r = Mat4 {
+            m: [
+                [c + u.x * u.x * c1, u.x * u.y * c1 - u.z * s, u.x * u.z * c1 + u.y * s, 0.0],
+                [u.y * u.x * c1 + u.z * s, c + u.y * u.y * c1, u.y * u.z * c1 - u.x * s, 0.0],
+                [u.z * u.x * c1 - u.y * s, u.z * u.y * c1 + u.x * s, c + u.z * u.z * c1, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        };
+        Mat4::translate(origin).mul(&r).mul(&Mat4::translate(-origin))
+    }
+
+    /// Reflection (mirror) across a 3D plane defined by a point on the plane and its normal vector.
+    pub fn mirror_plane(plane_pt: Vec3, normal: Vec3) -> Mat4 {
+        let n = normal.normalized();
+        if n.len() < 1e-12 {
+            return Mat4::IDENTITY;
+        }
+        let ref_mat = Mat4 {
+            m: [
+                [1.0 - 2.0 * n.x * n.x, -2.0 * n.x * n.y, -2.0 * n.x * n.z, 0.0],
+                [-2.0 * n.y * n.x, 1.0 - 2.0 * n.y * n.y, -2.0 * n.y * n.z, 0.0],
+                [-2.0 * n.z * n.x, -2.0 * n.z * n.y, 1.0 - 2.0 * n.z * n.z, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        };
+        Mat4::translate(plane_pt).mul(&ref_mat).mul(&Mat4::translate(-plane_pt))
+    }
+
+    /// 3D Alignment from 3 source points to 3 destination points.
+    /// Point 1 defines origin, point 2 defines X axis, point 3 defines XY plane.
+    pub fn align_3point(src: [Vec3; 3], dst: [Vec3; 3]) -> Option<Mat4> {
+        let sx = (src[1] - src[0]).normalized();
+        let dx = (dst[1] - dst[0]).normalized();
+        if sx.len() < 1e-12 || dx.len() < 1e-12 {
+            return Some(Mat4::translate(dst[0] - src[0]));
+        }
+
+        let sv = src[2] - src[0];
+        let mut sz = sx.cross(sv).normalized();
+        if sz.len() < 1e-12 {
+            sz = if sx.x.abs() < 0.8 { Vec3::X.cross(sx) } else { Vec3::Y.cross(sx) }.normalized();
+        }
+        let sy = sz.cross(sx).normalized();
+
+        let dv = dst[2] - dst[0];
+        let mut dz = dx.cross(dv).normalized();
+        if dz.len() < 1e-12 {
+            dz = if dx.x.abs() < 0.8 { Vec3::X.cross(dx) } else { Vec3::Y.cross(dx) }.normalized();
+        }
+        let dy = dz.cross(dx).normalized();
+
+        // R_src: columns are sx, sy, sz. R_src^T: rows are sx, sy, sz.
+        // R_dst: columns are dx, dy, dz.
+        // R = R_dst * R_src^T
+        let r = [
+            [dx.x * sx.x + dy.x * sy.x + dz.x * sz.x, dx.x * sx.y + dy.x * sy.y + dz.x * sz.y, dx.x * sx.z + dy.x * sy.z + dz.x * sz.z],
+            [dx.y * sx.x + dy.y * sy.x + dz.y * sz.x, dx.y * sx.y + dy.y * sy.y + dz.y * sz.y, dx.y * sx.z + dy.y * sy.z + dz.y * sz.z],
+            [dx.z * sx.x + dy.z * sy.x + dz.z * sz.x, dx.z * sx.y + dy.z * sy.y + dz.z * sz.y, dx.z * sx.z + dy.z * sy.z + dz.z * sz.z],
+        ];
+
+        // Translation: dst[0] - R * src[0]
+        let s0 = src[0];
+        let rs0 = Vec3::new(
+            r[0][0] * s0.x + r[0][1] * s0.y + r[0][2] * s0.z,
+            r[1][0] * s0.x + r[1][1] * s0.y + r[1][2] * s0.z,
+            r[2][0] * s0.x + r[2][1] * s0.y + r[2][2] * s0.z,
+        );
+        let t = dst[0] - rs0;
+
+        Some(Mat4 { m: [[r[0][0], r[0][1], r[0][2], t.x], [r[1][0], r[1][1], r[1][2], t.y], [r[2][0], r[2][1], r[2][2], t.z], [0.0, 0.0, 0.0, 1.0]] })
+    }
+
+    /// 2-point alignment (with optional uniform scaling based on distance between points).
+    pub fn align_2point(src: [Vec3; 2], dst: [Vec3; 2], scale: bool) -> Option<Mat4> {
+        let vs = src[1] - src[0];
+        let vd = dst[1] - dst[0];
+        let ls = vs.len();
+        let ld = vd.len();
+        if ls < 1e-12 || ld < 1e-12 {
+            return Some(Mat4::translate(dst[0] - src[0]));
+        }
+
+        let us = vs / ls;
+        let ud = vd / ld;
+        let dot = (us.dot(ud)).clamp(-1.0, 1.0);
+        let cross = us.cross(ud);
+        let angle = dot.acos();
+
+        let rot = if cross.len() > 1e-12 {
+            Mat4::rotate_axis(Vec3::ZERO, cross.normalized(), angle)
+        } else if dot < 0.0 {
+            let axis = if us.x.abs() < 0.8 { Vec3::X.cross(us) } else { Vec3::Y.cross(us) }.normalized();
+            Mat4::rotate_axis(Vec3::ZERO, axis, std::f64::consts::PI)
+        } else {
+            Mat4::IDENTITY
+        };
+
+        let k = if scale { ld / ls } else { 1.0 };
+        let sc = Mat4::scale(Vec3::new(k, k, k));
+
+        // Result: T(dst[0]) * Scale * Rot * T(-src[0])
+        Some(Mat4::translate(dst[0]).mul(&sc).mul(&rot).mul(&Mat4::translate(-src[0])))
+    }
 }

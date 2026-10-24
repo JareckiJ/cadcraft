@@ -234,6 +234,43 @@ pub fn standard_patterns() -> Vec<HatchPattern> {
             },
             16.0,
         ),
+        HatchPattern {
+            name: "CROSS30",
+            description: "30-degree / 120-degree crosshatch",
+            lines: vec![pl(30.0, (0.0, 0.0), (0.0, 0.125), &[]), pl(120.0, (0.0, 0.0), (0.0, 0.125), &[])],
+        },
+        HatchPattern {
+            name: "CROSS60",
+            description: "60-degree / 150-degree crosshatch",
+            lines: vec![pl(60.0, (0.0, 0.0), (0.0, 0.125), &[]), pl(150.0, (0.0, 0.0), (0.0, 0.125), &[])],
+        },
+        HatchPattern {
+            name: "TRIANG",
+            description: "Equilateral triangle grid",
+            lines: vec![pl(0.0, (0.0, 0.0), (0.0, 0.125), &[]), pl(60.0, (0.0, 0.0), (0.0, 0.125), &[]), pl(120.0, (0.0, 0.0), (0.0, 0.125), &[])],
+        },
+        HatchPattern {
+            name: "CHECKER",
+            description: "Checkerboard grid",
+            lines: vec![pl(0.0, (0.0, 0.0), (0.125, 0.125), &[0.125, -0.125]), pl(90.0, (0.0, 0.0), (0.125, 0.125), &[0.125, -0.125])],
+        },
+        HatchPattern {
+            name: "HERRINGBONE",
+            description: "Herringbone chevron pattern",
+            lines: vec![pl(45.0, (0.0, 0.0), (0.0, 0.25), &[0.25, -0.25]), pl(135.0, (0.176777, 0.0), (0.0, 0.25), &[0.25, -0.25])],
+        },
+        HatchPattern {
+            name: "PARQUET",
+            description: "Basketweave parquet tile",
+            lines: vec![
+                pl(0.0, (0.0, 0.0), (0.25, 0.25), &[0.25, -0.25]),
+                pl(0.0, (0.0, 0.083333), (0.25, 0.25), &[0.25, -0.25]),
+                pl(0.0, (0.0, 0.166667), (0.25, 0.25), &[0.25, -0.25]),
+                pl(90.0, (0.0, 0.25), (0.25, 0.25), &[0.25, -0.25]),
+                pl(90.0, (0.083333, 0.25), (0.25, 0.25), &[0.25, -0.25]),
+                pl(90.0, (0.166667, 0.25), (0.25, 0.25), &[0.25, -0.25]),
+            ],
+        },
     ]
 }
 

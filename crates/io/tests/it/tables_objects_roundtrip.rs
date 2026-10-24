@@ -70,6 +70,7 @@ fn multileader_styles_and_current_style_round_trip() {
         dogleg: 5.0,
         text_style: "Slanted".into(),
         annotative: false,
+        ..MLeaderStyle::default()
     };
     d.mleader_styles.push(callout);
     d.header.set_str("CMLEADERSTYLE", "Callout");
@@ -118,7 +119,14 @@ fn named_views_ucss_and_groups_round_trip() {
         layer_state: Some("Plan".into()),
         ..Default::default()
     });
-    d.ucss.push(Ucs { name: "Tilted".into(), origin: Vec3::new(1.0, 2.0, 0.0), x_axis: Vec3::new(0.6, 0.8, 0.0), y_axis: Vec3::new(-0.8, 0.6, 0.0) });
+    d.ucss.push(Ucs {
+        name: "Tilted".into(),
+        origin: Vec3::new(1.0, 2.0, 0.0),
+        x_axis: Vec3::new(0.6, 0.8, 0.0),
+        y_axis: Vec3::new(-0.8, 0.6, 0.0),
+        elevation: 0.0,
+        ortho_type: 0,
+    });
     d.groups.push(Group { name: "G1".into(), description: "grp".into(), selectable: false, members: vec![line] });
     // A member that no longer exists is not written.
     let gone = d.new_handle();

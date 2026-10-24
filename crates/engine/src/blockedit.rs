@@ -167,6 +167,16 @@ impl BlockEdit {
         b.base.y = self.base.y;
         b.entities = entities;
         d.blocks.insert(key, Arc::new(b));
+
+        let is_dynamic = has_dynamic_data(editor, &self.name) || has_dynamic_data(host, &self.name);
+        if !self.name.eq_ignore_ascii_case(name) {
+            if is_dynamic {
+                cadcraft_doc::dynblock::clone_dynamic_block(&mut d, &self.name, name);
+            }
+        } else if is_dynamic {
+            cadcraft_doc::dynblock::refresh_dynamic_references(&mut d, name);
+        }
+
         Ok(d)
     }
 }

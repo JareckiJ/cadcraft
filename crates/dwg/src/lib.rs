@@ -124,7 +124,10 @@ mod native {
             ));
         }
         written.map_err(|e| format!("DWG→DXF: {e}"))?;
-        Ok((add_header_vars(out.buf, &doc.header), notes))
+        let raw_items = collect_raw_dwg(&doc);
+        let dxf = add_header_vars(out.buf, &doc.header);
+        let dxf = inject_raw_dwg(dxf, &raw_items, 0x10000);
+        Ok((dxf, notes))
     }
 
     /// Most record types named in the skipped-records note.
@@ -524,6 +527,7 @@ mod native {
                 mb(Limits::DEFAULT.max_dxf_bytes as u64)
             ));
         }
+        let (raw_items, _) = extract_raw_dwg(dxf);
         let data = dxf.to_vec();
         let mut doc = std::panic::catch_unwind(move || acadrust::DxfReader::from_reader(Cursor::new(data)).and_then(|r| r.read()))
             .map_err(|_| "the DXF→DWG conversion failed".to_string())?
@@ -538,6 +542,7 @@ mod native {
         }
         other_layout_owners(&mut doc);
         table_style_rows(&mut doc, true);
+        restore_raw_dwg(&mut doc, &raw_items);
         dimension_flags(&mut doc);
         drop_unwritable(&mut doc);
         current_dimstyle(&mut doc);
@@ -548,6 +553,233 @@ mod native {
             .map_err(|e| format!("DWG write: {e}"))
     }
 
+    struct RawItem {
+        is_entity: bool,
+        handle: u64,
+        type_code: i16,
+        version: &'static str,
+        data: Vec<u8>,
+        handle_bits: i64,
+    }
+
+    fn to_hex(bytes: &[u8]) -> String {
+        let mut s = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            use std::fmt::Write;
+            let _ = write!(s, "{:02X}", b);
+        }
+        s
+    }
+
+    fn from_hex(s: &str) -> Option<Vec<u8>> {
+        if !s.len().is_multiple_of(2) {
+            return None;
+        }
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+    }
+
+    fn version_code(v: acadrust::DxfVersion) -> &'static str {
+        match v {
+            acadrust::DxfVersion::AC1009 => "AC1009",
+            acadrust::DxfVersion::AC1012 => "AC1012",
+            acadrust::DxfVersion::AC1014 => "AC1014",
+            acadrust::DxfVersion::AC1015 => "AC1015",
+            acadrust::DxfVersion::AC1018 => "AC1018",
+            acadrust::DxfVersion::AC1021 => "AC1021",
+            acadrust::DxfVersion::AC1024 => "AC1024",
+            acadrust::DxfVersion::AC1027 => "AC1027",
+            acadrust::DxfVersion::AC1032 => "AC1032",
+            _ => "AC1032",
+        }
+    }
+
+    fn version_from_code(s: &str) -> Option<acadrust::DxfVersion> {
+        match s {
+            "AC1009" => Some(acadrust::DxfVersion::AC1009),
+            "AC1012" => Some(acadrust::DxfVersion::AC1012),
+            "AC1014" => Some(acadrust::DxfVersion::AC1014),
+            "AC1015" => Some(acadrust::DxfVersion::AC1015),
+            "AC1018" => Some(acadrust::DxfVersion::AC1018),
+            "AC1021" => Some(acadrust::DxfVersion::AC1021),
+            "AC1024" => Some(acadrust::DxfVersion::AC1024),
+            "AC1027" => Some(acadrust::DxfVersion::AC1027),
+            "AC1032" => Some(acadrust::DxfVersion::AC1032),
+            _ => None,
+        }
+    }
+
+    fn collect_raw_dwg(doc: &acadrust::CadDocument) -> Vec<RawItem> {
+        let mut items = Vec::new();
+        for e in doc.entities() {
+            if let acadrust::entities::EntityType::Unknown(u) = e
+                && let (Some(data), Some(v)) = (&u.raw_dwg_data, u.dwg_source_version)
+            {
+                items.push(RawItem {
+                    is_entity: true,
+                    handle: u.common.handle.value(),
+                    type_code: u.dwg_type_code,
+                    version: version_code(v),
+                    data: data.clone(),
+                    handle_bits: u.dwg_handle_bits,
+                });
+            }
+        }
+        for (h, o) in &doc.objects {
+            if let acadrust::objects::ObjectType::Unknown { raw_dwg_data: Some(data), raw_dwg_version: Some(v), raw_dwg_handle_bits, .. } = o {
+                items.push(RawItem {
+                    is_entity: false,
+                    handle: h.value(),
+                    type_code: 0,
+                    version: version_code(*v),
+                    data: data.clone(),
+                    handle_bits: *raw_dwg_handle_bits,
+                });
+            }
+        }
+        items
+    }
+
+    fn inject_raw_dwg(mut dxf: Vec<u8>, items: &[RawItem], handseed: u64) -> Vec<u8> {
+        if items.is_empty() {
+            return dxf;
+        }
+        const OBJ_START: &[u8] = b"  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n";
+        const OBJ_END: &[u8] = b"\r\n  0\r\nENDSEC\r\n";
+        const DICT_START: &[u8] = b"  0\r\nDICTIONARY\r\n  5\r\n";
+
+        let Some(obj_pos) = dxf.windows(OBJ_START.len()).position(|w| w == OBJ_START) else {
+            return dxf;
+        };
+        let after_obj = obj_pos + OBJ_START.len();
+        let Some(end_rel) = dxf.get(after_obj..).and_then(|slice| slice.windows(OBJ_END.len()).position(|w| w == OBJ_END)) else {
+            return dxf;
+        };
+        let end_sec_pos = after_obj + end_rel + 2;
+
+        let root_dict = dxf.get(after_obj..).unwrap_or_default();
+        let root_handle = if root_dict.starts_with(DICT_START) {
+            let handle_start = DICT_START.len();
+            let handle_end = root_dict.get(handle_start..).and_then(|s| s.windows(2).position(|w| w == b"\r\n")).unwrap_or(0);
+            String::from_utf8_lossy(root_dict.get(handle_start..handle_start + handle_end).unwrap_or_default()).trim().to_string()
+        } else {
+            "C".to_string()
+        };
+
+        let cache_handle = format!("{:X}", handseed.max(0x1000).saturating_add(0x500));
+
+        let mut lines = Vec::new();
+        for item in items {
+            let kind = if item.is_entity { "E" } else { "O" };
+            lines.push(format!("{kind} {:X} {} {} {} {}", item.handle, item.type_code, item.version, to_hex(&item.data), item.handle_bits));
+        }
+
+        let mut xrec = format!(
+            "  0\r\nXRECORD\r\n  5\r\n{cache_handle}\r\n102\r\n{{ACAD_REACTORS\r\n330\r\n{root_handle}\r\n102\r\n}}\r\n330\r\n{root_handle}\r\n100\r\nAcDbXrecord\r\n280\r\n1\r\n  1\r\nCADCRAFT_DWG_RAW\r\n"
+        );
+        for line in &lines {
+            xrec.push_str(&format!("  1\r\n{line}\r\n"));
+        }
+
+        dxf.splice(end_sec_pos..end_sec_pos, xrec.into_bytes());
+
+        if let Some(dict_end) = dxf.get(after_obj..).and_then(|s| s.windows(5).position(|w| w == b"\r\n  0")) {
+            let insert_dict = after_obj + dict_end + 2;
+            let entry = format!("  3\r\nCADCRAFT_DWG_RAW\r\n350\r\n{cache_handle}\r\n");
+            dxf.splice(insert_dict..insert_dict, entry.into_bytes());
+        }
+
+        dxf
+    }
+
+    fn extract_raw_dwg(dxf: &[u8]) -> (Vec<RawItem>, Option<String>) {
+        const TAG: &[u8] = b"CADCRAFT_DWG_RAW";
+        let mut items = Vec::new();
+        let Some(pos) = dxf.windows(TAG.len()).position(|w| w == TAG) else {
+            return (items, None);
+        };
+        let text = String::from_utf8_lossy(dxf.get(pos..).unwrap_or_default());
+        for line in text.lines().skip(1) {
+            let trimmed = line.trim();
+            if trimmed == "0" || trimmed == "SECTION" || trimmed == "ENDSEC" {
+                break;
+            }
+            if let Some(rest) = trimmed.strip_prefix("E ") {
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if parts.len() == 5
+                    && let (Ok(h), Ok(tc), Some(data)) = (
+                        u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16),
+                        parts.get(1).copied().unwrap_or_default().parse::<i16>(),
+                        parts.get(3).copied().and_then(from_hex),
+                    )
+                {
+                    let bits = parts.get(4).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                    let version_str = match parts.get(2).copied() {
+                        Some("AC1009") => "AC1009",
+                        Some("AC1012") => "AC1012",
+                        Some("AC1014") => "AC1014",
+                        Some("AC1015") => "AC1015",
+                        Some("AC1018") => "AC1018",
+                        Some("AC1021") => "AC1021",
+                        Some("AC1024") => "AC1024",
+                        Some("AC1027") => "AC1027",
+                        Some("AC1032") => "AC1032",
+                        _ => "AC1032",
+                    };
+                    items.push(RawItem { is_entity: true, handle: h, type_code: tc, version: version_str, data, handle_bits: bits });
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("O ") {
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                if parts.len() == 4
+                    && let (Ok(h), Some(data)) =
+                        (u64::from_str_radix(parts.first().copied().unwrap_or_default(), 16), parts.get(2).copied().and_then(from_hex))
+                {
+                    let bits = parts.get(3).copied().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+                    let version_str = match parts.get(1).copied() {
+                        Some("AC1009") => "AC1009",
+                        Some("AC1012") => "AC1012",
+                        Some("AC1014") => "AC1014",
+                        Some("AC1015") => "AC1015",
+                        Some("AC1018") => "AC1018",
+                        Some("AC1021") => "AC1021",
+                        Some("AC1024") => "AC1024",
+                        Some("AC1027") => "AC1027",
+                        Some("AC1032") => "AC1032",
+                        _ => "AC1032",
+                    };
+                    items.push(RawItem { is_entity: false, handle: h, type_code: 0, version: version_str, data, handle_bits: bits });
+                }
+            }
+        }
+        (items, None)
+    }
+
+    fn restore_raw_dwg(doc: &mut acadrust::CadDocument, items: &[RawItem]) {
+        let doc_version = doc.version;
+        for item in items {
+            if item.is_entity {
+                for e in doc.entities_mut() {
+                    if let acadrust::entities::EntityType::Unknown(u) = e
+                        && u.common.handle.value() == item.handle
+                    {
+                        u.raw_dwg_data = Some(item.data.clone());
+                        u.dwg_type_code = item.type_code;
+                        u.dwg_source_version = version_from_code(item.version).or(Some(doc_version));
+                        u.dwg_handle_bits = item.handle_bits;
+                    }
+                }
+            } else {
+                for (h, o) in doc.objects.iter_mut() {
+                    if h.value() == item.handle
+                        && let acadrust::objects::ObjectType::Unknown { raw_dwg_data, raw_dwg_version, raw_dwg_handle_bits, .. } = o
+                    {
+                        *raw_dwg_data = Some(item.data.clone());
+                        *raw_dwg_version = version_from_code(item.version).or(Some(doc_version));
+                        *raw_dwg_handle_bits = item.handle_bits;
+                    }
+                }
+            }
+        }
+    }
     /// AutoCAD's entry name for the drawing variables dictionary (the DXF Reference calls it the
     /// ACDBVARIABLEDICTIONARY; dictionary keys are case-insensitive).
     const VARIABLE_DICTIONARY: &str = "AcDbVariableDictionary";

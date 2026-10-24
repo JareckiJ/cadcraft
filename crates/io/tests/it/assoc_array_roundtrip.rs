@@ -24,6 +24,7 @@ fn params(source: &str) -> ArrayParams {
         level_spacing: 4.0,
         replaced: vec![ReplacedItem { i: 1, j: 0, level: 0, block: "Größe".into() }],
         editing: None,
+        erased: Vec::new(),
     }
 }
 
@@ -56,6 +57,7 @@ fn drawing() -> Drawing {
         rows: 1,
         col_spacing: 0.0,
         row_spacing: 0.0,
+        clip: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::Insert(ins)).unwrap();
     d

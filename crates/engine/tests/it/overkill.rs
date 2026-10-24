@@ -230,3 +230,62 @@ fn many_objects_stay_fast() {
     assert_eq!(count(&s), 4001);
     assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
 }
+
+#[test]
+fn polyline_compared_with_lines_arcs_and_plines() {
+    let mut s = Session::new();
+    // Polyline with 2 segments: [0, 0] -> [10, 0] -> [10, 10]
+    s.execute("pline", &json!({ "vertices": [[0, 0], [10, 0], [10, 10]] })).unwrap();
+    // Duplicate line of segment 1
+    line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    // Overlapping line inside segment 2
+    line(&mut s, [10.0, 2.0], [10.0, 8.0]);
+    // Separate line
+    line(&mut s, [20.0, 0.0], [30.0, 0.0]);
+
+    // When plines is false, polyline comparison doesn't delete the duplicate line or contained line
+    let r = ok(&mut s, json!({ "plines": false }));
+    assert_eq!(r["deleted"], 0);
+
+    // When plines is true, duplicate line (1 dup) and overlapping line (1 overlap) are deleted
+    let r = ok(&mut s, json!({}));
+    assert_eq!(r["duplicates"], 1);
+    assert_eq!(r["overlapping"], 1);
+    assert_eq!(count(&s), 2); // Polyline + the separate line remain
+
+    // Polyline arc segment vs standalone Arc
+    let mut s = Session::new();
+    // Arc segment from [0, 0] to [10, 0] with bulge = 1.0 (semicircle, radius 5, center [5, 0], CCW from 180° to 360°)
+    s.execute(
+        "pline",
+        &json!({
+            "vertices": [
+                { "p": [0, 0], "bulge": 1.0 },
+                { "p": [10, 0] }
+            ]
+        }),
+    )
+    .unwrap();
+    // Semicircle arc matching the bulge
+    s.execute("arc", &json!({ "center": [5, 0], "radius": 5, "start": 180, "end": 360 })).unwrap();
+    // Overlapping sub-arc inside the bulge
+    s.execute("arc", &json!({ "center": [5, 0], "radius": 5, "start": 200, "end": 300 })).unwrap();
+
+    let r = ok(&mut s, json!({}));
+    assert_eq!(r["duplicates"], 1);
+    assert_eq!(r["overlapping"], 1);
+    assert_eq!(count(&s), 1); // Only the polyline remains
+
+    // 1-segment polyline vs standalone line and another polyline
+    let mut s = Session::new();
+    // Multi-segment polyline
+    s.execute("pline", &json!({ "vertices": [[0, 0], [20, 0], [20, 20]] })).unwrap();
+    // 1-segment polyline contained inside the first segment
+    s.execute("pline", &json!({ "vertices": [[2, 0], [8, 0]] })).unwrap();
+    // Duplicate 1-segment polyline
+    s.execute("pline", &json!({ "vertices": [[2, 0], [8, 0]] })).unwrap();
+    let r = ok(&mut s, json!({}));
+    assert_eq!(r["duplicates"], 1);
+    assert_eq!(r["overlapping"], 1);
+    assert_eq!(count(&s), 1);
+}

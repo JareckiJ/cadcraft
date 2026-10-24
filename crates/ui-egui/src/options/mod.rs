@@ -20,6 +20,9 @@
 //! | `historyLines` | command-line history lines, 0–12 |
 //! | `modelBackground`, `paperBackground` | `"#rrggbb"`, or `null` for the default |
 //! | `selectionColor` | the colour selected objects are highlighted in: `"#rrggbb"`, or `null` for the theme's |
+//! | `crosshairColor` | the crosshair cursor colour: `"#rrggbb"`, or `null` for the theme's |
+//! | `snapMarkerColor` | object snap marker colour: `"#rrggbb"`, or `null` for the theme's |
+//! | `gripColor` | unselected grip colour: `"#rrggbb"`, or `null` for the theme's |
 //! | `snapMarkerSize` | object snap marker size in points, 5–31 |
 //! | `interfaceScale` | the interface's size, 0.5–3 (1: the system's own) |
 //!
@@ -67,6 +70,12 @@ pub struct UiOptions {
     pub snap_marker_size: f32,
     /// The selection highlight colour; `None` keeps the theme's.
     pub selection_color: Option<Color32>,
+    /// The crosshair cursor colour; `None` keeps the theme's.
+    pub crosshair_color: Option<Color32>,
+    /// Object snap marker colour; `None` keeps the theme's.
+    pub snap_marker_color: Option<Color32>,
+    /// Unselected grip colour; `None` keeps the theme's.
+    pub grip_color: Option<Color32>,
     /// While a command runs: a quick right-click is Enter and a held one opens the shortcut menu
     /// (AutoCAD's time-sensitive right-click). Off: a right-click always opens the menu.
     pub time_sensitive_right_click: bool,
@@ -81,6 +90,9 @@ impl Default for UiOptions {
             paper_background: None,
             snap_marker_size: theme::SNAP_MARKER,
             selection_color: None,
+            crosshair_color: None,
+            snap_marker_color: None,
+            grip_color: None,
             time_sensitive_right_click: true,
             interface_scale: 1.0,
         }
@@ -95,6 +107,9 @@ impl UiOptions {
             paper: self.paper_background,
             snap_marker: self.snap_marker_size,
             selection: self.selection_color,
+            crosshair: self.crosshair_color,
+            snap_color: self.snap_marker_color,
+            grip_color: self.grip_color,
         }
     }
 }
@@ -143,6 +158,9 @@ struct UiChanges {
     model_background: Option<Option<Color32>>,
     paper_background: Option<Option<Color32>>,
     selection_color: Option<Option<Color32>>,
+    crosshair_color: Option<Option<Color32>>,
+    snap_marker_color: Option<Option<Color32>>,
+    grip_color: Option<Option<Color32>>,
     snap_marker_size: Option<f32>,
     save_version: Option<crate::SaveVersion>,
     savetime: Option<u32>,
@@ -178,6 +196,9 @@ fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
         "modelBackground" => c.model_background = Some(color_param(key, v)?),
         "paperBackground" => c.paper_background = Some(color_param(key, v)?),
         "selectionColor" => c.selection_color = Some(color_param(key, v)?),
+        "crosshairColor" => c.crosshair_color = Some(color_param(key, v)?),
+        "snapMarkerColor" => c.snap_marker_color = Some(color_param(key, v)?),
+        "gripColor" => c.grip_color = Some(color_param(key, v)?),
         "snapMarkerSize" => {
             let n = v.as_f64().filter(|n| SNAP_MARKER_SIZES.contains(&(*n as f32)) && n.is_finite()).ok_or("snapMarkerSize must be from 5 to 31")?;
             c.snap_marker_size = Some(n as f32);
@@ -221,6 +242,9 @@ fn ui_json(app: &CadApp) -> Map<String, Value> {
     m.insert("modelBackground".into(), color_json(o.model_background));
     m.insert("paperBackground".into(), color_json(o.paper_background));
     m.insert("selectionColor".into(), color_json(o.selection_color));
+    m.insert("crosshairColor".into(), color_json(o.crosshair_color));
+    m.insert("snapMarkerColor".into(), color_json(o.snap_marker_color));
+    m.insert("gripColor".into(), color_json(o.grip_color));
     m.insert("snapMarkerSize".into(), json!(o.snap_marker_size));
     m.insert("interfaceScale".into(), json!(o.interface_scale));
     m.insert("saveVersion".into(), json!(app.ui.save_version));
@@ -282,6 +306,15 @@ fn run_json(app: &mut CadApp, params: &Value) -> Result<Value, String> {
     if let Some(c) = ui.selection_color {
         app.options.selection_color = c;
     }
+    if let Some(c) = ui.crosshair_color {
+        app.options.crosshair_color = c;
+    }
+    if let Some(c) = ui.snap_marker_color {
+        app.options.snap_marker_color = c;
+    }
+    if let Some(c) = ui.grip_color {
+        app.options.grip_color = c;
+    }
     if let Some(n) = ui.snap_marker_size {
         app.options.snap_marker_size = n;
     }
@@ -328,6 +361,9 @@ impl CadApp {
             "modelBackground": color_json(self.options.model_background),
             "paperBackground": color_json(self.options.paper_background),
             "selectionColor": color_json(self.options.selection_color),
+            "crosshairColor": color_json(self.options.crosshair_color),
+            "snapMarkerColor": color_json(self.options.snap_marker_color),
+            "gripColor": color_json(self.options.grip_color),
             "snapMarkerSize": self.options.snap_marker_size,
             "timeSensitiveRightClick": self.options.time_sensitive_right_click,
             "interfaceScale": self.options.interface_scale,
@@ -346,9 +382,18 @@ impl CadApp {
             cadcraft_engine::cmd::options::restore(&mut self.session, vars);
         }
         let mut c = UiChanges::default();
-        for key in
-            ["systemCursor", "modelBackground", "paperBackground", "selectionColor", "snapMarkerSize", "timeSensitiveRightClick", "interfaceScale"]
-        {
+        for key in [
+            "systemCursor",
+            "modelBackground",
+            "paperBackground",
+            "selectionColor",
+            "crosshairColor",
+            "snapMarkerColor",
+            "gripColor",
+            "snapMarkerSize",
+            "timeSensitiveRightClick",
+            "interfaceScale",
+        ] {
             if let Some(value) = v.get(key) {
                 let _ = parse_ui(key, value, &mut c);
             }
@@ -365,6 +410,15 @@ impl CadApp {
         }
         if let Some(sel) = c.selection_color {
             self.options.selection_color = sel;
+        }
+        if let Some(c_cross) = c.crosshair_color {
+            self.options.crosshair_color = c_cross;
+        }
+        if let Some(c_snap) = c.snap_marker_color {
+            self.options.snap_marker_color = c_snap;
+        }
+        if let Some(c_grip) = c.grip_color {
+            self.options.grip_color = c_grip;
         }
         if let Some(n) = c.snap_marker_size {
             self.options.snap_marker_size = n;

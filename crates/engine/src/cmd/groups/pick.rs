@@ -28,38 +28,82 @@ const MEMBER_PICKS: &[&str] = &["groupedit", "-group"];
 /// `hs` plus the other members of the selectable groups they belong to (in the space being
 /// edited, visible), when PICKSTYLE has group selection on. Order: `hs` first.
 pub(crate) fn expand(s: &Session, hs: Vec<Handle>) -> Vec<Handle> {
-    if s.settings.pickstyle & 1 == 0 || hs.is_empty() || s.running.as_ref().is_some_and(|r| MEMBER_PICKS.contains(&r.id.as_str())) {
+    if s.settings.pickstyle == 0 || hs.is_empty() {
         return hs;
     }
     let Ok(d) = s.doc() else { return hs };
-    if !d.groups.iter().any(|g| g.selectable) {
-        return hs;
-    }
     let space = s.space();
     let Some(store) = d.space(&space) else { return hs };
-    // Member → its selectable groups, built once (window selections may hold many objects).
-    let mut of: HashMap<Handle, Vec<usize>> = HashMap::new();
-    for (i, g) in d.groups.iter().enumerate().filter(|(_, g)| g.selectable) {
-        for m in &g.members {
-            of.entry(*m).or_default().push(i);
-        }
-    }
     let mut seen: HashSet<Handle> = hs.iter().copied().collect();
-    let mut done: HashSet<usize> = HashSet::new();
     let mut out = hs.clone();
-    for h in &hs {
-        for gi in of.get(h).into_iter().flatten() {
-            if !done.insert(*gi) {
-                continue;
-            }
-            let Some(g) = d.groups.get(*gi) else { continue };
+
+    // Bit 1: group selection.
+    if s.settings.pickstyle & 1 != 0
+        && !s.running.as_ref().is_some_and(|r| MEMBER_PICKS.contains(&r.id.as_str()))
+        && d.groups.iter().any(|g| g.selectable)
+    {
+        let mut of: HashMap<Handle, Vec<usize>> = HashMap::new();
+        for (i, g) in d.groups.iter().enumerate().filter(|(_, g)| g.selectable) {
             for m in &g.members {
-                if store.get(*m).is_some_and(|e| d.is_visible(e)) && seen.insert(*m) {
-                    out.push(*m);
+                of.entry(*m).or_default().push(i);
+            }
+        }
+        let mut done: HashSet<usize> = HashSet::new();
+        for h in &hs {
+            for gi in of.get(h).into_iter().flatten() {
+                if !done.insert(*gi) {
+                    continue;
+                }
+                let Some(g) = d.groups.get(*gi) else { continue };
+                for m in &g.members {
+                    if store.get(*m).is_some_and(|e| d.is_visible(e)) && seen.insert(*m) {
+                        out.push(*m);
+                    }
                 }
             }
         }
     }
+
+    // Bit 2: associative hatch selection.
+    if s.settings.pickstyle & 2 != 0 {
+        let mut hatch_to_boundaries: HashMap<Handle, Vec<Handle>> = HashMap::new();
+        let mut boundary_to_hatches: HashMap<Handle, Vec<Handle>> = HashMap::new();
+        for e in store.iter() {
+            if let cadcraft_doc::EntityKind::Hatch(h) = &e.kind
+                && h.associative
+                && d.is_visible(e)
+            {
+                for l in &h.loops {
+                    for &src in &l.sources {
+                        if store.get(src).is_some_and(|be| d.is_visible(be)) {
+                            hatch_to_boundaries.entry(e.handle).or_default().push(src);
+                            boundary_to_hatches.entry(src).or_default().push(e.handle);
+                        }
+                    }
+                }
+            }
+        }
+        let mut frontier: Vec<Handle> = out.clone();
+        while let Some(cur) = frontier.pop() {
+            if let Some(bounds) = hatch_to_boundaries.get(&cur) {
+                for &b in bounds {
+                    if seen.insert(b) {
+                        out.push(b);
+                        frontier.push(b);
+                    }
+                }
+            }
+            if let Some(hatches) = boundary_to_hatches.get(&cur) {
+                for &hh in hatches {
+                    if seen.insert(hh) {
+                        out.push(hh);
+                        frontier.push(hh);
+                    }
+                }
+            }
+        }
+    }
+
     out
 }
 

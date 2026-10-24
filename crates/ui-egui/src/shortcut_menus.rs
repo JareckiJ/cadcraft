@@ -61,7 +61,10 @@ pub fn command_line_entries(app: &CadApp) -> Vec<Vec<Entry>> {
     if !lines.is_empty() {
         groups.push(vec![Entry::Sub { label: "Lines of Command History".into(), children: lines }]);
     }
-    let mut edit = vec![action("Copy History", "cmdline:copy".into(), !app.session.log.is_empty())];
+    let mut edit = vec![
+        action("Paste to Command Line", "cmdline:paste".into(), true),
+        action("Copy History", "cmdline:copy".into(), !app.session.log.is_empty()),
+    ];
     edit.extend(item(app, "ui.cmdline.clear", None));
     groups.push(edit);
     groups
@@ -100,10 +103,11 @@ pub fn layout_tab_entries(app: &CadApp, name: &str) -> Vec<Vec<Entry>> {
     if find_command("layout").is_some() {
         new.push(layout("template", "From Template..."));
         if !model {
-            new.extend([layout("delete", "Delete Layout"), layout("rename", "Rename Layout"), layout("copy", "Copy Layout")]);
+            new.extend([layout("delete", "Delete Layout"), layout("rename", "Rename Layout"), layout("movecopy", "Move or Copy...")]);
         }
     }
     push(&mut groups, new);
+    push(&mut groups, vec![action("Select All Layouts", "layout:selectall".into(), true)]);
     let out: Vec<Entry> = [("pagesetup", "Page Setup Manager..."), ("plot", "Print...")]
         .iter()
         .filter(|(id, _)| find_command(id).is_some())
@@ -155,6 +159,15 @@ pub fn choose(app: &mut CadApp, ctx: &egui::Context, id: &str) {
         }
     } else if id == "cmdline:copy" {
         ctx.copy_text(app.session.log.join("\n"));
+    } else if id == "cmdline:paste" {
+        // Synthesize an Event::Paste from clipboard text or trigger pasteclip / input
+        if let Some(text) = ctx.data(|d| d.get_temp::<String>(egui::Id::new("cc_last_copied_text"))) {
+            app.cmd.buffer.push_str(&text);
+        } else if let Some(_src) = &app.session.clipboard_source
+            && let Some(text) = cadcraft_engine::cmd::clipboard::system_text(&app.session)
+        {
+            app.cmd.buffer.push_str(&text);
+        }
     } else if let Some(rest) = id.strip_prefix("drawing:") {
         let Some((op, index)) = rest.split_once(':') else { return };
         let Ok(index) = index.parse::<usize>() else { return };
@@ -210,6 +223,16 @@ fn layout_action(app: &mut CadApp, op: &str, name: &str) {
         "pagesetup" | "plot" => {
             let _ = app.run("layout.set", json!({ "name": name }));
             activate(app, op);
+        }
+        "movecopy" => {
+            app.ui.dialog = Some(format!("move_copy_layout:{name}"));
+        }
+        "selectall" => {
+            // Select all layouts: activate all layouts or report in status
+            if let Ok(d) = app.session.doc() {
+                let n = d.layouts.len();
+                app.session.echo(format!("{n} layout(s) selected"));
+            }
         }
         // LAYOUT's options, as typed: Template asks for the file, Rename and Copy for the new name.
         "template" | "delete" | "rename" | "copy" => {

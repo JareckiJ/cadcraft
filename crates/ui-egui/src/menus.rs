@@ -63,6 +63,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.qselect", "Quick Select...", &[], None),
     ("ui.dialog.parameters", "Parameters Manager", &["Window", "Parameters Manager"], None),
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
+    ("ui.dialog.tolerance", "Geometric Tolerance", &[], None),
     ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
     ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
     ("ui.toggle.history", "Command History", &["Window", "Command History"], Some("F2")),
@@ -430,6 +431,38 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         }
         "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() => {
             crate::hatchdlg::open_edit(app);
+            Ok(Value::Null)
+        }
+        "tolerance" | "tol" | "ui.dialog.tolerance" if params.is_null() => {
+            if app.session.selection().len() == 1 {
+                let h = app.session.selection().first().copied();
+                let is_tol = h.and_then(|h| app.session.doc().ok()?.entity(h).map(|e| (h, matches!(e.kind, cadcraft_doc::EntityKind::Tolerance(_)))));
+                if let Some((h, true)) = is_tol {
+                    crate::tolerancedlg::open_edit(app, h);
+                    return Some(Ok(Value::Null));
+                }
+            }
+            crate::tolerancedlg::open_create(app);
+            Ok(Value::Null)
+        }
+        "tolerance.edit" | "toledit" if params.is_null() => {
+            let tol_h = app
+                .session
+                .selection()
+                .iter()
+                .find(|&&h| {
+                    app.session.doc().ok().and_then(|d| d.entity(h)).is_some_and(|e| matches!(e.kind, cadcraft_doc::EntityKind::Tolerance(_)))
+                })
+                .copied();
+            if let Some(h) = tol_h {
+                crate::tolerancedlg::open_edit(app, h);
+            } else {
+                crate::tolerancedlg::open_create(app);
+            }
+            Ok(Value::Null)
+        }
+        "matchprop.settings" | "ui.dialog.matchprop" if params.is_null() => {
+            crate::matchpropdlg::open(app);
             Ok(Value::Null)
         }
         "properties" | "pr" | "props" | "ch" if params.is_null() => {

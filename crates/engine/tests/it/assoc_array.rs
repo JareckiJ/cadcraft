@@ -336,7 +336,7 @@ fn typed_arrayedit() {
     let a = rect_array(&mut s);
     typed(&mut s, &["arrayedit", "l"]);
     let p = s.prompt_text();
-    assert!(p.contains("Enter an option or [Source/REPlace/Base point/Rows/Columns/Levels/RESet/eXit] <eXit>"), "{p}");
+    assert!(p.contains("Enter an option or [Source/REPlace/Base point/Rows/Columns/Levels/ERase/RESet/eXit] <eXit>"), "{p}");
     typed(&mut s, &["c", "4", "t", "9", "r", "2", "5", ""]);
     assert!(s.prompt_text().contains("Enter an option"), "{}", s.prompt_text());
     assert_eq!(centres(&s, &a).len(), 8);
@@ -376,4 +376,124 @@ fn json_arrays_follow_arrayassociativity() {
     assert_eq!(model(&s).iter().filter(|e| matches!(e.kind, EntityKind::Circle(_))).count(), 3);
     let r = s.execute("arraypolar", &json!({"handles": [h], "center": [10, 0], "count": 4, "associative": true})).unwrap();
     assert_eq!(r["associative"], true);
+}
+
+#[test]
+fn rect_array_grip_stretching() {
+    let mut s = Session::new();
+    let h = circle(&mut s, 10.0, 20.0);
+    let r = s.execute("arrayrect", &json!({"handles": [h], "rows": 2, "cols": 3, "rowSpacing": 5, "colSpacing": 4, "associative": true})).unwrap();
+    let ah = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+    let grips = s.grips_of(ah).unwrap();
+    assert_eq!(grips.len(), 6);
+    assert!(grips[0].near(Vec2::new(10.0, 20.0), 1e-6)); // Base point
+    assert!(grips[1].near(Vec2::new(14.0, 20.0), 1e-6)); // Col spacing
+    assert!(grips[2].near(Vec2::new(10.0, 25.0), 1e-6)); // Row spacing
+    assert!(grips[3].near(Vec2::new(18.0, 20.0), 1e-6)); // Col count
+    assert!(grips[4].near(Vec2::new(10.0, 25.0), 1e-6)); // Row count
+    assert!(grips[5].near(Vec2::new(18.0, 25.0), 1e-6)); // Corner
+
+    // Stretch column spacing (grip 1) from 4 to 6
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 1, "to": [16, 20]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Rect(r) = p.kind {
+        assert!((r.col_spacing - 6.0).abs() < 1e-6);
+        assert_eq!(r.cols, 3);
+    } else {
+        panic!("expected Rect");
+    }
+
+    // Stretch column count (grip 3) to 4 cols (distance 3 * 6 = 18 -> to x=28)
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 3, "to": [28, 20]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Rect(r) = p.kind {
+        assert_eq!(r.cols, 4);
+    } else {
+        panic!("expected Rect");
+    }
+
+    // Stretch base grip (grip 0) to [50, 60] (moves entire array)
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 0, "to": [50, 60]})).unwrap();
+    let grips2 = s.grips_of(ah).unwrap();
+    assert!(grips2[0].near(Vec2::new(50.0, 60.0), 1e-6));
+}
+
+#[test]
+fn polar_array_grip_stretching() {
+    let mut s = Session::new();
+    let h = circle(&mut s, 0.0, 0.0);
+    let r = s.execute("arraypolar", &json!({"handles": [h], "center": [10, 0], "count": 4, "fill": 360, "associative": true})).unwrap();
+    let ah = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+    let grips = s.grips_of(ah).unwrap();
+    assert_eq!(grips.len(), 4);
+    assert!(grips[0].near(Vec2::new(10.0, 0.0), 1e-6)); // Center
+    assert!(grips[1].near(Vec2::new(0.0, 0.0), 1e-6)); // Base
+
+    // Stretch center grip (grip 0) to [20, 0]
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 0, "to": [20, 0]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Polar(k) = p.kind {
+        assert!(k.center.near(Vec2::new(20.0, 0.0), 1e-6));
+    } else {
+        panic!("expected Polar");
+    }
+
+    // Stretch fill angle grip (grip 3) to 180 degrees
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 3, "to": [40, 0]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Polar(k) = p.kind {
+        assert!((k.fill - 180.0).abs() < 1.0);
+    } else {
+        panic!("expected Polar");
+    }
+}
+
+#[test]
+fn associative_path_array_creation_and_grips() {
+    let mut s = Session::new();
+    let c = circle(&mut s, 0.0, 0.0);
+    let line = s.execute("line", &json!({"points": [[0, 0], [100, 0]]})).unwrap()["handles"][0].clone();
+    let r = s.execute("arraypath", &json!({"handles": [c], "path": line, "count": 5, "associative": true})).unwrap();
+    assert_eq!(r["associative"], true);
+    let ah = Handle::parse_hex(r["handle"].as_str().unwrap()).unwrap();
+    let grips = s.grips_of(ah).unwrap();
+    assert_eq!(grips.len(), 3);
+    assert!(grips[0].near(Vec2::new(0.0, 0.0), 1e-6)); // Base point
+    assert!(grips[1].near(Vec2::new(25.0, 0.0), 1e-6)); // Spacing
+    assert!(grips[2].near(Vec2::new(100.0, 0.0), 1e-6)); // Count
+
+    // Stretch spacing grip (grip 1) to 10
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 1, "to": [10, 0]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Path(pa) = p.kind {
+        assert!((pa.spacing - 10.0).abs() < 1e-6);
+    } else {
+        panic!("expected Path");
+    }
+
+    // Stretch count grip (grip 2) to 50 -> count becomes (50 / 10) + 1 = 6
+    s.execute("grip.stretch", &json!({"handle": ah.hex(), "index": 2, "to": [50, 0]})).unwrap();
+    let p = s.doc().unwrap().array_params(s.doc().unwrap().entity(ah).unwrap()).unwrap();
+    if let ArrayKind::Path(pa) = p.kind {
+        assert_eq!(pa.items, 6);
+    } else {
+        panic!("expected Path");
+    }
+}
+
+#[test]
+fn arrayedit_erase_and_reset() {
+    let mut s = Session::new();
+    let a = rect_array(&mut s);
+    assert_eq!(centres(&s, &a).len(), 3);
+
+    // Erase item 1 (at x = 2) via ARRAYEDIT
+    s.execute("arrayedit", &json!({"handle": a, "erase": [1, 0, 0]})).unwrap();
+    assert_eq!(centres(&s, &a).len(), 2);
+    assert!(!centres(&s, &a).contains(&(2000, 0)));
+
+    // RESet restores erased items
+    s.execute("arrayedit", &json!({"handle": a, "reset": true})).unwrap();
+    assert_eq!(centres(&s, &a).len(), 3);
+    assert!(centres(&s, &a).contains(&(2000, 0)));
 }

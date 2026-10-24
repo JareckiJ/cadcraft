@@ -97,6 +97,8 @@ pub struct Drawing {
     pub mline_styles: Vec<MLineStyle>,
     pub blocks: BTreeMap<String, std::sync::Arc<Block>>,
     pub model: EntityStore,
+    /// Page setup of model space.
+    pub model_page: PageSetup,
     pub layouts: Vec<Layout>,
     /// The layout a file marks active (its block is `*Paper_Space`, the others `*Paper_SpaceN`),
     /// written active again. `None`, or a layout that no longer exists: the first by tab order.
@@ -110,6 +112,8 @@ pub struct Drawing {
     /// Plot style tables kept with the drawing (STYLESMANAGER); they shadow built-in tables of
     /// the same name.
     pub plot_style_tables: Vec<PlotStyleTable>,
+    /// Material definitions (MATERIAL).
+    pub materials: Vec<Material>,
     /// Parametric constraints (GEOMCONSTRAINT / DIMCONSTRAINT).
     pub constraints: Vec<Constraint>,
     /// User parameters and parametric settings.
@@ -154,6 +158,26 @@ impl Drawing {
         d.mleader_styles = vec![MLeaderStyle::metric()];
         d.table_styles = vec![TableStyle::metric()];
         d.header.set_str("DIMSTYLE", "ISO-25");
+        d.model_page = PageSetup {
+            paper: "A4".into(),
+            width_mm: 210.0,
+            height_mm: 297.0,
+            margins_mm: [5.0, 5.0, 5.0, 5.0],
+            landscape: true,
+            plot_area: "extents".into(),
+            scale_to_fit: true,
+            ..PageSetup::default()
+        };
+        for l in &mut d.layouts {
+            l.page = PageSetup {
+                paper: "A4".into(),
+                width_mm: 210.0,
+                height_mm: 297.0,
+                margins_mm: [5.0, 5.0, 5.0, 5.0],
+                landscape: true,
+                ..PageSetup::default()
+            };
+        }
         d
     }
     fn bare() -> Self {
@@ -173,6 +197,7 @@ impl Drawing {
             mline_styles: vec![MLineStyle::default()],
             blocks: BTreeMap::new(),
             model: EntityStore::new(),
+            model_page: PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() },
             layouts: vec![Layout::new("Layout1", 1), Layout::new("Layout2", 2)],
             active_layout: None,
             views: Vec::new(),
@@ -181,6 +206,7 @@ impl Drawing {
             layer_states: Vec::new(),
             groups: Vec::new(),
             plot_style_tables: Vec::new(),
+            materials: vec![Material::global()],
             constraints: Vec::new(),
             parametric: Parametric::default(),
             scales: imperial_scales(),
@@ -394,6 +420,13 @@ impl Drawing {
                 return n;
             }
             i += 1;
+        }
+    }
+
+    /// Update foreign record keys and targets when a named item is renamed.
+    pub fn rename_foreign_record(&mut self, kind: &str, from: &str, to: &str) {
+        if !self.foreign.records.is_empty() || !self.foreign.targets.is_empty() {
+            std::sync::Arc::make_mut(&mut self.foreign).rename_record(kind, from, to);
         }
     }
 }

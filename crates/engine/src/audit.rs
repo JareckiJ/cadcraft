@@ -86,7 +86,7 @@ impl Report {
     /// Format this report for an AUDITCTL `.adt` log file.
     pub fn format_adt(&self, title: &str, path: Option<&str>) -> String {
         let name = path.unwrap_or(title);
-        format!("Audit of drawing: {name}\n\n{}\n", self.message())
+        format!("CADCraft AUDIT Report for {name}\nAudit of drawing: {name}\n\n{}\n", self.message())
     }
 }
 
@@ -100,6 +100,81 @@ pub fn check(d: &Drawing) -> Report {
 pub fn fix(d: &mut Drawing) -> Report {
     Report { issues: repair(d), fixed: true }
 }
+
+static AUDITCTL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// AUDITCTL system variable: 0 = do not create an audit log, 1 = create `<drawing>.adt` file.
+pub fn auditctl() -> i32 {
+    AUDITCTL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Set AUDITCTL (0 or 1).
+pub fn set_auditctl(val: i32) {
+    AUDITCTL.store(if val != 0 { 1 } else { 0 }, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Total entities currently in `d` (across model space, paper layouts, and blocks).
+pub fn count_entities(d: &Drawing) -> usize {
+    each_entity(d).count()
+}
+
+/// Format the content of an `.adt` log file matching AutoCAD standard audit reports.
+pub fn format_adt(report: &Report, drawing_name: &str, total_objects: usize) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("CADCraft AUDIT Report for {drawing_name}"));
+    lines.push(String::new());
+    lines.push(format!("Pass 1 {total_objects} objects audited"));
+    lines.push(format!("Pass 2 {total_objects} objects audited"));
+    let n = report.errors();
+    let fixed = if report.fixed { n } else { 0 };
+    lines.push(format!("Total errors found {n}, fixed {fixed}"));
+    if !report.issues.is_empty() {
+        lines.push(String::new());
+        lines.push("Errors detected:".into());
+        for i in &report.issues {
+            let what = match &i.handle {
+                Some(h) => format!("{}: object {h}: {}", i.location, i.message),
+                None => format!("{}: {}", i.location, i.message),
+            };
+            if report.fixed {
+                lines.push(format!("  {what} ({})", i.fix));
+            } else {
+                lines.push(format!("  {what}"));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn write_adt_file(doc_path: Option<&str>, title: &str, content: &str) {
+    let path = match doc_path {
+        Some(p) if !p.trim().is_empty() => {
+            let p_path = std::path::Path::new(p);
+            if p_path.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
+                Some(p_path.with_extension("adt"))
+            } else {
+                let dir = crate::autosave::savefilepath();
+                let stem = p_path.file_stem().and_then(|s| s.to_str()).unwrap_or(title);
+                if !dir.trim().is_empty() { Some(std::path::Path::new(&dir).join(format!("{stem}.adt"))) } else { None }
+            }
+        }
+        _ => {
+            let dir = crate::autosave::savefilepath();
+            let stem = std::path::Path::new(title).file_stem().and_then(|s| s.to_str()).unwrap_or("Drawing");
+            if !dir.trim().is_empty() { Some(std::path::Path::new(&dir).join(format!("{stem}.adt"))) } else { None }
+        }
+    };
+    let Some(path) = path else { return };
+    if let Err(e) = std::fs::write(&path, content) {
+        log::warn!("failed to write audit log {}: {e}", path.display());
+    } else {
+        log::info!("wrote audit log {}", path.display());
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn write_adt_file(_doc_path: Option<&str>, _title: &str, _content: &str) {}
 
 /// Where a set of objects lives.
 #[derive(Clone, Debug)]

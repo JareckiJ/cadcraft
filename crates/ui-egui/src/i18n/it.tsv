@@ -240,6 +240,7 @@ menu	Modify	Edita
 	Dimensional Constraint Parameters	Parametri dei vincoli dimensionali
 	Dimensional Constraints	Vincoli dimensionali
 	Disassociate Dimensions	Disassocia quote
+	Discard	Ignora
 	Display name	Nome visualizzato
 	Distance	Distanza
 	Divide	Dividi
@@ -1256,7 +1257,6 @@ menu	Modify	Edita
 	Add…	Aggiungi…
 	Edit…	Modifica…
 	Save alias	Salva alias
-	Discard	Scarta
 	Customize	Personalizza
 	Edit Command Aliases (PGP)...	Modifica alias dei comandi (PGP)...
 # Added for 0.7/0.8: multileaders, LISP, recent files, in-place reference editing, selection options, hatch and gradient, dynamic blocks, Block Editor, text formatting.

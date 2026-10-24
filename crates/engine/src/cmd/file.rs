@@ -105,6 +105,26 @@ pub fn write_as() -> Option<WriteAsHook> {
     WRITE_AS.get().copied()
 }
 
+/// Tolerant drawing reader for RECOVER (installed by hosts whose readers support a recovery mode).
+pub type RecoverHook = fn(&[u8], &str) -> std::result::Result<Drawing, String>;
+
+static RECOVER_HOOK: std::sync::RwLock<Option<RecoverHook>> = std::sync::RwLock::new(None);
+
+/// Install the host's reader for RECOVER; recovery calls that have none use [`IoHooks::read`].
+pub fn set_recover(h: RecoverHook) {
+    if let Ok(mut lock) = RECOVER_HOOK.write() {
+        *lock = Some(h);
+    }
+}
+pub fn recover_hook() -> Option<RecoverHook> {
+    RECOVER_HOOK.read().ok().and_then(|lock| *lock)
+}
+pub fn clear_recover() {
+    if let Ok(mut lock) = RECOVER_HOOK.write() {
+        *lock = None;
+    }
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")
@@ -147,7 +167,15 @@ fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<
         return Err(bad(cmd, "binary applies to DXF files only"));
     }
     // A drawing file is the drawing outside the Block Editor; an image is what is shown.
-    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    let base_doc: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    let mut cloned_doc: cadcraft_doc::Drawing;
+    let d: &cadcraft_doc::Drawing = if is_drawing_file(path) && s.settings.objectisolationmode == 0 && !base_doc.hidden_objects.is_empty() {
+        cloned_doc = base_doc.clone();
+        cloned_doc.hidden_objects.clear();
+        &cloned_doc
+    } else {
+        base_doc
+    };
     let r = if *opts == SaveAs::default() {
         (hooks.write)(d, path)
     } else {
@@ -179,7 +207,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["File", "Save As..."])
             .key("Cmd+Shift+S")
             .params("{path, version?: 2000|2004|2007|2010|2013|2018, binary?: bool}")
-            .noundo(),
+            .noundo()
+            .interactive(|_| Ok(Box::new(SaveAsM::default()))),
         CommandSpec::new("document.switch", "Switch Drawing", run_switch).params("{index}").enabled(always).noundo(),
         CommandSpec::new("document.bytes", "Drawing as bytes", run_bytes)
             .params("{format?: dxf, version?: 2000…2018, binary?: bool} → {data: base64}")
@@ -244,6 +273,180 @@ impl Interactive for ScriptM {
                 Ok(Step::Done)
             }
             Err(e) => Err(e),
+        }
+    }
+}
+
+/// SAVEAS typed at the command line: interactive prompt machine prompting for file format or
+/// save path. Follows AutoCAD command line format options: [2000, 2004, 2007, 2010, 2013, 2018,
+/// DXF, DWG, Formats] and binary DXF toggles.
+#[derive(Clone, Debug, Default, PartialEq)]
+enum SaveAsStep {
+    #[default]
+    FormatOrPath,
+    DxfBinary,
+    Path,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SaveAsM {
+    step: SaveAsStep,
+    version: Option<Version>,
+    binary: bool,
+}
+
+impl SaveAsM {
+    fn apply_save(&self, s: &mut Session, path: &str) -> Result<Step> {
+        let mut p = json!({ "path": path, "binary": self.binary });
+        if let Some(v) = self.version {
+            p["version"] = json!(v.year());
+        }
+        match run_saveas_reporting(s, &p) {
+            Ok(_) => Ok(Step::Done),
+            Err(EngineError::BadParams { msg, .. }) => {
+                s.echo(msg);
+                Ok(Step::Done)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl Interactive for SaveAsM {
+    fn name(&self) -> &'static str {
+        "SAVEAS"
+    }
+
+    fn prompt(&self, s: &Session) -> Prompt {
+        match self.step {
+            SaveAsStep::FormatOrPath => {
+                let cur_ver = drawing_version(s, "").year();
+                Prompt::new("Enter file format or save path", Accept::TEXT)
+                    .kw(&["2000", "2004", "2007", "2010", "2013", "2018", "DXF", "DWG", "Formats"])
+                    .default(cur_ver)
+            }
+            SaveAsStep::DxfBinary => Prompt::new("Save as binary DXF? [Yes/No]", Accept::TEXT).kw(&["Yes", "No"]).default("No"),
+            SaveAsStep::Path => {
+                let default_path = s
+                    .state()
+                    .ok()
+                    .and_then(|st| st.path.clone())
+                    .unwrap_or_else(|| s.state().map(|st| st.title.clone()).unwrap_or_else(|_| "Drawing1.dxf".into()));
+                Prompt::new("Save drawing as", Accept::TEXT).default(default_path)
+            }
+        }
+    }
+
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if matches!(i, Input::Cancel) {
+            return Ok(Step::Cancel);
+        }
+        match self.step {
+            SaveAsStep::FormatOrPath => {
+                match i {
+                    Input::Enter => {
+                        // Accept default version, proceed to path
+                        self.version = Some(drawing_version(s, ""));
+                        self.step = SaveAsStep::Path;
+                        Ok(Step::Continue)
+                    }
+                    Input::Keyword(k) => {
+                        let kl = k.to_ascii_lowercase();
+                        if let Some(v) = Version::parse(&k) {
+                            self.version = Some(v);
+                            self.step = SaveAsStep::Path;
+                            Ok(Step::Continue)
+                        } else if kl == "dxf" {
+                            self.step = SaveAsStep::DxfBinary;
+                            Ok(Step::Continue)
+                        } else if kl == "dwg" {
+                            self.step = SaveAsStep::Path;
+                            Ok(Step::Continue)
+                        } else if kl == "formats" {
+                            s.echo(format!("Available versions: {}", version_list()));
+                            s.echo("Available formats: DXF (ASCII/Binary), DWG");
+                            Ok(Step::Continue)
+                        } else {
+                            s.echo(format!("Unknown option `{k}`"));
+                            Ok(Step::Continue)
+                        }
+                    }
+                    Input::Text(t) => {
+                        let text = t.trim();
+                        if text.is_empty() {
+                            self.version = Some(drawing_version(s, ""));
+                            self.step = SaveAsStep::Path;
+                            return Ok(Step::Continue);
+                        }
+                        if let Some(v) = Version::parse(text) {
+                            self.version = Some(v);
+                            self.step = SaveAsStep::Path;
+                            Ok(Step::Continue)
+                        } else if text.eq_ignore_ascii_case("dxf") {
+                            self.step = SaveAsStep::DxfBinary;
+                            Ok(Step::Continue)
+                        } else if text.eq_ignore_ascii_case("dwg") {
+                            self.step = SaveAsStep::Path;
+                            Ok(Step::Continue)
+                        } else if text.eq_ignore_ascii_case("formats") || text == "?" {
+                            s.echo(format!("Available versions: {}", version_list()));
+                            s.echo("Available formats: DXF (ASCII/Binary), DWG");
+                            Ok(Step::Continue)
+                        } else {
+                            // Direct path entered
+                            self.apply_save(s, text)
+                        }
+                    }
+                    _ => Ok(Step::Continue),
+                }
+            }
+            SaveAsStep::DxfBinary => match i {
+                Input::Enter => {
+                    self.binary = false;
+                    self.step = SaveAsStep::Path;
+                    Ok(Step::Continue)
+                }
+                Input::Keyword(k) => {
+                    self.binary = k.eq_ignore_ascii_case("yes") || k.eq_ignore_ascii_case("y");
+                    self.step = SaveAsStep::Path;
+                    Ok(Step::Continue)
+                }
+                Input::Text(t) => {
+                    let text = t.trim();
+                    if text.is_empty() {
+                        self.binary = false;
+                    } else {
+                        self.binary = text.eq_ignore_ascii_case("yes") || text.eq_ignore_ascii_case("y");
+                    }
+                    self.step = SaveAsStep::Path;
+                    Ok(Step::Continue)
+                }
+                _ => Ok(Step::Continue),
+            },
+            SaveAsStep::Path => match i {
+                Input::Enter => {
+                    let default_path = s
+                        .state()
+                        .ok()
+                        .and_then(|st| st.path.clone())
+                        .unwrap_or_else(|| s.state().map(|st| st.title.clone()).unwrap_or_else(|_| "Drawing1.dxf".into()));
+                    self.apply_save(s, &default_path)
+                }
+                Input::Text(t) | Input::Keyword(t) => {
+                    let text = t.trim();
+                    if text.is_empty() {
+                        let default_path = s
+                            .state()
+                            .ok()
+                            .and_then(|st| st.path.clone())
+                            .unwrap_or_else(|| s.state().map(|st| st.title.clone()).unwrap_or_else(|_| "Drawing1.dxf".into()));
+                        self.apply_save(s, &default_path)
+                    } else {
+                        self.apply_save(s, text)
+                    }
+                }
+                _ => Ok(Step::Continue),
+            },
         }
     }
 }

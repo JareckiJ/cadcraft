@@ -802,7 +802,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
     // The contents are in paper units now: draw their pens before clipping.
     pen::apply(&mut sub.list, unit_mm);
     b.list.expanded = b.list.expanded.saturating_add(sub.list.expanded);
-    append_clipped(&mut b.list, &sub.list, clip);
+    append_clipped(&mut b.list, &sub.list, clip, false);
 }
 
 /// The clip region of a clipped viewport: the outline of its clip boundary entity, when that
@@ -820,53 +820,97 @@ enum Clip<'a> {
     Rect(Bounds2),
     /// A clip boundary's outline.
     Poly(&'a clip::PolyClip),
+    /// An inverted clip boundary (keeps outside, cuts inside).
+    InvertedPoly(&'a clip::PolyClip),
 }
 
 /// Append `src` to `dst`, clipped to `clip`.
-fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip) {
-    for p in &src.prims {
+fn append_clipped(dst: &mut DisplayList, src: &DisplayList, clip: &Clip, copy_layers: bool) {
+    let has_layers = copy_layers && !src.prim_layers.is_empty();
+    let has_pens = !src.pens.is_empty();
+    if has_pens && !dst.prims.is_empty() {
+        dst.pens.resize(dst.prims.len(), Pen::default());
+    }
+    for (src_idx, p) in src.prims.iter().enumerate() {
         let pts = src.points(p);
+        let layer = if has_layers { src.prim_layers.get(src_idx).copied().unwrap_or(NO_LAYER) } else { NO_LAYER };
+        let pen = if has_pens { src.pens.get(src_idx).copied().unwrap_or_default() } else { Pen::default() };
+        let push = |dst: &mut DisplayList, kind: Kind, piece: &[Vec2]| {
+            let before = dst.prims.len();
+            push_raw(dst, p, kind, piece);
+            if dst.prims.len() > before {
+                if has_layers {
+                    dst.prim_layers.push(layer);
+                }
+                if has_pens {
+                    dst.pens.push(pen);
+                }
+            }
+        };
         match (p.kind, clip) {
             (Kind::Polyline, Clip::Rect(rect)) => {
                 for piece in clip::clip_polyline(pts, rect) {
-                    push_raw(dst, p, Kind::Polyline, &piece);
+                    push(dst, Kind::Polyline, &piece);
                 }
             }
             (Kind::Polyline, Clip::Poly(c)) => {
                 for piece in c.clip_polyline(pts) {
-                    push_raw(dst, p, Kind::Polyline, &piece);
+                    push(dst, Kind::Polyline, &piece);
+                }
+            }
+            (Kind::Polyline, Clip::InvertedPoly(c)) => {
+                for piece in c.clip_polyline_inverted(pts) {
+                    push(dst, Kind::Polyline, &piece);
                 }
             }
             (Kind::Tris | Kind::Mask, Clip::Rect(rect)) => {
                 let t = clip::clip_triangles(pts, rect);
-                push_raw(dst, p, p.kind, &t);
+                push(dst, p.kind, &t);
             }
             (Kind::Tris | Kind::Mask, Clip::Poly(c)) => {
                 let t = c.clip_triangles(pts);
-                push_raw(dst, p, p.kind, &t);
+                push(dst, p.kind, &t);
+            }
+            (Kind::Tris | Kind::Mask, Clip::InvertedPoly(c)) => {
+                let mut out_tris = Vec::new();
+                for t in pts.as_chunks::<3>().0 {
+                    let tb = Bounds2::from_points(t.iter().copied());
+                    if !tb.intersects(&c.bounds()) || !t.iter().all(|pt| c.contains(*pt)) {
+                        out_tris.extend_from_slice(t);
+                    }
+                }
+                push(dst, p.kind, &out_tris);
             }
             (Kind::Point, _) => {
                 let inside = |q: Vec2| match clip {
                     Clip::Rect(rect) => rect.contains(q),
                     Clip::Poly(c) => c.contains(q),
+                    Clip::InvertedPoly(c) => !c.contains(q),
                 };
                 if let Some(q) = pts.first()
                     && inside(*q)
                 {
-                    push_raw(dst, p, Kind::Point, &[*q]);
+                    push(dst, Kind::Point, &[*q]);
                 }
             }
             (Kind::Infinite { ray }, Clip::Rect(rect)) => {
                 if let (Some(base), Some(dir)) = (pts.first(), pts.get(1))
                     && let Some((a, c)) = clip::clip_infinite(*base, *dir, ray, rect)
                 {
-                    push_raw(dst, p, Kind::Polyline, &[a, c]);
+                    push(dst, Kind::Polyline, &[a, c]);
                 }
             }
             (Kind::Infinite { ray }, Clip::Poly(c)) => {
                 if let (Some(base), Some(dir)) = (pts.first(), pts.get(1)) {
                     for piece in c.clip_infinite(*base, *dir, ray) {
-                        push_raw(dst, p, Kind::Polyline, &piece);
+                        push(dst, Kind::Polyline, &piece);
+                    }
+                }
+            }
+            (Kind::Infinite { ray }, Clip::InvertedPoly(c)) => {
+                if let (Some(base), Some(dir)) = (pts.first(), pts.get(1)) {
+                    for piece in c.clip_infinite_inverted(*base, *dir, ray) {
+                        push(dst, Kind::Polyline, &piece);
                     }
                 }
             }
@@ -1071,6 +1115,14 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
     if b.opts.transparency {
         b.transparency = transparency(e.common.transparency, layer_transparency, ctx.block_transparency);
+    }
+    if !b.plotting
+        && let Some(r) = &ctx.d.refedit
+    {
+        let is_working = if ctx.depth == 0 { r.is_working(e.handle) } else { r.is_working(ctx.top) };
+        if !is_working {
+            b.transparency = b.transparency.max(70);
+        }
     }
     // A plot style's linetype replaces the object's.
     let lt = match b.styles.and_then(|s| s.linetype(rgb, b.named)) {
@@ -1555,6 +1607,62 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
                 let m = Mat3::translate(off).then_before(ins.transform(blk.base.xy()));
                 let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, m) };
+                if let Some(cb) = &ins.clip
+                    && cb.enabled
+                    && cb.points.len() >= 2
+                {
+                    let raw_pts = if cb.points.len() == 2 {
+                        let (Some(p0), Some(p1)) = (cb.points.first(), cb.points.get(1)) else { continue };
+                        let (min_x, max_x) = (p0.x.min(p1.x), p0.x.max(p1.x));
+                        let (min_y, max_y) = (p0.y.min(p1.y), p0.y.max(p1.y));
+                        vec![Vec2::new(min_x, min_y), Vec2::new(max_x, min_y), Vec2::new(max_x, max_y), Vec2::new(min_x, max_y)]
+                    } else {
+                        cb.points.clone()
+                    };
+                    let world_pts: Vec<Vec2> = raw_pts.iter().map(|p| m.apply(*p)).collect();
+                    let display_pts: Vec<Vec2> = raw_pts.iter().map(|p| sub.xf.apply(*p)).collect();
+                    if let Some(poly_clip) = clip::PolyClip::new(&display_pts) {
+                        let mut sub_b = Builder {
+                            list: DisplayList::default(),
+                            opts: b.opts,
+                            plotting: b.plotting,
+                            styles: b.styles,
+                            named: b.named,
+                            shared_budget: b.shared_budget,
+                            transparency: b.transparency,
+                        };
+                        for be in blk.entities.iter() {
+                            if matches!(be.kind, EntityKind::AttDef(_)) {
+                                continue;
+                            }
+                            if !sub_b.expand() || b.list.expanded.saturating_add(sub_b.list.expanded) > MAX_BLOCK_EXPANSION {
+                                break 'copies;
+                            }
+                            entity(&mut sub_b, &sub, be);
+                        }
+                        b.list.expanded = b.list.expanded.saturating_add(sub_b.list.expanded);
+                        if b.list.expanded > MAX_BLOCK_EXPANSION {
+                            break 'copies;
+                        }
+                        if let Some(sheet) = b.list.sheet {
+                            pen::apply(&mut sub_b.list, sheet.unit_mm);
+                        }
+                        let cl = if cb.inverted { Clip::InvertedPoly(&poly_clip) } else { Clip::Poly(&poly_clip) };
+                        let copy_layers = ctx.top != VIEWPORT_CONTENT && b.plotting;
+                        append_clipped(&mut b.list, &sub_b.list, &cl, copy_layers);
+
+                        let xclipframe = ctx.d.header.i64("XCLIPFRAME", 2);
+                        let show_frame = if b.plotting { xclipframe == 1 } else { xclipframe != 0 };
+                        if show_frame {
+                            let mut frame = world_pts.clone();
+                            if let Some(first) = world_pts.first() {
+                                frame.push(*first);
+                            }
+                            b.polyline(ctx, rgb, 0.0, &frame);
+                        }
+                        continue;
+                    }
+                }
                 for be in blk.entities.iter() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
                     if matches!(be.kind, EntityKind::AttDef(_)) {

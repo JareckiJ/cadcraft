@@ -116,3 +116,28 @@ fn a_command_keyword_wins_over_a_snap_word() {
     s.cmdline("arc _cen").unwrap();
     assert!(s.prompt_text().ends_with("Center of:"), "{}", s.prompt_text());
 }
+
+#[test]
+fn tab_cycling_offers_every_candidate_under_the_aperture() {
+    let mut s = Session::new();
+    // Three lines with endpoints close to (10, 10):
+    // Line 1: endpoint at (10, 10)
+    // Line 2: endpoint at (10, 10.05)
+    // Line 3: endpoint at (10.05, 10)
+    s.script("LINE 0,10 10,10\n\nLINE 0,10.05 10,10.05\n\nLINE 0,0 10.05,10\n\n").unwrap();
+    let d = s.doc().unwrap();
+    let space = s.space();
+    let osmode = mode::END;
+    let cursor = Vec2::new(10.02, 10.02);
+    let aperture = 0.15; // covers all three endpoints
+    let cands = snap_candidates(d, &space, cursor, aperture, osmode, None, false);
+    // All 3 distinct endpoints should be present in candidates:
+    assert_eq!(cands.len(), 3, "every candidate endpoint within aperture is offered: {cands:?}");
+    let points: Vec<Vec2> = cands.iter().map(|h| h.point).collect();
+    assert!(points.iter().any(|p| p.near(Vec2::new(10.0, 10.0), 1e-4)));
+    assert!(points.iter().any(|p| p.near(Vec2::new(10.0, 10.05), 1e-4)));
+    assert!(points.iter().any(|p| p.near(Vec2::new(10.05, 10.0), 1e-4)));
+    // Closest to cursor should come first:
+    let closest = cands.iter().min_by(|a, b| a.point.dist(cursor).total_cmp(&b.point.dist(cursor))).unwrap().point;
+    assert_eq!(cands.first().unwrap().point, closest);
+}

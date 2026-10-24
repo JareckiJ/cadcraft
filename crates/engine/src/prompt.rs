@@ -26,6 +26,19 @@ impl Accept {
     pub const SELECT: Accept = Accept { point: true, number: false, text: false, select: true, enter: true };
 }
 
+impl std::ops::BitOr for Accept {
+    type Output = Accept;
+    fn bitor(self, rhs: Accept) -> Accept {
+        Accept {
+            point: self.point || rhs.point,
+            number: self.number || rhs.number,
+            text: self.text || rhs.text,
+            select: self.select || rhs.select,
+            enter: self.enter || rhs.enter,
+        }
+    }
+}
+
 /// A prompt shown on the command line.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -269,10 +282,18 @@ pub fn parse_point(text: &str, last: Vec2) -> Option<Vec2> {
 /// `parse_point` with polar angles read per `angles` (AUNITS, ANGBASE, ANGDIR); `d<<a` and
 /// `d<<<a` measure from +X counterclockwise (in degrees and in AUNITS).
 pub fn parse_point_with(text: &str, last: Vec2, angles: &crate::units::AngleSettings) -> Option<Vec2> {
+    parse_point_ucs(text, last, angles, None)
+}
+
+/// `parse_point_with` with optional User Coordinate System (UCS).
+/// Coordinates prefixed with `*` (`*x,y`, `*@dx,dy`, `@*dx,dy`) are in World Coordinate System (WCS).
+/// Other coordinates are interpreted in the given UCS.
+pub fn parse_point_ucs(text: &str, last: Vec2, angles: &crate::units::AngleSettings, ucs: Option<&cadcraft_doc::Ucs>) -> Option<Vec2> {
     let t = text.trim();
     if t.is_empty() {
         return None;
     }
+    let is_world = t.starts_with('*') || t.starts_with("@*") || t.starts_with("*@");
     let t = t.strip_prefix('*').map_or(t, str::trim_start);
     let (rel, body) = if let Some(b) = t.strip_prefix('@') {
         let b = b.trim();
@@ -302,7 +323,22 @@ pub fn parse_point_with(text: &str, last: Vec2, angles: &crate::units::AngleSett
         }
         Vec2::new(x, y)
     };
-    let r = if rel { last + p } else { p };
+
+    let u = match ucs {
+        Some(u) if !is_world && !u.is_world() => u,
+        _ => {
+            let r = if rel { last + p } else { p };
+            return r.is_finite().then_some(r);
+        }
+    };
+
+    let r = if rel {
+        let d = u.x_axis.xy() * p.x + u.y_axis.xy() * p.y;
+        last + d
+    } else {
+        let w = u.origin + u.x_axis * p.x + u.y_axis * p.y;
+        w.xy()
+    };
     r.is_finite().then_some(r)
 }
 

@@ -243,6 +243,25 @@ pub struct Recoverable {
     pub bytes: u64,
 }
 
+/// Storage hooks for platforms without a native file system (e.g. web/wasm).
+pub struct StorageHooks {
+    pub write: fn(path: &str, bytes: &[u8]) -> std::result::Result<(), String>,
+    pub read: fn(path: &str) -> std::result::Result<Vec<u8>, String>,
+    pub delete: fn(path: &str) -> std::result::Result<(), String>,
+    pub list: fn() -> Vec<Recoverable>,
+}
+
+static STORAGE: std::sync::OnceLock<StorageHooks> = std::sync::OnceLock::new();
+
+/// Install storage hooks for autosave and Drawing Recovery.
+pub fn set_storage(h: StorageHooks) {
+    let _ = STORAGE.set(h);
+}
+
+pub fn storage() -> Option<&'static StorageHooks> {
+    STORAGE.get()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::*;
 
@@ -347,7 +366,7 @@ mod native {
     }
 
     fn write_file(write: WriteHook, doc: &Drawing, path: &str) -> std::result::Result<(), String> {
-        let bytes = write(doc, "autosave.dxf")?;
+        let bytes = write(doc, "autosave.dwg").or_else(|_| write(doc, "autosave.dxf"))?;
         if let Some(dir) = Path::new(path).parent() {
             create_folder(dir).map_err(|e| e.to_string())?;
         }
@@ -360,7 +379,11 @@ mod native {
         /// Autosave what is due (writing in the background) and delete files no longer needed.
         /// Returns how long until the next autosave is due, so the host can wake up for it.
         pub fn tick(&mut self, s: &Session) -> Option<Duration> {
-            let now = self.start.elapsed().as_secs_f64();
+            self.tick_at(s, self.start.elapsed().as_secs_f64())
+        }
+
+        /// [`Autosaver::tick`] with an explicit current time.
+        pub fn tick_at(&mut self, s: &Session, now: f64) -> Option<Duration> {
             self.reap();
             let dir = savefilepath();
             let minutes = savetime();
@@ -467,6 +490,87 @@ mod native {
             if !dir.is_empty() && is_instance_id(&self.instance) {
                 let _ = std::fs::remove_file(lock_path(Path::new(&dir), &self.instance));
             }
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub use web::*;
+
+#[cfg(target_arch = "wasm32")]
+mod web {
+    use std::path::Path;
+    use std::time::Duration;
+
+    use super::*;
+
+    /// A web instance id matching [`is_instance_id`].
+    pub fn instance_id() -> String {
+        "0-1".to_string()
+    }
+
+    pub fn recoverable(_dir: &Path, _own: &str) -> Vec<Recoverable> {
+        storage().map(|s| (s.list)()).unwrap_or_default()
+    }
+
+    pub fn discard(path: &str) {
+        if let Some(s) = storage() {
+            let _ = (s.delete)(path);
+        }
+    }
+
+    pub fn prune_locks(_dir: &Path) {}
+
+    impl Autosaver {
+        pub fn tick(&mut self, s: &Session) -> Option<Duration> {
+            self.tick_at(s, 0.0)
+        }
+
+        pub fn tick_at(&mut self, s: &Session, now: f64) -> Option<Duration> {
+            let minutes = savetime();
+            let jobs = self.plan(s, now, minutes, "web");
+            self.perform_web(jobs);
+            self.next_due(now, minutes).map(Duration::from_secs_f64)
+        }
+
+        pub fn save_now(&mut self, s: &Session) -> usize {
+            let jobs = self.plan_with(s, 0.0, savetime(), "web", true);
+            let writes = jobs.iter().filter(|j| matches!(j, Job::Write { .. })).count();
+            self.perform_web(jobs);
+            writes
+        }
+
+        fn perform_web(&mut self, jobs: Vec<Job>) {
+            let Some(hooks) = crate::cmd::file::io() else { return };
+            let Some(st) = storage() else { return };
+            for job in jobs {
+                match job {
+                    Job::Delete { path } => {
+                        let _ = (st.delete)(&path);
+                    }
+                    Job::Write { uid, path, doc } => {
+                        let write_fn = hooks.write;
+                        let bytes = write_fn(&doc, "autosave.dwg").or_else(|_| write_fn(&doc, "autosave.dxf"));
+                        match bytes {
+                            Ok(b) => {
+                                if (st.write)(&path, &b).is_ok() {
+                                    self.busy.remove(&uid);
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("web autosave failed: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        pub fn shutdown(&mut self) {
+            for path in self.files() {
+                discard(&path);
+            }
+            self.docs.clear();
         }
     }
 }

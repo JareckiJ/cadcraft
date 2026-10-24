@@ -23,8 +23,10 @@ pub mod credits;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
+pub mod matchpropdlg;
 mod mtext_editor;
 pub mod spacemouse;
+pub mod tolerancedlg;
 // The External References palette.
 pub mod xrefs;
 
@@ -256,8 +258,14 @@ pub struct CadApp {
     pub alias_dlg: Option<aliasdlg::AliasDlgState>,
     /// The Hatch and Gradient dialog while open or picking ([`hatchdlg`]).
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
+    /// The Geometric Tolerance dialog while open ([`tolerancedlg`]).
+    pub tolerance_dlg: Option<tolerancedlg::ToleranceDlgState>,
+    /// The Property Settings dialog for MATCHPROP while open ([`matchpropdlg`]).
+    pub matchprop_dlg: Option<matchpropdlg::MatchPropDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// QuickCalc palette history and variables kept across restarts.
+    pub quickcalc: palettes::quickcalc::QuickCalcState,
 }
 
 impl CadApp {
@@ -297,7 +305,10 @@ impl CadApp {
             gpu_notice: None,
             alias_dlg: None,
             hatch_dlg: None,
+            tolerance_dlg: None,
+            matchprop_dlg: None,
             bedit: bedit::State::default(),
+            quickcalc: palettes::quickcalc::QuickCalcState::default(),
         }
     }
 
@@ -393,6 +404,9 @@ impl CadApp {
         if !self.ui.recent_files.is_empty() {
             prefs["recentFiles"] = json!(self.ui.recent_files);
         }
+        if !self.quickcalc.history.is_empty() || !self.quickcalc.vars.is_empty() {
+            prefs["quickcalc"] = json!(self.quickcalc);
+        }
         if let Some(dir) = &self.ui.last_lisp_dir {
             prefs["lispDir"] = json!(dir);
         }
@@ -422,6 +436,17 @@ impl CadApp {
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(qc) = v.get("quickcalc")
+            && let Ok(mut state) = serde_json::from_value::<palettes::quickcalc::QuickCalcState>(qc.clone())
+        {
+            if state.history.len() > palettes::quickcalc::MAX_HISTORY {
+                state.history.drain(0..state.history.len() - palettes::quickcalc::MAX_HISTORY);
+            }
+            if state.vars.len() > palettes::quickcalc::MAX_VARS {
+                state.vars.truncate(palettes::quickcalc::MAX_VARS);
+            }
+            self.quickcalc = state;
         }
         if let Some(dir) = v.get("lispDir").and_then(Value::as_str).filter(|d| !d.is_empty()) {
             self.ui.last_lisp_dir = Some(dir.to_string());
@@ -879,5 +904,44 @@ mod tests {
         assert_eq!(SaveFormat::Dwg.suggested_name(Some("  ")), "Drawing.dwg");
         let ui: UiState = serde_json::from_value(json!({ "saveFormat": "dwg" })).unwrap_or_default();
         assert_eq!(ui.save_format, SaveFormat::Dwg);
+    }
+
+    #[test]
+    fn quickcalc_history_and_variables_persist_across_restarts() {
+        let mut a = app();
+        a.quickcalc.history.push(("2+2".into(), "4".into()));
+        a.quickcalc.history.push(("sin(pi/2)".into(), "1".into()));
+        a.quickcalc.vars.push(("w".into(), serde_json::json!(12.5)));
+        a.quickcalc.vars.push(("pt".into(), serde_json::json!([10.0, 20.0])));
+
+        let prefs = a.prefs_json();
+        assert!(prefs.contains("\"quickcalc\""));
+
+        let mut b = app();
+        assert!(b.quickcalc.history.is_empty());
+        assert!(b.quickcalc.vars.is_empty());
+
+        b.load_prefs(&prefs);
+        assert_eq!(b.quickcalc.history, vec![("2+2".to_string(), "4".to_string()), ("sin(pi/2)".to_string(), "1".to_string())]);
+        assert_eq!(b.quickcalc.vars, vec![("w".to_string(), serde_json::json!(12.5)), ("pt".to_string(), serde_json::json!([10.0, 20.0]))]);
+
+        // Malformed or hostile values do not panic and are capped
+        let mut c = app();
+        c.load_prefs(r#"{"quickcalc": "not an object"}"#);
+        assert!(c.quickcalc.history.is_empty());
+
+        let overflow_history: Vec<(String, String)> = (0..150).map(|i| (format!("{i}"), format!("{i}"))).collect();
+        let overflow_vars: Vec<(String, serde_json::Value)> = (0..70).map(|i| (format!("v{i}"), serde_json::json!(i))).collect();
+        let hostile_json = serde_json::json!({
+            "quickcalc": {
+                "history": overflow_history,
+                "vars": overflow_vars
+            }
+        })
+        .to_string();
+
+        c.load_prefs(&hostile_json);
+        assert_eq!(c.quickcalc.history.len(), palettes::quickcalc::MAX_HISTORY);
+        assert_eq!(c.quickcalc.vars.len(), palettes::quickcalc::MAX_VARS);
     }
 }

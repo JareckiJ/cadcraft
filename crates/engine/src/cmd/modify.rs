@@ -1,9 +1,12 @@
 //! Modify commands: ERASE, MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM, EXTEND, FILLET,
 //! CHAMFER, EXPLODE, STRETCH, BREAK, JOIN (arrays: `array`; draw order: `draworder`).
 
-use cadcraft_doc::{Entity, EntityKind, Handle, Prim};
+use std::collections::HashMap;
+
+use cadcraft_doc::{Entity, EntityKind, Handle, Prim, Space};
 use cadcraft_geom::{
-    Arc, Circle, Line, Mat3, PolyVertex, Polyline, Segment, TAU, Vec2, angle_in_sweep, ccw_sweep, intersect_ext, line_line_infinite, norm_angle,
+    Arc, Bounds2, Circle, Line, Mat3, PolyVertex, Polyline, Segment, TAU, Vec2, angle_in_sweep, ccw_sweep, intersect_ext, line_line_infinite,
+    norm_angle,
 };
 use serde_json::{Value, json};
 
@@ -99,27 +102,149 @@ pub fn specs() -> Vec<CommandSpec> {
 
 // ---------------- core operations ----------------
 
+/// If `h` is a paper-space viewport or a clip boundary of one, return `(viewport, boundary)`.
+fn viewport_clip_pair(d: &cadcraft_doc::Drawing, h: Handle) -> Option<(Handle, Handle)> {
+    let sp = d.space_of(h)?;
+    if !matches!(sp, Space::Paper(_)) {
+        return None;
+    }
+    match d.entity(h).map(|e| &e.kind) {
+        Some(EntityKind::Viewport(v)) => {
+            let b = v.clip.filter(|b| *b != h)?;
+            Some((h, b))
+        }
+        Some(_) => {
+            let vh = d.space(&sp)?.iter().find(|e| matches!(&e.kind, EntityKind::Viewport(v) if v.clip == Some(h))).map(|e| e.handle)?;
+            Some((vh, h))
+        }
+        None => None,
+    }
+}
+
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
-    for h in hs {
-        let Some(sp) = d.space_of(*h) else { continue };
-        if copy {
-            let Some(e) = d.entity(*h).map(|e| (**e).clone()) else { continue };
+    if copy {
+        let mut handle_map: HashMap<Handle, Handle> = HashMap::new();
+        let mut all_to_copy = hs.to_vec();
+        for &h in hs {
+            if let Some((vh, bh)) = viewport_clip_pair(d, h) {
+                if !all_to_copy.contains(&vh) {
+                    all_to_copy.push(vh);
+                }
+                if !all_to_copy.contains(&bh) {
+                    all_to_copy.push(bh);
+                }
+            }
+        }
+        for &h in &all_to_copy {
             let nh = d.new_handle();
+            handle_map.insert(h, nh);
+        }
+        let mut new_boundaries_to_sync: Vec<(Handle, Handle)> = Vec::new();
+        for &h in &all_to_copy {
+            let Some(sp) = d.space_of(h) else { continue };
+            let Some(e) = d.entity(h).map(|e| (**e).clone()) else { continue };
+            let Some(&nh) = handle_map.get(&h) else { continue };
             let mut ne = Entity { handle: nh, ..e };
             ne.kind.transform(m);
+            if let EntityKind::Viewport(v) = &mut ne.kind
+                && let Some(b) = v.clip
+                && let Some(&new_b) = handle_map.get(&b)
+            {
+                v.clip = Some(new_b);
+                new_boundaries_to_sync.push((nh, new_b));
+            }
+            if let EntityKind::Hatch(h) = &mut ne.kind
+                && h.associative
+            {
+                for l in &mut h.loops {
+                    l.sources = l.sources.iter().map(|s| handle_map.get(s).copied().unwrap_or(*s)).collect();
+                }
+            }
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
-                out.push(nh);
+                if hs.contains(&h) {
+                    out.push(nh);
+                }
             }
-        } else {
-            let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
+        }
+        for (new_vh, new_bh) in new_boundaries_to_sync {
+            if let Some(be) = d.entity(new_bh)
+                && let Some(poly) = cadcraft_render::clip::boundary_polygon(&be.kind)
+            {
+                let bx = Bounds2::from_points(poly);
+                if !bx.is_empty() && bx.min.is_finite() && bx.max.is_finite() {
+                    d.modify_entity(new_vh, |e| {
+                        if let EntityKind::Viewport(v) = &mut e.kind {
+                            v.center = bx.center().to3(0.0);
+                            v.width = bx.width();
+                            v.height = bx.height();
+                        }
+                    })?;
+                }
+            }
+        }
+        // Copying an entire group creates a new group for the copied members (AutoCAD standard behavior).
+        let mut new_groups = Vec::new();
+        for g in &d.groups {
+            if !g.members.is_empty() && g.members.iter().all(|m| handle_map.contains_key(m)) {
+                let new_members: Vec<Handle> = g.members.iter().filter_map(|m| handle_map.get(m).copied()).collect();
+                if new_members.len() == g.members.len() {
+                    let mut temp_d = d.clone();
+                    temp_d.groups.extend(new_groups.clone());
+                    let new_name = super::groups::next_unnamed(&temp_d);
+                    new_groups.push(cadcraft_doc::Group {
+                        name: new_name,
+                        description: g.description.clone(),
+                        selectable: g.selectable,
+                        members: new_members,
+                    });
+                }
+            }
+        }
+        d.groups.extend(new_groups);
+    } else {
+        let mut to_transform = hs.to_vec();
+        let mut boundaries_to_sync: Vec<(Handle, Handle)> = Vec::new();
+        for &h in hs {
+            if let Some((vh, bh)) = viewport_clip_pair(d, h) {
+                if !to_transform.contains(&vh) {
+                    to_transform.push(vh);
+                }
+                if !to_transform.contains(&bh) {
+                    to_transform.push(bh);
+                }
+                if !boundaries_to_sync.contains(&(vh, bh)) {
+                    boundaries_to_sync.push((vh, bh));
+                }
+            }
+        }
+        for &h in &to_transform {
+            let locked = d.entity(h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
             if locked {
                 continue;
             }
-            d.modify_entity(*h, |e| e.kind.transform(m))?;
-            out.push(*h);
+            d.modify_entity(h, |e| e.kind.transform(m))?;
+            if hs.contains(&h) {
+                out.push(h);
+            }
+        }
+        for (vh, bh) in boundaries_to_sync {
+            if let Some(be) = d.entity(bh)
+                && let Some(poly) = cadcraft_render::clip::boundary_polygon(&be.kind)
+            {
+                let bx = Bounds2::from_points(poly);
+                if !bx.is_empty() && bx.min.is_finite() && bx.max.is_finite() {
+                    d.modify_entity(vh, |e| {
+                        if let EntityKind::Viewport(v) = &mut e.kind {
+                            v.center = bx.center().to3(0.0);
+                            v.width = bx.width();
+                            v.height = bx.height();
+                        }
+                    })?;
+                }
+            }
         }
     }
     Ok(out)
@@ -127,11 +252,32 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
 
 fn erase(s: &mut Session, hs: &[Handle]) -> Result<usize> {
     let d = s.doc_mut()?;
+    let mut to_erase = hs.to_vec();
+    let mut to_unclip = Vec::new();
+    for &h in hs {
+        if let Some((vh, bh)) = viewport_clip_pair(d, h) {
+            if h == vh && !to_erase.contains(&bh) {
+                to_erase.push(bh);
+            } else if h == bh && !to_erase.contains(&vh) {
+                to_unclip.push(vh);
+            }
+        }
+    }
     let mut n = 0;
-    for h in hs {
-        let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
-        if !locked && d.remove_entity(*h).is_some() {
+    for h in to_erase {
+        let locked = d.entity(h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
+        let removed = !locked && d.remove_entity(h).is_some();
+        if removed && hs.contains(&h) {
             n += 1;
+        }
+    }
+    for vh in to_unclip {
+        if d.entity(vh).is_some() {
+            let _ = d.modify_entity(vh, |e| {
+                if let EntityKind::Viewport(v) = &mut e.kind {
+                    v.clip = None;
+                }
+            });
         }
     }
     s.set_selection(Vec::new());
@@ -311,6 +457,24 @@ fn run_stretch(s: &mut Session, p: &Value) -> Result<Value> {
     for h in &hs {
         doc.modify_entity(*h, |e| stretch_entity(e, &areas, d))?;
     }
+    for &h in &hs {
+        if let Some((vh, bh)) = viewport_clip_pair(doc, h)
+            && h == bh
+            && let Some(be) = doc.entity(bh)
+            && let Some(poly) = cadcraft_render::clip::boundary_polygon(&be.kind)
+        {
+            let bx = Bounds2::from_points(poly);
+            if !bx.is_empty() && bx.min.is_finite() && bx.max.is_finite() {
+                let _ = doc.modify_entity(vh, |ve| {
+                    if let EntityKind::Viewport(v) = &mut ve.kind {
+                        v.center = bx.center().to3(0.0);
+                        v.width = bx.width();
+                        v.height = bx.height();
+                    }
+                });
+            }
+        }
+    }
     Ok(json!({ "stretched": hs.len() }))
 }
 
@@ -449,14 +613,14 @@ impl StretchM {
                 self.corner = None;
                 let d = s.doc()?;
                 let store = d.space(&s.space());
-                let word = t.trim().to_ascii_lowercase();
                 // `_C`, `_L`: the English name, as scripts write it.
-                let word = word.strip_prefix('_').unwrap_or(&word).to_string();
-                if let Some(m) = SelectMode::from_keyword(&word).filter(|m| m.kind != SelectKind::Group) {
+                let word = t.trim().to_ascii_lowercase();
+                let word = word.strip_prefix('_').unwrap_or(&word);
+                if let Some(m) = SelectMode::from_keyword(word).filter(|m| m.kind != SelectKind::Group && m.kind != SelectKind::Class) {
                     self.mode = Some(m);
                     return Ok(Step::Continue);
                 }
-                let picked = match word.as_str() {
+                let picked = match word {
                     "r" | "remove" => {
                         self.removing = true;
                         None
@@ -1436,6 +1600,8 @@ pub(crate) fn explode_kind(d: &cadcraft_doc::Drawing, e: &Entity) -> Option<Vec<
                         line_spacing: 1.0,
                         line_spacing_exact: false,
                         columns: None,
+                        background: None,
+                        background_scale: None,
                     }),
                 });
             }

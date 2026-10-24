@@ -331,3 +331,34 @@ fn long_secant_keeps_both_intersections() {
     assert!(hits[0].0.near(Vec2::new(-2.0, 0.0), 1e-8), "{hits:?}");
     assert!(hits[1].0.near(Vec2::new(2.0, 0.0), 1e-8), "{hits:?}");
 }
+
+#[test]
+fn mat4_3d_transformations() {
+    let p = Vec3::new(1.0, 2.0, 3.0);
+
+    // Translation
+    let t = Mat4::translate(Vec3::new(10.0, -5.0, 2.0));
+    assert_eq!(t.apply(p), Vec3::new(11.0, -3.0, 5.0));
+
+    // Rotation around Z axis through origin by 90 degrees
+    let rz = Mat4::rotate_axis(Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let p_rot = rz.apply(Vec3::new(1.0, 0.0, 0.0));
+    assert!(p_rot.near(Vec3::new(0.0, 1.0, 0.0), 1e-9));
+
+    // Rotation around arbitrary axis through base point
+    let ra = Mat4::rotate_axis(Vec3::new(1.0, 1.0, 0.0), Vec3::Z, std::f64::consts::PI);
+    let p_ra = ra.apply(Vec3::new(2.0, 1.0, 0.0));
+    assert!(p_ra.near(Vec3::new(0.0, 1.0, 0.0), 1e-9));
+
+    // Mirror across XY plane (normal Z) through origin
+    let mxy = Mat4::mirror_plane(Vec3::ZERO, Vec3::Z);
+    assert_eq!(mxy.apply(Vec3::new(1.0, 2.0, 3.0)), Vec3::new(1.0, 2.0, -3.0));
+
+    // Align 3-point
+    let src = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+    let dst = [Vec3::new(10.0, 20.0, 5.0), Vec3::new(10.0, 20.0, 6.0), Vec3::new(10.0, 21.0, 5.0)];
+    let al = Mat4::align_3point(src, dst).unwrap();
+    assert!(al.apply(src[0]).near(dst[0], 1e-9));
+    assert!(al.apply(src[1]).near(dst[1], 1e-9));
+    assert!(al.apply(src[2]).near(dst[2], 1e-9));
+}

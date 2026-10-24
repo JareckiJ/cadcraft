@@ -248,3 +248,67 @@ fn selection_highlight_settings_set_save_and_show_in_the_selection_tab() {
         assert!(text.contains(label), "{label} missing from:\n{text}");
     }
 }
+
+#[test]
+fn drawing_area_colors_and_right_click_customization_modal() {
+    let mut a = app();
+    let r = a
+        .run(
+            "options",
+            json!({
+                "crosshairColor": "#00FF00",
+                "snapMarkerColor": "#FF00FF",
+                "gripColor": "#0000FF"
+            }),
+        )
+        .unwrap();
+    assert_eq!(r["crosshairColor"], "#00ff00");
+    assert_eq!(r["snapMarkerColor"], "#ff00ff");
+    assert_eq!(r["gripColor"], "#0000ff");
+
+    let mut b = app();
+    b.load_profile(&a.profile_json());
+    assert_eq!(b.options.crosshair_color, Some(Color32::from_rgb(0, 255, 0)));
+    assert_eq!(b.options.snap_marker_color, Some(Color32::from_rgb(255, 0, 255)));
+    assert_eq!(b.options.grip_color, Some(Color32::from_rgb(0, 0, 255)));
+
+    // Verify token override
+    cadcraft_ui_egui::theme::set_canvas(b.options.canvas());
+    let t = Tokens::get();
+    assert_eq!(t.crosshair, Color32::from_rgb(0, 255, 0));
+    assert_eq!(t.snap, Color32::from_rgb(255, 0, 255));
+    assert_eq!(t.grip, Color32::from_rgb(0, 0, 255));
+    cadcraft_ui_egui::theme::set_canvas(cadcraft_ui_egui::theme::Canvas::default());
+
+    // Display tab shows Crosshair color
+    let ctx = egui::Context::default();
+    a.ui.dialog = Some("options:display".into());
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Crosshair color"), "Display tab has Crosshair color");
+
+    // Drafting tab shows Snap marker color
+    a.ui.dialog = Some("options:drafting".into());
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Snap marker color"), "Drafting tab has Snap marker color");
+
+    // Selection tab shows Grip color
+    a.ui.dialog = Some("options:selection".into());
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Grip color"), "Selection tab has Grip color");
+
+    // Profiles tab shows Export Profile... and Import Profile...
+    a.ui.dialog = Some("options:profiles".into());
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Export Profile..."), "Profiles tab has Export Profile");
+    assert!(text.contains("Import Profile..."), "Profiles tab has Import Profile");
+
+    // User Preferences tab shows Right-Click Customization button and opens modal
+    a.ui.dialog = Some("options:preferences".into());
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Right-Click Customization..."), "Preferences tab has modal button");
+
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cc_options_right_click"), true));
+    let text = render(&mut a, &ctx);
+    assert!(text.contains("Turn on time-sensitive right-click"), "Right-Click Customization modal rendered");
+    assert!(text.contains("Command and Edit Modes"), "Right-Click modal has Command and Edit Modes");
+}

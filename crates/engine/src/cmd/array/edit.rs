@@ -38,7 +38,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
 
 /// The array block reference `h`, its array block and parameters (with the block names its items
 /// use).
-fn array_of(d: &Drawing, h: Handle) -> Result<(Insert, Arc<Block>, ArrayParams)> {
+pub(crate) fn array_of(d: &Drawing, h: Handle) -> Result<(Insert, Arc<Block>, ArrayParams)> {
     let e = d.entity(h).ok_or_else(|| other("No such object."))?;
     let p = d.array_params(e).ok_or_else(|| other("The object is not an associative array."))?;
     let EntityKind::Insert(ins) = &e.kind else { return Err(other("The object is not an associative array.")) };
@@ -112,7 +112,7 @@ fn drop_unused(d: &mut Drawing, names: &[String]) {
 
 /// Rebuild array `h` with parameters `p` (and its block reference moved to `insert` when
 /// given): a new array block for this reference, old blocks removed when unused.
-fn rebuild(s: &mut Session, h: Handle, p: ArrayParams, insert: Option<Vec2>) -> Result<()> {
+pub(crate) fn rebuild(s: &mut Session, h: Handle, p: ArrayParams, insert: Option<Vec2>) -> Result<()> {
     if !p.is_valid() {
         return Err(other("The array parameters are not valid."));
     }
@@ -181,7 +181,7 @@ fn centroid(d: &Drawing, hs: &[Handle]) -> Vec2 {
 }
 
 /// The item of array `h` under world point `at` (the lowest level when levels overlap).
-fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Option<(u32, u32, u32)> {
+pub(crate) fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Option<(u32, u32, u32)> {
     let (ins, blk, p) = array_of(d, h).ok()?;
     let w = ins.transform(blk.base.xy());
     let mut best: Option<((u32, u32, u32), f64)> = None;
@@ -214,7 +214,7 @@ fn item_at(d: &Drawing, h: Handle, at: Vec2, tol: f64) -> Option<(u32, u32, u32)
 }
 
 /// Move the base point of array `h` to world point `base` without moving the items.
-fn rebase(s: &mut Session, h: Handle, base: Vec2) -> Result<()> {
+pub(crate) fn rebase(s: &mut Session, h: Handle, base: Vec2) -> Result<()> {
     let d = s.doc()?;
     let (ins, blk, mut p) = array_of(d, h)?;
     let w = ins.transform(blk.base.xy());
@@ -421,6 +421,26 @@ fn apply_params(a: &mut ArrayParams, p: &Value, to_local: &Mat3) -> Result<()> {
                 k.center = to_local.apply(c);
             }
         }
+        ArrayKind::Path(pa) => {
+            if let Some(n) = count_param(p, "items")? {
+                pa.items = n;
+            }
+            if let Some(x) = num_param(p, "spacing")? {
+                pa.spacing = x;
+            }
+            if let Some(r) = p.get("align").and_then(Value::as_bool) {
+                pa.align = r;
+            }
+            if let Some(n) = count_param(p, "rows")? {
+                pa.rows = n;
+            }
+            if let Some(x) = num_param(p, "rowSpacing")? {
+                pa.row_spacing = x;
+            }
+            if let Some(x) = num_param(p, "rowElevation")? {
+                pa.row_elevation = x;
+            }
+        }
     }
     Ok(())
 }
@@ -453,6 +473,24 @@ fn run_arrayedit(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_or(p, "reset", false) {
         let (_, _, mut a) = array_of(s.doc()?, h)?;
         a.replaced.clear();
+        a.erased.clear();
+        rebuild(s, h, a, None)?;
+    }
+    if let Some(val) = p.get("erase") {
+        let (_, _, mut a) = array_of(s.doc()?, h)?;
+        if let Some((i, j, level)) = item_param(val)
+            && !a.erased.contains(&(i, j, level))
+        {
+            a.erased.push((i, j, level));
+        } else if let Some(list) = val.as_array() {
+            for v in list {
+                if let Some((i, j, level)) = item_param(v)
+                    && !a.erased.contains(&(i, j, level))
+                {
+                    a.erased.push((i, j, level));
+                }
+            }
+        }
         rebuild(s, h, a, None)?;
     }
     if let Some(r) = p.get("replace").filter(|v| !v.is_null()) {
@@ -525,6 +563,9 @@ enum Stage {
     RepItems,
     /// Source: the item whose objects are placed for editing.
     SourceItem,
+    BaseKeyPoint,
+    RepBaseKeyPoint,
+    Erase,
 }
 
 /// ARRAYEDIT: select an array, then change it option by option until eXit.
@@ -600,12 +641,14 @@ impl EditM {
             "Angle between" => Stage::Between,
             "Fill angle" => Stage::Fill,
             "ROTate items" => Stage::Rotate,
+            "ERase" | "Delete" => Stage::Erase,
             "RESet" => {
                 self.change(s, |p| {
                     p.replaced.clear();
+                    p.erased.clear();
                     Ok(())
                 })?;
-                s.echo("Replaced items were restored.");
+                s.echo("Replaced and erased items were restored.");
                 Stage::Main
             }
             _ => return Err(other("Invalid option keyword.")),
@@ -634,16 +677,21 @@ impl Interactive for EditM {
         let p = self.params(s);
         let rect = p.as_ref().and_then(|p| match &p.kind {
             ArrayKind::Rect(r) => Some(r.clone()),
-            ArrayKind::Polar(_) => None,
+            _ => None,
         });
         let polar = p.as_ref().and_then(|p| match &p.kind {
             ArrayKind::Polar(k) => Some(k.clone()),
-            ArrayKind::Rect(_) => None,
+            _ => None,
+        });
+        let path = p.as_ref().and_then(|p| match &p.kind {
+            ArrayKind::Path(pa) => Some(pa.clone()),
+            _ => None,
         });
         let (levels, ls) = p.as_ref().map(|p| (p.levels, p.level_spacing)).unwrap_or((1, 0.0));
-        let (cols, rows, cs, rs, elev) = match (&rect, &polar) {
-            (Some(r), _) => (r.cols, r.rows, r.col_spacing, r.row_spacing, r.row_elevation),
-            (_, Some(k)) => (k.items, k.rows, 0.0, k.row_spacing, k.row_elevation),
+        let (cols, rows, cs, rs, elev) = match (&rect, &polar, &path) {
+            (Some(r), _, _) => (r.cols, r.rows, r.col_spacing, r.row_spacing, r.row_elevation),
+            (_, Some(k), _) => (k.items, k.rows, 0.0, k.row_spacing, k.row_elevation),
+            (_, _, Some(pa)) => (pa.items, pa.rows, pa.spacing, pa.row_spacing, pa.row_elevation),
             _ => (1, 1, 0.0, 0.0, 0.0),
         };
         let dist = |m: &str, d: f64| Prompt::new(m, Accept::POINT_OR_NUMBER).default(fmt(d));
@@ -651,10 +699,26 @@ impl Interactive for EditM {
         match self.stage {
             Select => Prompt::new("Select array", Accept::SELECT),
             Main if polar.is_some() => Prompt::new("Enter an option", KEYWORDS)
-                .kw(&["Source", "REPlace", "Base point", "Items", "Angle between", "Fill angle", "Rows", "Levels", "ROTate items", "RESet", "eXit"])
+                .kw(&[
+                    "Source",
+                    "REPlace",
+                    "Base point",
+                    "Items",
+                    "Angle between",
+                    "Fill angle",
+                    "Rows",
+                    "Levels",
+                    "ROTate items",
+                    "ERase",
+                    "RESet",
+                    "eXit",
+                ])
+                .default("eXit"),
+            Main if path.is_some() => Prompt::new("Enter an option", KEYWORDS)
+                .kw(&["Source", "REPlace", "Base point", "Items", "Rows", "Levels", "ERase", "RESet", "eXit"])
                 .default("eXit"),
             Main => Prompt::new("Enter an option", KEYWORDS)
-                .kw(&["Source", "REPlace", "Base point", "Rows", "Columns", "Levels", "RESet", "eXit"])
+                .kw(&["Source", "REPlace", "Base point", "Rows", "Columns", "Levels", "ERase", "RESet", "eXit"])
                 .default("eXit"),
             Base => Prompt::new("Specify base point", Accept::POINT).kw(&["Key point"]).default("centroid"),
             ColsCount => Prompt::new("Enter the number of columns", Accept::NUMBER).default(cols.to_string()),
@@ -687,6 +751,9 @@ impl Interactive for EditM {
             RepBase => Prompt::new("Select base point of replacement objects", Accept::POINT).kw(&["Key point"]).default("centroid"),
             RepItems => Prompt::new("Select an item in array to replace", Accept::POINT).kw(&["Source objects"]),
             SourceItem => Prompt::new("Select item in array", Accept::POINT),
+            BaseKeyPoint => Prompt::new("Select key point on source objects", Accept::POINT),
+            RepBaseKeyPoint => Prompt::new("Select key point on replacement objects", Accept::POINT),
+            Erase => Prompt::new("Select an item in array to delete", Accept::POINT),
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
@@ -744,8 +811,35 @@ impl Interactive for EditM {
                 }
                 Main
             }
+            (Base, Input::Keyword(k)) if k.eq_ignore_ascii_case("Key point") || k.eq_ignore_ascii_case("k") => BaseKeyPoint,
+            (RepBase, Input::Keyword(k)) if k.eq_ignore_ascii_case("Key point") || k.eq_ignore_ascii_case("k") => RepBaseKeyPoint,
+            (BaseKeyPoint, Input::Point(p)) => {
+                rebase(s, h, *p)?;
+                Main
+            }
+            (RepBaseKeyPoint, Input::Point(p)) => {
+                let name = block_from(s, h, &self.rep_objs, *p)?;
+                self.rep_block = Some(name);
+                RepItems
+            }
+            (Erase, Input::Point(at)) => {
+                let tol = s.pixel_size() * s.settings.pickbox;
+                if let Some(item) = item_at(s.doc()?, h, *at, tol) {
+                    self.change(s, |p| {
+                        if !p.erased.contains(&item) {
+                            p.erased.push(item);
+                        }
+                        Ok(())
+                    })?;
+                    s.echo(format!("Item ({}, {}, {}) deleted from array.", item.0, item.1, item.2));
+                } else {
+                    s.echo("No array item found at that point.");
+                }
+                Erase
+            }
+            (Erase, Input::Enter) => Main,
             (Base | RepBase, Input::Keyword(_)) => {
-                s.echo("Key points are not available yet; specify a point.");
+                s.echo("Specify a point or choose Key point.");
                 stage
             }
             (ColsCount | Items, _) => match count(&i, c64, self.max_for(s, r64.saturating_mul(l64)))? {
@@ -755,6 +849,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.cols = n,
                             ArrayKind::Polar(k) => k.items = n,
+                            ArrayKind::Path(pa) => pa.items = n,
                         }
                         Ok(())
                     })?;
@@ -769,6 +864,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.rows = n,
                             ArrayKind::Polar(k) => k.rows = n,
+                            ArrayKind::Path(pa) => pa.rows = n,
                         }
                         Ok(())
                     })?;
@@ -794,8 +890,10 @@ impl Interactive for EditM {
                 let p = self.params(s).ok_or_else(|| other("No array selected."))?;
                 let (cur, n) = match (stage, &p.kind) {
                     (ColsSpace | ColsTotal, ArrayKind::Rect(r)) => (r.col_spacing, r.cols),
+                    (ColsSpace | ColsTotal, ArrayKind::Path(pa)) => (pa.spacing, pa.items),
                     (RowsSpace | RowsTotal, ArrayKind::Rect(r)) => (r.row_spacing, r.rows),
                     (RowsSpace | RowsTotal, ArrayKind::Polar(k)) => (k.row_spacing, k.rows),
+                    (RowsSpace | RowsTotal, ArrayKind::Path(pa)) => (pa.row_spacing, pa.rows),
                     (LevelsSpace | LevelsTotal, _) => (p.level_spacing, p.levels),
                     _ => (0.0, 1),
                 };
@@ -808,8 +906,10 @@ impl Interactive for EditM {
                         self.change(s, |p| {
                             match (stage, &mut p.kind) {
                                 (ColsSpace | ColsTotal, ArrayKind::Rect(r)) => r.col_spacing = v,
+                                (ColsSpace | ColsTotal, ArrayKind::Path(pa)) => pa.spacing = v,
                                 (RowsSpace | RowsTotal, ArrayKind::Rect(r)) => r.row_spacing = v,
                                 (RowsSpace | RowsTotal, ArrayKind::Polar(k)) => k.row_spacing = v,
+                                (RowsSpace | RowsTotal, ArrayKind::Path(pa)) => pa.row_spacing = v,
                                 _ => p.level_spacing = v,
                             }
                             Ok(())
@@ -826,6 +926,7 @@ impl Interactive for EditM {
                         match &mut p.kind {
                             ArrayKind::Rect(r) => r.row_elevation = z,
                             ArrayKind::Polar(k) => k.row_elevation = z,
+                            ArrayKind::Path(pa) => pa.row_elevation = z,
                         }
                         Ok(())
                     })?;

@@ -122,6 +122,37 @@ fn json_form_takes_leader_type_and_block() {
     }
 }
 
+#[test]
+fn mleader_inherits_mleaderstyle_defaults() {
+    let mut s = with_block();
+    // Configure default MLeaderStyle or a new style with spline leader and block content
+    s.execute(
+        "mleaderstyle",
+        &json!({
+            "name": "CustomStyle",
+            "leaderType": "spline",
+            "contentType": "block",
+            "block": "TAG",
+            "current": true,
+        }),
+    )
+    .unwrap();
+
+    // Invoking mleader without specifying leaderType or block should inherit from current style
+    s.execute(
+        "mleader",
+        &json!({
+            "points": [[0, 0], [5, 5], [10, 0]]
+        }),
+    )
+    .unwrap();
+
+    let m = last_mleader(&s);
+    assert!(m.spline, "expected spline leader inherited from style");
+    assert!(m.block.is_some(), "expected block content inherited from style");
+    assert_eq!(m.block.as_ref().map(|b| b.block.as_str()), Some("TAG"));
+}
+
 /// DIMSCALE belongs to dimension styles: a multileader keeps its style's text height, arrowhead
 /// and dogleg whatever DIMSCALE is (#1648).
 #[test]

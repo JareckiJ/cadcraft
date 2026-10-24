@@ -54,6 +54,7 @@ pub(super) fn apply(s: &Session, k: EntityKind, c: &Content) -> Result<EntityKin
             rows: 1,
             col_spacing: 0.0,
             row_spacing: 0.0,
+            clip: None,
         };
         if *center {
             // Move the block so the centre of its extents lands on the anchor.
@@ -76,14 +77,27 @@ pub(super) fn apply(s: &Session, k: EntityKind, c: &Content) -> Result<EntityKin
 /// `leaderType` ("straight" | "spline" | "none"), `block` (a block name) and `blockAttach`
 /// ("center" | "insertion") from the JSON form.
 pub(super) fn json_content(s: &Session, p: &Value) -> Result<Content> {
+    let cur_style = s
+        .doc()
+        .ok()
+        .and_then(|d| {
+            let cur = d.header.str("CMLEADERSTYLE", "Standard");
+            d.mleader_styles.iter().find(|m| m.name.eq_ignore_ascii_case(&cur)).or(d.mleader_styles.first()).cloned()
+        })
+        .unwrap_or_default();
+
     let leader = match str_param(p, "leaderType").map(str::to_ascii_lowercase).as_deref() {
-        None | Some("straight") => LeaderType::Straight,
+        Some("straight") => LeaderType::Straight,
         Some("spline") => LeaderType::Spline,
         Some("none") => LeaderType::None,
         Some(_) => return Err(bad("mleader", "`leaderType` must be \"straight\", \"spline\" or \"none\"")),
+        None => match cur_style.leader_type {
+            0 => LeaderType::None,
+            2 => LeaderType::Spline,
+            _ => LeaderType::Straight,
+        },
     };
     let block = match str_param(p, "block") {
-        None => None,
         Some(n) => {
             let center = match str_param(p, "blockAttach").map(str::to_ascii_lowercase).as_deref() {
                 None | Some("center") => true,
@@ -92,6 +106,11 @@ pub(super) fn json_content(s: &Session, p: &Value) -> Result<Content> {
             };
             Some((block_name(s, n).map_err(|e| bad("mleader", e.to_string()))?, center))
         }
+        None if cur_style.content_type == 2 && !cur_style.block_name.is_empty() => {
+            let n = &cur_style.block_name;
+            Some((block_name(s, n).map_err(|e| bad("mleader", e.to_string()))?, true))
+        }
+        None => None,
     };
     Ok(Content { leader, block })
 }

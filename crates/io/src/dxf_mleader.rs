@@ -310,6 +310,8 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             line_spacing: pos(p.line_spacing).unwrap_or(1.0),
             line_spacing_exact: p.line_spacing_style == Some(2),
             columns: None,
+            background: None,
+            background_scale: None,
         }
     });
     let block = has_block.then(|| {
@@ -325,6 +327,7 @@ pub(crate) fn read(tags: &[Tag]) -> MLeader {
             rows: 1,
             col_spacing: 0.0,
             row_spacing: 0.0,
+            clip: None,
         }
     });
     MLeader {
