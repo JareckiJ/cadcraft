@@ -3005,6 +3005,12 @@ pub(crate) mod tests {
         // 6. While picking the second corner of a selection window, the crosshair lines return.
         app.session.pending_window = Some(cadcraft_engine::PendingWindow { corner: Vec2::ZERO, during_command: true });
         assert_eq!(paint(&app), (4, 0), "selection window second corner");
+        app.session.pending_window = None;
+        app.session.cancel();
+
+        // 7. STRETCH's "Remove objects" prompt also draws the pickbox-only cursor.
+        app.session.cmdline("stretch r").unwrap();
+        assert_eq!(paint(&app), (0, 1), "STRETCH Remove objects prompt");
     }
 }
 
