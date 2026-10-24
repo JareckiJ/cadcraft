@@ -1366,3 +1366,10 @@ menu	Modify	Modifikace
 	Ignore	Ignorovat
 	Origin: {x}, {y}	Počátek: {x}, {y}
 	Sheet Books to PDF...	Exportovat sady listů do PDF...
+	Analyze Usage	Analýza využití
+	AutoLISP (LSP)	AutoLISP (LSP)
+	Imperial (inches)	Imperiální (palce)
+	Implied Loops	Odvozené smyčky
+	Metric (millimetres)	Metrické (milimetry)
+	New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE).	Příkaz Nový i první výkres po spuštění používají tyto jednotky, pokud není nastavena výchozí šablona (QNEWTEMPLATE).
+	Units of new drawings	Jednotky nových výkresů
