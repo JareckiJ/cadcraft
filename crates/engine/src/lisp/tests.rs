@@ -4,7 +4,7 @@ use super::value::{Value, to_text};
 use crate::Session;
 use crate::cmd::file::{EntityCodec, set_entity_codec};
 
-fn session() -> Session {
+pub(super) fn session() -> Session {
     set_entity_codec(EntityCodec { groups: cadcraft_io::entity_groups, entity: cadcraft_io::entity_from_groups });
     Session::new()
 }
@@ -438,6 +438,24 @@ fn tables_and_variables() {
 }
 
 #[test]
+fn getvar_drawing_and_session_variables() {
+    let mut s = session();
+    assert_eq!(ok(&mut s, "(list (getvar \"DWGPREFIX\") (getvar \"DWGTITLED\"))"), "(\"\" 0)");
+    assert_eq!(ok(&mut s, "(list (getvar \"FILEDIA\") (getvar \"CMDECHO\") (getvar \"TILEMODE\"))"), "(1 1 1)");
+    assert_eq!(ok(&mut s, "(setvar \"FILEDIA\" 0) (setvar \"CMDECHO\" 0) (getvar \"FILEDIA\")"), "0");
+    // Both belong to the session, so they survive a switch to another drawing.
+    s.new_drawing(true);
+    assert_eq!(ok(&mut s, "(list (getvar \"FILEDIA\") (getvar \"CMDECHO\"))"), "(0 0)");
+    assert_eq!(ok(&mut s, "(getvar \"CMDACTIVE\")"), "0");
+    let dir = std::env::temp_dir();
+    let file = dir.join("lisp_getvar_test.dxf");
+    s.state_mut().unwrap().path = Some(file.to_string_lossy().into_owned());
+    let want = format!("{}{}", dir.to_string_lossy().trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR);
+    assert_eq!(crate::sysvars::get(&s, "DWGPREFIX"), Some(serde_json::json!(want)));
+    assert_eq!(ok(&mut s, "(getvar \"DWGTITLED\")"), "1");
+}
+
+#[test]
 fn input_functions_take_supplied_answers() {
     let mut s = session();
     let r = eval_with(
@@ -464,6 +482,13 @@ fn interactive_routine_waits_for_the_user() {
     s.cmdline("(progn (initget 1 \"Yes No\") (setq ans (getkword \"\\nSure? [Yes/No]: \")))").unwrap();
     s.cmdline("n").unwrap();
     assert_eq!(to_text(&s.lisp_var("ANS"), true), "\"No\"");
+    // Bit 128 lets getkword return arbitrary text; a keyword still wins.
+    s.cmdline("(progn (initget 128 \"SElect CUrrent\") (setq ans (getkword \"\\nOption: \")))").unwrap();
+    s.cmdline("banana").unwrap();
+    assert_eq!(to_text(&s.lisp_var("ANS"), true), "\"banana\"");
+    s.cmdline("(progn (initget 128 \"SElect CUrrent\") (setq ans (getkword \"\\nOption: \")))").unwrap();
+    s.cmdline("cu").unwrap();
+    assert_eq!(to_text(&s.lisp_var("ANS"), true), "\"CUrrent\"");
     s.cmdline("(setq d (getdist '(0 0)))").unwrap();
     s.cmdline("3,4").unwrap();
     assert_eq!(to_text(&s.lisp_var("D"), true), "5.0");
@@ -477,6 +502,24 @@ fn interactive_routine_waits_for_the_user() {
     s.input(crate::Input::Point(cadcraft_geom::Vec2::new(50.0, 50.0))).unwrap();
     assert!(!s.lisp_running());
     assert!(s.doc().unwrap().model.iter().any(|e| matches!(&e.kind, cadcraft_doc::EntityKind::Circle(c) if c.center.x == 50.0 && c.radius == 2.0)));
+}
+
+#[test]
+fn getangle_is_relative_to_angbase() {
+    let mut s = session();
+    s.cmdline("(setvar \"ANGBASE\" 90)").unwrap();
+    // A picked point at 180° in world terms is 90° from ANGBASE.
+    s.cmdline("(setq a (getangle '(0 0)))").unwrap();
+    s.input(crate::Input::Point(cadcraft_geom::Vec2::new(-1.0, 0.0))).unwrap();
+    assert_eq!(to_text(&s.lisp_var("A"), true), "1.5708");
+    // getorient ignores ANGBASE.
+    s.cmdline("(setq o (getorient '(0 0)))").unwrap();
+    s.input(crate::Input::Point(cadcraft_geom::Vec2::new(-1.0, 0.0))).unwrap();
+    assert_eq!(to_text(&s.lisp_var("O"), true), "3.14159");
+    // A typed angle is already measured from ANGBASE.
+    s.cmdline("(setq t2 (getangle))").unwrap();
+    s.cmdline("180").unwrap();
+    assert_eq!(to_text(&s.lisp_var("T2"), true), "3.14159");
 }
 
 #[test]
@@ -745,4 +788,13 @@ fn a_panic_inside_a_routine_ends_it_with_an_error() {
     assert!(!s.lisp_running());
     assert!(s.log.iter().any(|l| l.contains("internal error")), "{:?}", s.log);
     assert_eq!(ok(&mut s, "(+ 1 2)"), "3");
+}
+
+#[test]
+fn angtof_reads_the_string_in_the_given_units() {
+    let mut s = Session::new();
+    assert_eq!(ok(&mut s, "(angtof \"1.5\" 3)"), "1.5");
+    assert_eq!(ok(&mut s, "(angtof \"180\" 0)"), "3.14159");
+    assert_eq!(ok(&mut s, "(angtof \"180\" 7)"), "nil");
+    assert_eq!(ok(&mut s, "(angtof \"180\" \"x\")"), "nil");
 }
