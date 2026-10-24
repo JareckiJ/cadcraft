@@ -359,6 +359,7 @@ mod tests {
         (app, handle)
     }
 
+    /// The panel opens with the selection, stays closed once closed by hand, and closes with it.
     #[test]
     fn attributes_panel_follows_the_selection_and_respects_a_manual_close() {
         let (mut app, handle) = app_with_block_reference();
@@ -386,6 +387,7 @@ mod tests {
         assert!(!workspace.layout.contains(&Panel::Attributes));
     }
 
+    /// A panel restored open with nothing to show is closed.
     #[test]
     fn a_restored_attributes_panel_with_nothing_to_show_is_closed() {
         let (mut app, _) = app_with_block_reference();

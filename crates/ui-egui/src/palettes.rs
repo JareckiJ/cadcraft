@@ -1296,6 +1296,7 @@ mod tests {
         assert!(painted_blue, "a ByLayer entity on a blue layer needs a blue Properties swatch");
     }
 
+    /// The texts of a painted shape, one string per text.
     fn collect_text(shape: &Shape, out: &mut Vec<String>) {
         match shape {
             Shape::Text(t) => out.push(t.galley.text().to_string()),
@@ -1358,6 +1359,7 @@ mod tests {
 
     const CODICE_REV: [(&str, &str); 2] = [("CODICE", "8231"), ("REV", "A")];
 
+    /// Editing an attribute changes only the selected block reference.
     #[test]
     fn editing_an_attribute_changes_only_the_selected_block_reference() {
         let mut app = app_with_block(&CODICE_REV);
@@ -1369,6 +1371,7 @@ mod tests {
         assert_eq!(attribute_value(&app, second, "CODICE"), "8231");
     }
 
+    /// Block names from the drawing are shown as they are, not translated.
     #[test]
     fn block_names_from_the_drawing_are_shown_untranslated() {
         // A block named like an interface word ("Color" is "Colore" in Italian) must not be taken for one.
@@ -1381,6 +1384,7 @@ mod tests {
         assert!(!texts.iter().any(|t| t == "Colore"), "the block name was translated: {texts:?}");
     }
 
+    /// The panel lists the selected block reference's attributes.
     #[test]
     fn attributes_panel_lists_the_selected_block_reference_attributes() {
         let mut app = app_with_block(&CODICE_REV);
