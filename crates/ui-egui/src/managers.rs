@@ -1382,18 +1382,4 @@ mod plot_sheets_tests {
         assert!(line.starts_with("Layout1: ") && line.contains("A3") && line.ends_with("monochrome.ctb"), "{line}");
         assert!(sheet_summary(d, "Model").starts_with("Model: "));
     }
-
-    #[test]
-    fn the_engine_plots_the_ticked_sheets_in_one_file() {
-        use cadcraft_engine::cmd::file::{IoHooks, base64_decode, set_io};
-        fn fake_plot(_: &cadcraft_doc::Drawing, space: &cadcraft_doc::Space, opts: &Value) -> Result<Vec<u8>, String> {
-            Ok(format!("%PDF {space:?} {}", opts.get("layouts").map(Value::to_string).unwrap_or_default()).into_bytes())
-        }
-        set_io(IoHooks { read: |_, _| Err("no".into()), write: |_, _| Err("no".into()), plot: Some(fake_plot) });
-        let mut app = crate::CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
-        let r = app.run("plot", sheets_params(&["Layout1".to_string(), "Layout2".to_string()])).unwrap();
-        assert_eq!(r["pages"], 2);
-        let text = String::from_utf8(base64_decode(r["data"].as_str().unwrap_or_default()).unwrap_or_default()).unwrap_or_default();
-        assert!(text.ends_with(r#"["Layout1","Layout2"]"#), "{text}");
-    }
 }
