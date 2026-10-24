@@ -437,6 +437,11 @@ fn kept_header_vars(w: &mut W, d: &Drawing, start: usize) {
             continue;
         }
         let Some(code) = d.header.code(name) else { continue };
+        // Only a code a header value can have: a structural code (0 starts a record, 9 a variable,
+        // 100 to 102 subclasses and groups) or extended data would break the file.
+        if !header_value_code(code) {
+            continue;
+        }
         // A reference to another object by handle: written while that object keeps its handle.
         if matches!(code, 5 | 105 | 320..=369 | 390..=399 | 480 | 481) {
             let target = v.as_str().and_then(Handle::parse_hex);
@@ -481,6 +486,13 @@ fn kept_header_vars(w: &mut W, d: &Drawing, start: usize) {
             },
         }
     }
+}
+
+/// Whether a header variable may be written with group `code` (DXF Reference, HEADER section):
+/// a value code, a handle, or one of the point codes. `code` comes from the file a drawing was
+/// read from (or a `.cad` document), so anything else is skipped.
+fn header_value_code(code: i32) -> bool {
+    matches!(code, cadcraft_doc::POINT_2D | cadcraft_doc::POINT_3D | 1..=8 | 10..=99 | 105 | 110..=149 | 160..=179 | 210..=239 | 270..=481)
 }
 
 /// An entity's group 440 (DXF Reference): ByBlock is `0x01000000`, a fixed transparency its alpha
@@ -2033,6 +2045,8 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     for s in &d.dim_styles {
         arrow_names.extend([s.arrow_block.clone(), s.arrow_block1.clone(), s.arrow_block2.clone(), s.leader_arrow_block.clone()]);
     }
+    // A multileader style's arrowhead (341) is a block record too.
+    arrow_names.extend(d.mleader_styles.iter().map(|s| s.props.arrow_block.clone()));
     for e in &every {
         if let EntityKind::Dimension(dm) = &e.kind {
             for (k, v) in &dm.overrides {
@@ -3072,7 +3086,8 @@ fn mleader_style_obj(w: &mut W, s: &MLeaderStyle, h: &str, dict: &str, cx: &Ctx,
     w.i(291, i64::from(p.dogleg_on));
     w.f(43, s.dogleg);
     w.s(3, p.description.clone());
-    if let Some(a) = block(&p.arrow_block) {
+    // A user block by name, otherwise the arrowhead block written for it ([`tags_for`]).
+    if let Some(a) = block(&p.arrow_block).or_else(|| (!p.arrow_block.trim().is_empty()).then(|| cx.arrow(&p.arrow_block)).flatten()) {
         w.s(341, a);
     }
     w.f(44, s.arrow_size);

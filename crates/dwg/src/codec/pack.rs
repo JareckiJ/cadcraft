@@ -181,7 +181,8 @@ pub(crate) fn pack_with(info: &FileInfo, sections: &[Section], map_order: &[&str
             put_u32(&mut hdr, 0, DATA_PAGE_TYPE);
             put_u32(&mut hdr, 4, id);
             put_u32(&mut hdr, 8, stored.len() as u32);
-            put_u32(&mut hdr, 12, extent as u32);
+            // §4.6: the page size decompressed (the reader's limit for the page), not its extent.
+            put_u32(&mut hdr, 12, s.page_size as u32);
             put_u64(&mut hdr, 16, start);
             put_u32(&mut hdr, 28, data_sum);
             let header_sum = page_checksum(data_sum, &hdr);

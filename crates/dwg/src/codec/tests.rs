@@ -102,6 +102,21 @@ fn literal_only_pages_read_back_too() {
     assert_eq!(c.objects_iter().map(|(r, o)| (r.handle, o.unwrap().type_code)).collect::<Vec<_>>(), expected);
 }
 
+/// Each data page header (§4.6, XORed with its address) records the page's decompressed size at
+/// offset 12, which readers take as the most the page may decompress to.
+#[test]
+fn data_page_headers_record_the_decompressed_page_size() {
+    let (file, _, _) = synthetic();
+    // The first data page (the header section's) follows the 0x100-byte file header.
+    let word = |i: usize| {
+        let at = 0x100 + i * 4;
+        u32::from_le_bytes(file[at..at + 4].try_into().unwrap()) ^ 0x4164_536B ^ 0x100
+    };
+    assert_eq!(word(0), 0x4163_043B);
+    assert_eq!(word(3), MAX_PAGE as u32);
+    assert!(word(2) < word(3), "the stored (compressed) size is smaller");
+}
+
 #[test]
 fn object_maps_need_ascending_handles_and_split_into_blocks() {
     assert!(object_map(&[(5, 10), (4, 20)]).is_err());
