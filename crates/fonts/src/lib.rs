@@ -769,7 +769,8 @@ mod ttf_tests {
                     c.len() == d.len() && c.iter().zip(d).all(|(p, q)| (p.x - ax - (q.x - bx)).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9)
                 })
         };
-        let rightmost = rtl.glyphs.iter().max_by(|a, b| x0(a).total_cmp(&x0(b))).unwrap();
+        // Empty glyphs (the space) keep a slot for text export but have no position to compare.
+        let rightmost = rtl.glyphs.iter().filter(|g| !g.is_empty()).max_by(|a, b| x0(a).total_cmp(&x0(b))).unwrap();
         assert!(same_shape(rightmost, o_slash.glyphs.first().unwrap()), "the face's Ø at the right end");
         assert!(same_shape(o_rtl.glyphs.first().unwrap(), o_slash.glyphs.first().unwrap()), "Ø at the left end of a left-to-right line");
         assert_eq!(rtl.glyphs.len(), o_rtl.glyphs.len());
