@@ -515,7 +515,7 @@ fn properties_set_thickness() {
     // Issue #1722: `properties.set` used to ignore `thickness` while still reporting a change.
     let mut s = Session::new();
     let r = s.execute("circle", &json!({"center": [0, 0], "radius": 5})).unwrap();
-    let h = r["handles"][0].as_str().unwrap().to_string();
+    let h = r["handle"].as_str().unwrap().to_string();
     let hh = cadcraft_doc::Handle::parse_hex(&h).unwrap();
     let th = |s: &Session| s.doc().unwrap().entity(hh).unwrap().common.thickness;
     s.execute("properties.set", &json!({"handles": [h], "thickness": 8})).unwrap();
