@@ -86,9 +86,11 @@ mod carry {
         pub class: Option<super::BridgeClass>,
     }
     impl CarriedRecord {
+        /// No bytes in the web build.
         pub fn raw(&self) -> &[u8] {
             &[]
         }
+        /// No handle stream in the web build.
         pub fn handle_bits(&self) -> i64 {
             0
         }
@@ -96,18 +98,23 @@ mod carry {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct NativeCarry;
     impl NativeCarry {
+        /// No source version in the web build.
         pub fn version(&self) -> &str {
             ""
         }
+        /// No carried records in the web build.
         pub fn records(&self) -> &[CarriedRecord] {
             &[]
         }
+        /// Always empty in the web build.
         pub fn is_empty(&self) -> bool {
             true
         }
+        /// No handles in the web build.
         pub fn handles(&self) -> std::collections::HashSet<u64> {
             Default::default()
         }
+        /// Nothing skipped in the web build.
         pub fn skipped(&self, _handle: u64) -> Option<&str> {
             None
         }
@@ -130,8 +137,27 @@ pub struct DwgWrite {
     pub kept: usize,
     /// Carried subtrees that weren't (their records are lost from this file).
     pub not_carried: Vec<NotCarried>,
-    /// Other programs' records the DWG writer can't keep, left out: "entity `X` (handle 1F)".
-    pub dropped: Vec<String>,
+    /// Other programs' records the DWG writer can't keep, left out.
+    pub dropped: Vec<Dropped>,
+}
+
+/// A record of another program a written DWG leaves out: acadrust can't write it as the file's
+/// version (no raw DWG data, data of another version, or R12).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Dropped {
+    /// `entity` or `object`.
+    pub kind: &'static str,
+    /// Its DXF type name, e.g. `AEC_WALL`.
+    pub type_name: String,
+    /// Its handle in the DXF the DWG was written from.
+    pub handle: u64,
+}
+
+impl std::fmt::Display for Dropped {
+    /// "entity `X` (handle 1F)".
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} `{}` (handle {:X})", self.kind, self.type_name, self.handle)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -226,6 +252,7 @@ mod native {
         Ok(DwgRead { dxf, notes, version, issues, issue_count, carry: carry.map(std::sync::Arc::new) })
     }
 
+    /// [`type_label`] for the tests.
     #[cfg(test)]
     pub(crate) fn type_label_for_tests(t: Option<&str>) -> String {
         type_label(t)
@@ -467,19 +494,19 @@ mod native {
     }
 
     /// The custom entities and objects of other programs that acadrust can't write as `doc.version`
-    /// (no raw DWG data, data of another version, or R12), as "entity `X` (handle 1F)" lines.
+    /// (no raw DWG data, data of another version, or R12).
     /// Nothing is left out to make the write succeed: the caller refuses the whole file, naming
     /// every one (the writer alone stops at the first, and says nothing of the others).
-    pub(crate) fn unwritable(doc: &acadrust::CadDocument) -> Vec<String> {
+    pub(crate) fn unwritable(doc: &acadrust::CadDocument) -> Vec<super::Dropped> {
         let version = doc.version;
         let r12 = version == acadrust::DxfVersion::AC1009;
-        let mut found: Vec<String> = doc
+        let mut found: Vec<super::Dropped> = doc
             .entities()
             .filter_map(|e| match e {
                 acadrust::entities::EntityType::Unknown(u)
                     if u.raw_dwg_data.is_none() || u.dwg_source_version.is_some_and(|v| v != version) || r12 =>
                 {
-                    Some(format!("entity `{}` (handle {:X})", u.dxf_name, u.common.handle.value()))
+                    Some(super::Dropped { kind: "entity", type_name: u.dxf_name.clone(), handle: u.common.handle.value() })
                 }
                 _ => None,
             })
@@ -488,7 +515,7 @@ mod native {
             acadrust::objects::ObjectType::Unknown { type_name, raw_dwg_data, raw_dwg_version, .. }
                 if raw_dwg_data.is_none() || raw_dwg_version.is_some_and(|v| v != version) || r12 =>
             {
-                Some(format!("object `{type_name}` (handle {:X})", h.value()))
+                Some(super::Dropped { kind: "object", type_name: type_name.clone(), handle: h.value() })
             }
             _ => None,
         }));
@@ -496,9 +523,9 @@ mod native {
     }
 
     /// The refusal for [`unwritable`] records: names up to a few and counts the rest.
-    pub(crate) fn refuse_unwritable(found: &[String], version: acadrust::DxfVersion) -> String {
+    pub(crate) fn refuse_unwritable(found: &[super::Dropped], version: acadrust::DxfVersion) -> String {
         const SHOWN: usize = 5;
-        let mut list = found.iter().take(SHOWN).cloned().collect::<Vec<_>>().join(", ");
+        let mut list = found.iter().take(SHOWN).map(ToString::to_string).collect::<Vec<_>>().join(", ");
         if found.len() > SHOWN {
             list.push_str(&format!(" and {} more", found.len() - SHOWN));
         }
@@ -661,6 +688,7 @@ mod native {
         Ok(out)
     }
 
+    /// The acadrust version for a `$ACADVER` code CADCraft writes (AC1015 to AC1032).
     fn dwg_version(version: &str) -> Result<acadrust::DxfVersion, String> {
         Ok(match version.trim().to_ascii_uppercase().as_str() {
             "AC1015" => acadrust::DxfVersion::AC1015,
@@ -677,7 +705,7 @@ mod native {
     /// entities and objects without raw DWG data of that version (acadrust refuses the whole file
     /// for one of them), with the dictionary entries that named them. Returns them, for the
     /// caller's loss report: nothing goes unlisted.
-    fn drop_unwritable(doc: &mut acadrust::CadDocument) -> Vec<String> {
+    fn drop_unwritable(doc: &mut acadrust::CadDocument) -> Vec<super::Dropped> {
         let found = unwritable(doc);
         if found.is_empty() {
             return found;
@@ -809,6 +837,7 @@ mod native {
         Ok(out)
     }
 
+    /// Convert DXF to a DWG, refusing records of other programs the writer can't keep rather than dropping them.
     fn convert(dxf: &[u8], version: Option<acadrust::DxfVersion>) -> Result<Vec<u8>, String> {
         let mut doc = prepare(dxf, version)?;
         let found = unwritable(&doc);
@@ -849,6 +878,7 @@ mod native {
         Ok(doc)
     }
 
+    /// Write `doc` as DWG after the header and dictionary repairs, with the writer's panics turned into errors.
     fn write_doc(doc: &mut acadrust::CadDocument) -> Result<Vec<u8>, String> {
         current_dimstyle(doc);
         add_variable_dictionary(doc);
@@ -970,6 +1000,7 @@ pub fn dwg_to_dxf(_bytes: &[u8]) -> Result<Vec<u8>, String> {
 pub fn dwg_to_dxf_noted(_bytes: &[u8], _limits: Limits) -> Result<(Vec<u8>, Vec<String>), String> {
     Err("DWG files can't be opened in the web build yet; save as DXF".into())
 }
+/// The web build opens no DWG.
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf_detailed(_bytes: &[u8], _limits: Limits) -> Result<DwgRead, String> {
     Err("DWG files can't be opened in the web build yet; save as DXF".into())
@@ -982,11 +1013,13 @@ pub fn dwg_to_dxf_with(_bytes: &[u8], _limits: Limits) -> Result<Vec<u8>, String
 pub fn dxf_to_dwg(_dxf: &[u8]) -> Result<Vec<u8>, String> {
     Err("DWG files can't be written in the web build yet; save as DXF".into())
 }
+/// The web build has no file inventory.
 #[cfg(target_arch = "wasm32")]
 pub fn inventory(_bytes: &[u8]) -> Result<std::collections::BTreeMap<String, u64>, String> {
     Err("file inventories aren't available in the web build".into())
 }
 
+/// The web build writes no DWG.
 #[cfg(target_arch = "wasm32")]
 pub fn dxf_to_dwg_carrying(_dxf: &[u8], version: &str, _carry: Option<&NativeCarry>) -> Result<DwgWrite, String> {
     Err(unsupported(version))
@@ -1021,7 +1054,7 @@ mod tests {
     fn custom_records_of_another_dwg_version_are_refused_not_dropped() {
         let source = ff1::dwg_source(ff1::CustomRecords::Combined).unwrap();
         let mut doc = acadrust::DwgReader::from_stream(std::io::Cursor::new(source.bytes.as_ref())).read().unwrap();
-        assert_eq!(native::unwritable(&doc), Vec::<String>::new(), "same version: writable as read");
+        assert_eq!(native::unwritable(&doc), Vec::new(), "same version: writable as read");
         assert!(acadrust::DwgWriter::write_to_vec(&doc).is_ok());
         for other in [acadrust::DxfVersion::AC1027, acadrust::DxfVersion::AC1018] {
             doc.version = other;
@@ -1049,6 +1082,7 @@ mod tests {
         assert_eq!(Some(doc.header.current_text_style_handle), romans);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     use super::ff1;
 
     /// An AC1032 source with a LINE, optionally a BLOCK-marker XDATA record.
@@ -1069,6 +1103,7 @@ mod tests {
         acadrust::DwgWriter::write_to_vec(&doc).unwrap()
     }
 
+    /// XDATA on a BLOCK marker is reported; a plain block is not.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn block_marker_xdata_is_reported_and_plain_blocks_are_not() {
@@ -1082,6 +1117,7 @@ mod tests {
         assert!(issue.handle.is_some());
     }
 
+    /// An opaque custom entity and object are reported with their class, handle and version.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_custom_records_are_reported_with_class_handle_and_version() {
@@ -1106,6 +1142,7 @@ mod tests {
         }
     }
 
+    /// The byte-only read functions still report what the detailed one finds.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn byte_only_wrappers_do_not_hide_known_losses() {
@@ -1118,6 +1155,7 @@ mod tests {
         assert!(String::from_utf8_lossy(&dxf).contains("LINE"));
     }
 
+    /// A drawing with nothing CADCraft can't keep reports nothing.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn ordinary_drawings_report_nothing() {
@@ -1161,6 +1199,7 @@ mod tests {
         assert_eq!(c.finish().1, 1);
     }
 
+    /// Issue details are capped; their count is not.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn issue_details_are_capped_but_the_count_is_not() {
@@ -1173,6 +1212,7 @@ mod tests {
         assert_eq!(count, 2 * (MAX_BRIDGE_ISSUES as u64 + 40));
     }
 
+    /// Truncated and oversized DWG sources fail with an error, never a panic.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn truncated_and_oversized_sources_fail_safely() {

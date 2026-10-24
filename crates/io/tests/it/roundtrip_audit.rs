@@ -1051,6 +1051,7 @@ fn dwg_leaves_out_the_custom_types_and_reports_each_with_its_groups() {
     assert!(dxf_report.is_none(), "DXF keeps them all");
 }
 
+/// A DWG save reports BLOCK-marker XDATA even when the drawing has no custom types.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn dwg_reports_block_marker_xdata_even_without_custom_types() {

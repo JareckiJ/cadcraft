@@ -76,16 +76,19 @@ pub struct PreservationIssue {
 pub struct NativeCarry(std::sync::Arc<dyn std::any::Any + Send + Sync>);
 
 impl NativeCarry {
+    /// Wrap the I/O layer's carried records.
     pub fn new<T: std::any::Any + Send + Sync>(value: T) -> Self {
         Self(std::sync::Arc::new(value))
     }
 
+    /// The carried records, if they are of type `T`.
     pub fn get<T: std::any::Any>(&self) -> Option<&T> {
         self.0.downcast_ref::<T>()
     }
 }
 
 impl std::fmt::Debug for NativeCarry {
+    /// Opaque: only that there is one.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("NativeCarry(..)")
     }
@@ -93,6 +96,7 @@ impl std::fmt::Debug for NativeCarry {
 
 /// The same carried records: one read, shared by its copies.
 impl PartialEq for NativeCarry {
+    /// Whether both share the same read.
     fn eq(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &other.0)
     }
@@ -116,14 +120,17 @@ pub struct PreservationState {
 }
 
 impl PreservationState {
+    /// A context for a drawing read from `format` at `version` (the version string is bounded).
     pub fn new(format: PreservationFormat, version: &str) -> Self {
         Self { source: Some(PreservationSource { format, version: bounded_text(version) }), ..Self::default() }
     }
 
+    /// Where the drawing was read from.
     pub fn source(&self) -> Option<&PreservationSource> {
         self.source.as_ref()
     }
 
+    /// The confirmed issues kept in detail (at most [`MAX_PRESERVATION_DETAILS`]).
     pub fn issues(&self) -> &[PreservationIssue] {
         &self.issues
     }
@@ -144,6 +151,7 @@ impl PreservationState {
         self.native.as_ref()
     }
 
+    /// Keep the records a same-version DWG save can put back.
     pub fn set_native(&mut self, native: NativeCarry) {
         self.native = Some(native);
     }
@@ -170,6 +178,7 @@ impl PreservationState {
     }
 }
 
+/// `text` cut to [`MAX_PRESERVATION_TEXT_BYTES`] at a character boundary.
 fn bounded_text(text: &str) -> String {
     let mut end = text.len().min(MAX_PRESERVATION_TEXT_BYTES);
     while !text.is_char_boundary(end) {
@@ -269,6 +278,7 @@ mod preservation_tests {
     use crate::{Drawing, RefEdit, Space};
     use std::sync::Arc;
 
+    /// A confirmed opaque custom object, with its class.
     fn issue() -> PreservationIssue {
         PreservationIssue {
             reason: PreservationReason::OpaqueCustomRecord,
@@ -284,6 +294,7 @@ mod preservation_tests {
         }
     }
 
+    /// New drawings have no import loss and nothing that blocks a save.
     #[test]
     fn preservation_defaults_have_no_unresolved_import_loss() {
         for d in [Drawing::default(), Drawing::new_metric()] {
@@ -294,6 +305,7 @@ mod preservation_tests {
         }
     }
 
+    /// Clones, edits and committed in-place-edit snapshots share the same context.
     #[test]
     fn preservation_survives_clones_edits_and_committed_refedit_snapshots() {
         let mut state = PreservationState::new(PreservationFormat::Dwg, "AC1032");
@@ -324,6 +336,7 @@ mod preservation_tests {
         assert_ne!(Drawing { preservation: d.preservation.clone(), ..Drawing::default() }, Drawing::default());
     }
 
+    /// The detail list is capped; the count is not, and saturates instead of wrapping.
     #[test]
     fn preservation_detail_cap_does_not_cap_or_wrap_blocking_count() {
         let mut state = PreservationState::new(PreservationFormat::Dwg, "AC1032");
@@ -341,6 +354,7 @@ mod preservation_tests {
         assert!(state.blocks_save());
     }
 
+    /// Every untrusted string is bounded at a UTF-8 character boundary.
     #[test]
     fn preservation_bounds_all_untrusted_strings_at_utf8_boundaries() {
         // The byte cap lands inside a four-byte character, not at a character boundary.

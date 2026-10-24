@@ -39,6 +39,7 @@ fn source() -> TestResult<Vec<u8>> {
     Ok(DwgWriter::write_to_vec(&doc)?)
 }
 
+/// Draw order counts one space out of handle order; the empty dictionary isn't counted.
 #[test]
 fn draw_order_is_counted_by_space_and_empty_dictionaries_not_at_all() -> TestResult {
     let bytes = source()?;

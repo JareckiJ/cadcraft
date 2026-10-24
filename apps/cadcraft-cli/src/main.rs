@@ -173,6 +173,7 @@ fn export_window(s: &Session, framing: Framing, before: Option<&[(u64, Option<Vi
     }
 }
 
+/// Install the file-format hooks the engine's commands use (read, write, plot, save with a loss report).
 fn install_io() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
@@ -307,6 +308,7 @@ fn loss(r: &cadcraft_io::LossReport) -> cadcraft_engine::cmd::file::Loss {
     cadcraft_engine::cmd::file::Loss { count: r.count(), summary: r.summary(), json: r.to_json() }
 }
 
+/// Write the drawing to `out` (a window frames images), backing up an overwritten source a lossy save would shrink and keeping the loss report beside a drawing file.
 fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), String> {
     use cadcraft_engine::cmd::file::{back_up_source, keep_loss_report};
     let d = s.doc().map_err(|e| e.to_string())?;
@@ -908,6 +910,7 @@ fn main() -> ExitCode {
     if STDOUT_ERROR.load(Ordering::Relaxed) { ExitCode::FAILURE } else { code }
 }
 
+/// Parse the command line and run the subcommand; the exit code says whether it succeeded.
 fn cli() -> ExitCode {
     install_io();
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -44,6 +44,7 @@ pub(crate) fn state_from_bridge(read: &DwgRead) -> PreservationState {
     state
 }
 
+/// The drawing's view of a bridge issue (no dependency type crosses into the document).
 fn map_issue(i: &BridgeIssue) -> PreservationIssue {
     PreservationIssue {
         reason: match i.reason {
@@ -134,6 +135,7 @@ pub struct LossReport {
 }
 
 impl LossReport {
+    /// Whether the file lacks nothing.
     pub fn is_empty(&self) -> bool {
         self.records.is_empty() && self.more == 0
     }
@@ -207,6 +209,7 @@ impl LossReport {
     }
 }
 
+/// Standard base64 with padding (the record bytes in the JSON report).
 fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
@@ -224,10 +227,12 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// A handle in upper-case hex.
 fn hex(h: u64) -> String {
     format!("{h:X}")
 }
 
+/// The report's name for a record kind.
 fn kind_name(k: PreservationKind) -> &'static str {
     match k {
         PreservationKind::Entity => "entity",
@@ -237,6 +242,7 @@ fn kind_name(k: PreservationKind) -> &'static str {
     }
 }
 
+/// Why a record the import lost isn't in the file.
 fn import_reason(r: PreservationReason) -> &'static str {
     match r {
         PreservationReason::OpaqueCustomRecord => "custom record of another program, not part of the editable drawing",
@@ -246,6 +252,7 @@ fn import_reason(r: PreservationReason) -> &'static str {
     }
 }
 
+/// A carried record the file lacks, with its DWG bytes.
 fn carried_record(r: &CarriedRecord, version: &str, reason: String) -> LostRecord {
     LostRecord {
         reason,
@@ -260,6 +267,7 @@ fn carried_record(r: &CarriedRecord, version: &str, reason: String) -> LostRecor
     }
 }
 
+/// An import issue the file lacks (no bytes: the record wasn't carried).
 fn issue_record(i: &PreservationIssue) -> LostRecord {
     LostRecord {
         reason: import_reason(i.reason).to_string(),
@@ -305,45 +313,44 @@ pub(crate) fn import_losses(d: &Drawing, kept: &HashSet<u64>, why_carried: &dyn 
     (out, more)
 }
 
-/// Other programs' records kept from a DXF file that a DWG can't hold (they are left out of it),
-/// with their DXF groups.
-pub(crate) fn dxf_customs_lost(d: &Drawing, version: crate::Version) -> Vec<LostRecord> {
-    let custom = crate::custom_class_names(d);
-    let stored = if version >= crate::Version::R2013 { d.foreign.data_store_entities() } else { Default::default() };
-    let why = format!("custom record of another program: CADCraft keeps it in DXF, a DWG {} can't hold it", version.code());
-    let mut out = Vec::new();
+/// Other programs' records a written DWG leaves out. `dropped`, the DWG writer's own list, decides
+/// what is lost; each one gets its DXF groups when CADCraft kept the record from a DXF file
+/// (matched by kind, type and handle, else by kind and type in order). A record the writer kept
+/// isn't listed.
+pub(crate) fn dxf_customs_lost(d: &Drawing, version: crate::Version, dropped: &[cadcraft_dwg::Dropped]) -> Vec<LostRecord> {
+    let held = format!("custom record of another program: CADCraft keeps it in DXF, a DWG {} can't hold it", version.code());
+    let unheld = format!("record of another program the DWG writer can't write as {}", version.code());
+    // What CADCraft kept of each candidate: (kind, upper-case type, handle, DXF groups).
+    let mut kept: Vec<Option<(&'static str, String, u64, Vec<(i32, String)>)>> = Vec::new();
     let spaces = std::iter::once(&d.model).chain(d.layouts.iter().map(|l| &l.entities)).chain(d.blocks.values().map(|b| &b.entities));
     for e in spaces.flat_map(|s| s.iter()) {
-        let EntityKind::Unknown(u) = &e.kind else { continue };
-        if crate::MODELER_TYPES.iter().any(|t| u.dxf_type.eq_ignore_ascii_case(t)) && stored.contains(&e.handle) {
-            continue;
+        if let EntityKind::Unknown(u) = &e.kind {
+            kept.push(Some(("entity", u.dxf_type.to_ascii_uppercase(), e.handle.0, u.tags.iter().map(|t| (t.code, t.value.clone())).collect())));
         }
+    }
+    for o in &d.foreign.objects {
+        kept.push(Some(("object", o.kind.to_ascii_uppercase(), o.handle.0, o.tags.iter().map(|t| (t.code, t.value.clone())).collect())));
+    }
+    let mut out = Vec::with_capacity(dropped.len());
+    for r in dropped {
+        let name = r.type_name.to_ascii_uppercase();
+        let same = |c: &Option<(&'static str, String, u64, Vec<(i32, String)>)>| c.as_ref().is_some_and(|(k, t, _, _)| *k == r.kind && *t == name);
+        let at = kept.iter().position(|c| same(c) && c.as_ref().is_some_and(|(_, _, h, _)| *h == r.handle)).or_else(|| kept.iter().position(same));
+        let (reason, dxf) = match at.and_then(|i| kept.get_mut(i)).and_then(Option::take) {
+            Some((_, _, _, groups)) => (held.clone(), groups),
+            None => (unheld.clone(), Vec::new()),
+        };
         out.push(LostRecord {
-            reason: why.clone(),
-            kind: "entity",
-            record: Some(u.dxf_type.clone()),
-            handle: Some(e.handle.hex()),
+            reason,
+            kind: r.kind,
+            record: Some(r.type_name.clone()),
+            handle: Some(cadcraft_doc::Handle(r.handle).hex()),
             owner: None,
             path: Vec::new(),
             class: None,
             dwg: None,
-            dxf: u.tags.iter().map(|t| (t.code, t.value.clone())).collect(),
+            dxf,
         });
-    }
-    for o in &d.foreign.objects {
-        if custom.contains(&o.kind.to_ascii_uppercase()) {
-            out.push(LostRecord {
-                reason: why.clone(),
-                kind: "object",
-                record: Some(o.kind.clone()),
-                handle: Some(o.handle.hex()),
-                owner: None,
-                path: Vec::new(),
-                class: None,
-                dwg: None,
-                dxf: o.tags.iter().map(|t| (t.code, t.value.clone())).collect(),
-            });
-        }
     }
     out
 }
@@ -392,6 +399,7 @@ pub(crate) fn report(d: &Drawing, target: String, kept_natively: usize, records:
 
 #[cfg(test)]
 mod tests {
+    /// The base64 encoder matches the standard alphabet and padding.
     #[test]
     fn base64_matches_the_standard_alphabet_and_padding() {
         assert_eq!(super::base64(b""), "");

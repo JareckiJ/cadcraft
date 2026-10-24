@@ -26,6 +26,7 @@ const SENTINEL: &[u8] = b"existing engine target\0\xff";
 struct TestDir(PathBuf);
 
 impl TestDir {
+    /// A fresh directory, removed when dropped.
     fn new() -> TestResult<Self> {
         let path = std::env::temp_dir().join(format!("cc-engine-ff1-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&path)?;
@@ -34,11 +35,13 @@ impl TestDir {
 }
 
 impl Drop for TestDir {
+    /// Remove the directory and what is in it.
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
 
+/// Install the real I/O hooks, the loss-reporting writer among them.
 fn install() {
     set_io(IoHooks {
         read: |b, n| cadcraft_io::read(b, n).map_err(|e| e.to_string()),
@@ -68,6 +71,7 @@ struct Before {
 }
 
 impl Before {
+    /// The session state a failed save or byte delivery must not change.
     fn capture(s: &Session) -> Self {
         let st = s.state().unwrap();
         Self {
@@ -82,6 +86,7 @@ impl Before {
         }
     }
 
+    /// Assert the session state is as captured.
     fn unchanged(&self, s: &Session) {
         let st = s.state().unwrap();
         assert!(Arc::ptr_eq(&st.doc, &self.doc), "live drawing changed on failure/byte delivery");
@@ -91,21 +96,25 @@ impl Before {
     }
 }
 
+/// The LINE's handle.
 fn line(d: &Drawing) -> Handle {
     d.model.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).expect("LINE present").handle
 }
 
+/// Assert the LINE is moved by `shift` along X.
 fn assert_line(d: &Drawing, shift: f64) {
     let EntityKind::Line(l) = &d.entity(line(d)).unwrap().kind else { panic!("LINE absent") };
     assert_eq!((l.a.x, l.a.y, l.b.x, l.b.y), (1. + shift, 2., 11. + shift, 12.));
 }
 
+/// MOVE the LINE by 5 along X.
 fn edit(s: &mut Session) {
     let handle = line(s.doc().unwrap());
     let r = s.execute("move", &json!({"handle": handle.hex(), "delta": [5, 0]})).unwrap();
     assert_eq!(r["moved"], 1);
 }
 
+/// Assert a saved file keeps the custom records of `variant` and the LINE moved by `shift`.
 fn assert_foreign(bytes: &[u8], variant: CustomRecords, shift: f64) -> TestResult {
     let d = cadcraft_io::read(bytes, "saved.dxf")?;
     assert_line(&d, shift);
@@ -161,6 +170,7 @@ fn lossy_save(s: &mut Session, cmd: &str, params: Value, names: &[&str]) -> Test
 
 // Source oracle precedes CADCraft import. Full bit/text/reference stream assertions are also
 // exercised in io::ff1_preservation using this same original builder; no AutoCAD oracle claimed.
+/// Assert a saved DWG holds the source's custom records unchanged.
 fn assert_source(source: &ff1::DwgSource, bytes: &[u8]) -> TestResult {
     let out = DwgReader::from_stream(Cursor::new(bytes)).read_with_stats()?;
     assert!(out.stats.record_stream_read && out.stats.stream_completed && out.stats.source_records > 0);
@@ -191,6 +201,7 @@ fn assert_source(source: &ff1::DwgSource, bytes: &[u8]) -> TestResult {
     Ok(())
 }
 
+/// Every engine save of a DWG with `variant`: kept, or reported and the source backed up.
 fn native_saves(variant: CustomRecords) -> TestResult {
     install();
     let source = ff1::dwg_source(variant)?;
@@ -266,21 +277,25 @@ fn native_saves(variant: CustomRecords) -> TestResult {
     Ok(())
 }
 
+/// A custom entity is reported and the overwritten source backed up.
 #[test]
 fn native_custom_entity_is_reported_and_its_source_backed_up() -> TestResult {
     native_saves(CustomRecords::EntityOnly)
 }
 
+/// A custom object goes back into a same-version DWG.
 #[test]
 fn native_custom_object_goes_back_into_a_same_version_dwg() -> TestResult {
     native_saves(CustomRecords::ObjectOnly)
 }
 
+/// The import context survives UNDO and REDO.
 #[test]
 fn native_custom_entity_and_object_context_survives_undo_redo() -> TestResult {
     native_saves(CustomRecords::Combined)
 }
 
+/// A DWG export of a DXF drawing reports what it lacks; a later DXF save keeps everything.
 #[test]
 fn native_dxf_dwg_export_reports_its_losses_and_a_later_dxf_save_keeps_everything() -> TestResult {
     install();
@@ -314,6 +329,7 @@ fn native_dxf_dwg_export_reports_its_losses_and_a_later_dxf_save_keeps_everythin
     Ok(())
 }
 
+/// Real saves and byte delivery keep edits, versions and binary choices.
 #[test]
 fn real_save_and_byte_delivery_keep_edits_versions_and_binary_choices() -> TestResult {
     install();
@@ -373,6 +389,7 @@ fn real_save_and_byte_delivery_keep_edits_versions_and_binary_choices() -> TestR
     Ok(())
 }
 
+/// A storage failure keeps the drawing dirty, with its path, title and saved snapshot.
 #[test]
 fn real_storage_failure_keeps_dirty_path_title_and_saved_snapshot() -> TestResult {
     install();

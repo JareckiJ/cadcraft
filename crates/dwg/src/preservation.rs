@@ -95,6 +95,7 @@ impl BridgeIssue {
     }
 }
 
+/// `text` cut to `MAX_TEXT_BYTES` at a character boundary.
 #[cfg(not(target_arch = "wasm32"))]
 fn bounded(text: &str) -> String {
     let mut end = text.len().min(MAX_TEXT_BYTES);
@@ -113,14 +114,17 @@ pub(crate) struct Collector {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Collector {
+    /// An empty collector.
     pub(crate) fn new() -> Self {
         Self { issues: Vec::new(), count: 0 }
     }
 
+    /// The detailed issues and the total count.
     pub(crate) fn finish(self) -> (Vec<BridgeIssue>, u64) {
         (self.issues, self.count)
     }
 
+    /// Count an issue, keeping its detail while there is room.
     fn push(&mut self, mut issue: BridgeIssue) {
         if issue.count == 0 {
             return;

@@ -27,6 +27,7 @@ pub struct Source {
     pub raw: Option<Vec<u8>>,
 }
 
+/// A source at `version` with the supported metadata of `family`.
 pub fn source(version: acadrust::DxfVersion, family: Family) -> TestResult<Source> {
     let mut doc = CadDocument::with_version(version);
     let line = doc.add_entity(EntityType::Line(Line::from_coords(1., 2., 0., 11., 12., 0.)))?;
@@ -104,6 +105,7 @@ pub fn source(version: acadrust::DxfVersion, family: Family) -> TestResult<Sourc
     Ok(Source { doc, line, target, raw })
 }
 
+/// Assert a native document keeps `family`'s metadata, the LINE ending at `end`.
 pub fn assert_native(doc: &CadDocument, family: Family, end: f64) -> TestResult {
     let lines: Vec<_> = doc.entities().filter_map(|e| if let EntityType::Line(l) = e { Some(l) } else { None }).collect();
     assert_eq!(lines.len(), 1);
@@ -151,6 +153,7 @@ pub fn assert_native(doc: &CadDocument, family: Family, end: f64) -> TestResult 
     Ok(())
 }
 
+/// Assert DXF tags keep `family`'s metadata, the LINE ending at `end`.
 pub fn assert_tags(bytes: &[u8], family: Family, end: f64) -> TestResult {
     use cadcraft_dxf::{Tag, records};
     let tags = cadcraft_dxf::parse(bytes)?;

@@ -32,24 +32,6 @@ pub use dxf_write::entity_groups;
 pub use pdf::{PdfOptions, pdf, plot};
 pub use preservation::{LossReport, LostRecord, RawDwg};
 
-/// Solid-modeler entity types whose ACIS payload the data store can carry from AutoCAD 2013 on.
-pub(crate) const MODELER_TYPES: &[&str] = &["3DSOLID", "REGION", "BODY"];
-
-/// DXF names of foreign CLASS records whose C++ name is not an Autodesk `AcDb*` type: those are
-/// custom classes of other programs. CADCraft keeps them in DXF; a DWG save cannot.
-pub(crate) fn custom_class_names(d: &Drawing) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for class in &d.foreign.classes {
-        let dxf = class.iter().find(|t| t.code == 1).map(|t| t.value.trim());
-        let cpp = class.iter().find(|t| t.code == 2).map(|t| t.value.trim()).unwrap_or("");
-        let Some(dxf) = dxf.filter(|n| !n.is_empty()) else { continue };
-        if !cpp.to_ascii_lowercase().starts_with("acdb") {
-            out.insert(dxf.to_ascii_uppercase());
-        }
-    }
-    out
-}
-
 /// How a drawing is saved as DXF or DWG.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SaveOptions {
@@ -153,7 +135,7 @@ pub fn write_with_report(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<
                     .unwrap_or_else(|| format!("custom record of another program: kept only for a DWG {source} save, this one is {}", version.code()))
             };
             let (mut records, more) = preservation::import_losses(d, &kept, &why);
-            records.extend(preservation::dxf_customs_lost(d, version));
+            records.extend(preservation::dxf_customs_lost(d, version, &w.dropped));
             records.extend(preservation::block_xdata_lost(&block_xdata, version));
             Ok((w.bytes, preservation::report(d, format!("DWG {}", version.code()), w.kept, records, more)))
         }
@@ -207,6 +189,7 @@ pub struct Audit {
 }
 
 impl Audit {
+    /// The audit as JSON: the loss report and the per-kind differences.
     pub fn to_json(&self) -> String {
         let report: serde_json::Value = self.report.as_ref().map(|r| serde_json::from_str(&r.to_json()).unwrap_or_default()).unwrap_or_default();
         let diffs: Vec<serde_json::Value> =

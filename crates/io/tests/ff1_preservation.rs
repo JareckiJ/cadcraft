@@ -20,6 +20,7 @@ fn saved(doc: &cadcraft_doc::Drawing, path: &str, opts: &cadcraft_io::SaveOption
     Ok(cadcraft_io::write_with_report(doc, path, opts)?)
 }
 
+/// The record types a loss report names.
 fn lost_names(r: &cadcraft_io::LossReport) -> Vec<&str> {
     r.records.iter().filter_map(|x| x.record.as_deref()).collect()
 }
@@ -31,6 +32,7 @@ fn data_bits(raw: &[u8], handle_bits: i64) -> Vec<bool> {
     (0..n).map(|i| raw.get(i / 8).is_some_and(|b| (b >> (7 - (i % 8))) & 1 == 1)).collect()
 }
 
+/// The generated DWG sources hold the exact opaque records before the bridge reads them.
 #[test]
 fn generated_dwg_sources_contain_exact_opaque_records_before_the_bridge() -> TestResult {
     for variant in [CustomRecords::EntityOnly, CustomRecords::ObjectOnly, CustomRecords::Combined] {
@@ -117,6 +119,7 @@ fn generated_dwg_sources_contain_exact_opaque_records_before_the_bridge() -> Tes
     Ok(())
 }
 
+/// The DXF builders have classes, payloads, owners and LINE references.
 #[test]
 fn native_dxf_builders_have_classes_payloads_owners_and_line_references() -> TestResult {
     use cadcraft_doc::{EntityKind, Handle};
@@ -198,6 +201,23 @@ fn custom_records_are_left_out_of_a_dwg_and_reported_with_their_groups() -> Test
     Ok(())
 }
 
+/// The DWG writer's own list decides what the report names: an unknown object whose class is
+/// an `AcDb*` one is left out of the DWG like any other, and is reported with its DXF groups.
+#[test]
+fn an_unknown_object_of_an_acdb_class_is_reported_when_the_dwg_leaves_it_out() -> TestResult {
+    let source = ff1::dxf_source(CustomRecords::ObjectOnly).replace("RustFF1_OBJECT", "AcDbFF1Object");
+    let doc = cadcraft_io::read_dxf(source.as_bytes())?;
+    let opts = cadcraft_io::SaveOptions { version: Some(cadcraft_dxf::Version::R2018), ..Default::default() };
+    let (bytes, report) = saved(&doc, "out.dwg", &opts)?;
+    let report = report.ok_or("no loss report")?;
+    assert_eq!(lost_names(&report), ["FF1_OBJECT"]);
+    assert!(report.records.iter().all(|r| r.dxf.iter().any(|(c, v)| *c == 1 && v == "FF1_OBJECT_UNIQUE")), "{:?}", report.records);
+    let native = DwgReader::from_stream(Cursor::new(&bytes)).read()?;
+    assert!(!native.objects.values().any(|o| matches!(o, ObjectType::Unknown { .. })));
+    Ok(())
+}
+
+/// The strict bridge refuses custom records it can't write as DWG.
 #[test]
 fn the_bridge_refuses_custom_records_it_cannot_write_as_dwg() {
     for variant in [CustomRecords::EntityOnly, CustomRecords::ObjectOnly, CustomRecords::Combined] {
@@ -227,6 +247,7 @@ fn object_only_customs_are_reported_from_foreign_inventory() -> TestResult {
     Ok(())
 }
 
+/// MOVE the entity `handle` by 5 along X.
 fn edit_line(doc: &mut cadcraft_doc::Drawing, handle: cadcraft_doc::Handle) -> TestResult {
     doc.modify_entity(handle, |e| {
         if let cadcraft_doc::EntityKind::Line(l) = &mut e.kind {
@@ -236,6 +257,7 @@ fn edit_line(doc: &mut cadcraft_doc::Drawing, handle: cadcraft_doc::Handle) -> T
     Ok(())
 }
 
+/// A DWG source with `variant` read through CADCraft, and its LINE.
 fn native_import(variant: CustomRecords) -> TestResult<(cadcraft_doc::Drawing, cadcraft_doc::Handle)> {
     let source = ff1::dwg_source(variant)?;
     let doc = cadcraft_io::read(source.bytes.as_ref(), "source.dwg")?;
@@ -272,6 +294,7 @@ fn public_dxf_writers_save_incomplete_native_imports_and_the_report_keeps_their_
     Ok(())
 }
 
+/// The public DXF writers keep native DXF payloads, classes and references identically.
 #[test]
 fn public_dxf_writers_keep_native_dxf_payloads_classes_and_references_identically() -> TestResult {
     use cadcraft_doc::{EntityKind, Handle, RawTag};
@@ -347,6 +370,7 @@ fn public_dxf_writers_keep_native_dxf_payloads_classes_and_references_identicall
     Ok(())
 }
 
+/// Every database save target: DXF, binary DXF, DWG and DWT.
 fn all_database_targets() -> Vec<(&'static str, cadcraft_io::SaveOptions)> {
     use cadcraft_dxf::Version;
     let v = |version| cadcraft_io::SaveOptions { version: Some(version), binary: false };
@@ -425,6 +449,7 @@ fn native_import_keeps_or_reports_every_record_for_every_database_target() -> Te
     Ok(())
 }
 
+/// Drawings with only known or native DXF content stay writable everywhere.
 #[test]
 fn known_and_native_dxf_only_documents_stay_writable() -> TestResult {
     for variant in [CustomRecords::EntityOnly, CustomRecords::ObjectOnly, CustomRecords::Combined] {
@@ -480,6 +505,7 @@ fn block_dxf_source(version: cadcraft_io::Version) -> String {
     )
 }
 
+/// Assert the BLOCK marker's XDATA payload is intact.
 fn assert_block_payload(doc: &cadcraft_doc::Drawing) -> TestResult {
     let extra = doc.foreign.records.get(&("BLOCK".into(), BLOCK_NAME.into())).ok_or("BLOCK foreign role absent")?;
     let actual: Vec<_> = extra.xdata.iter().map(|t| (t.code, t.value.as_str())).collect();
@@ -521,6 +547,7 @@ fn dxf_block_marker_xdata_is_reported_for_dwg_and_kept_by_repeated_dxf_saves() -
     Ok(())
 }
 
+/// The BLOCK-marker report names the target and counts only blocks actually written.
 #[test]
 fn block_marker_report_names_the_target_and_only_counts_blocks_actually_written() -> TestResult {
     use cadcraft_io::{SaveOptions, Version};
@@ -591,6 +618,7 @@ fn metadata_dwg(version: DxfVersion, family: &str) -> TestResult<(Vec<u8>, acadr
     Ok((acadrust::DwgWriter::write_to_vec(&doc)?, target))
 }
 
+/// Read a DWG natively for the metadata checks.
 fn read_native_metadata(bytes: &[u8]) -> TestResult<acadrust::CadDocument> {
     let outcome = DwgReader::from_stream(Cursor::new(bytes)).read_with_stats()?;
     assert!(outcome.stats.source_records > 0 && outcome.stats.record_stream_read && outcome.stats.stream_completed);
@@ -639,6 +667,7 @@ fn appid_source(version: DxfVersion, name: &str, entity_use: bool) -> TestResult
     Ok(doc)
 }
 
+/// Assert the APPID `name` keeps its own XDATA (and the LINE its use, when `entity_use`), the LINE ending at `end`.
 fn assert_native_appid(doc: &acadrust::CadDocument, name: &str, entity_use: bool, end: f64) -> TestResult {
     use acadrust::xdata::XDataValue;
     let app = doc.app_ids.get(name).ok_or("native APPID absent")?.handle;
@@ -669,6 +698,7 @@ fn assert_native_appid(doc: &acadrust::CadDocument, name: &str, entity_use: bool
     Ok(())
 }
 
+/// The native document as acadrust DXF.
 fn native_dxf(doc: &acadrust::CadDocument) -> TestResult<Vec<u8>> {
     let mut bytes = Vec::new();
     acadrust::DxfWriter::new(doc).write_to_writer(&mut bytes)?;
@@ -730,6 +760,7 @@ fn assert_appid_tags(bytes: &[u8], name: &str, entity_use: bool, end: f64) -> Te
     Ok(())
 }
 
+/// A custom APPID's own XDATA survives DWG and DXF saves, with or without entity use.
 fn appid_roundtrips(name: &str, entity_use: bool) -> TestResult {
     use cadcraft_io::{SaveOptions, Version};
     for (native_version, version) in
@@ -777,21 +808,25 @@ fn appid_roundtrips(name: &str, entity_use: bool) -> TestResult {
     Ok(())
 }
 
+/// A custom APPID's own XDATA survives without entity use.
 #[test]
 fn custom_appid_own_xdata_survives_without_entity_use() -> TestResult {
     appid_roundtrips(APPID_CUSTOM, false)
 }
 
+/// A custom APPID's own XDATA survives with entity use spelled in another case.
 #[test]
 fn custom_appid_own_xdata_survives_with_case_insensitive_entity_use() -> TestResult {
     appid_roundtrips(APPID_CUSTOM, true)
 }
 
+/// The built-in ACAD APPID's foreign XDATA stays writable.
 #[test]
 fn builtin_appid_foreign_xdata_remains_writable() -> TestResult {
     appid_roundtrips("ACAD", false)
 }
 
+/// A BLOCK source with public XDATA and raw EED: every database save reports it.
 #[test]
 fn native_block_source_has_public_xdata_and_raw_eed_and_every_database_save_reports_it() -> TestResult {
     use acadrust::xdata::XDataValue;
@@ -922,6 +957,7 @@ fn table_roundtrips(native_version: DxfVersion, version: cadcraft_io::Version, f
     Ok(())
 }
 
+/// Supported metadata of `family` survives saves at `version` from a `native_version` source.
 fn supported_metadata_roundtrips(native_version: DxfVersion, version: cadcraft_io::Version, family: metadata::Family) -> TestResult {
     let source = metadata::source(native_version, family)?;
     let dwg = acadrust::DwgWriter::write_to_vec(&source.doc)?;
@@ -957,6 +993,7 @@ fn supported_metadata_roundtrips(native_version: DxfVersion, version: cadcraft_i
     Ok(())
 }
 
+/// A reactor to a custom non-entity record: carried by a same-version DWG, reported otherwise.
 fn custom_reactor_target(native_version: DxfVersion, _version: cadcraft_io::Version, family: metadata::Family) -> TestResult {
     let source = metadata::source(native_version, family)?;
     let bytes = acadrust::DwgWriter::write_to_vec(&source.doc)?;
@@ -1036,6 +1073,7 @@ metadata_matrix!(supported_metadata_roundtrips, metadata::Family::LayerColour, l
 metadata_matrix!(supported_metadata_roundtrips, metadata::Family::KnownReactor, known_reactor_ac1018, known_reactor_ac1021, known_reactor_ac1032);
 metadata_matrix!(custom_reactor_target, metadata::Family::CustomReactor, custom_reactor_ac1018, custom_reactor_ac1021, custom_reactor_ac1032);
 
+/// DXF custom records are reported by every DWG version, whatever the source version.
 #[test]
 fn dxf_custom_records_are_reported_by_every_dwg_version_whatever_the_source_version() -> TestResult {
     for source_version in [None, Some("AC1018"), Some("AC1021"), Some("AC1032")] {
@@ -1065,6 +1103,7 @@ fn dxf_custom_records_are_reported_by_every_dwg_version_whatever_the_source_vers
     Ok(())
 }
 
+/// Malformed or truncated native sources fail with an error or report their losses.
 #[test]
 fn malformed_or_truncated_native_sources_error_or_report_their_losses() -> TestResult {
     let source = ff1::dwg_source(CustomRecords::Combined)?;
@@ -1095,6 +1134,7 @@ fn malformed_or_truncated_native_sources_error_or_report_their_losses() -> TestR
     Ok(())
 }
 
+/// Issue overflow is counted in full through the I/O mapping, with bounded messages.
 #[test]
 fn native_issue_overflow_is_counted_in_full_through_the_io_mapping_with_bounded_messages() -> TestResult {
     use acadrust::entities::{Block, Line};

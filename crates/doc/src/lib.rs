@@ -158,6 +158,7 @@ impl Drawing {
         d.header.set_str("DIMSTYLE", "ISO-25");
         d
     }
+    /// An empty drawing with the default tables and no file context.
     fn bare() -> Self {
         Drawing {
             header: Header::default(),

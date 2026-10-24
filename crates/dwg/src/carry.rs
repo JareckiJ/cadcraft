@@ -124,6 +124,7 @@ pub struct NativeCarry {
 }
 
 impl PartialEq for NativeCarry {
+    /// Same version and the same records (bytes included).
     fn eq(&self, other: &Self) -> bool {
         self.version_code == other.version_code && self.records == other.records
     }
@@ -180,10 +181,12 @@ struct Layout {
     refs: Vec<HandleRef>,
 }
 
+/// Bit `i` of `raw`, most significant first (0 past the end).
 fn bit(raw: &[u8], i: usize) -> u8 {
     raw.get(i / 8).map_or(0, |b| (b >> (7 - (i % 8))) & 1)
 }
 
+/// The next `n` bits (at most 64) at `pos`, not past bit `end`; advances `pos`.
 fn read_bits(raw: &[u8], pos: &mut usize, n: usize, end: usize) -> Option<u64> {
     if n > 64 || pos.checked_add(n)? > end {
         return None;
@@ -264,6 +267,7 @@ fn target(r: &HandleRef, own: u64) -> Option<u64> {
     }
 }
 
+/// Append the low `n` bits of `value`, most significant first, counting them in `nbits`.
 fn push_bits(out: &mut Vec<u8>, nbits: &mut usize, value: u64, n: usize) {
     for i in (0..n).rev() {
         if nbits.is_multiple_of(8) {
@@ -360,6 +364,7 @@ fn key_path(index: &HashMap<Handle, (Handle, String)>, nod: Handle, h: Handle) -
     None
 }
 
+/// What handle `h` is to the document (layer, linetype, style, application, block, dictionary path, entity, the named object dictionary), so a carried reference can be re-encoded to what has the same role in the written file.
 fn role(doc: &CadDocument, index: &HashMap<Handle, (Handle, String)>, h: Handle) -> Option<CarryRole> {
     let nod = doc.header.named_objects_dict_handle;
     if h == nod {
@@ -416,6 +421,7 @@ fn resolve(doc: &CadDocument, role: &CarryRole, old: u64) -> Option<Handle> {
     }
 }
 
+/// The CLASS record named `name`, for the report.
 fn class_of(doc: &CadDocument, name: &str) -> Option<BridgeClass> {
     doc.classes.get_by_name(name).map(|c| BridgeClass {
         number: Some(c.class_number),
@@ -425,6 +431,7 @@ fn class_of(doc: &CadDocument, name: &str) -> Option<BridgeClass> {
     })
 }
 
+/// An object's type for messages (its enum variant's name).
 fn object_kind(o: &ObjectType) -> String {
     let s = format!("{o:?}");
     s.split(['(', ' ', '{']).next().unwrap_or("object").to_string()
@@ -768,6 +775,7 @@ fn written_subtree(doc: &CadDocument, top: Handle) -> Vec<Handle> {
     out
 }
 
+/// The handle of a dictionary or XRECORD (the types a carried subtree may hold besides opaque records).
 fn object_handle(o: &ObjectType) -> Option<Handle> {
     match o {
         ObjectType::Dictionary(d) => Some(d.handle),
@@ -776,6 +784,7 @@ fn object_handle(o: &ObjectType) -> Option<Handle> {
     }
 }
 
+/// A subtree that can't go back, with its records' handles and why.
 fn not_carried(carry: &NativeCarry, root: &Root, reason: String) -> NotCarried {
     NotCarried { key: root.key.clone(), handles: root.records.iter().filter_map(|&i| carry.records.get(i)).map(|r| r.handle).collect(), reason }
 }
@@ -972,6 +981,7 @@ pub fn verify(doc: &CadDocument, applied: &Applied) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Append a handle reference: 4-bit code, byte count, then the value's bytes.
     fn push_ref(out: &mut Vec<u8>, n: &mut usize, code: u8, value: u64) {
         let bytes = (64 - value.leading_zeros()).div_ceil(8) as usize;
         push_bits(out, n, u64::from(code), 4);
@@ -1002,6 +1012,7 @@ mod tests {
         (raw, hb)
     }
 
+    /// A record's handle stream is decoded and encoded again bit for bit.
     #[test]
     fn records_are_read_and_rewritten_bit_exactly() {
         let (raw, hb) = record(0x100, 0x12, &[(4, 0x2A), (5, 0x10), (6, 0)]);
@@ -1030,6 +1041,7 @@ mod tests {
         }
     }
 
+    /// Truncated or oversized handle streams are refused, never read past their end.
     #[test]
     fn hostile_records_are_refused_not_misread() {
         assert!(handle_refs(&[], 8).is_none());

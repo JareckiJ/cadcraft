@@ -67,8 +67,12 @@ silently.** Every database entry point (CLI `convert` and `run --save`, engine `
 lacks: a loss report naming each record of the source that isn't in the file, with that record's
 own DWG bytes (as read, R2010+ framing with its handle-stream bit count) or DXF groups where they
 were kept, so it can be restored later. The CLI and the editor keep it beside the file as
-`<file>.lost.json`, echo its summary, and copy a file they overwrite with less than it holds to
-`<name>.orig.<ext>` first. `document.bytes` returns the report in its result. (`write`,
+`<file>.lost.json` (with the saved file's size and hash, and no wider permissions than the
+file), echo its summary, and copy a file they overwrite with less than it holds to
+`<name>.orig.<ext>` first (created exclusively, with the file's permissions; a report beside the
+file suppresses the copy only when it was made for exactly that file). The editor marks the
+drawing saved only once both the file and its report are written. A DWG save's list of other
+programs' records comes from the DWG writer's own list of what it left out. `document.bytes` returns the report in its result. (`write`,
 `write_with`, `write_framed` and `write_dxf` return the bytes only; their callers use the
 `_report` forms to see the loss.)
 

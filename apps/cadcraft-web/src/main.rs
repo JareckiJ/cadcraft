@@ -97,6 +97,7 @@ mod web {
         Services { pick_save: Some(Box::new(|name: &str| Some(name.to_string()))), no_file_system: true, ..Services::default() }
     }
 
+    /// Start the web app: logging, the file-format hooks, and the eframe runner on the page's canvas.
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {

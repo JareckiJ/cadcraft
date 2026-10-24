@@ -15,6 +15,7 @@ use acadrust::objects::{ObjectType, XRecordValue};
 use acadrust::{CadDocument, DwgReader, Handle};
 use ff1::TestResult;
 
+/// Read a DWG natively, asserting nothing was skipped.
 fn native(bytes: &[u8]) -> TestResult<CadDocument> {
     let out = DwgReader::from_stream(Cursor::new(bytes)).read_with_stats()?;
     assert_eq!((out.stats.skipped_source_records, out.stats.recovered_errors), (0, 0));
@@ -61,6 +62,7 @@ fn references(raw: &[u8], handle_bits: i64) -> (Vec<u64>, Vec<(u8, u64)>) {
     (apps, refs)
 }
 
+/// An opaque record's type, bytes, handle-stream bit count and owner.
 fn record(doc: &CadDocument, h: Handle) -> TestResult<(&String, &Vec<u8>, i64, Handle)> {
     match doc.objects.get(&h) {
         Some(ObjectType::Unknown { type_name, raw_dwg_data: Some(raw), raw_dwg_handle_bits, owner, .. }) => {
@@ -70,6 +72,7 @@ fn record(doc: &CadDocument, h: Handle) -> TestResult<(&String, &Vec<u8>, i64, H
     }
 }
 
+/// MOVE the LINE by `dx` along X.
 fn edit_line(doc: &mut cadcraft_doc::Drawing, dx: f64) -> TestResult {
     let h = doc.model.iter().find(|e| matches!(e.kind, cadcraft_doc::EntityKind::Line(_))).ok_or("LINE")?.handle;
     doc.modify_entity(h, |e| {
@@ -80,6 +83,7 @@ fn edit_line(doc: &mut cadcraft_doc::Drawing, dx: f64) -> TestResult {
     Ok(())
 }
 
+/// Display objects go back into a same-version DWG with every reference moved, over two edited saves.
 #[test]
 fn display_objects_go_back_into_a_same_version_dwg_with_their_references_moved() -> TestResult {
     let src = ff1::display_source()?;
@@ -147,6 +151,7 @@ fn display_objects_go_back_into_a_same_version_dwg_with_their_references_moved()
     Ok(())
 }
 
+/// Another version or DXF reports every display object with its bytes.
 #[test]
 fn another_version_or_dxf_reports_every_display_object_with_its_bytes() -> TestResult {
     let src = ff1::display_source()?;
@@ -167,6 +172,7 @@ fn another_version_or_dxf_reports_every_display_object_with_its_bytes() -> TestR
     Ok(())
 }
 
+/// `audit` counts what a save keeps and loses without writing anything.
 #[test]
 fn audit_counts_what_a_save_keeps_and_loses_without_writing() -> TestResult {
     let src = ff1::display_source()?;

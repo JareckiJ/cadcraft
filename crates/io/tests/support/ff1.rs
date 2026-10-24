@@ -187,6 +187,7 @@ pub struct DisplaySource {
 #[allow(dead_code)]
 pub const NO_ROLE: u64 = 0xF_FFFF;
 
+/// Build the [`DisplaySource`] DWG.
 #[allow(dead_code)]
 pub fn display_source() -> TestResult<DisplaySource> {
     use acadrust::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};

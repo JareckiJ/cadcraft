@@ -32,6 +32,7 @@ const SENTINEL: &[u8] = b"existing target must remain byte-identical\0\xff";
 struct TestDir(PathBuf);
 
 impl TestDir {
+    /// A fresh directory, removed when dropped.
     fn new() -> TestResult<Self> {
         let path = std::env::temp_dir().join(format!("cc-cli-ff1-{}-{}", std::process::id(), NEXT_DIR.fetch_add(1, Ordering::Relaxed)));
         fs::create_dir(&path)?;
@@ -40,23 +41,28 @@ impl TestDir {
 }
 
 impl Drop for TestDir {
+    /// Remove the directory and what is in it.
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
 
+/// Run the CLI binary with `args`.
 fn cli(args: &[&str]) -> TestResult<Output> {
     Ok(Command::new(env!("CARGO_BIN_EXE_cadcraft-cli")).args(args).output()?)
 }
 
+/// A test path as text.
 fn path(path: &Path) -> &str {
     path.to_str().expect("test path is UTF-8")
 }
 
+/// Assert the CLI succeeded, showing its stderr if not.
 fn success(out: &Output) {
     assert!(out.status.success(), "{:?}: {}", out.status, String::from_utf8_lossy(&out.stderr));
 }
 
+/// Assert the first JSON result moved the LINE.
 fn moved(out: &Output) -> TestResult {
     let first = out.stdout.split(|b| *b == b'\n').find(|line| !line.is_empty()).ok_or("no move result")?;
     let result: serde_json::Value = serde_json::from_slice(first)?;
@@ -64,15 +70,18 @@ fn moved(out: &Output) -> TestResult {
     Ok(())
 }
 
+/// The LINE's handle in a drawing file.
 fn line_handle(bytes: &[u8]) -> TestResult<Handle> {
     let doc = cadcraft_io::read(bytes, "source.dxf")?;
     Ok(doc.model.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).ok_or("LINE absent")?.handle)
 }
 
+/// A MOVE of the LINE by 5 along X, as a script line.
 fn move_command(bytes: &[u8]) -> TestResult<String> {
     Ok(format!("move {}", serde_json::json!({"handle": line_handle(bytes)?.hex(), "delta": [5, 0]})))
 }
 
+/// Read a DWG natively, asserting nothing was skipped or recovered.
 fn read_native(bytes: &[u8]) -> TestResult<CadDocument> {
     let out = DwgReader::from_stream(Cursor::new(bytes)).read_with_stats()?;
     assert!(out.stats.source_records > 0 && out.stats.record_stream_read && out.stats.stream_completed);
@@ -227,6 +236,7 @@ fn assert_opaque(bytes: &[u8], expected: &ff1::DwgSource) -> TestResult {
     Ok(())
 }
 
+/// Every CLI save of a DWG with `records`: kept by a same-version DWG/DWT, reported with bytes otherwise.
 fn opaque_saves(records: CustomRecords) -> TestResult {
     let source = ff1::dwg_source(records)?;
     let entity: Vec<&'static str> = source.entity.as_ref().map(|e| e.name).into_iter().collect();
@@ -251,21 +261,25 @@ fn opaque_saves(records: CustomRecords) -> TestResult {
     Ok(())
 }
 
+/// A custom entity is reported by every save, with its bytes.
 #[test]
 fn native_entity_only_is_reported_by_every_save_with_its_bytes() -> TestResult {
     opaque_saves(CustomRecords::EntityOnly)
 }
 
+/// A custom object goes back into a same-version DWG and DWT and is reported by DXF.
 #[test]
 fn native_object_only_goes_back_into_dwg_and_dwt_and_is_reported_by_dxf() -> TestResult {
     opaque_saves(CustomRecords::ObjectOnly)
 }
 
+/// A custom entity and object together are kept or reported by every save.
 #[test]
 fn native_combined_customs_are_kept_or_reported_by_every_save() -> TestResult {
     opaque_saves(CustomRecords::Combined)
 }
 
+/// The source's extended data on the LINE.
 fn xdata(line: acadrust::Handle) -> ExtendedData {
     let mut record = ExtendedDataRecord::new(APP);
     record.values = vec![
@@ -323,6 +337,7 @@ fn metadata_source(version: DxfVersion, marker_only: bool) -> TestResult<Vec<u8>
     Ok(DwgWriter::write_to_vec(&doc)?)
 }
 
+/// Assert a saved DWG keeps the supported metadata and the LINE moved by `dx`.
 fn assert_native_metadata(bytes: &[u8], marker_only: bool, dx: f64) -> TestResult {
     let doc = read_native(bytes)?;
     assert!(doc.entities().all(|e| !matches!(e, EntityType::Unknown(_))));
@@ -370,6 +385,7 @@ fn assert_native_metadata(bytes: &[u8], marker_only: bool, dx: f64) -> TestResul
     Ok(())
 }
 
+/// BLOCK-marker metadata alone is reported by every save, at AC1018, AC1021 and AC1032.
 #[test]
 fn native_block_metadata_alone_is_reported_by_every_save_in_all_three_measured_versions() -> TestResult {
     for version in [DxfVersion::AC1018, DxfVersion::AC1021, DxfVersion::AC1032] {
@@ -379,6 +395,7 @@ fn native_block_metadata_alone_is_reported_by_every_save_in_all_three_measured_v
     Ok(())
 }
 
+/// Assert the LINE is moved by `dx`; returns its handle.
 fn assert_line(doc: &Drawing, dx: f64) -> TestResult<Handle> {
     let lines: Vec<_> = doc.model.iter().filter_map(|e| if let EntityKind::Line(l) = &e.kind { Some((e.handle, l)) } else { None }).collect();
     assert_eq!(lines.len(), 1);
@@ -387,6 +404,7 @@ fn assert_line(doc: &Drawing, dx: f64) -> TestResult<Handle> {
     Ok(handle)
 }
 
+/// Assert a saved DXF keeps the custom records' payloads, classes and references, and the LINE moved by `dx`.
 fn assert_dxf_customs(bytes: &[u8], records: CustomRecords, dx: f64) -> TestResult {
     let doc = cadcraft_io::read(bytes, "source.dxf")?;
     let line = assert_line(&doc, dx)?;
@@ -450,6 +468,7 @@ fn dxf_block_source() -> String {
     )
 }
 
+/// Assert a saved DXF keeps the BLOCK marker's XDATA and the LINE moved by `dx`.
 fn assert_dxf_block(bytes: &[u8], dx: f64) -> TestResult {
     let doc = cadcraft_io::read(bytes, "source.dxf")?;
     let line = assert_line(&doc, dx)?;
@@ -467,6 +486,7 @@ fn assert_dxf_block(bytes: &[u8], dx: f64) -> TestResult {
     Ok(())
 }
 
+/// DXF BLOCK-marker metadata is reported by DWG/DWT saves and kept by DXF.
 #[test]
 fn dxf_block_metadata_alone_is_reported_by_dwg_dwt_and_kept_by_native_dxf() -> TestResult {
     let source = dxf_block_source();
@@ -474,6 +494,7 @@ fn dxf_block_metadata_alone_is_reported_by_dwg_dwt_and_kept_by_native_dxf() -> T
     two_edited_saves(source.as_bytes(), "dxf", "dxf", assert_dxf_block)
 }
 
+/// DXF custom records are reported with their groups by DWG and DWT saves.
 #[test]
 fn native_dxf_customs_are_reported_with_their_groups_by_dwg_and_dwt_saves() -> TestResult {
     for records in [CustomRecords::EntityOnly, CustomRecords::ObjectOnly, CustomRecords::Combined] {
@@ -511,12 +532,14 @@ fn two_edited_saves(bytes: &[u8], source_ext: &str, target_ext: &str, verify: im
     Ok(())
 }
 
+/// DXF foreign payloads, classes and references survive two CLI edits.
 #[test]
 fn native_dxf_foreign_payloads_classes_and_references_survive_two_cli_edits() -> TestResult {
     let bytes = ff1::dxf_source(CustomRecords::Combined);
     two_edited_saves(bytes.as_bytes(), "dxf", "dxf", |b, dx| assert_dxf_customs(b, CustomRecords::Combined, dx))
 }
 
+/// Supported metadata and LINE edits survive two DWG, DWT and DXF saves.
 #[test]
 fn supported_native_metadata_and_line_edits_survive_two_dwg_dwt_and_dxf_saves() -> TestResult {
     for version in [DxfVersion::AC1018, DxfVersion::AC1021, DxfVersion::AC1032] {
@@ -574,6 +597,7 @@ fn supported_native_metadata_and_line_edits_survive_two_dwg_dwt_and_dxf_saves() 
     Ok(())
 }
 
+/// A partial import still supports `info` and image rendering.
 #[test]
 fn partial_native_import_still_supports_cli_info_and_image_rendering() -> TestResult {
     let source = ff1::dwg_source(CustomRecords::Combined)?;
