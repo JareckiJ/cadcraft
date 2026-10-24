@@ -492,7 +492,10 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         // the drawing's), in the style's text style, as the dimensions beside it (#1056).
         let d = s.doc()?;
         let ds = d.dim_style(&style(s)).cloned().unwrap_or_default();
-        let k = if ds.annotative { 1.0 } else { ds.effective_scale(d.header.f64("DIMSCALE", 1.0)) };
+        // As a dimension of the style: DIMSCALE always, and an annotative style makes the text
+        // annotative too, so it follows the annotation scale as the dimension does.
+        let k = ds.effective_scale(d.header.f64("DIMSCALE", 1.0));
+        let annotative = ds.annotative;
         let th = if ds.text_height > 0.0 { ds.text_height * k } else { 0.18 * k };
         let text_style = d.text_style(&ds.text_style).map_or_else(|| "Standard".to_string(), |t| t.name.clone());
         out.push(
@@ -510,6 +513,11 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
             }))?
             .hex(),
         );
+        if annotative && let Some(t) = out.last().and_then(|x| cadcraft_doc::Handle::parse_hex(x)) {
+            let d = s.doc_mut()?;
+            let cur = d.current_anno_scale();
+            d.modify_entity(t, |e| cadcraft_doc::set_annotative(e, true, &cur))?;
+        }
     }
     Ok(json!({ "handles": out }))
 }
