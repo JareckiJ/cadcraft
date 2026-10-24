@@ -967,7 +967,7 @@
 	Viewport {id}	Ansichtsfenster {id}
 	Viewports	Ansichtsfenster
 	W	W
-	WCS ⌄	WKS ⌄
+	WCS	WKS
 	White	Weiß
 	Width factor	Breitenfaktor
 	Window	Fenster
@@ -1027,6 +1027,7 @@
 	Search for pattern	Muster suchen
 	Not a number or distance: {text}	Keine Zahl und keine Entfernung: {text}
 	Query Texts	Texte abfragen
+	Analyze Shapes	Formen analysieren
 	Italic	Kursiv
 	Underline	Unterstrichen
 	Overline	Überstrichen
