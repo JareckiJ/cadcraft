@@ -9,7 +9,8 @@
 //! lineweights.
 //!
 //! Several sheets go into one file ([`pdf_sheets`], the `layouts` option), each page labelled
-//! with its layout name, and entity hyperlinks become link annotations.
+//! with its layout name. Drawing layers become PDF layers (optional content groups) that a PDF
+//! viewer can switch on and off, and entity hyperlinks become link annotations.
 
 use std::fmt::Write as _;
 
@@ -23,8 +24,10 @@ use craft_pdf::write::backend as kr;
 use craft_pdf::write::{self, Metadata, WriteError, Writer};
 use kr::action::LinkAction;
 use kr::annotation::{Annotation, LinkAnnotation, Target};
+use kr::error::KrillaError;
 use kr::geom::{Path, PathBuilder, Point, Rect, Transform};
 use kr::num::NormalizedF32;
+use kr::optional_content::OcgId;
 use kr::page::{PageLabel, PageSettings};
 use kr::paint::{Fill, FillRule, LineCap, LineJoin, Stroke};
 use kr::surface::Surface;
@@ -77,8 +80,8 @@ pub struct PdfOptions {
     pub window: Option<Bounds2>,
     /// Drawing layers become PDF layers (optional content groups). Default on.
     pub layers: bool,
-    /// With `layers`: objects on layers that are off are included on PDF layers that start
-    /// hidden (frozen layers are never included). Default off: they aren't plotted.
+    /// With `layers`: objects on layers that are off are plotted on PDF layers that start
+    /// hidden (frozen layers are never plotted). Default off: they aren't plotted.
     pub include_off_layers: bool,
     /// Hyperlinks: an entity's handle and its link target (a URL). The area the entity covers
     /// on the sheet becomes a link annotation.
@@ -412,7 +415,7 @@ fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as
         // Layers that are off plot on PDF layers that start hidden: draw them from a copy with
         // them on.
         let with_off;
-        let drawn = if OPTIONAL_CONTENT && o.layers && o.include_off_layers && d.layers.iter().any(|l| !l.on && !l.frozen) {
+        let drawn = if o.layers && o.include_off_layers && d.layers.iter().any(|l| !l.on && !l.frozen) {
             let mut c = d.clone();
             for l in c.layers.iter_mut().filter(|l| !l.frozen) {
                 l.on = true;
@@ -438,12 +441,42 @@ fn write_pdf(d: &Drawing, items: &[(Space, PdfOptions)], o: &PdfOptions, text_as
         };
         let mut writer = Writer::new(settings, metadata);
         let mut fonts = fonts::Fonts::new(!text_as_geometry);
+        let mut groups = Groups::default();
         for (s, po) in items {
             let page = sheet(drawn, s, po, &links)?;
-            write_page(writer.document_mut(), &page, &mut fonts)?;
+            let doc = writer.document_mut();
+            // Groups are added to the document, so they must exist before the page starts.
+            groups.add(doc, d, &page.layers);
+            write_page(doc, &page, &groups, &mut fonts)?;
+        }
+        if items.len() == 1 && !groups.ids.is_empty() {
+            writer.document_mut().set_optional_content_page_mode(true);
         }
         Ok(writer.finish()?)
     })
+}
+
+/// The PDF layers (optional content groups) of a file: one per drawing layer used, shared by
+/// all pages, at most [`MAX_LAYERS`].
+#[derive(Default)]
+struct Groups {
+    ids: std::collections::HashMap<u32, OcgId>,
+}
+
+impl Groups {
+    /// Add groups for the drawing layers in `layers` that don't have one yet, named after the
+    /// layer and visible when the layer is on in `d`, the drawing as given (not the copy that
+    /// turns layers that are off on to plot them).
+    fn add(&mut self, doc: &mut kr::Document, d: &Drawing, layers: &[u32]) {
+        for l in layers {
+            if self.ids.len() >= MAX_LAYERS || self.ids.contains_key(l) {
+                continue;
+            }
+            let Some(layer) = d.layers.get(*l as usize) else { continue };
+            let id = doc.add_optional_content_group(layer.name.as_str(), layer.on);
+            self.ids.insert(*l, id);
+        }
+    }
 }
 
 /// One plotted sheet, ready to be written as a page.
@@ -454,7 +487,8 @@ struct SheetPage {
     list: cadcraft_render::DisplayList,
     map: Map,
     clip_pt: Bounds2,
-    /// The drawing layers (indices in the layer table) that get PDF layers, in order of first use.
+    /// The drawing layers (indices in the layer table) drawn on, in order of first use: the
+    /// candidates for PDF layers.
     layers: Vec<u32>,
     /// Link annotations: rectangle in points and target.
     links: Vec<(Bounds2, String)>,
@@ -647,7 +681,7 @@ fn rect_path(min: Vec2, max: Vec2) -> Option<Path> {
 }
 
 /// Write one sheet as a page: its size, label, link annotations and marks.
-fn write_page(doc: &mut kr::Document, p: &SheetPage, fonts: &mut fonts::Fonts) -> std::result::Result<(), Failure> {
+fn write_page(doc: &mut kr::Document, p: &SheetPage, groups: &Groups, fonts: &mut fonts::Fonts) -> std::result::Result<(), Failure> {
     let (w, h) = (p.media.x as f32, p.media.y as f32);
     let label = PageLabel::new(None, Some(p.label.chars().take(MAX_TEXT).collect()), None);
     let settings = PageSettings::from_wh(w, h).ok_or_else(|| IoError::Format("the sheet has no area".into()))?.with_page_label(label);
@@ -663,15 +697,16 @@ fn write_page(doc: &mut kr::Document, p: &SheetPage, fonts: &mut fonts::Fonts) -
     // The surface's y axis points down; flip it so we draw in PDF points (y up).
     surface.push_transform(&Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, h));
     // Clip to the plot area.
+    let mut drawn = Ok(());
     if let Some(clip) = rect_path(p.clip_pt.min, p.clip_pt.max) {
         surface.push_clip_path(&clip, &FillRule::NonZero);
-        marks(&mut surface, p, fonts);
+        drawn = marks(&mut surface, p, groups, fonts);
         surface.pop();
     }
     surface.pop();
     surface.finish();
     page.finish();
-    Ok(())
+    drawn
 }
 
 /// What consecutive strokes share to be painted as one path: colour, width (points) and
@@ -714,15 +749,24 @@ fn flush(s: &mut Surface<'_>, batch: &mut Option<(StrokeStyle, PathBuilder)>) {
     s.draw_path(&path);
 }
 
-/// The drawing layer of the following marks changed (`None`: no layer). Optional content
-/// (PDF layers) is wired here once craft-libs' PDF writer ships it.
-fn layer_changed(_s: &mut Surface<'_>, _layer: Option<u32>) {}
+/// The PDF layer of the following marks changed from `from` to `to` (`None`: no layer): end
+/// the old one's marked content and start the new one's.
+fn layer_changed(s: &mut Surface<'_>, from: Option<OcgId>, to: Option<OcgId>) -> std::result::Result<(), Failure> {
+    if from.is_some() {
+        s.end_optional_content().map_err(krilla_failure)?;
+    }
+    if let Some(id) = to {
+        s.start_optional_content(id).map_err(krilla_failure)?;
+    }
+    Ok(())
+}
 
-/// Whether drawing layers become optional content groups; until then objects on layers that
-/// are off are never plotted (they would show).
-const OPTIONAL_CONTENT: bool = false;
+fn krilla_failure(e: KrillaError) -> Failure {
+    Failure::Io(IoError::Format(format!("PDF export failed: {e}")))
+}
 
-/// The page's marks, clipped to the plot area by the caller.
+/// The page's marks, clipped to the plot area by the caller. Those of primitives on a layer
+/// with a PDF layer in `groups` are marked as its optional content.
 ///
 /// Consecutive strokes with the same colour, width and transparency are one path; a
 /// transparent primitive is stroked on its own (one path is painted once), so where
@@ -733,18 +777,17 @@ const OPTIONAL_CONTENT: bool = false;
 /// Primitives that stand for a glyph in an embeddable font (see [`fonts::Fonts`]) are written
 /// as text instead: the glyph at font size 1 under its glyph matrix (the matrix axes are one
 /// em).
-fn marks(s: &mut Surface<'_>, p: &SheetPage, fonts: &mut fonts::Fonts) {
+fn marks(s: &mut Surface<'_>, p: &SheetPage, groups: &Groups, fonts: &mut fonts::Fonts) -> std::result::Result<(), Failure> {
     let (list, map) = (&p.list, &p.map);
-    let marked: std::collections::HashSet<u32> = p.layers.iter().copied().collect();
     let texts = fonts::texts(list);
     let white = Rgb(255, 255, 255);
     let mut batch: Option<(StrokeStyle, PathBuilder)> = None;
-    let mut layer: Option<u32> = None;
+    let mut layer: Option<OcgId> = None;
     for (i, prim) in list.prims.iter().enumerate() {
-        let want = list.prim_layers.get(i).copied().filter(|l| marked.contains(l));
+        let want = list.prim_layers.get(i).and_then(|l| groups.ids.get(l)).copied();
         if want != layer {
             flush(s, &mut batch);
-            layer_changed(s, want);
+            layer_changed(s, layer, want)?;
             layer = want;
         }
         let rgb = prim.display_rgb(white);
@@ -831,9 +874,7 @@ fn marks(s: &mut Surface<'_>, p: &SheetPage, fonts: &mut fonts::Fonts) {
         }
     }
     flush(s, &mut batch);
-    if layer.is_some() {
-        layer_changed(s, None);
-    }
+    layer_changed(s, layer, None)
 }
 
 /// Write one glyph as text in its embedded font: font size 1, placed by the glyph's matrix (one

@@ -10,7 +10,6 @@ use cadcraft_io::{PdfOptions, plot};
 use serde_json::json;
 
 use crate::pdf_read::{self, Doc};
-const OC_PENDING: &str = "optional content arrives with the craft-libs krilla patch";
 
 fn read(bytes: &[u8]) -> Doc {
     pdf_read::read(bytes)
@@ -70,9 +69,7 @@ fn raw(extra: serde_json::Value) -> serde_json::Value {
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn drawing_layers_become_pdf_layers() {
-    let _ = OC_PENDING;
     let d = layered();
     let doc = read(&plot(&d, &Space::Model, &raw(json!({}))).unwrap());
     // Plotted layers only, in drawing order of first use; block contents on layer 0 are on
@@ -107,7 +104,6 @@ fn drawing_layers_become_pdf_layers() {
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn layers_that_are_off_are_included_hidden_on_request() {
     let d = layered();
     let doc = read(&plot(&d, &Space::Model, &raw(json!({"offLayers": true}))).unwrap());
@@ -122,20 +118,22 @@ fn layers_that_are_off_are_included_hidden_on_request() {
 }
 
 #[test]
-fn layers_that_are_off_are_not_plotted() {
+fn layers_that_are_off_are_plotted_only_on_request() {
     let d = layered();
-    // Notes (off) and Hidden (frozen) aren't drawn: the four lines less those two, plus the door.
     let strokes = |o: serde_json::Value| {
         let doc = read(&plot(&d, &Space::Model, &raw(o)).unwrap());
         pdf_read::drawn(doc.content()).iter().filter(|o| o.op == "m").count()
     };
+    // By default Notes (off) and Hidden (frozen) aren't drawn: the four lines less those two,
+    // plus the door.
     let plain = strokes(json!({}));
     assert_eq!(plain, 3, "lines on 0 and Walls, and the door leaf");
-    assert_eq!(strokes(json!({"layers": false})), plain);
+    // `offLayers` adds Notes (on a hidden PDF layer), never the frozen layer; it needs PDF layers.
+    assert_eq!(strokes(json!({"offLayers": true})), 4);
+    assert_eq!(strokes(json!({"layers": false, "offLayers": true})), plain);
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn viewport_contents_keep_their_layers() {
     let mut d = layered();
     let paper = Space::Paper("Layout1".into());
@@ -188,7 +186,6 @@ fn several_sheets_in_one_file_with_page_labels() {
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn several_sheets_share_one_pdf_layer_per_drawing_layer() {
     let mut d = layered();
     add_line(&mut d, &Space::Paper("Layout1".into()), "Walls", (10.0, 10.0), (50.0, 10.0));
@@ -243,7 +240,6 @@ fn unusual_names() -> Drawing {
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn unusual_layer_names_are_kept() {
     let doc = read(&plot(&unusual_names(), &Space::Model, &raw(json!({}))).unwrap());
     assert_eq!(ocg_names(&doc), ["a(b)\\c", "Wände", "日本"]);
@@ -253,4 +249,22 @@ fn unusual_layer_names_are_kept() {
 fn unusual_titles_are_kept() {
     let doc = read(&plot(&unusual_names(), &Space::Model, &raw(json!({"title": "Plan ü (1)\\"}))).unwrap());
     assert_eq!(doc.title.as_deref(), Some("Plan ü (1)\\"));
+}
+
+#[test]
+fn layers_past_the_cap_print_without_a_pdf_layer() {
+    // One more drawing layer than a file has PDF layers (4096).
+    let mut d = Drawing::new_metric();
+    for i in 0..4097 {
+        let name = format!("L{i}");
+        d.layers.push(Layer { name: name.clone(), ..Layer::default() });
+        add_line(&mut d, &Space::Model, &name, (0.0, f64::from(i)), (10.0, f64::from(i)));
+    }
+    let doc = read(&plot(&d, &Space::Model, &raw(json!({}))).unwrap());
+    assert_eq!(doc.ocgs.len(), 4096);
+    assert!(!ocg_names(&doc).contains(&"L4096".to_string()));
+    // Every line is still drawn; only the last is outside marked content.
+    let c = doc.content();
+    assert_eq!(pdf_read::drawn(c).iter().filter(|o| o.op == "m").count(), 4097);
+    assert_eq!((pdf_read::count(c, "BDC"), pdf_read::count(c, "EMC")), (4096, 4096));
 }

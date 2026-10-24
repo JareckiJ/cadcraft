@@ -334,7 +334,6 @@ fn text_seen_through_a_viewport_and_on_layers() {
 }
 
 #[test]
-#[ignore = "optional content arrives with the craft-libs krilla patch"]
 fn text_sits_in_its_layers_marked_content() {
     let mut d = drawing();
     text(&mut d, &Space::Model, "Real", (0.0, 0.0), "AB", 0.0, 1.0, 0.0);
