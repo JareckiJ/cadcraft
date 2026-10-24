@@ -218,10 +218,8 @@ mod tests {
 
     #[test]
     fn drift_tracks_rest_after_two_idle_seconds() {
-        let mut f = Filter::default();
         // Five axes units of drift sit inside the deadzone (FULL_SCALE * DEADZONE = 20).
-        f.raw = [5.0; 6];
-        f.bias = Some([0.0; 6]);
+        let mut f = Filter { raw: [5.0; 6], bias: Some([0.0; 6]), ..Filter::default() };
         let t0 = Instant::now();
         let mut b = [0.0; 6];
         f.update_drift(true, t0, &mut b); // starts the idle window: no shift yet
