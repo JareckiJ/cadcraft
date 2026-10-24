@@ -1580,3 +1580,22 @@
 	Terminal plan (CSV)	План клем (CSV)
 	PLC I/O list (CSV)	Перелік входів/виходів ПЛК (CSV)
 	Cable list (CSV)	Перелік кабелів (CSV)
+	Close panel	Закрити панель
+	Wire	Провід
+	Wire type	Тип проводу
+	Clean rungs	Без порожніх
+	Coil	Котушка
+	NO	NO
+	NC	NC
+	Push NO	Кнопка NO
+	Push NC	Кнопка NC
+	Lamp	Лампа
+	Terminal	Клема
+	Breaker	Автомат
+	Motor	Двигун
+	Wire no.	№ проводу
+	Cross-ref	Посилання
+	Wiring	Проводка
+	Numbering	Нумерація
+	Electrical Workspace	Електричний робочий простір
+	Electrical Workspace: only the drawing, Project Manager and Electrical palette	Електричний робочий простір: лише креслення, менеджер проєкту й електрична палітра

@@ -33,6 +33,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.panel.electrical", "Electrical Palette", &["Window", "Electrical Palette"], Some("Cmd+7")),
     ("ui.panel.project", "Project Manager", &["Window", "Project Manager"], Some("Cmd+6")),
     ("ui.toggle.etoolbar", "Electrical Tool Bar", &["Window", "Electrical Tool Bar"], None),
+    ("ui.workspace.electrical", "Electrical Workspace", &["Window", "Electrical Workspace"], None),
     ("ui.toggle.systemcursor", "Show System Cursor", &["View", "Accessibility", "Show System Cursor"], None),
     ("ui.animations.system", "Use System Setting", &["View", "Accessibility", "Animation Effects", "Use System Setting"], None),
     ("ui.animations.on", "On", &["View", "Accessibility", "Animation Effects", "On"], None),
@@ -110,6 +111,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     // QUICKCALC typed or from a menu opens the palette; with parameters it is CAL.
     if id == "ui.panel.project" {
         return Some(crate::palettes::project::open(app));
+    }
+    if id == "ui.workspace.electrical" {
+        return Some(crate::docking::electrical_workspace(app));
     }
     if id == "ui.toggle.etoolbar" {
         let on = params.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.show_etoolbar);

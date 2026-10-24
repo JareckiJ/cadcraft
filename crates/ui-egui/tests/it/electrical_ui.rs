@@ -75,4 +75,16 @@ fn electrical_tool_bar_and_project_manager() {
     h.get_by_label("Keep tags").click();
     h.run_steps(3);
     assert!(h.query_by_label_contains("Renumber device tags").is_none());
+
+    // The electrical workspace: Tool Sets, Layers and Properties go; Project Manager and the
+    // Electrical palette share the left side.
+    h.state_mut().run("ui.workspace.electrical", json!({})).unwrap();
+    h.run_steps(6);
+    save(&mut h, "electrical-4-workspace");
+    assert!(!h.state().ui.show_toolsets && !h.state().ui.show_palettes);
+    // The palette's close button closes it.
+    h.get_by_label("Close panel").click();
+    h.run_steps(4);
+    assert!(!h.state().ui.docking.layout.contains(&cadcraft_ui_egui::docking::Panel::Projects));
+    save(&mut h, "electrical-5-closed");
 }

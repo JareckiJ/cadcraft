@@ -370,10 +370,22 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             }
             Panel::ToolSets => crate::palettes::toolsets(app, ui),
             Panel::QuickCalc => crate::palettes::quickcalc::show(app, ui),
-            Panel::Devices => crate::palettes::devices::show(app, ui),
-            Panel::Community => crate::palettes::community::show(app, ui),
-            Panel::Electrical => crate::palettes::electrical::show(app, ui),
-            Panel::Projects => crate::palettes::project::show(app, ui),
+            Panel::Devices => {
+                close_bar(app, ui, *panel);
+                crate::palettes::devices::show(app, ui)
+            }
+            Panel::Community => {
+                close_bar(app, ui, *panel);
+                crate::palettes::community::show(app, ui)
+            }
+            Panel::Electrical => {
+                close_bar(app, ui, *panel);
+                crate::palettes::electrical::show(app, ui)
+            }
+            Panel::Projects => {
+                close_bar(app, ui, *panel);
+                crate::palettes::project::show(app, ui)
+            }
             Panel::Layers => {
                 egui::ScrollArea::vertical()
                     .id_salt("dock-layers")
@@ -410,6 +422,59 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             app.set_status(format!("Panel move was not applied: {error}"));
         }
     }
+}
+
+/// The electrical workspace: the drawing with the Project Manager and the Electrical palette as
+/// tabs on the left, and nothing else (Tool Sets, Layers and Properties close; Window brings
+/// them back).
+pub fn electrical_workspace(app: &mut crate::CadApp) -> Result<Value, String> {
+    app.ui.show_toolsets = false;
+    app.ui.show_palettes = false;
+    for p in [Panel::Devices, Panel::Community] {
+        command(app, false, &json!({ "operation": "close", "panel": p.id() })).ok();
+    }
+    command(app, false, &json!({ "operation": "open", "panel": Panel::Projects.id() }))?;
+    command(app, false, &json!({ "operation": "open", "panel": Panel::Electrical.id() }))?;
+    if !in_same_group(&app.ui.docking, Panel::Electrical, Panel::Projects) {
+        command(app, false, &json!({ "operation": "move", "panel": Panel::Electrical.id(), "target": Panel::Projects.id(), "zone": "center" }))?;
+    }
+    app.ui.show_etoolbar = true;
+    command(app, false, &json!({ "operation": "activate", "panel": Panel::Projects.id() }))
+}
+
+/// Whether `a` and `b` are tabs of one group.
+fn in_same_group(w: &Workspace, a: Panel, b: Panel) -> bool {
+    let mut nodes: Vec<&Node<Panel>> = w.layout.root.iter().collect();
+    while let Some(n) = nodes.pop() {
+        match n {
+            Node::Split { first, second, .. } => {
+                nodes.push(first);
+                nodes.push(second);
+            }
+            Node::Tabs { panels, .. } if panels.contains(&a) && panels.contains(&b) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// A thin bar with a close button (✕) at the top right of the electrical palettes, which open on
+/// demand: closing is otherwise only on the tab's right-click menu.
+fn close_bar(app: &mut crate::CadApp, ui: &mut egui::Ui, panel: Panel) {
+    let t = crate::theme::Tokens::get();
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let r = ui
+                .add(egui::Button::new(egui::RichText::new("✕").size(14.0).color(t.text_dim)).frame(false).min_size(egui::vec2(22.0, 20.0)))
+                .on_hover_text(crate::tl!("Close panel"));
+            crate::control::record_widget(ui, &r, "Close panel", "button", None);
+            if r.clicked()
+                && let Err(e) = command(app, false, &json!({ "operation": "close", "panel": panel.id() }))
+            {
+                app.set_status(e);
+            }
+        });
+    });
 }
 
 fn panel_limits(panel: &Panel) -> PanelLimits {

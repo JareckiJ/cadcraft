@@ -254,7 +254,7 @@ impl Pen<'_> {
 pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
     let t = Tokens::get();
     let alpha = |c: Color32| if dim { c.gamma_multiply(0.4) } else { c };
-    let pen = Pen { p, r: rect, w: (rect.width() / 16.0).clamp(1.0, 1.6), base: alpha(t.icon), acc: alpha(t.icon_accent), pt: alpha(t.icon_point) };
+    let pen = Pen { p, r: rect, w: (rect.width() / 16.0).clamp(1.0, 2.0), base: alpha(t.icon), acc: alpha(t.icon_accent), pt: alpha(t.icon_point) };
     let (b, a) = (pen.base, pen.acc);
     use Icon::*;
     match icon {
