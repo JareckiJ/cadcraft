@@ -808,6 +808,9 @@ struct PlotState {
     generation: u32,
     /// "Model" or a layout name.
     target: String,
+    /// The sheets OK plots, in tab order (`target` alone, until others are ticked). With several,
+    /// they go into one PDF, each with its own page setup.
+    sheets: Vec<String>,
     page: cadcraft_doc::PageSetup,
     /// Plot area "window" corners in drawing units: [x1, y1, x2, y2].
     window: [f64; 4],
@@ -833,6 +836,28 @@ fn plot_page(d: &cadcraft_doc::Drawing, target: &str) -> cadcraft_doc::PageSetup
         page.height_mm = a4.height_mm;
     }
     page
+}
+
+/// Tick or untick `name` among the sheets to plot. `targets` lists every sheet in tab order, which
+/// is the order of the result. At least one sheet always stays.
+fn toggle_sheet(sheets: &mut Vec<String>, targets: &[String], name: &str, on: bool) {
+    let next: Vec<String> = targets.iter().filter(|t| if t.as_str() == name { on } else { sheets.contains(t) }).cloned().collect();
+    if !next.is_empty() {
+        *sheets = next;
+    }
+}
+
+/// The `plot` parameters for several sheets in one PDF: no device or page overrides, so each
+/// sheet plots with its own page setup.
+fn sheets_params(sheets: &[String]) -> Value {
+    json!({ "layouts": sheets, "layout": sheets.first(), "device": "None" })
+}
+
+/// One line about a sheet's page setup for the summary shown with several sheets ticked.
+fn sheet_summary(d: &cadcraft_doc::Drawing, name: &str) -> String {
+    let page = plot_page(d, name);
+    let orientation = if page.landscape { "landscape" } else { "portrait" };
+    format!("{name}: {} · {orientation} · {}", page.paper, style_label(&page))
 }
 
 /// The `plot` parameters for the dialog's settings (without the output path). `preview_dpi`
@@ -918,12 +943,18 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         PlotState {
             generation,
             page: plot_page(d, &target),
+            sheets: vec![target.clone()],
             target,
             window: [ext.min.x, ext.min.y, ext.max.x, ext.max.y],
             center: true,
             offset_mm: [0.0, 0.0],
         }
     });
+    // Layouts deleted since the dialog was last open drop out of the ticked sheets.
+    st.sheets.retain(|n| targets.contains(n));
+    if st.sheets.is_empty() {
+        st.sheets = vec![st.target.clone()];
+    }
     let model = st.target == "Model";
     let choices = PageChoices::new(ctx, d);
     let offset_supported =
@@ -938,52 +969,98 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
             ui.label("Layout");
             egui::ComboBox::from_id_salt("plot_layout").selected_text(st.target.as_str()).width(190.0).show_ui(ui, |ui| {
                 for n in &targets {
-                    if ui.selectable_label(*n == st.target, n).clicked() && *n != st.target {
+                    if ui.selectable_label(*n == st.target, n).clicked() && (*n != st.target || st.sheets.len() > 1) {
                         st.page = plot_page(d, n);
                         st.target = n.clone();
+                        st.sheets = vec![n.clone()];
                     }
                 }
             });
             ui.end_row();
         });
-        ui.separator();
-        ui.horizontal_top(|ui| {
-            egui::Grid::new("plot_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
-                let rows = if model {
-                    PageRows { areas: MODEL_AREAS, scale: true, center: false }
-                } else {
-                    PageRows { areas: &["layout"], scale: false, center: false }
-                };
-                let placement = model.then_some((&mut st.center, &mut st.offset_mm, offset_supported));
-                if let Some((k, v)) = page_rows(ui, egui::Id::new(("plot", st.target.as_str())), &st.page, &rows, &choices, placement) {
-                    apply_page_change(&mut st.page, k, &v);
-                }
-                if model && st.page.plot_area == "window" {
-                    for (i, label) in [(0, "First corner"), (2, "Opposite corner")] {
-                        ui.label(label);
-                        ui.horizontal(|ui| {
-                            for (j, axis) in ["X", "Y"].iter().enumerate() {
-                                ui.label(*axis);
-                                let k = i + j;
-                                if let Some(slot) = st.window.get_mut(k)
-                                    && let Some(v) = num_field(ui, ("plot_window", k), *slot)
-                                {
-                                    *slot = v;
-                                }
-                            }
-                        });
-                        ui.end_row();
+        // Several sheets in one PDF: tick them here. Each plots with its own page setup.
+        egui::CollapsingHeader::new("Plot several sheets").default_open(st.sheets.len() > 1).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.small_button("All layouts").on_hover_text("Every layout, in tab order (not the Model tab)").clicked() {
+                    st.sheets = targets.iter().filter(|n| *n != "Model").cloned().collect();
+                    if let Some(first) = st.sheets.first().cloned() {
+                        st.page = plot_page(d, &first);
+                        st.target = first;
                     }
-                    ui.label("");
-                    pick = ui.button("Window <").on_hover_text("Pick the window's corners in the drawing").clicked();
-                    ui.end_row();
+                }
+                if ui.small_button("Only this one").clicked() {
+                    st.sheets = vec![st.target.clone()];
                 }
             });
-            sheet_sketch(ui, &st.page, &t);
+            egui::ScrollArea::vertical().id_salt("plot_sheets").max_height(120.0).auto_shrink([true, true]).show(ui, |ui| {
+                for n in &targets {
+                    let mut on = st.sheets.contains(n);
+                    if ui.checkbox(&mut on, n).changed() {
+                        toggle_sheet(&mut st.sheets, &targets, n, on);
+                        // One sheet left: it is the one whose settings the dialog edits.
+                        if let [only] = st.sheets.as_slice()
+                            && *only != st.target
+                        {
+                            st.page = plot_page(d, only);
+                            st.target = only.clone();
+                        }
+                    }
+                }
+            });
         });
+        let several = st.sheets.len() > 1;
+        ui.separator();
+        if several {
+            ui.label(
+                RichText::new(crate::tf!(
+                    "{n} sheets in one PDF, each with its own page setup (change them in the Page Setup Manager):",
+                    n = st.sheets.len()
+                ))
+                .color(t.text_dim),
+            );
+            for n in &st.sheets {
+                ui.label(sheet_summary(d, n));
+            }
+        }
+        if !several {
+            ui.horizontal_top(|ui| {
+                egui::Grid::new("plot_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+                    let rows = if model {
+                        PageRows { areas: MODEL_AREAS, scale: true, center: false }
+                    } else {
+                        PageRows { areas: &["layout"], scale: false, center: false }
+                    };
+                    let placement = model.then_some((&mut st.center, &mut st.offset_mm, offset_supported));
+                    if let Some((k, v)) = page_rows(ui, egui::Id::new(("plot", st.target.as_str())), &st.page, &rows, &choices, placement) {
+                        apply_page_change(&mut st.page, k, &v);
+                    }
+                    if model && st.page.plot_area == "window" {
+                        for (i, label) in [(0, "First corner"), (2, "Opposite corner")] {
+                            ui.label(label);
+                            ui.horizontal(|ui| {
+                                for (j, axis) in ["X", "Y"].iter().enumerate() {
+                                    ui.label(*axis);
+                                    let k = i + j;
+                                    if let Some(slot) = st.window.get_mut(k)
+                                        && let Some(v) = num_field(ui, ("plot_window", k), *slot)
+                                    {
+                                        *slot = v;
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        }
+                        ui.label("");
+                        pick = ui.button("Window <").on_hover_text("Pick the window's corners in the drawing").clicked();
+                        ui.end_row();
+                    }
+                });
+                sheet_sketch(ui, &st.page, &t);
+            });
+        }
         ui.separator();
         ui.horizontal(|ui| {
-            if !model && ui.button("Apply to Layout").on_hover_text("Save these settings in the layout's page setup").clicked() {
+            if !model && !several && ui.button("Apply to Layout").on_hover_text("Save these settings in the layout's page setup").clicked() {
                 let page = &st.page;
                 action = Some((
                     "pagesetup",
@@ -1028,11 +1105,15 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         return action;
     }
     if ok {
-        let mut params = plot_params(&st, None);
+        let several = st.sheets.len() > 1;
+        let mut params = if several { sheets_params(&st.sheets) } else { plot_params(&st, None) };
+        // Several sheets always make a PDF; one sheet's file type follows its device.
+        let ext = if several { "pdf" } else { ext };
+        let what = if several { crate::tf!("{n} sheets", n = st.sheets.len()) } else { st.target.clone() };
         if let Some(pick) = app.services.pick_save.as_ref() {
             let title = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
             let stem = std::path::Path::new(&title).file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.is_empty());
-            let suggested = format!("{}-{}.{ext}", stem.unwrap_or_else(|| "Drawing".into()), st.target);
+            let suggested = format!("{}-{}.{ext}", stem.unwrap_or_else(|| "Drawing".into()), if several { "sheets" } else { st.target.as_str() });
             // Cancelling the file dialog keeps the Plot dialog open with its settings.
             let Some(path) = pick(&suggested) else { return action };
             if let Some(o) = params.as_object_mut() {
@@ -1043,8 +1124,8 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         match app.run("plot", params) {
             Ok(r) => {
                 let msg = match r.get("path").and_then(Value::as_str) {
-                    Some(path) => format!("Plotted {} to {path}", st.target),
-                    None => format!("Plotted {} ({} bytes of PDF; there is no file dialog here)", st.target, r["bytes"]),
+                    Some(path) => format!("Plotted {what} to {path}"),
+                    None => format!("Plotted {what} ({} bytes of PDF; there is no file dialog here)", r["bytes"]),
                 };
                 app.session.echo(msg);
             }
@@ -1149,6 +1230,7 @@ mod plot_dialog_tests {
         PlotState {
             generation: 0,
             page: plot_page(&d, target),
+            sheets: vec![target.into()],
             target: target.into(),
             window: [0.0, 0.0, 10.0, 10.0],
             center: true,
@@ -1254,5 +1336,64 @@ mod plot_dialog_tests {
         plot_window_resume(&mut app, &ctx);
         assert_eq!(app.ui.dialog.as_deref(), Some("plot"));
         assert_eq!(temp::<PlotState>(&ctx, "plot_state").unwrap().window, [2.0, 3.0, 12.0, 9.0]);
+    }
+}
+
+#[cfg(test)]
+mod plot_sheets_tests {
+    use super::*;
+
+    fn targets() -> Vec<String> {
+        ["Model", "Layout1", "Layout2", "Sheet 3"].map(String::from).to_vec()
+    }
+
+    #[test]
+    fn ticking_sheets_keeps_tab_order_and_at_least_one() {
+        let t = targets();
+        let mut sheets = vec!["Layout2".to_string()];
+        toggle_sheet(&mut sheets, &t, "Model", true);
+        toggle_sheet(&mut sheets, &t, "Sheet 3", true);
+        assert_eq!(sheets, ["Model", "Layout2", "Sheet 3"], "tab order, not the order they were ticked");
+        toggle_sheet(&mut sheets, &t, "Layout2", false);
+        assert_eq!(sheets, ["Model", "Sheet 3"]);
+        toggle_sheet(&mut sheets, &t, "Model", false);
+        toggle_sheet(&mut sheets, &t, "Sheet 3", false);
+        assert_eq!(sheets, ["Sheet 3"], "the last sheet can't be unticked");
+        toggle_sheet(&mut sheets, &t, "Nope", true);
+        assert_eq!(sheets, ["Sheet 3"], "an unknown name changes nothing");
+    }
+
+    #[test]
+    fn several_sheets_plot_with_their_own_page_setups_into_one_pdf() {
+        let p = sheets_params(&["Layout1".to_string(), "Layout2".to_string()]);
+        assert_eq!(p, json!({ "layouts": ["Layout1", "Layout2"], "layout": "Layout1", "device": "None" }));
+        // No page overrides: each sheet keeps its paper, orientation, style table and lineweights.
+        for k in ["paper", "width", "height", "landscape", "plotStyleTable", "lineweights", "plotTransparency", "fit"] {
+            assert!(p.get(k).is_none(), "{k} would apply to every sheet");
+        }
+    }
+
+    #[test]
+    fn the_summary_names_each_sheets_paper_and_style() {
+        let mut app = crate::CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
+        app.run("pagesetup", json!({ "layout": "Layout1", "paper": "A3", "plotStyleTable": "monochrome.ctb" })).unwrap();
+        let d = app.session.doc().unwrap();
+        let line = sheet_summary(d, "Layout1");
+        assert!(line.starts_with("Layout1: ") && line.contains("A3") && line.ends_with("monochrome.ctb"), "{line}");
+        assert!(sheet_summary(d, "Model").starts_with("Model: "));
+    }
+
+    #[test]
+    fn the_engine_plots_the_ticked_sheets_in_one_file() {
+        use cadcraft_engine::cmd::file::{IoHooks, base64_decode, set_io};
+        fn fake_plot(_: &cadcraft_doc::Drawing, space: &cadcraft_doc::Space, opts: &Value) -> Result<Vec<u8>, String> {
+            Ok(format!("%PDF {space:?} {}", opts.get("layouts").map(Value::to_string).unwrap_or_default()).into_bytes())
+        }
+        set_io(IoHooks { read: |_, _| Err("no".into()), write: |_, _| Err("no".into()), plot: Some(fake_plot) });
+        let mut app = crate::CadApp::new(cadcraft_engine::Session::default(), crate::Services::default());
+        let r = app.run("plot", sheets_params(&["Layout1".to_string(), "Layout2".to_string()])).unwrap();
+        assert_eq!(r["pages"], 2);
+        let text = String::from_utf8(base64_decode(r["data"].as_str().unwrap_or_default()).unwrap_or_default()).unwrap_or_default();
+        assert!(text.ends_with(r#"["Layout1","Layout2"]"#), "{text}");
     }
 }
