@@ -7,7 +7,7 @@ use cadcraft_engine::Session;
 use cadcraft_engine::doc::{EntityKind, Handle};
 use cadcraft_engine::geom::Vec2;
 use cadcraft_engine::prompt::Input;
-use cadcraft_engine::select::SelectArea;
+use cadcraft_engine::select::{PickArea, SelectArea};
 use serde_json::json;
 
 fn session() -> Session {
@@ -88,8 +88,8 @@ fn the_area_a_pick_was_made_with_is_read_once() {
     point(&mut s, -2.0, -2.0);
     point(&mut s, 12.0, 2.0);
     let bx = match s.take_pick_area() {
-        Some(SelectArea::Box(bx)) => bx,
-        other => panic!("{other:?}"),
+        Some(PickArea { area: SelectArea::Box(bx), crossing: false }) => bx,
+        other => panic!("left to right is a window: {other:?}"),
     };
     assert!(bx.contains(Vec2::new(0.0, 0.0)) && bx.contains(Vec2::new(10.0, 0.0)));
     assert_eq!(s.take_pick_area(), None);
@@ -98,7 +98,7 @@ fn the_area_a_pick_was_made_with_is_read_once() {
         point(&mut s, x, y);
     }
     s.input(Input::Enter).unwrap();
-    assert!(matches!(s.take_pick_area(), Some(SelectArea::Polygon(p)) if p.len() == 3));
+    assert!(matches!(s.take_pick_area(), Some(PickArea { area: SelectArea::Polygon(p), crossing: true }) if p.len() == 3));
 }
 
 #[test]
@@ -142,4 +142,46 @@ fn a_typed_fence_shows_its_lines_at_any_select_objects() {
     point(&mut s, 5.0, 0.0);
     let pv = s.preview(Vec2::new(5.0, 5.0));
     assert_eq!(pv.len(), 2, "the fence so far and on to the cursor: {pv:?}");
+}
+
+/// A crossing made at STRETCH's "Select objects" moves only the multiline vertex inside it (#1739),
+/// whether clicked or typed (`CP`).
+#[test]
+fn a_stretch_crossing_takes_a_multiline_by_its_vertex() {
+    let vertices = |s: &Session| -> Vec<(f64, f64)> {
+        s.doc()
+            .unwrap()
+            .model
+            .iter()
+            .find_map(|e| match &e.kind {
+                EntityKind::MLine(m) => Some(m.vertices.iter().map(|v| (v.p.x, v.p.y)).collect()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let mut s = Session::new();
+    s.viewport_px = (1000.0, 1000.0);
+    // Zoomed in so the clicks 5 from the vertex are on empty space, not a pick of the multiline.
+    s.execute("view.set", &json!({"center": [3000, 300], "height": 500})).unwrap();
+    s.settings.osmode = 0;
+    // The element lines run 100 away from the middle vertex at (3000, 0).
+    s.execute("mline", &json!({ "points": [[0, 0], [3000, 0], [3000, 2000]], "scale": 200 })).unwrap();
+    s.start("stretch").unwrap();
+    point(&mut s, 3005.0, 5.0);
+    point(&mut s, 2995.0, -5.0);
+    s.input(Input::Enter).unwrap();
+    point(&mut s, 0.0, 0.0);
+    point(&mut s, 0.0, 610.0);
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(vertices(&s), vec![(0.0, 0.0), (3000.0, 610.0), (3000.0, 2000.0)]);
+    s.start("stretch").unwrap();
+    s.input(Input::Text("CP".into())).unwrap();
+    for (x, y) in [(2995.0, 605.0), (3005.0, 605.0), (3000.0, 615.0)] {
+        point(&mut s, x, y);
+    }
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Enter).unwrap();
+    point(&mut s, 0.0, 0.0);
+    point(&mut s, 0.0, -610.0);
+    assert_eq!(vertices(&s), vec![(0.0, 0.0), (3000.0, 0.0), (3000.0, 2000.0)]);
 }

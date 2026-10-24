@@ -359,6 +359,9 @@ pub struct Settings {
     pub gridmajor: u32,
     /// ZOOMFACTOR: how far one mouse wheel step zooms (3..=100).
     pub zoomfactor: u32,
+    /// MEASUREINIT: the units of a new drawing made without a template (NEW, QNEW and the first
+    /// drawing at startup): `false` (0, the default) imperial, `true` (1) metric.
+    pub measureinit: bool,
     /// -VIEW sEttings > Layer snapshot: named views save the layer settings with them.
     pub view_layer_snapshot: bool,
     pub dynmode: bool,
@@ -400,6 +403,10 @@ pub struct Settings {
     pub pickfirst: bool,
     /// ACADLSPASDOC: acad.lsp loads into every drawing, not once per session.
     pub acadlspasdoc: bool,
+    /// CMDECHO: kept for routines that switch command echo around their commands; no command reads it yet.
+    pub cmdecho: bool,
+    /// FILEDIA: kept for routines that switch file dialogs off around a script; no command reads it yet.
+    pub filedia: bool,
     pub pickadd: bool,
     /// PICKDRAG: how a selection window's second corner is given: 0 by a second click, 1 where
     /// the button that set the first corner comes up (drag), 2 either way (a drag held past the
@@ -474,6 +481,7 @@ impl Default for Settings {
             gridunit: Vec2::new(0.5, 0.5),
             gridmajor: 5,
             zoomfactor: 60,
+            measureinit: false,
             view_layer_snapshot: true,
             dynmode: true,
             dyndigrip: 31,
@@ -492,6 +500,8 @@ impl Default for Settings {
             aperture: 10.0,
             pickfirst: true,
             acadlspasdoc: false,
+            cmdecho: true,
+            filedia: true,
             pickadd: true,
             pickdrag: 2,
             pickstyle: 1,
@@ -682,7 +692,7 @@ pub struct Session {
     pub pending_window: Option<PendingWindow>,
     /// The window or polygon the last pick at a command's "Select objects" was made with (`None`
     /// for single picks, fences, All, Last…); see [`Session::take_pick_area`].
-    pick_area: Option<select::SelectArea>,
+    pick_area: Option<select::PickArea>,
     /// A selection mode typed at "Select objects" (W, C, F, WP, CP) collecting its points.
     pub select_mode: Option<select::SelectMode>,
     /// SIngle typed at "Select objects": the next selection ends the prompt.
@@ -1151,7 +1161,7 @@ impl Session {
                     let crossing = p.x < pw.corner.x;
                     let bx = Bounds2::new(pw.corner, p);
                     let hs = select::select_window(self.doc()?, &space, bx, crossing);
-                    self.pick_area = Some(select::SelectArea::Box(bx));
+                    self.pick_area = Some(select::PickArea { area: select::SelectArea::Box(bx), crossing });
                     return Ok(Some(Input::Pick(cmd::groups::expand(self, hs))));
                 }
                 match select::pick(self.doc()?, &space, p, ap) {
@@ -1734,7 +1744,7 @@ impl Session {
     /// The window or polygon the pick just handed to the running command was made with, taken
     /// so it is read once: STRETCH moves the vertices inside it (#1116). `None` for a single
     /// pick, a fence, All, Last or Previous.
-    pub fn take_pick_area(&mut self) -> Option<select::SelectArea> {
+    pub fn take_pick_area(&mut self) -> Option<select::PickArea> {
         self.pick_area.take()
     }
 

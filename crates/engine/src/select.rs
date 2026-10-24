@@ -393,6 +393,15 @@ impl SelectArea {
     }
 }
 
+/// The area a pick at a command's "Select objects" was made with, and whether it selected as a
+/// crossing (objects inside or crossing it) or a window (objects inside it):
+/// [`crate::Session::take_pick_area`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickArea {
+    pub area: SelectArea,
+    pub crossing: bool,
+}
+
 /// A selection mode typed at "Select objects", collecting its points before it selects.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectKind {
@@ -485,12 +494,22 @@ impl SelectMode {
         out
     }
     /// The area the mode selects with once it has its points; a fence or a group marks none.
-    pub fn area(&self) -> Option<SelectArea> {
-        match (self.kind, self.pts.as_slice()) {
-            (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, [a, b, ..]) => Some(SelectArea::Box(Bounds2::new(*a, *b))),
-            (SelectKind::WPolygon | SelectKind::CPolygon, pts) if pts.len() >= 3 => Some(SelectArea::Polygon(pts.to_vec())),
-            _ => None,
-        }
+    pub fn area(&self) -> Option<PickArea> {
+        let (area, crossing) = match (self.kind, self.pts.as_slice()) {
+            (SelectKind::Window | SelectKind::Crossing | SelectKind::Box, [a, b, ..]) => {
+                let crossing = match self.kind {
+                    SelectKind::Crossing => true,
+                    SelectKind::Box => b.x < a.x,
+                    _ => false,
+                };
+                (SelectArea::Box(Bounds2::new(*a, *b)), crossing)
+            }
+            (SelectKind::WPolygon | SelectKind::CPolygon, pts) if pts.len() >= 3 => {
+                (SelectArea::Polygon(pts.to_vec()), self.kind == SelectKind::CPolygon)
+            }
+            _ => return None,
+        };
+        Some(PickArea { area, crossing })
     }
     /// The objects the mode selects, or `None` while it has too few points.
     pub fn select(&self, d: &Drawing, space: &Space) -> Option<Vec<Handle>> {
