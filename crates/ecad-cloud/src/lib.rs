@@ -58,6 +58,12 @@ pub enum CloudError {
 
 pub type Result<T> = std::result::Result<T, CloudError>;
 
+/// The CADCraft community parts database: its address and *anon public* key. Both are public by
+/// design (every copy of CADCraft carries them); what a user may do is enforced by the
+/// database's row-level security, not by keeping these secret.
+pub const COMMUNITY_URL: &str = "https://jyfemnilqzjliupdocml.supabase.co";
+pub const COMMUNITY_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5ZmVtbmlscXpqbGl1cGRvY21sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4MDMxOTgsImV4cCI6MjEwODM3OTE5OH0.uK8eJfFhhB0AmWxu9fdlsJGdQirp5dtYU8sJjIwbkMo";
+
 /// The Supabase project: its URL and public (anon) key.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -100,8 +106,13 @@ impl CloudConfig {
         }
     }
 
+    /// The community database ([`COMMUNITY_URL`]).
+    pub fn community() -> CloudConfig {
+        CloudConfig { url: COMMUNITY_URL.into(), anon_key: COMMUNITY_ANON_KEY.into() }
+    }
+
     /// The saved settings, with `CADCRAFT_SUPABASE_URL` / `CADCRAFT_SUPABASE_ANON_KEY` taking
-    /// precedence.
+    /// precedence; the community database when nothing is set.
     pub fn load() -> CloudConfig {
         let mut c: CloudConfig = Self::path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         if let Ok(v) = std::env::var("CADCRAFT_SUPABASE_URL") {
@@ -109,6 +120,9 @@ impl CloudConfig {
         }
         if let Ok(v) = std::env::var("CADCRAFT_SUPABASE_ANON_KEY") {
             c.anon_key = v;
+        }
+        if c.url.trim().is_empty() && c.anon_key.trim().is_empty() {
+            c = Self::community();
         }
         c
     }
@@ -214,6 +228,14 @@ pub use web::{current_session, open_in_browser, search, sign_in, sign_out, submi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_community_database_is_built_in_with_its_public_key() {
+        let c = CloudConfig::community();
+        assert!(c.validated().is_ok());
+        assert_eq!(jwt_role(&c.anon_key).as_deref(), Some("anon"), "only ever the anon key");
+        assert!(c.url.contains("jyfemnilqzjliupdocml"));
+    }
 
     #[test]
     fn config_checks() {

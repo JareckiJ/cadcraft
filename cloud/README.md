@@ -20,8 +20,11 @@ their own.
      secret (the secret stays in Supabase).
    - Authentication → URL Configuration → Redirect URLs → add
      `http://127.0.0.1:53682/callback` (where CADCraft listens while you sign in).
-4. In CADCraft: **Tools → Electrical → Database → Community Hub**, paste the Project URL and anon
-   key, then **Link GitHub Account**.
+4. The community project (`https://jyfemnilqzjliupdocml.supabase.co`) and its anon key are built
+   into CADCraft (`crates/ecad-cloud/src/lib.rs`, `COMMUNITY_URL` / `COMMUNITY_ANON_KEY`): open
+   **Tools → Electrical → Database → Community Hub** and click **Link GitHub Account**. Another
+   project can be set in the hub's Settings or with `CADCRAFT_SUPABASE_URL` /
+   `CADCRAFT_SUPABASE_ANON_KEY`.
 
 ## What the database enforces
 
