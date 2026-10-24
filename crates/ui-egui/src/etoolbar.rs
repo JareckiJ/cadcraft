@@ -77,7 +77,7 @@ const GROUPS: &[&[(Icon, Act, &str, &str)]] = &[
 const TITLES: &[&str] = &["Wiring", "Symbols", "Numbering", "Reports", "Project"];
 
 /// The bar's height: a 32-pixel icon, its caption and the group title.
-pub const HEIGHT: f32 = 66.0;
+pub const HEIGHT: f32 = 72.0;
 const ICON: f32 = 32.0;
 
 fn has_project(app: &mut CadApp) -> bool {

@@ -101,7 +101,7 @@ jobs:
           CRAFT_UI_VISUAL_DIR="$PWD/shots" cargo test -q -p cadcraft-ui-egui --test it electrical_ui 2>&1 | tee ui.txt
           s=$?
           if [ $s -ne 0 ]; then
-            msg=$(grep -v "Compiling\|Checking\|Downloaded\|Downloading" ui.txt | sed 's/\x1b\[[0-9;]*m//g' | tail -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            msg=$( (grep -A8 "panicked at" ui.txt; grep -A14 "^error" ui.txt) | sed 's/\x1b\[[0-9;]*m//g' | head -60 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=ui-test::$msg"
           fi
           exit $s
