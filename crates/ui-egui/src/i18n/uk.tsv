@@ -1612,3 +1612,32 @@
 	Edit Component...	Змінити компонент...
 	Edit Component	Змінити компонент
 	Component Dialog After Insert	Діалог компонента після вставлення
+	Place	Розмістити
+	Top rail (y)	Верхня шина (y)
+	Bottom rail (y)	Нижня шина (y)
+	From (x)	Від (x)
+	To (x)	До (x)
+	Rung spacing	Крок східців
+	Top rail name	Назва верхньої шини
+	Bottom rail name	Назва нижньої шини
+	A rung in every column	Східець у кожному стовпці
+	Rungs nothing is placed on can be removed afterwards with Remove Empty Rungs.	Порожні східці можна потім прибрати командою «Видалити порожні східці».
+	Colour	Колір
+	Cross-section (mm²)	Переріз (мм²)
+	Change the selected wires	Змінити вибрані проводи
+	Otherwise new wires are drawn with this type.	Інакше нові проводи креслитимуться цим типом.
+	Digital in	Цифрові входи
+	Digital out	Цифрові виходи
+	Analog in	Аналогові входи
+	Analog out	Аналогові виходи
+	Points	Точки
+	First address	Перша адреса
+	Then click where the card goes	Потім клацніть, де розмістити модуль
+	Black	Чорний
+	Brown	Коричневий
+	Orange	Помаранчевий
+	Dark blue	Темно-синій
+	Violet	Фіолетовий
+	Grey	Сірий
+	Pink	Рожевий
+	Green-yellow	Зелено-жовтий

@@ -106,7 +106,7 @@ fn card_block(s: &mut Session, name: &str, kind: &str, input: bool, points: u64)
     Ok(())
 }
 
-fn run_plc(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn run_plc(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "eplc";
     let (kind, input, analog) = kind_param(p)?;
     let points = match p.get("points") {

@@ -1053,6 +1053,9 @@ pub(super) fn break_wires(s: &mut Session, pins: &[Vec2], layers: &str) -> Resul
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
+        CommandSpec::new("eplace", "Place", run_place)
+            .params("{command: esymbol | eplc, params: {...}, at: [x, y]} → that command's result (interactive: the preset a dialog set)")
+            .interactive(|s| Ok(Box::new(super::interactive::PlaceM::new(s)))),
         CommandSpec::new("esymbol", "Insert Symbol", run_esymbol)
             .menu(&["Tools", "Electrical", "Insert Symbol"])
             .params(
@@ -1062,6 +1065,16 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             )
             .interactive(|_| Ok(Box::new(EsymbolM::default()))),
     ]
+}
+
+fn run_place(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = p.get("command").and_then(Value::as_str).unwrap_or("");
+    if !super::interactive::PLACEABLE.contains(&cmd) {
+        return Err(EngineError::Other(format!("`command` must be one of {}", super::interactive::PLACEABLE.join(", "))));
+    }
+    let mut params = p.get("params").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}));
+    params["at"] = p.get("at").cloned().unwrap_or(Value::Null);
+    s.execute(cmd, &params)
 }
 
 pub(super) fn run_esymbol(s: &mut Session, p: &Value) -> Result<Value> {

@@ -183,9 +183,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 ui.horizontal_wrapped(|ui| {
                     for (name, desc, _, _) in items {
                         let short = name.trim_start_matches("IEC_").replace('_', " ");
-                        if ui.button(RichText::new(short).font(crate::theme::small())).on_hover_text(desc.as_str()).clicked() {
-                            // Insert Symbol with this name: the insertion point is picked next.
-                            app.cmdline(&format!("esymbol {name}"));
+                        if ui.button(RichText::new(short.as_str()).font(crate::theme::small())).on_hover_text(desc.as_str()).clicked() {
+                            // Placed click after click (Enter ends), each with its component dialog.
+                            crate::edialogs::place_symbol(app, name, &short);
                         }
                     }
                 });
@@ -196,8 +196,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new(RichText::new(crate::tl!("Tools")).strong()).id_salt("el-tools").default_open(true).show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 tool(app, ui, crate::tl!("Draw Wire"), "ewire", crate::tl!("Click pins or wires; the wire routes at right angles"));
-                tool(app, ui, crate::tl!("Wire Type"), "ewiretype", crate::tl!("Colour and cross-section of new wires"));
-                tool(app, ui, crate::tl!("Ladder"), "eladder", crate::tl!("Supply rails with a rung in every column"));
+                if ui.button(crate::tl!("Wire Type")).on_hover_text(crate::tl!("Colour and cross-section of new wires")).clicked() {
+                    app.ui.dialog = Some("ewiretype".into());
+                }
+                if ui.button(crate::tl!("Ladder")).on_hover_text(crate::tl!("Supply rails with a rung in every column")).clicked() {
+                    app.ui.dialog = Some("eladder".into());
+                }
                 project_cmd(
                     app,
                     ui,
@@ -206,7 +210,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                     crate::tl!("Rungs nothing was placed on (they would short the rails)"),
                 );
                 tool(app, ui, crate::tl!("Cable"), "ecable", crate::tl!("A cable line across its wires"));
-                tool(app, ui, crate::tl!("PLC card"), "eplc", crate::tl!("A digital or analog I/O card"));
+                if ui.button(crate::tl!("PLC card")).on_hover_text(crate::tl!("A digital or analog I/O card")).clicked() {
+                    app.ui.dialog = Some("eplc".into());
+                }
                 tool(app, ui, crate::tl!("Link Contacts"), "elink", crate::tl!("Give contacts their coil's tag"));
                 tool(app, ui, crate::tl!("Symbol Builder"), "esymbuild", crate::tl!("Make a symbol from drawn geometry"));
             });

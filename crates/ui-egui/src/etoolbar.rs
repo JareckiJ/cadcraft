@@ -24,14 +24,16 @@ enum Act {
     Report(&'static str, &'static str),
     /// Open a panel (a UI command).
     Ui(&'static str),
+    /// Open one of the electrical dialogs ([`crate::edialogs`]).
+    Dialog(&'static str),
 }
 
 /// The groups: (title, [(icon, action, caption, tooltip)]).
 const GROUPS: &[&[(Icon, Act, &str, &str)]] = &[
     &[
         (Icon::EWire, Act::Start("ewire"), "Wire", "Draw Wire (EWIRE): click a pin or wire, then the next"),
-        (Icon::EWireType, Act::Start("ewiretype"), "Wire type", "Wire Type: colour and cross-section of new wires"),
-        (Icon::ELadder, Act::Start("eladder"), "Ladder", "Insert Ladder: supply rails with a rung in every column"),
+        (Icon::EWireType, Act::Dialog("ewiretype"), "Wire type", "Wire Type: colour and cross-section of new wires"),
+        (Icon::ELadder, Act::Dialog("eladder"), "Ladder", "Insert Ladder: supply rails with a rung in every column"),
         (Icon::ECleanRungs, Act::Start("eladder.clean"), "Clean rungs", "Remove Empty Rungs (they would short the rails)"),
         (Icon::ECable, Act::Start("ecable"), "Cable", "Insert Cable: draw a line across its wires"),
     ],
@@ -45,7 +47,7 @@ const GROUPS: &[&[(Icon, Act, &str, &str)]] = &[
         (Icon::ETerminal, Act::Symbol("IEC_TERMINAL"), "Terminal", "Terminal (-X)"),
         (Icon::EBreaker, Act::Symbol("IEC_MCB_3P"), "Breaker", "Circuit-breaker, 3 poles (-Q)"),
         (Icon::EMotor, Act::Symbol("IEC_MOTOR_3PH"), "Motor", "Three-phase motor (-M)"),
-        (Icon::EPlc, Act::Start("eplc"), "PLC card", "PLC I/O card (DI, DO, AI, AO)"),
+        (Icon::EPlc, Act::Dialog("eplc"), "PLC card", "PLC I/O card (DI, DO, AI, AO)"),
     ],
     &[
         (Icon::ETag, Act::Scoped("etag", "eproject.tag"), "Tag", "Tag Devices (IEC 81346): whole project when one is open"),
@@ -86,8 +88,10 @@ fn run(app: &mut CadApp, act: Act) {
     match act {
         Act::Start(cmd) => app.start(cmd),
         Act::Symbol(name) => {
-            app.cmdline(&format!("esymbol {name}"));
+            let label = name.trim_start_matches("IEC_").replace('_', " ");
+            crate::edialogs::place_symbol(app, name, &label);
         }
+        Act::Dialog(name) => app.ui.dialog = Some(name.to_string()),
         Act::Scoped(here, project) => {
             if has_project(app) {
                 let _ = app.run(project, json!({}));
@@ -191,6 +195,7 @@ mod tests {
                     Act::Symbol(n) => assert!(names.contains(n), "{n}"),
                     Act::Report(..) => {}
                     Act::Ui(c) => assert!(crate::menus::is_ui_command(c), "{c}"),
+                    Act::Dialog(d) => assert!(crate::edialogs::is_dialog(d), "{d}"),
                 }
             }
         }

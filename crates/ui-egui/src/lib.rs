@@ -31,6 +31,7 @@ pub mod xrefs;
 pub mod dyngrips;
 pub mod dyninput;
 pub mod ecomponent;
+pub mod edialogs;
 pub mod etoolbar;
 pub mod gpu;
 pub mod grip_dyn;

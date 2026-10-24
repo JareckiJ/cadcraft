@@ -649,6 +649,9 @@ pub struct Session {
     /// component dialog after a symbol is placed (`{"dialog": "ecomponent", "handle": "1A3"}`).
     /// A UI drains them each frame; scripts and headless runs leave them (bounded).
     pub ui_requests: Vec<serde_json::Value>,
+    /// What EPLACE places next (`{"command": "eplc", "params": {...}}`), set by a dialog before
+    /// it starts EPLACE so the person only clicks the insertion point.
+    pub place_preset: Option<serde_json::Value>,
     pub last_command: Option<String>,
     /// LASTPOINT.
     pub last_point: Vec2,
@@ -735,6 +738,7 @@ impl Session {
             suspended: None,
             log: Vec::new(),
             ui_requests: Vec::new(),
+            place_preset: None,
             last_command: None,
             last_point: Vec2::ZERO,
             last_segment: None,

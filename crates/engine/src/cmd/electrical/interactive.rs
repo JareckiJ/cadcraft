@@ -208,3 +208,70 @@ mod tests {
         s.cancel();
     }
 }
+
+/// Commands EPLACE may place.
+pub(super) const PLACEABLE: &[&str] = &["esymbol", "eplc"];
+
+/// EPLACE at the command line: the insertion point for what a dialog prepared
+/// ([`Session::place_preset`]); each click places one more, Enter ends.
+pub(super) struct PlaceM {
+    preset: Option<serde_json::Value>,
+    placed: usize,
+}
+
+impl PlaceM {
+    pub(super) fn new(s: &Session) -> Self {
+        PlaceM { preset: s.place_preset.clone(), placed: 0 }
+    }
+}
+
+impl Interactive for PlaceM {
+    fn name(&self) -> &'static str {
+        "EPLACE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        let what = self.preset.as_ref().and_then(|p| p["label"].as_str().or(p["command"].as_str())).unwrap_or("object").to_string();
+        let accept = Accept { point: true, number: false, text: false, select: false, enter: true };
+        if self.placed == 0 {
+            Prompt::new(format!("Insertion point for {what}"), accept)
+        } else {
+            Prompt::new(format!("Next {what} or <done>"), accept)
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let Some(preset) = self.preset.clone() else {
+            return Err(EngineError::Other("Nothing to place: choose it in its dialog first.".into()));
+        };
+        match i {
+            Input::Point(p) => {
+                let cmd = preset["command"].as_str().unwrap_or("");
+                if !PLACEABLE.contains(&cmd) {
+                    return Err(EngineError::Other(format!("EPLACE cannot place {cmd}.")));
+                }
+                let mut params = preset["params"].clone();
+                if !params.is_object() {
+                    params = json!({});
+                }
+                params["at"] = json!([p.x, p.y]);
+                let r = if cmd == "eplc" { super::plc::run_plc(s, &params)? } else { super::symbols::run_esymbol(s, &params)? };
+                if let Some(h) = r["handle"].as_str()
+                    && cmd == "esymbol"
+                {
+                    s.request_ui(json!({ "dialog": "ecomponent", "handle": h }));
+                }
+                self.placed += 1;
+                // A PLC card is placed once; symbols repeat until Enter.
+                if cmd == "eplc" {
+                    s.place_preset = None;
+                    return Ok(Step::Done);
+                }
+                Ok(Step::Continue)
+            }
+            Input::Enter | Input::Cancel => {
+                s.place_preset = None;
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+}

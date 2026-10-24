@@ -31,6 +31,9 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "authoring" => crate::bedit::authoring_dialog(app, ctx, &mut open),
         "stylesmanager" => crate::plotstyles::dialog(app, ctx, &mut open),
         o if o == "options" || o.starts_with("options:") => crate::options::dialog(app, ctx, o, &mut open),
+        "eladder" => crate::edialogs::ladder(app, ctx, &mut open),
+        "ewiretype" => crate::edialogs::wire_type(app, ctx, &mut open),
+        "eplc" => crate::edialogs::plc(app, ctx, &mut open),
         o if o.starts_with("ecomponent:") => crate::ecomponent::dialog(app, ctx, o.trim_start_matches("ecomponent:"), &mut open),
         other => crate::managers::dialog(app, ctx, other, &mut open),
     }
