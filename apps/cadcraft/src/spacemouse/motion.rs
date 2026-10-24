@@ -107,6 +107,23 @@ impl Filter {
         *self = Self::default();
     }
 
+    fn update_drift(&mut self, complete: bool, now: Instant, bias: &mut [f64; 6]) {
+        if !complete {
+            return;
+        }
+        if self.raw.iter().zip(*bias).all(|(raw, b)| (*raw - b).abs() <= FULL_SCALE * DEADZONE) {
+            let since = *self.idle_since.get_or_insert(now);
+            if now.saturating_duration_since(since) >= Duration::from_secs(2) {
+                for (b, raw) in bias.iter_mut().zip(self.raw) {
+                    *b += (raw - *b) * 0.01;
+                }
+                self.bias = Some(*bias);
+            }
+        } else {
+            self.idle_since = None;
+        }
+    }
+
     pub fn update(&mut self, values: [i16; 6], mask: u8, now: Instant) -> Motion {
         for (index, seen) in self.seen.iter_mut().enumerate() {
             if mask & (1 << index) != 0 {
@@ -128,19 +145,7 @@ impl Filter {
         }
         let Some(mut bias) = self.bias else { return Motion::default() };
         // Follow small resting drift only after two seconds entirely inside the deadzone.
-        if complete {
-            if self.raw.iter().zip(bias).all(|(raw, bias)| (*raw - bias).abs() <= FULL_SCALE * DEADZONE) {
-                let since = *self.idle_since.get_or_insert(now);
-                if now.saturating_duration_since(since) >= Duration::from_secs(2) {
-                    for (bias, raw) in bias.iter_mut().zip(self.raw) {
-                        *bias += (raw - *bias) * 0.01;
-                    }
-                    self.bias = Some(bias);
-                }
-            } else {
-                self.idle_since = None;
-            }
-        }
+        self.update_drift(complete, now, &mut bias);
         let mut axes = [0.0; 6];
         for ((axis, raw), bias) in axes.iter_mut().zip(self.raw).zip(bias) {
             let value = ((raw - bias) / FULL_SCALE).clamp(-1.0, 1.0);
