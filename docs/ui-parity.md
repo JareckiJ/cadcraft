@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (distinct polyline midpoint grips) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-25 · **Change:** minor (RECTANG width and height fields) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How CADCraft's interaction compares with AutoCAD's: point entry, object snaps, tracking, dynamic
 input, grips, selection, the command line, chrome and navigation. A drafter's speed in AutoCAD
@@ -103,9 +103,16 @@ CADCraft has pointer input boxes since #60 (`crates/ui-egui/src/dyninput.rs`): v
 beside the cursor while a command asks for a point; second and later points default to polar
 distance and angle (DYNPIFORMAT = 1 for Cartesian); `,` and `<` lock a value and move to the next
 box; Tab types the separator; Enter sends a relative entry (DYNPICOORDS = 1 for absolute) and
-fills an empty box from the cursor; a plain number stays direct distance entry. Missing:
-dimensional input on grips (length/angle fields while stretching), lock icons, the prompt with a
-down-arrow options menu (DYNPROMPT), and DYNDIM.
+fills an empty box from the cursor; a plain number stays direct distance entry. Grip dimensional
+input (`grip_dyn.rs`), lock icons, a distance prompt's one length field and the down-arrow
+options menu (DYNPROMPT) landed since. RECTANG's other corner shows the rubber-band rectangle's
+width and height as fields on dimension lines along its sides (`rect_dyn.rs`, asked for through
+`Prompt::rect`): Tab locks a typed length and moves to the other field and back, a locked side
+keeps its length while the other follows the cursor, the cursor's quadrant gives each length its
+direction, retyping a locked field replaces its lock, Enter places the corner, and the Rotation
+option turns the fields with the rectangle; `@dx,dy`, points and keywords still go through.
+Missing: length and angle fields on the segment for LINE, PLINE, ARC and POLYGON (they keep the
+pointer boxes), and DYNDIM ([gaps.md](gaps.md) U14).
 
 ## Grips (≈ 40%)
 
@@ -117,7 +124,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Hot-grip options: Base point, Copy, Undo, Reference, eXit | yes | **advertised in the prompt but not parsed**; the engine's JSON grip commands accept `copy`, the UI never passes it |
 | Several hot grips at once (Shift-click) | yes | **no** (one handle) |
 | Multifunctional grip hover menus (Add Vertex, Remove Vertex, Convert to Arc, Lengthen …) | yes | **no** |
-| Grip dimensional input (length/angle fields) | yes | no |
+| Grip dimensional input (length/angle fields) | yes | yes (`grip_dyn.rs`) |
 | Dynamic block grips | yes | no (no dynamic blocks) |
 | Grip appearance (GRIPSIZE, colours, hover) | yes | GRIPSIZE, GRIPS and GRIPOBJLIMIT honoured (Options ▸ Selection); polyline segment midpoints use rectangles, vertices use squares; no grip colours |
 
@@ -203,6 +210,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-25 | minor | RECTANG's other corner: width and height fields on dimension lines with Tab to lock (`rect_dyn.rs`, `Prompt::rect`); the Dynamic input section's stale "missing" list corrected (grip input, lock icons and DYNPROMPT landed) |
 | 2026-10-22 | minor | Polyline segment midpoint grips use rectangles, distinct from square vertex grips, with matching hover and pick bounds (#1950) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |
 | 2026-10-14 | minor | Selection cycling (#1143): the list and badge of SELECTIONCYCLING, Shift+Space through overlapping objects (#1145) |

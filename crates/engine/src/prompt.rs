@@ -66,6 +66,54 @@ pub struct Prompt {
     /// the routine writes, so it cannot be read for the word "Select" (#1598).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub picks_one: bool,
+    /// The prompt sizes a rectangle from its first corner or centre (RECTANG's other corner):
+    /// Dynamic Input shows its width and height as fields along its sides instead of the pointer
+    /// boxes, and a typed one holds that side ([`RectSize::corner`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rect: Option<RectSize>,
+}
+
+/// A rectangle sized from a base point ([`Prompt::rect`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RectSize {
+    /// The first corner, or the centre with `center`.
+    pub base: Vec2,
+    /// The rectangle's rotation (radians): its width runs along this direction, its height
+    /// a quarter turn on.
+    pub rotation: f64,
+    /// `base` is the centre: the picked point is a corner half the size away.
+    pub center: bool,
+}
+
+impl RectSize {
+    /// How much of the size lies between the base and the picked corner.
+    fn reach(&self) -> f64 {
+        if self.center { 0.5 } else { 1.0 }
+    }
+    /// The signed width and height with the other corner at `p` (negative to the left of or
+    /// below the base, in the rectangle's own directions).
+    pub fn size(&self, p: Vec2) -> (f64, f64) {
+        let l = (p - self.base).rotate(-self.rotation) / self.reach();
+        (l.x, l.y)
+    }
+    /// The other corner for a typed `width` and `height` (lengths; `None` follows the cursor):
+    /// the cursor's side of the base gives each typed length its direction.
+    pub fn corner(&self, width: Option<f64>, height: Option<f64>, cursor: Vec2) -> Vec2 {
+        let (w, h) = self.size(cursor);
+        let pick = |typed: Option<f64>, live: f64| match typed.filter(|v| v.is_finite()) {
+            Some(v) if live < 0.0 => -v.abs(),
+            Some(v) => v.abs(),
+            None => live,
+        };
+        self.base + (Vec2::new(pick(width, w), pick(height, h)) * self.reach()).rotate(self.rotation)
+    }
+    /// The rectangle of signed size `(w, h)`: the corner it is drawn from, then the far ends of
+    /// its width side and of its height side.
+    pub fn sides(&self, (w, h): (f64, f64)) -> (Vec2, Vec2, Vec2) {
+        let o = if self.center { self.base - Vec2::new(w / 2.0, h / 2.0).rotate(self.rotation) } else { self.base };
+        (o, o + Vec2::new(w, 0.0).rotate(self.rotation), o + Vec2::new(0.0, h).rotate(self.rotation))
+    }
 }
 
 /// Parse `@distance<angle` (relative polar), returning `(distance, angle in radians)`.
@@ -116,6 +164,11 @@ impl Prompt {
     pub fn corner(mut self, p: Vec2) -> Self {
         self.base = Some(p);
         self.corner = true;
+        self
+    }
+    /// Sizes a rectangle from a base point (the `rect` field).
+    pub fn rect(mut self, r: RectSize) -> Self {
+        self.rect = Some(r);
         self
     }
     /// Asks for a distance from the base (the `distance` field).

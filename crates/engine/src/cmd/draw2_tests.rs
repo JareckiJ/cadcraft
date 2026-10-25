@@ -623,6 +623,68 @@ fn rectang_options_command_line() {
     }
 }
 
+/// RECTANG's other-corner prompt asks Dynamic Input for width and height fields
+/// ([`crate::Prompt::rect`]) measured from the first corner in the rectangle's rotation, or from
+/// the centre in centre mode; typed Dimensions leave only the quadrant, so no fields; and the
+/// corner the fields resolve to draws exactly the typed size on the cursor's side.
+#[test]
+fn rectang_other_corner_asks_for_width_and_height_fields() {
+    use crate::RectSize;
+    let mut s = Session::new();
+    s.cmdline("rectang").unwrap();
+    assert_eq!(s.current_prompt().unwrap().rect, None, "the first corner is a point");
+    s.cmdline("2,3").unwrap();
+    let r = s.current_prompt().unwrap().rect.expect("width and height fields");
+    assert_eq!(r, RectSize { base: Vec2::new(2.0, 3.0), rotation: 0.0, center: false });
+    assert_eq!(r.size(Vec2::new(-1.0, 7.0)), (-3.0, 4.0));
+    // Width 10 typed, height from the cursor; the cursor's quadrant gives the directions.
+    let c = r.corner(Some(10.0), None, Vec2::new(-1.0, 7.0));
+    assert!(near(c, -8.0, 7.0), "{c:?}");
+    // Both typed: the cursor only picks the quadrant.
+    s.input(Input::Point(r.corner(Some(10.0), Some(5.0), Vec2::new(4.0, -1.0)))).unwrap();
+    assert!(s.running.is_none());
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 2.0, -2.0) && near(b.max, 12.0, 3.0), "{b:?}");
+
+    // Rotation turns the fields with the rectangle.
+    s.cmdline("rectang 0,0 r 90").unwrap();
+    let r = s.current_prompt().unwrap().rect.unwrap();
+    assert!((r.rotation - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    // The width runs up the Y axis now.
+    let (w, h) = r.size(Vec2::new(-2.0, 6.0));
+    assert!((w - 6.0).abs() < 1e-9 && (h - 2.0).abs() < 1e-9, "{w} {h}");
+    let (o, wend, hend) = r.sides((6.0, 2.0));
+    assert!(near(o, 0.0, 0.0) && near(wend, 0.0, 6.0) && near(hend, -2.0, 0.0), "{wend:?} {hend:?}");
+    s.cancel();
+
+    // Centre mode: the fields are the full size, half of it each side of the centre.
+    s.cmdline("rectang ce 10,10").unwrap();
+    let r = s.current_prompt().unwrap().rect.unwrap();
+    assert!(r.center);
+    assert_eq!(r.size(Vec2::new(14.0, 16.0)), (8.0, 12.0));
+    s.input(Input::Point(r.corner(Some(4.0), Some(2.0), Vec2::new(0.0, 0.0)))).unwrap();
+    let b = cadcraft_geom::Bounds2::from_points(rect_pts(&s));
+    assert!(near(b.min, 8.0, 9.0) && near(b.max, 12.0, 11.0), "{b:?}");
+    assert_eq!(r.sides((4.0, 2.0)).0, Vec2::new(8.0, 9.0));
+
+    // Typed Dimensions: the next point only picks the quadrant, so no fields.
+    s.cmdline("rectang 0,0 d 3 2").unwrap();
+    assert_eq!(s.current_prompt().unwrap().rect, None);
+    s.cancel();
+
+    // `@dx,dy`, an absolute point and keywords still answer the prompt.
+    s.cmdline("rectang 1,1 @4,2").unwrap();
+    assert!(near(cadcraft_geom::Bounds2::from_points(rect_pts(&s)).max, 5.0, 3.0));
+    s.cmdline("rectang 1,1 6,6").unwrap();
+    assert!(near(cadcraft_geom::Bounds2::from_points(rect_pts(&s)).max, 6.0, 6.0));
+    s.cmdline("rectang 0,0 a 20 l 5").unwrap();
+    assert!(near(cadcraft_geom::Bounds2::from_points(rect_pts(&s)).max, 5.0, 4.0));
+
+    // Hostile values never escape as non-finite corners.
+    let c = r.corner(Some(f64::NAN), Some(f64::INFINITY), Vec2::new(1.0, 1.0));
+    assert!(c.is_finite(), "{c:?}");
+}
+
 /// Guards the JSON `center: true` form for every sizing route: a picked corner mirrored about
 /// the centre, full-size `dimensions`, full `area`, rotation about the centre, that the default
 /// corner mode is untouched, and that centre mode without a size is rejected.

@@ -200,7 +200,7 @@ pub fn draw(app: &mut CadApp, p: &egui::Painter) -> bool {
 }
 
 /// One value field centred on `at`.
-fn field(p: &egui::Painter, at: Pos2, text: &str, font: &egui::FontId, active: bool, locked: bool, live: bool) {
+pub(crate) fn field(p: &egui::Painter, at: Pos2, text: &str, font: &egui::FontId, active: bool, locked: bool, live: bool) {
     let t = Tokens::get();
     let g = p.layout_no_wrap(text.to_owned(), font.clone(), if live { t.text_faint } else { t.text });
     let lock_w = if locked { 11.0 } else { 0.0 };

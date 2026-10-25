@@ -162,9 +162,10 @@ impl Session {
             Frame::TempTrack => Prompt::new("Specify temporary OTRACK point", point),
             Frame::Track { last: None } => Prompt::new("First tracking point", point),
             Frame::Track { last: Some(l) } => Prompt::new("Next point (Press ENTER to end tracking)", point).base(l),
-            Frame::Angle { .. } | Frame::Snap { mode: 0 } => p,
+            // A typed angle or snap holds the point, not a rectangle's sides.
+            Frame::Angle { .. } | Frame::Snap { mode: 0 } => Prompt { rect: None, ..p },
             // "Endpoint of:", keeping the base and deferral PER/TAN need.
-            Frame::Snap { mode } => Prompt { message: format!("{} of", snap_name(mode)), keywords: Vec::new(), default: None, ..p },
+            Frame::Snap { mode } => Prompt { message: format!("{} of", snap_name(mode)), keywords: Vec::new(), default: None, rect: None, ..p },
         })
     }
 

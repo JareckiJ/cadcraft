@@ -10,7 +10,7 @@ use super::curves::{self, Chain, MAX_GEN, TanObj};
 use super::helpers::*;
 use super::machines::number;
 use super::*;
-use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, RectSize, Result, Session, Step};
 
 pub(crate) mod breakline;
 pub(crate) mod mline;
@@ -1744,7 +1744,14 @@ impl Interactive for RectM2 {
                 let msg = if self.center { "Specify center point for rectangle" } else { "Specify first corner point" };
                 Prompt::new(msg, Accept::POINT).kw(&["Chamfer", "CEnter", "Elevation", "Fillet", "Thickness", "Width"])
             }
-            Some(p) => Prompt::new("Specify other corner point", Accept::POINT).kw(&["Area", "Dimensions", "Rotation"]).corner(p),
+            Some(p) => {
+                let pr = Prompt::new("Specify other corner point", Accept::POINT).kw(&["Area", "Dimensions", "Rotation"]).corner(p);
+                // Typed dimensions leave only the quadrant to pick: no width and height fields.
+                match self.dims {
+                    Some(_) => pr,
+                    None => pr.rect(RectSize { base: p, rotation: self.rotation, center: self.center }),
+                }
+            }
         }
     }
     /// Consumes one input: option keywords (`Center` only switches the first point's meaning

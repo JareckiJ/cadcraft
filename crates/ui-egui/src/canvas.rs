@@ -102,6 +102,8 @@ pub struct CanvasState {
     pub hot_grips: Vec<(Handle, usize)>,
     /// Grip dimensional input: the value fields of the grip being stretched.
     pub grip_dyn: crate::grip_dyn::GripDyn,
+    /// A rectangle's width and height fields (RECTANG's other corner).
+    pub rect_dyn: crate::rect_dyn::RectDyn,
     /// A GRIP edit was running last frame (its grips go cold when it ends).
     grip_editing: bool,
     /// The grip whose menu (Stretch, Add Vertex, Lengthen…) a right-click opened.
@@ -1595,8 +1597,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.canvas.snap = None;
             app.canvas.track = None;
         }
-        // Grip dimensional input: typed lengths and angles hold the grip and override snaps.
-        let grip_held = crate::grip_dyn::constrain(app, eff);
+        // Grip dimensional input: typed lengths and angles hold the grip and override snaps; a
+        // rectangle's typed width and height hold its corner the same way.
+        let grip_held = crate::grip_dyn::constrain(app, eff).or_else(|| crate::rect_dyn::constrain(app, eff));
         if let Some(q) = grip_held {
             eff = q;
             app.canvas.snap = None;
@@ -2045,9 +2048,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && let Some(hp) = hover_pos
     {
         // A stretched grip shows its dimensions instead of the pointer boxes; a prompt asking for
-        // a distance shows its one field and keeps the prompt and its options.
-        let fields = crate::grip_dyn::draw(app, &painter);
-        if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
+        // a distance, or sizing a rectangle, shows its fields and keeps the prompt and its options.
+        let fields = crate::grip_dyn::draw(app, &painter) || crate::rect_dyn::draw(app, &painter);
+        if !fields || app.session.current_prompt().is_some_and(|p| p.distance || p.rect.is_some()) {
             dynamic_input(app, &painter, hp, fields);
         }
     }

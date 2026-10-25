@@ -80,6 +80,10 @@ fn tab(app: &mut CadApp) {
     if crate::grip_dyn::tab(app) {
         return;
     }
+    // A rectangle's width and height: Tab locks the typed length and moves to the other field.
+    if crate::rect_dyn::tab(app) {
+        return;
+    }
     // Over a snap marker with nothing typed, Tab cycles the candidate snaps.
     if app.cmd.buffer.is_empty() && app.canvas.snap.is_some() {
         app.canvas.snap_tab = true;
@@ -359,6 +363,12 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
 pub fn submit(app: &mut CadApp) {
     // Grip dimensional input: the typed lengths and angles place the grip.
     if crate::grip_dyn::submit(app) {
+        return;
+    }
+    // A rectangle's typed width and height place its other corner.
+    if crate::rect_dyn::submit(app) {
+        app.cmd.locked_second = None;
+        app.cmd.history_pos = None;
         return;
     }
     // Dynamic Input: a split entry (`40,30`, `40<90`, `40,`) is completed from the cursor and
