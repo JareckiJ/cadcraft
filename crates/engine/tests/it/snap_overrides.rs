@@ -190,3 +190,23 @@ fn tan_for_a_3p_circle_takes_the_solution_that_touches_the_arc() {
     let (c, r) = last_circle(&s);
     assert!((c.dist(Vec2::new(20.0, 20.0)) - (r - 3.0)).abs() < 1e-9 && (r - 6.082575694955838).abs() < 1e-9, "{c:?} r={r}");
 }
+
+#[test]
+fn tan_for_a_circle_radius_refuses_the_picked_circles_own_center() {
+    // #1512: a circle around 20,20 would lie on the circle there, not touch it.
+    let mut s = drawing();
+    s.script("CIRCLE 20,20 TAN 23.02,20.03\n").unwrap();
+    assert!(s.prompt_text().contains("radius of circle"), "{}", s.prompt_text());
+    assert!(s.log.iter().any(|l| l.contains("No circle around the center is tangent there.")), "{:?}", s.log);
+    assert_eq!(s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Circle(_))).count(), 1);
+}
+
+#[test]
+fn tan_for_a_3p_circle_refuses_the_picked_circle_itself() {
+    // #1512: tangent twice to the circle and through a point on it is only the circle itself.
+    let mut s = drawing();
+    s.script("CIRCLE 3P TAN 23.02,20.03 TAN 16.98,20.03 20,23\n").unwrap();
+    assert!(s.prompt_text().contains("third point"), "{}", s.prompt_text());
+    assert!(s.log.iter().any(|l| l.contains("Circle does not exist.")), "{:?}", s.log);
+    assert_eq!(s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Circle(_))).count(), 1);
+}

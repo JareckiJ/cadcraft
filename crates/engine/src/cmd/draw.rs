@@ -843,7 +843,10 @@ impl Interactive for CircleM {
             // curve, on the side it was picked (#1512).
             Input::Deferred(d) if self.mode == 0 && self.pts.len() == 1 => {
                 let Some(&c) = self.pts.first() else { return Ok(Step::Continue) };
-                let touch = d.curve.perpendiculars(c, d.at).into_iter().min_by(|a, b| a.dist(d.at).total_cmp(&b.dist(d.at)));
+                // Around the picked curve's own center the circle would lie on it, not touch it.
+                let concentric =
+                    matches!(d.curve, snap::SnapCurve::Circle { center, .. } | snap::SnapCurve::Arc { center, .. } if center.near(c, 1e-9));
+                let touch = d.curve.perpendiculars(c, d.at).into_iter().filter(|_| !concentric).min_by(|a, b| a.dist(d.at).total_cmp(&b.dist(d.at)));
                 match touch.map(|t| c.dist(t)).filter(|r| *r > 1e-12 && r.is_finite()) {
                     Some(r) => {
                         finish_circle(s, Circle::new(c, r))?;
@@ -913,9 +916,18 @@ impl CircleM {
             super::curves::TanObj::Circle(circle)
         };
         let pts = [a, b, c];
-        // The circle must touch an arc within its sweep, not elsewhere on the arc's circle.
-        let on_arcs = |found: &Circle| pts.iter().enumerate().all(|(i, p)| tan(i).is_none_or(|t| t.contains(target(i, *p).touch(found))));
-        super::curves::ttt_where([(target(0, a), a), (target(1, b), b), (target(2, c), c)], on_arcs)
+        // The circle must touch an arc within its sweep, not elsewhere on the arc's circle, and
+        // not be the picked circle itself (which lies on it rather than touching it).
+        let touches = |found: &Circle| {
+            pts.iter().enumerate().all(|(i, p)| {
+                tan(i).is_none_or(|t| {
+                    let same = matches!(target(i, *p), super::curves::TanObj::Circle(o)
+                        if o.center.dist(found.center) + (o.radius - found.radius).abs() <= 1e-9 * o.radius);
+                    !same && t.contains(target(i, *p).touch(found))
+                })
+            })
+        };
+        super::curves::ttt_where([(target(0, a), a), (target(1, b), b), (target(2, c), c)], touches)
     }
 }
 
