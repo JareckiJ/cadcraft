@@ -1320,7 +1320,7 @@ menu	Modify	Edita
 	Spherical	Sferica
 	Hemispherical	Emisferica
 	Inverted	Invertita
-	Centered	Centrata
+	Centered	Centrato
 	Hatch origin	Origine del tratteggio
 	Use current origin	Usa l'origine corrente
 	Specified origin	Origine specificata
@@ -1390,43 +1390,43 @@ menu	Modify	Edita
 	Above	Sopra
 	Angular precision	Precisione angolare
 	Angular units	Unità angolari
-	Architectural	Architettoniche
+	Architectural	Architettonico
 	Arrow size	Dimensione delle frecce
 	Changes apply to the current dimension style at once and are kept for new drawings. Other drawings keep their own styles.	Le modifiche si applicano subito allo stile di quota corrente e vengono mantenute per i nuovi disegni. Gli altri disegni conservano i propri stili.
 	Comma (,)	Virgola (,)
 	Current dimension style	Stile di quota corrente
-	Decimal	Decimali
+	Decimal	Decimale
 	Decimal degrees	Gradi decimali
 	Decimal separator	Separatore decimale
 	Degrees, minutes, seconds	Gradi, primi, secondi
 	Edit as JSON	Modifica come JSON
-	Engineering	Ingegneristiche
+	Engineering	Ingegneristico
 	Extension beyond dimension line	Estensione oltre la linea di quota
 	Extension line offset	Distanza della linea di estensione dall'origine
 	Forget defaults for new drawings	Dimentica i valori predefiniti per i nuovi disegni
-	Fractional	Frazionarie
-	Gradians	Gradianti
+	Fractional	Frazionario
+	Gradians	Gradienti
 	JIS	JIS
 	Linear scale factor	Fattore di scala lineare
 	Linear units	Unità lineari
 	No drawing is open: these values are kept for new drawings.	Nessun disegno aperto: questi valori vengono mantenuti per i nuovi disegni.
 	Not valid JSON	JSON non valido
 	Offset from dimension line	Distanza del testo dalla linea di quota
-	Outside	All'esterno
+	Outside	Esterno
 	Overall scale	Scala complessiva
 	Period (.)	Punto (.)
 	Precision (decimal places)	Precisione (cifre decimali)
 	Prefix	Prefisso
 	Radians	Radianti
 	Round off to	Arrotonda a
-	Scientific	Scientifiche
+	Scientific	Scientifico
 	Space	Spazio
 	Suffix	Suffisso
 	Suppress leading zeros	Sopprimi gli zeri iniziali
 	Suppress trailing zeros	Sopprimi gli zeri finali
 	Text position	Posizione del testo
 	The settings must be a JSON object.	Le impostazioni devono essere un oggetto JSON.
-	Windows desktop	Formato Windows
+	Windows desktop	Formato desktop di Windows
 	Zero suppression	Soppressione degli zeri
 	{n} settings	{n} impostazioni
 	System printers	Stampanti di sistema
@@ -1435,3 +1435,147 @@ menu	Modify	Edita
 	Refresh printers	Aggiorna l'elenco delle stampanti
 	A printer connected to this computer: the sheet goes to its queue	Una stampante collegata a questo computer: il foglio va nella sua coda di stampa
 	Copies	Copie
+# Plot dialog, managers, recovery and view widgets (strings that used to be untranslated).
+	A recovery copy of the open drawing with unsaved changes was autosaved.	È stata salvata automaticamente una copia di ripristino del disegno aperto con modifiche non salvate.
+	Analyze Usage	Analizza utilizzo
+	Angle tolerance (degrees)	Tolleranza angolare (gradi)
+	Apply changes to existing references	Applica le modifiche ai riferimenti esistenti
+	Apply to Layout	Applica al layout
+	Block Attribute Manager	Gestore attributi blocco
+	Block:	Blocco:
+	Bring every reference in line with these definitions	Allinea ogni riferimento a queste definizioni
+	CADCraft did not close normally. These drawings were autosaved:	CADCraft non è stato chiuso correttamente. Questi disegni sono stati salvati automaticamente:
+	CADCraft draws in the World Coordinate System; user coordinate systems aren't available yet.	CADCraft disegna nel sistema di coordinate globale; i sistemi di coordinate utente non sono ancora disponibili.
+	Center the plot	Centra la stampa
+	Constant	Costante
+	Constraint bar transparency (%)	Trasparenza delle barre dei vincoli (%)
+	Constraint types AUTOCONSTRAIN applies	Tipi di vincolo applicati da AUTOCONSTRAIN
+	Coordinate system	Sistema di coordinate
+	Ctrl+click or Shift+click pick several layouts	Ctrl+clic o Maiusc+clic selezionano più layout
+	Current	Corrente
+	Dimensional	Dimensionali
+	Dismiss	Chiudi
+	Distance from the printable area's lower-left corner; values range from −100000 to 100000 mm	Distanza dall'angolo inferiore sinistro dell'area di stampa; valori da −100000 a 100000 mm
+	Distance tolerance	Tolleranza di distanza
+	Draw new objects with the selected linetype	Disegna i nuovi oggetti con il tipo di linea selezionato
+	Drawing Recovery	Ripristino disegni
+	Drawing Units	Unità del disegno
+	Every layout, in tab order (not the Model tab)	Tutti i layout, nell'ordine delle schede (esclusa la scheda Modello)
+	Every library linetype is loaded.	Tutti i tipi di linea della libreria sono caricati.
+	Fit	Adatta
+	Fit to paper	Adatta al foglio
+	From File...	Da file...
+	Geometric	Geometrici
+	Global scale factor	Fattore di scala globale
+	Graphics error	Errore grafico
+	Hide UCS Icon	Nascondi icona UCS
+	Hide ViewCube	Nascondi ViewCube
+	Imperial (inches)	Imperiali (pollici)
+	Implied Loops	Contorni impliciti
+	Infer geometric constraints	Deduci i vincoli geometrici
+	Insertion scale	Scala di inserimento
+	Invisible	Invisibile
+	Keep the files and ask again next time	Conserva i file e chiedi di nuovo la prossima volta
+	Landscape	Orizzontale
+	Later	Più tardi
+	Layouts	Layout
+	Linetype Manager	Gestore tipi di linea
+	Metric (millimetres)	Metriche (millimetri)
+	Mode	Modalità
+	Move Down	Sposta giù
+	Move Up	Sposta su
+	New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE).	I nuovi disegni e il primo disegno all'avvio usano queste unità, salvo che sia impostato un modello predefinito (QNEWTEMPLATE).
+	New style name	Nome del nuovo stile
+	Nothing needed autosaving.	Non c'era nulla da salvare automaticamente.
+	Opened drawings have no file name: save them to keep them.	I disegni aperti non hanno un nome di file: salvarli per conservarli.
+	Orientation	Orientamento
+	PDF on the paper chosen below	PDF sulla carta scelta qui sotto
+	Paper size	Formato carta
+	Paper units per drawing unit, or a ratio such as 1:50	Unità di carta per unità di disegno, oppure un rapporto come 1:50
+	Pick the window's corners in the drawing	Indicare gli angoli della finestra nel disegno
+	Plot area	Area di stampa
+	Plot object lineweights	Stampa gli spessori di linea degli oggetti
+	Plot objects with their transparency (PLOTTRANSPARENCYOVERRIDE can override it)	Stampa gli oggetti con la loro trasparenza (PLOTTRANSPARENCYOVERRIDE può modificarla)
+	Plot offset	Scostamento di stampa
+	Plot transparency	Trasparenza di stampa
+	Point Size	Dimensione del punto
+	Point Style	Stile punto
+	Portrait	Verticale
+	Precision	Precisione
+	Printer/plotter	Stampante/plotter
+	Prompt	Richiesta
+	Sample output	Esempio di risultato
+	Save these settings in the layout's page setup	Salva queste impostazioni nell'impostazione pagina del layout
+	Save your work and restart CADCraft. Recovery copies are offered at the next start if needed.	Salvare il lavoro e riavviare CADCraft. Se necessario, le copie di ripristino verranno proposte al prossimo avvio.
+	Set Size Relative to Screen	Imposta dimensione relativa allo schermo
+	Set Size in Absolute Units	Imposta dimensione in unità assolute
+	Show constraint bars	Mostra le barre dei vincoli
+	Show dynamic constraints	Mostra i vincoli dinamici
+	Styles	Stili
+	Sync	Sincronizza
+	Tag	Etichetta
+	The graphics device stopped working (a driver reset or a GPU that stopped responding). CADCraft can't draw again until it restarts.	Il dispositivo grafico ha smesso di funzionare (ripristino del driver o GPU che non risponde). CADCraft non può disegnare finché non viene riavviato.
+	The sheet as these settings plot it	Il foglio come lo stampano queste impostazioni
+	The whole sheet (or double-click)	Tutto il foglio (o doppio clic)
+	This drawing has no blocks with attributes.	Questo disegno non ha blocchi con attributi.
+	This drawing has no layouts.	Questo disegno non ha layout.
+	UCS icon: World Coordinate System	Icona UCS: sistema di coordinate globale
+	Units of new drawings	Unità dei nuovi disegni
+	Units to scale inserted content	Unità per scalare il contenuto inserito
+	Window <	Finestra <
+	World (WCS)	Globale (WCS)
+	Zoom in (or the mouse wheel)	Ingrandisci (o rotellina del mouse)
+	Zoom out	Riduci
+# Labels the manager dialogs translate when they draw them.
+	Limits	Limiti
+	Center the plotted model bounds on the printable area	Centra i limiti del modello stampato nell'area di stampa
+	Model-space offset placement is not supported by SVG	Il posizionamento con scostamento dello spazio modello non è supportato da SVG
+	Offsets must be within ±100000 mm	Gli scostamenti devono essere entro ±100000 mm
+	First corner	Primo angolo
+	Opposite corner	Angolo opposto
+	Current style: {current}	Stile corrente: {current}
+	Properties of {sel}	Proprietà di {sel}
+	Page setup of {name}	Impostazione pagina di {name}
+	Current linetype: {current}	Tipo di linea corrente: {current}
+	Height (0 = ask)	Altezza (0 = chiedi)
+	Backwards	Rovesciato
+	Upside down	Capovolto
+	Cell margin	Margine della cella
+	Title row	Riga del titolo
+	Header row	Riga di intestazione
+	Arrowhead size	Dimensione della freccia
+	Landing gap	Distanza dalla linea di invio
+	Landing length	Lunghezza della linea di invio
+	Appearance	Aspetto
+	Text Style	Stile di testo
+	Table Style	Stile tabella
+	Multileader Style	Stile multidirettrice
+	Decimal Degrees	Gradi decimali
+	Deg/Min/Sec	Gradi/primi/secondi
+	Grads	Gradienti
+	Surveyor's Units	Unità topografiche
+	Unitless	Senza unità
+	Inches	Pollici
+	Feet	Piedi
+	Miles	Miglia
+	Millimeters	Millimetri
+	Centimeters	Centimetri
+	Meters	Metri
+	Kilometers	Chilometri
+	Microinches	Microinch
+	Mils	Mil
+	Yards	Iarde
+	Angstroms	Angstrom
+	Nanometers	Nanometri
+	Microns	Micron
+	Decimeters	Decimetri
+	Decameters	Decametri
+	Hectometers	Ettometri
+	Gigameters	Gigametri
+	Astronomical Units	Unità astronomiche
+	Light Years	Anni luce
+	Parsecs	Parsec
+	US Survey Feet	Piedi US survey
+	US Survey Inch	Pollice US survey
+	US Survey Yard	Iarda US survey
+	US Survey Mile	Miglio US survey

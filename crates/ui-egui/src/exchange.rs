@@ -249,7 +249,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let (mut close, mut print) = (false, false);
     // What to draw in detail after the window: the part and the sheet's width on screen.
     let mut want: Option<([f32; 4], f32)> = None;
-    egui::Window::new("Plot Preview").open(open).collapsible(false).resizable(true).default_size(vec2(900.0, 680.0)).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Plot Preview")).open(open).collapsible(false).resizable(true).default_size(vec2(900.0, 680.0)).show(ctx, |ui| {
         match &pv.shown {
             Ok(shown) => {
                 let image = shown.base.size_vec2();
@@ -259,9 +259,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     ui.label(&shown.info);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(format!("{:.0}%", view.zoom * 100.0));
-                        fit = ui.small_button("Fit").on_hover_text("The whole sheet (or double-click)").clicked();
-                        zoom_in = ui.small_button("+").on_hover_text("Zoom in (or the mouse wheel)").clicked();
-                        zoom_out = ui.small_button("−").on_hover_text("Zoom out").clicked();
+                        fit = ui.small_button(crate::tl!("Fit")).on_hover_text(crate::tl!("The whole sheet (or double-click)")).clicked();
+                        zoom_in = ui.small_button("+").on_hover_text(crate::tl!("Zoom in (or the mouse wheel)")).clicked();
+                        zoom_out = ui.small_button("−").on_hover_text(crate::tl!("Zoom out")).clicked();
                     });
                 });
                 let size = vec2(ui.available_width().max(160.0), (ui.available_height() - 36.0).max(160.0));
@@ -331,8 +331,8 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            print = ui.button("Print...").clicked();
-            close = ui.button("Close").clicked();
+            print = ui.button(crate::tl!("Print...")).clicked();
+            close = ui.button(crate::tl!("Close")).clicked();
         });
     });
     if let (Some((crop, width)), Ok(shown)) = (want, pv.shown.as_ref()) {

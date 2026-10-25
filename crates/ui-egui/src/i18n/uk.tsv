@@ -1434,3 +1434,148 @@
 	Refresh printers	Оновити список принтерів
 	A printer connected to this computer: the sheet goes to its queue	Принтер, підключений до цього комп'ютера: аркуш іде в його чергу друку
 	Copies	Копії
+# Plot dialog, managers, recovery and view widgets (strings that used to be untranslated).
+	A recovery copy of the open drawing with unsaved changes was autosaved.	Копію для відновлення відкритого креслення з незбереженими змінами автоматично збережено.
+	Angle tolerance (degrees)	Допуск кута (градуси)
+	Apply changes to existing references	Застосувати зміни до наявних посилань
+	Apply to Layout	Застосувати до аркуша
+	Block Attribute Manager	Диспетчер атрибутів блоків
+	Block:	Блок:
+	Bring every reference in line with these definitions	Привести всі посилання у відповідність до цих означень
+	CADCraft did not close normally. These drawings were autosaved:	CADCraft завершився некоректно. Ці креслення було автоматично збережено:
+	CADCraft draws in the World Coordinate System; user coordinate systems aren't available yet.	CADCraft креслить у світовій системі координат; користувацькі системи координат поки недоступні.
+	Center the plot	Центрувати друк
+	Constant	Постійний
+	Constraint bar transparency (%)	Прозорість панелей обмежень (%)
+	Constraint types AUTOCONSTRAIN applies	Типи обмежень, що застосовує AUTOCONSTRAIN
+	Coordinate system	Система координат
+	Ctrl+click or Shift+click pick several layouts	Ctrl+клік або Shift+клік вибирає кілька аркушів
+	Current	Поточний
+	Dimensional	Розмірні
+	Dismiss	Закрити
+	Distance from the printable area's lower-left corner; values range from −100000 to 100000 mm	Відстань від лівого нижнього кута області друку; значення від −100000 до 100000 мм
+	Distance tolerance	Допуск відстані
+	Draw new objects with the selected linetype	Креслити нові об'єкти вибраним типом ліній
+	Drawing Recovery	Відновлення креслень
+	Drawing Units	Одиниці креслення
+	Every layout, in tab order (not the Model tab)	Усі аркуші в порядку вкладок (без вкладки «Модель»)
+	Every library linetype is loaded.	Усі типи ліній бібліотеки завантажено.
+	Fit	Вписати
+	Fit to paper	Вписати в аркуш
+	From File...	З файлу...
+	Geometric	Геометричні
+	Global scale factor	Глобальний коефіцієнт масштабу
+	Graphics error	Помилка графіки
+	Hide UCS Icon	Приховати значок ПСК
+	Hide ViewCube	Приховати ViewCube
+	Infer geometric constraints	Виводити геометричні обмеження
+	Insertion scale	Масштаб вставлення
+	Invisible	Невидимий
+	Keep the files and ask again next time	Зберегти файли та запитати знову наступного разу
+	Landscape	Альбомна
+	Later	Пізніше
+	Layouts	Аркуші
+	Linetype Manager	Диспетчер типів ліній
+	Mode	Режим
+	Move Down	Вниз
+	Move Up	Вгору
+	New style name	Назва нового стилю
+	Nothing needed autosaving.	Автозбереження не потрібне.
+	Opened drawings have no file name: save them to keep them.	Відкриті креслення не мають імені файлу: збережіть їх, щоб зберегти зміни.
+	Orientation	Орієнтація
+	PDF on the paper chosen below	PDF на вибраному нижче аркуші
+	Paper size	Розмір аркуша
+	Paper units per drawing unit, or a ratio such as 1:50	Одиниць паперу на одиницю креслення або співвідношення, наприклад 1:50
+	Pick the window's corners in the drawing	Вкажіть кути вікна на кресленні
+	Plot area	Область друку
+	Plot object lineweights	Друкувати товщини ліній об'єктів
+	Plot objects with their transparency (PLOTTRANSPARENCYOVERRIDE can override it)	Друкувати об'єкти з їхньою прозорістю (PLOTTRANSPARENCYOVERRIDE може це змінити)
+	Plot offset	Зміщення друку
+	Plot transparency	Прозорість друку
+	Point Size	Розмір точки
+	Point Style	Стиль точки
+	Portrait	Книжкова
+	Precision	Точність
+	Printer/plotter	Принтер/плотер
+	Prompt	Підказка
+	Sample output	Приклад виводу
+	Save these settings in the layout's page setup	Зберегти ці параметри в параметрах сторінки аркуша
+	Save your work and restart CADCraft. Recovery copies are offered at the next start if needed.	Збережіть роботу й перезапустіть CADCraft. За потреби копії для відновлення буде запропоновано під час наступного запуску.
+	Set Size Relative to Screen	Задати розмір відносно екрана
+	Set Size in Absolute Units	Задати розмір в абсолютних одиницях
+	Show constraint bars	Показувати панелі обмежень
+	Show dynamic constraints	Показувати динамічні обмеження
+	Styles	Стилі
+	Sync	Синхронізувати
+	Tag	Тег
+	The graphics device stopped working (a driver reset or a GPU that stopped responding). CADCraft can't draw again until it restarts.	Графічний пристрій припинив працювати (скидання драйвера або GPU перестав відповідати). CADCraft не зможе малювати, доки не перезапуститься.
+	The sheet as these settings plot it	Аркуш таким, яким його надрукують ці параметри
+	The whole sheet (or double-click)	Весь аркуш (або подвійний клік)
+	This drawing has no blocks with attributes.	У цьому кресленні немає блоків з атрибутами.
+	This drawing has no layouts.	У цьому кресленні немає аркушів.
+	UCS icon: World Coordinate System	Значок ПСК: світова система координат
+	Units to scale inserted content	Одиниці для масштабування вставленого вмісту
+	Window <	Вікно <
+	World (WCS)	Світова (WCS)
+	Zoom in (or the mouse wheel)	Збільшити (або колесо миші)
+	Zoom out	Зменшити
+	All layouts	Усі аркуші
+	Only this one	Лише цей
+	Plot several sheets	Друк кількох аркушів
+	Select all	Вибрати все
+	{n} layouts selected: a change applies to all of them	Вибрано аркушів: {n}. Зміна застосовується до всіх
+	{n} sheets	Аркушів: {n}
+	{n} sheets in one PDF, each with its own page setup (change them in the Page Setup Manager):	Аркушів в одному PDF: {n}, кожен зі своїми параметрами сторінки (змінюйте їх у Диспетчері параметрів сторінки):
+# Labels the manager dialogs translate when they draw them.
+	Limits	Ліміти
+	Center the plotted model bounds on the printable area	Центрувати межі надрукованої моделі в області друку
+	Model-space offset placement is not supported by SVG	Зміщення простору моделі не підтримується в SVG
+	Offsets must be within ±100000 mm	Зміщення мають бути в межах ±100000 мм
+	First corner	Перший кут
+	Opposite corner	Протилежний кут
+	Current style: {current}	Поточний стиль: {current}
+	Properties of {sel}	Властивості {sel}
+	Page setup of {name}	Параметри сторінки {name}
+	Current linetype: {current}	Поточний тип ліній: {current}
+	Height (0 = ask)	Висота (0 = запитувати)
+	Backwards	Дзеркально по горизонталі
+	Upside down	Догори дриґом
+	Cell margin	Поле комірки
+	Title row	Рядок заголовка
+	Header row	Рядок шапки
+	Arrowhead size	Розмір стрілки
+	Landing gap	Проміжок до полиці
+	Landing length	Довжина полиці
+	Appearance	Вигляд
+	Text Style	Стиль тексту
+	Table Style	Стиль таблиці
+	Multileader Style	Стиль мультивиноски
+	Decimal Degrees	Десяткові градуси
+	Deg/Min/Sec	Град/хв/с
+	Grads	Гради
+	Surveyor's Units	Геодезичні одиниці
+	Unitless	Без одиниць
+	Inches	Дюйми
+	Feet	Фути
+	Miles	Милі
+	Millimeters	Міліметри
+	Centimeters	Сантиметри
+	Meters	Метри
+	Kilometers	Кілометри
+	Microinches	Мікродюйми
+	Mils	Міли
+	Yards	Ярди
+	Angstroms	Ангстреми
+	Nanometers	Нанометри
+	Microns	Мікрони
+	Decimeters	Дециметри
+	Decameters	Декаметри
+	Hectometers	Гектометри
+	Gigameters	Гігаметри
+	Astronomical Units	Астрономічні одиниці
+	Light Years	Світлові роки
+	Parsecs	Парсеки
+	US Survey Feet	Геодезичні фути США
+	US Survey Inch	Геодезичний дюйм США
+	US Survey Yard	Геодезичний ярд США
+	US Survey Mile	Геодезична миля США

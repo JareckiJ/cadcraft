@@ -105,6 +105,11 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
         include_str!("../vpscale.rs"),
         include_str!("../options/dialog.rs"),
         include_str!("../saveas.rs"),
+        include_str!("../managers.rs"),
+        include_str!("../managers/battman.rs"),
+        include_str!("../autosave.rs"),
+        include_str!("../viewcube.rs"),
+        include_str!("../exchange.rs"),
         include_str!("../options/dimensions.rs"),
         include_str!("../options/advanced.rs"),
     ];
