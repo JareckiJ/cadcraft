@@ -102,6 +102,7 @@ pub fn specs() -> Vec<CommandSpec> {
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    let mut copies = std::collections::HashMap::new();
     for h in hs {
         let Some(sp) = d.space_of(*h) else { continue };
         if copy {
@@ -112,6 +113,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
+                copies.insert(*h, nh);
             }
         } else {
             let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -120,6 +122,19 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             }
             d.modify_entity(*h, |e| e.kind.transform(m))?;
             out.push(*h);
+        }
+    }
+    // A copied dimension follows the copied breaking objects when they were copied together;
+    // sources left behind still refer to the originals in this drawing.
+    for h in copies.values() {
+        if d.entity(*h).is_some_and(|e| matches!(&e.kind, EntityKind::Dimension(dm) if dm.marks.auto_break.is_some())) {
+            d.modify_entity(*h, |e| {
+                if let EntityKind::Dimension(dm) = &mut e.kind
+                    && let Some(a) = &mut dm.marks.auto_break
+                {
+                    a.remap_handles(|h| copies.get(&h).copied());
+                }
+            })?;
         }
     }
     Ok(out)
@@ -1480,15 +1495,48 @@ pub(crate) fn explode_with(
         let own_pieces = !matches!(e.kind, EntityKind::Insert(_));
         let d = s.doc_mut()?;
         d.remove_entity(*h);
+        let mut item_remap: std::collections::HashMap<Handle, Handle> = std::collections::HashMap::new();
+        let mut item_entities: Vec<Entity> = Vec::new();
+
+        let push_item =
+            |entities: &mut Vec<Entity>, remap: &std::collections::HashMap<Handle, Handle>, d: &mut cadcraft_doc::Drawing, out: &mut Vec<Handle>| {
+                for mut e in entities.drain(..) {
+                    if let EntityKind::Dimension(dm) = &mut e.kind
+                        && let Some(a) = &mut dm.marks.auto_break
+                    {
+                        a.remap_handles(|h| remap.get(&h).copied());
+                    }
+                    out.push(e.handle);
+                    if let Some(st) = d.space_mut(&space) {
+                        st.push(e);
+                    }
+                }
+            };
+
         for mut p in parts {
             if own_pieces {
                 p.common.xdata.clear();
+                p.handle = d.new_handle();
+                out.push(p.handle);
+                if let Some(st) = d.space_mut(&space) {
+                    st.push(p);
+                }
+                continue;
             }
-            p.handle = d.new_handle();
-            out.push(p.handle);
-            if let Some(st) = d.space_mut(&space) {
-                st.push(p);
+            let src_h = p.handle;
+            if src_h.0 != 0 && item_remap.contains_key(&src_h) {
+                push_item(&mut item_entities, &item_remap, d, &mut out);
+                item_remap.clear();
             }
+            let new_h = d.new_handle();
+            p.handle = new_h;
+            if src_h.0 != 0 {
+                item_remap.insert(src_h, new_h);
+            }
+            item_entities.push(p);
+        }
+        if !item_entities.is_empty() {
+            push_item(&mut item_entities, &item_remap, d, &mut out);
         }
     }
     s.set_selection(Vec::new());

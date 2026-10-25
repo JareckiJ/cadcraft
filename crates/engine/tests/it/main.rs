@@ -31,6 +31,7 @@ mod dim_properties;
 mod dim_radial_inside;
 mod dim_radial_outside;
 mod dim_vars;
+mod dimbreak_assoc;
 mod dimtedit_prompts;
 mod drafting_spacing;
 mod draw_prompts;

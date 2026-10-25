@@ -2,7 +2,9 @@
 //! DXF Reference), jogs, breaks and inspection frames as CADCraft xdata. Damaged xdata is
 //! skipped.
 
-use cadcraft_doc::{Common, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Inspection, JoggedRadius, Space};
+use cadcraft_doc::{
+    AssocSnap, AutoDimBreak, Common, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Handle, Inspection, JoggedRadius, Space,
+};
 use cadcraft_geom::Vec3;
 use cadcraft_io::{read_dxf, write_dxf};
 
@@ -47,7 +49,8 @@ fn dimension_marks_roundtrip() {
             DimBreak { at: Vec3::new(4.0, 3.0, 0.0), size: 0.125, auto: true },
             DimBreak { at: Vec3::new(7.0, 3.0, 0.0), size: 0.5, auto: false },
         ],
-        inspect: Some(Inspection { shape: 1, label: "QC".into(), rate: "25%".into() }),
+        auto_break: Some(AutoDimBreak { objects: vec![Handle(0xABC), Handle(0xDEF)], size: 0.125 }),
+        inspect: Some(Inspection { shape: 1, label: "BREAKAUTO".into(), rate: "25%".into() }),
         ..Default::default()
     };
     let aligned = DimMarks { oblique: Some(100f64.to_radians()), ..Default::default() };
@@ -91,4 +94,97 @@ fn damaged_marks_are_skipped() {
     let back = read_dxf(bad.as_bytes()).unwrap();
     let got = marks_of(&back);
     assert_eq!(got.first(), Some(&DimMarks::default()), "{got:?}");
+}
+
+#[test]
+fn automatic_break_relationship_without_gaps_roundtrips_and_bad_sizes_are_skipped() {
+    let mut d = Drawing::new_imperial();
+    let auto = AutoDimBreak { objects: vec![Handle(0xABC)], size: 0.5 };
+    let m = DimMarks { auto_break: Some(auto.clone()), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break, Some(auto));
+    for bad in ["nan", "inf", "0", "-1"] {
+        let damaged = text.replacen("BREAKAUTO\r\n1002\r\n{\r\n1040\r\n0.5\r\n", &format!("BREAKAUTO\r\n1002\r\n{{\r\n1040\r\n{bad}\r\n"), 1);
+        assert_ne!(damaged, text);
+        let back = read_dxf(damaged.as_bytes()).unwrap();
+        assert!(marks_of(&back)[0].auto_break.is_none(), "{bad}");
+    }
+}
+
+#[test]
+fn automatic_break_source_input_is_bounded_and_bad_handles_are_skipped() {
+    let mut d = Drawing::new_imperial();
+    let m = DimMarks { auto_break: Some(AutoDimBreak { objects: vec![Handle(0xABC)], size: 0.5 }), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    let damaged = text.replacen("1005\r\nABC\r\n", "1005\r\nnot-a-handle\r\n1005\r\n0\r\n1005\r\nDEF\r\n", 1);
+    let back = read_dxf(damaged.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break.as_ref().unwrap().objects, vec![Handle(0xDEF)]);
+    let oversized = text.replacen("1005\r\nABC\r\n", &"1005\r\nABC\r\n".repeat(cadcraft_doc::MAX_DIM_BREAK_OBJECTS + 10), 1);
+    let back = read_dxf(oversized.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break.as_ref().unwrap().objects.len(), cadcraft_doc::MAX_DIM_BREAK_OBJECTS);
+}
+
+#[test]
+fn automatic_break_xdata_is_omitted_when_oversized_or_exceeding_byte_limit() {
+    let mut d = Drawing::new_imperial();
+    // Exceeds MAX_DIM_BREAK_OBJECTS: entire BREAKAUTO record must be omitted.
+    let too_many_objects: Vec<Handle> = (0..=cadcraft_doc::MAX_DIM_BREAK_OBJECTS).map(|i| Handle(i as u64 + 1)).collect();
+    let m = DimMarks { auto_break: Some(AutoDimBreak { objects: too_many_objects, size: 0.5 }), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    assert!(!text.contains("BREAKAUTO"), "oversized object list must omit BREAKAUTO entirely");
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert!(marks_of(&back)[0].auto_break.is_none());
+
+    // Exceeds 16 KB xdata limit even when objects.len() <= MAX_DIM_BREAK_OBJECTS:
+    // 3000 handles with 5 hex digits each: 30 + 3000 * (3 + 5) = 24,030 bytes > 16,384 bytes.
+    let mut d2 = Drawing::new_imperial();
+    let large_xdata_objects: Vec<Handle> = (0x10000..0x10BB8).map(Handle).collect();
+    assert!(large_xdata_objects.len() <= cadcraft_doc::MAX_DIM_BREAK_OBJECTS);
+    let m2 = DimMarks { auto_break: Some(AutoDimBreak { objects: large_xdata_objects, size: 0.5 }), ..Default::default() };
+    d2.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m2)).unwrap();
+    let text2 = write_dxf(&d2);
+    assert!(!text2.contains("BREAKAUTO"), "xdata exceeding 16 KB limit must omit BREAKAUTO entirely");
+    let back2 = read_dxf(text2.as_bytes()).unwrap();
+    assert!(marks_of(&back2)[0].auto_break.is_none());
+
+    // BREAKAUTO alone fits, but BREAKAUTO + MARKS + app header exceeds 16 KB:
+    // BREAKAUTO is omitted, MARKS is preserved.
+    let mut d3 = Drawing::new_imperial();
+    let near_limit_objects: Vec<Handle> = (0x10000..0x107F8).map(Handle).collect();
+    let breaks = vec![DimBreak { at: Vec3::ZERO, size: 0.5, auto: false }; 5];
+    let m3 = DimMarks { auto_break: Some(AutoDimBreak { objects: near_limit_objects, size: 0.5 }), breaks, ..Default::default() };
+    d3.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m3)).unwrap();
+    let text3 = write_dxf(&d3);
+    assert!(!text3.contains("BREAKAUTO"), "combined xdata exceeding 16 KB must omit BREAKAUTO");
+    assert!(text3.contains("MARKS"), "MARKS must be preserved even when BREAKAUTO is omitted");
+    let back3 = read_dxf(text3.as_bytes()).unwrap();
+    assert!(marks_of(&back3)[0].auto_break.is_none());
+    assert_eq!(marks_of(&back3)[0].breaks.len(), 5);
+
+    // BREAKAUTO alone fits, but BREAKAUTO + ASSOC + app header exceeds 16 KB:
+    // BREAKAUTO is omitted, ASSOC is preserved.
+    let mut d4 = Drawing::new_imperial();
+    let near_limit_objects4: Vec<Handle> = (0x10000..0x107F8).map(Handle).collect();
+    let m4 = DimMarks { auto_break: Some(AutoDimBreak { objects: near_limit_objects4, size: 0.5 }), ..Default::default() };
+    let mut dm4 = dim(DimKind::Linear { rotation: 0.0 }, m4);
+    if let EntityKind::Dimension(dm) = &mut dm4 {
+        dm.assoc = vec![
+            DimAssoc { point: "defpt".into(), handle: Handle(1), snap: AssocSnap::Start },
+            DimAssoc { point: "p13".into(), handle: Handle(2), snap: AssocSnap::End },
+            DimAssoc { point: "p14".into(), handle: Handle(3), snap: AssocSnap::Mid },
+        ];
+    }
+    d4.add(&Space::Model, Common::default(), dm4).unwrap();
+    let text4 = write_dxf(&d4);
+    assert!(!text4.contains("BREAKAUTO"), "assoc xdata consuming budget must omit BREAKAUTO");
+    assert!(text4.contains("ASSOC"), "ASSOC must be preserved even when BREAKAUTO is omitted");
+    let back4 = read_dxf(text4.as_bytes()).unwrap();
+    assert!(marks_of(&back4)[0].auto_break.is_none());
+    if let EntityKind::Dimension(dm) = &back4.model.iter().next().unwrap().kind {
+        assert_eq!(dm.assoc.len(), 3);
+    }
 }

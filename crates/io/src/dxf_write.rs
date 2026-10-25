@@ -233,7 +233,8 @@ fn dim_xdata(w: &mut W, dm: &Dimension, cx: &Ctx) {
     if !dm.assoc.is_empty() {
         ours.extend(dxf_ext::assoc_xdata(&dm.assoc));
     }
-    ours.extend(dxf_ext::marks_xdata(&dm.marks));
+    let reserved: usize = ours.iter().map(dxf_ext::encoded_len).sum();
+    ours.extend(dxf_ext::marks_xdata(&dm.marks, reserved));
     if !ours.is_empty() {
         w.s(1001, dxf_ext::APP);
         w.xdata(ours);

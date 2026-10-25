@@ -588,6 +588,9 @@ pub struct DimMarks {
     /// Gaps in the dimension and extension lines (DIMBREAK).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub breaks: Vec<DimBreak>,
+    /// Objects followed by DIMBREAK Auto, kept even while none crosses the dimension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_break: Option<AutoDimBreak>,
     /// Inspection frame, label and rate (DIMINSPECT).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inspect: Option<Inspection>,
@@ -614,6 +617,9 @@ impl DimMarks {
             t3(&mut b.at);
             b.size *= s;
         }
+        if let Some(a) = &mut self.auto_break {
+            a.size *= s;
+        }
     }
 }
 
@@ -634,9 +640,32 @@ pub struct JoggedRadius {
 pub struct DimBreak {
     pub at: Vec3,
     pub size: f64,
-    /// Made by DIMBREAK Auto (recomputed by the next Auto) rather than picked by hand.
+    /// Made by DIMBREAK Auto rather than picked by hand.
     pub auto: bool,
 }
+
+/// The sources and gap size of DIMBREAK Auto. Computed gaps live in [`DimMarks::breaks`];
+/// this relationship survives temporarily missing intersections and file round trips.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AutoDimBreak {
+    pub objects: Vec<Handle>,
+    pub size: f64,
+}
+
+impl AutoDimBreak {
+    /// Remap source handles using `remap`, leaving unmapped handles unchanged.
+    pub fn remap_handles(&mut self, mut remap: impl FnMut(Handle) -> Option<Handle>) {
+        for source in &mut self.objects {
+            if let Some(new_h) = remap(*source) {
+                *source = new_h;
+            }
+        }
+    }
+}
+
+/// Most source objects retained by one automatic dimension break (including file input).
+pub const MAX_DIM_BREAK_OBJECTS: usize = 20_000;
 
 /// An inspection dimension (DIMINSPECT).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

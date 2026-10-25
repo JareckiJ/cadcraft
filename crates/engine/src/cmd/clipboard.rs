@@ -349,6 +349,7 @@ fn adopt(d: &mut Drawing, e: &Entity, renames: &BTreeMap<String, String>) -> Ent
         }
         EntityKind::Dimension(dm) => {
             dm.assoc.clear();
+            dm.marks.auto_break = None;
             if let Some(n) = dm.block.as_ref().and_then(|b| renames.get(b)) {
                 dm.block = Some(n.clone());
             }

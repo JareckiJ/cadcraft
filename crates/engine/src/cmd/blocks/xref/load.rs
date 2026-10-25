@@ -406,6 +406,7 @@ fn import(d: &mut Drawing, key: &str, x: &Drawing, cx: &mut Ctx) -> Result<(), S
         rename_refs(&mut e, &dep);
         if let EntityKind::Dimension(dm) = &mut e.kind {
             dm.assoc.clear();
+            dm.marks.auto_break = None;
         }
         e
     };

@@ -271,7 +271,10 @@ fn add_group(d: &mut Drawing, name: &str, objs: &[(&Entity, Color)], renames: &R
 /// have new handles, so the links would name objects the snapshot does not have.
 fn detach(k: &mut EntityKind) {
     match k {
-        EntityKind::Dimension(dm) => dm.assoc.clear(),
+        EntityKind::Dimension(dm) => {
+            dm.assoc.clear();
+            dm.marks.auto_break = None;
+        }
         EntityKind::Hatch(h) => {
             h.associative = false;
             h.loops.iter_mut().for_each(|l| l.sources.clear());
