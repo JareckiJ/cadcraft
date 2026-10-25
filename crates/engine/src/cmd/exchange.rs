@@ -717,16 +717,17 @@ mod tests {
         let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "A4", "landscape": true, "width": 600 })).unwrap();
         assert_eq!((r["layout"].as_str(), r["width"].as_u64(), r["height"].as_u64()), (Some("Layout1"), Some(600), Some(424)));
         assert_eq!(r["paper"], "ISO A4 (210.00 x 297.00 MM)");
-        // B4/B5/B6 are the JIS sizes Japanese drawings use, and the Japanese postcards resolve by
-        // their names and their Japanese spelling; the ISO B5 stays by name.
+        // The bare B5 is the ISO size it always was; the JIS sheet needs its explicit name, and the
+        // Japanese postcards resolve by their names and their Japanese spelling.
         let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "B5", "landscape": false, "width": 400 })).unwrap();
+        assert_eq!(r["paper"], "ISO B5 (176.00 x 250.00 MM)");
+        assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(400), Some(568)));
+        let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "B5 (JIS)", "landscape": false, "width": 400 })).unwrap();
         assert_eq!(r["paper"], "JIS B5 (182.00 x 257.00 MM)");
         assert_eq!((r["width"].as_u64(), r["height"].as_u64()), (Some(400), Some(565)));
         let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "はがき", "landscape": false, "width": 200 })).unwrap();
         assert_eq!(r["paper"], "Japanese Postcard (100.00 x 148.00 MM)");
         assert_eq!(r["height"], 296);
-        let r = s.execute("preview", &json!({ "layout": "layout1", "paper": "B5 (ISO)", "landscape": false, "width": 400 })).unwrap();
-        assert_eq!(r["paper"], "ISO B5 (176.00 x 250.00 MM)");
         assert!(s.execute("preview", &json!({ "layout": "Nope" })).is_err());
         assert!(s.execute("preview", &json!({ "paper": "Nope" })).is_err());
         for p in [json!({ "scale": -1, "fit": false }), json!({ "scale": 1e-300, "fit": false }), json!({ "width": -5 }), json!({ "width": 1e30 })] {
