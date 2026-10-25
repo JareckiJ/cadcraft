@@ -5,8 +5,13 @@ CADCraft runs AutoLISP routines (`.lsp` files). What is here and what is not yet
 
 ## Loading and running
 
-- **APPLOAD** (Tools > Load Application…, alias `AP`) asks for a `.lsp` file and runs it. Dropping
-  a `.lsp` file on the window does the same.
+- **APPLOAD** (Tools > Load Application…, alias `AP`) opens a file browser filtered to `.lsp`
+  files, starting in the folder the last one came from (kept in the preferences), and runs the
+  chosen file. Cancelling the browser does nothing. A picked file loads as a typed name does, so a
+  routine it starts that asks for a point waits for it. A desktop without a file browser asks for
+  the name on the command line; the web has no file system, so it says to drop the `.lsp` file on
+  the window and loads it from its contents. Only `.lsp` files are loaded; anything else is
+  refused.
 - **`(load "name")`** loads a file by path, with `.lsp` added when the name has none. A file
   APPLOAD loaded is found again by its name, also on the web where there is no file system.
 - **`(defun c:NAME …)`** defines a command: type `NAME` at the command line. Built-in commands
@@ -16,8 +21,9 @@ CADCraft runs AutoLISP routines (`.lsp` files). What is here and what is not yet
   `CIRCLE 0,0 (* 2 r)`.
 - **Programmatically** (scripts, the control channel, MCP, the CLI): `lisp {code, inputs?}` and
   `appload {path} | {name, text | data}` run to the end and return `{value, output, error?}`.
-  `inputs` answer `get…` calls in order (numbers, strings, `[x, y]` points); a call with none left
-  gets nil.
+  `appload` also returns `commands`, the `c:` commands the file defined, and a JSON call never
+  opens a file dialog. `inputs` answer `get…` calls in order (numbers, strings, `[x, y]` points);
+  a call with none left gets nil.
 
 ### At startup
 
@@ -86,9 +92,16 @@ Block definitions can be read: `(tblsearch "BLOCK" name)` gives the block's firs
 -2, `entnext` goes from one entity of a definition to the next (nil after the last) and `entget`
 lists them (without a layout, group 410). So a routine can read what a block stores, such as the
 text of a dimension's `*D` block. `entmod` and `entdel` don't change a definition's entities.
+`entmake` defines blocks: a BLOCK list (2 name, 70 flags, 10 base point, 4 description) begins a
+definition, the entities made after it go into the block instead of the drawing, and an ENDBLK
+list adds the block (redefining one of the same name) and returns its name. Flag 1 with a `*U`
+name makes an anonymous block, named when it ends. A BLOCK while a definition is open, an
+xref (flag 4), an invalid name, a block that inserts itself and a block being edited in place
+(REFEDIT) return nil. A definition stays open across routines until ENDBLK, but a routine that
+fails drops the one it began.
 
 ## Testing against the corpus
 
 The AutoLISP conformance corpus (#648) lives in its own repository. Point `CADCRAFT_LISP_CORPUS`
-at it and run `cargo test -p cadcraft-engine --test lisp_corpus`; without the variable the test
+at it and run `cargo test -p cadcraft-engine --test it lisp_corpus::`; without the variable the test
 says it was skipped.
