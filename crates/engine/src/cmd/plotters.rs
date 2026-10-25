@@ -208,6 +208,23 @@ fn printer_cache() -> std::sync::MutexGuard<'static, PrinterCache> {
     CACHE.get_or_init(Mutex::default).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Ask the system for its printers again now (a printer was just installed or switched on):
+/// the next device list starts a new listing instead of using one a few seconds old. A listing
+/// under way is left to finish. Returns whether there are system printers in this build.
+pub fn refresh_system_printers() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if PRINTERS.get().is_none() {
+            return false;
+        }
+        printer_cache().at = None;
+        let _ = system_printers();
+        true
+    }
+    #[cfg(target_arch = "wasm32")]
+    PRINTERS.get().is_some()
+}
+
 /// Whether the system printers are being listed (a dialog showing devices redraws when it ends).
 pub fn system_printers_pending() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
@@ -312,6 +329,7 @@ fn builtin(name: &str, output: PlotOutput, description: &str) -> PlotterConfig {
         default_paper,
         papers,
         system: false,
+        system_default: false,
     }
 }
 
@@ -585,7 +603,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("plottermanager", "Plotter Manager...", run_plottermanager)
             .menu(&["File", "Plotter Manager..."])
             .params(
-                "{action?: list (default)|get|new|set|delete|load|save, name?: device, from?: device to copy (new), output?: pdf|png|svg, description?, resolution?: dpi, orientation?: portrait|landscape, defaultPaper?, paper?: {name, width, height (mm), margins?: [l,b,r,t] mm} (set: add or replace), removePaper?: name (set), text? (load), path? (save: native only; without it returns `text`)} (typed: option prompts)",
+                "{action?: list (default)|get|new|set|delete|load|save|refresh (ask the system for its printers again), name?: device, from?: device to copy (new), output?: pdf|png|svg, description?, resolution?: dpi, orientation?: portrait|landscape, defaultPaper?, paper?: {name, width, height (mm), margins?: [l,b,r,t] mm} (set: add or replace), removePaper?: name (set), text? (load), path? (save: native only; without it returns `text`)} (typed: option prompts)",
             )
             .enabled(always)
             .noundo()
@@ -611,6 +629,7 @@ fn summary(c: &PlotterConfig) -> Value {
         "output": c.output.as_str(),
         "builtin": is_builtin(&c.name),
         "system": c.system,
+        "default": c.system_default,
         "papers": c.papers.len(),
         "defaultPaper": c.default_paper,
     })
@@ -708,6 +727,9 @@ fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
     let action = str_param(p, "action").unwrap_or("list").trim().to_ascii_lowercase();
     match action.as_str() {
         "list" => Ok(json!({ "devices": listed_devices().iter().map(summary).collect::<Vec<_>>() })),
+        // The system's printers asked for again; `list` (or the Plot dialog) shows them once
+        // that listing ends.
+        "refresh" => Ok(json!({ "printers": refresh_system_printers(), "pending": system_printers_pending() })),
         "get" => {
             let n = device_name(cmd, p)?;
             let c = find_device(&n).ok_or_else(|| unknown_device(cmd, &n))?;
@@ -715,6 +737,7 @@ fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(o) = v.as_object_mut() {
                 o.insert("builtin".into(), json!(is_builtin(&c.name)));
                 o.insert("system".into(), json!(c.system));
+                o.insert("default".into(), json!(c.system_default));
             }
             Ok(v)
         }

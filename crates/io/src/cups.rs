@@ -1,5 +1,8 @@
 //! System printers through CUPS (macOS and Linux): the destinations `lpstat` lists, each with
-//! the papers and printable areas of its PPD, and printing a plot's PDF with `lp`.
+//! the papers and printable areas of its PPD, and printing a plot's PDF with `lp`. A destination
+//! without a PPD file the user can read (a driverless IPP queue CUPS made on the fly, or a PPD
+//! readable only by root) takes its papers from `lpoptions -l` instead, with the margins IPP
+//! printers commonly report. `lpstat -d` names the system's default printer.
 //!
 //! The PDF is the one the PDF plotter writes for the chosen paper, so it is sent unscaled: the
 //! plot's scale is already applied. The parsers take text, so they are tested without a printer.
@@ -98,6 +101,117 @@ pub fn parse_ppd(text: &str) -> Ppd {
     ppd
 }
 
+/// The margin IPP printers commonly report for each edge of a sheet that is not borderless
+/// (`media-*-margin` 423, in hundredths of a millimetre), used when nothing better is known.
+const IPP_MARGIN_MM: f64 = 4.23;
+
+/// The size of a media keyword `lpoptions -l` lists, in points: a PWG self-describing name
+/// (`iso_a4_210x297mm`, `na_letter_8.5x11in`), Adobe's `w612h792` (points), or a standard size
+/// CADCraft knows (`A4`, `Letter`, `Legal`, `Tabloid`…, shown by its keyword). `None` for custom
+/// and unknown ones.
+fn media_size(keyword: &str) -> Option<(String, f64, f64)> {
+    let k = keyword.trim();
+    if k.is_empty() || k.to_ascii_lowercase().starts_with("custom") {
+        return None;
+    }
+    // PWG 5101.1: `class_name_WxHunit`, the size as the last part.
+    if let Some((head, dims)) = k.rsplit_once('_') {
+        let (dims, mm) = match (dims.strip_suffix("mm"), dims.strip_suffix("in")) {
+            (Some(d), _) => (d, 1.0),
+            (None, Some(d)) => (d, 25.4),
+            (None, None) => ("", 0.0),
+        };
+        if let Some((w, h)) = dims.split_once('x')
+            && let (Ok(w), Ok(h)) = (w.parse::<f64>(), h.parse::<f64>())
+            && w.is_finite()
+            && h.is_finite()
+            && w > 0.0
+            && h > 0.0
+        {
+            // `iso_a4` → "A4", `na_letter` → "Letter": the name part after the class.
+            let name = head.split_once('_').map_or(head, |(_, n)| n);
+            let shown = if name.is_empty() { k.to_string() } else { pwg_name(name) };
+            return Some((shown, w * mm * PT_PER_MM, h * mm * PT_PER_MM));
+        }
+    }
+    if let Some(rest) = k.strip_prefix('w')
+        && let Some((w, h)) = rest.split_once('h')
+        && let (Ok(w), Ok(h)) = (w.parse::<f64>(), h.parse::<f64>())
+        && w.is_finite()
+        && h.is_finite()
+        && w > 0.0
+        && h > 0.0
+    {
+        return Some((format!("{:.0} x {:.0} mm", w / PT_PER_MM, h / PT_PER_MM), w, h));
+    }
+    // A PPD's `B4`/`B5` are the JIS sizes, not ISO's: left out rather than guessed.
+    let base = k.strip_suffix(".Fullbleed").unwrap_or(k);
+    if base.starts_with(['B', 'b']) {
+        return None;
+    }
+    let p = cadcraft_render::paper_size(base)?;
+    Some((base.to_string(), p.width_mm * PT_PER_MM, p.height_mm * PT_PER_MM))
+}
+
+/// A PWG media name shown as people write it: `a4` → "A4", `letter` → "Letter",
+/// `govt-letter` → "Govt Letter".
+fn pwg_name(name: &str) -> String {
+    let words: Vec<String> = name
+        .split(['-', '.'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            // ISO and JIS sizes are written in capitals (A4, B5, C6).
+            if w.len() <= 3 && w.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && w.chars().skip(1).all(|c| c.is_ascii_digit()) {
+                w.to_ascii_uppercase()
+            } else {
+                let mut c = w.chars();
+                c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
+            }
+        })
+        .collect();
+    words.join(" ")
+}
+
+/// `lpoptions -p NAME -l` (in the C locale): the `PageSize` (or `media`) choices as papers with
+/// [`IPP_MARGIN_MM`] margins, the default (marked `*`) as the default size. Keywords whose size
+/// isn't known are left out.
+pub fn parse_lpoptions(text: &str) -> Ppd {
+    let mut ppd = Ppd::default();
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("PageSize/") || l.starts_with("PageSize:"))
+        .or_else(|| text.lines().find(|l| l.starts_with("media/") || l.starts_with("media:")));
+    let Some((_, choices)) = line.and_then(|l| l.split_once(':')) else { return ppd };
+    let m = IPP_MARGIN_MM * PT_PER_MM;
+    for choice in choices.split_whitespace().take(MAX_LPOPTIONS_CHOICES) {
+        let (keyword, default) = match choice.strip_prefix('*') {
+            Some(k) => (k, true),
+            None => (choice, false),
+        };
+        let Some((name, w, h)) = media_size(keyword) else { continue };
+        let borderless = keyword.ends_with(".Fullbleed") || keyword.contains(".Borderless");
+        let name = if borderless { format!("{name} (borderless)") } else { name };
+        if ppd.papers.iter().any(|p| p.name == name) {
+            continue;
+        }
+        if default {
+            ppd.default_size = keyword.to_string();
+        }
+        let imageable = (!borderless && w > 2.0 * m && h > 2.0 * m).then_some([m, m, w - m, h - m]);
+        ppd.papers.push(PpdPaper { keyword: keyword.to_string(), name, width: w, height: h, imageable });
+    }
+    ppd
+}
+
+/// Most `lpoptions` choices read for one option.
+const MAX_LPOPTIONS_CHOICES: usize = 500;
+
+/// `lpstat -d` (in the C locale): the default destination, if there is one.
+pub fn parse_default_destination(text: &str) -> Option<String> {
+    let name = text.lines().find_map(|l| l.trim().strip_prefix("system default destination:"))?.trim();
+    valid_name(name).then(|| name.to_string())
+}
+
 /// The device a destination becomes: a system printer (PDF in, printed with `lp`) with the
 /// PPD's papers.
 pub fn printer_config(name: &str, ppd: &Ppd) -> PlotterConfig {
@@ -122,6 +236,7 @@ pub fn printer_config(name: &str, ppd: &Ppd) -> PlotterConfig {
         default_paper,
         papers,
         system: true,
+        system_default: false,
     }
     .sanitized()
 }
@@ -145,15 +260,22 @@ pub fn valid_name(n: &str) -> bool {
     !n.is_empty() && n.len() <= 127 && !n.starts_with('.') && !n.contains(['/', '\\', '#']) && !n.chars().any(|c| c.is_control() || c.is_whitespace())
 }
 
-/// The `lp` arguments for a job (the PDF goes to standard input).
-pub fn lp_args(printer: &str, page_size: Option<&str>, copies: u32, title: &str) -> Vec<String> {
+/// The `lp` option choosing the paper `keyword`: `PageSize` for a paper of the printer's PPD,
+/// IPP's `media` for one `lpoptions` listed for a queue without one.
+pub fn paper_option(keyword: &str, from_ppd: bool) -> String {
+    if from_ppd { format!("PageSize={keyword}") } else { format!("media={keyword}") }
+}
+
+/// The `lp` arguments for a job (the PDF goes to standard input); `paper` is a
+/// [`paper_option`].
+pub fn lp_args(printer: &str, paper: Option<&str>, copies: u32, title: &str) -> Vec<String> {
     let mut a = vec!["-d".into(), printer.into(), "-n".into(), copies.clamp(1, MAX_COPIES).to_string()];
     let title: String = title.chars().filter(|c| !c.is_control()).take(100).collect();
     if !title.trim().is_empty() {
         a.extend(["-t".into(), title]);
     }
-    if let Some(k) = page_size {
-        a.extend(["-o".into(), format!("PageSize={k}")]);
+    if let Some(o) = paper {
+        a.extend(["-o".into(), o.to_string()]);
     }
     // The plot is already at its scale: no fitting to the page.
     a.extend(["-o".into(), "print-scaling=none".into(), "-o".into(), "fit-to-page=false".into(), "-".into()]);
@@ -174,20 +296,28 @@ mod system {
         Some(parse_ppd(&std::fs::read_to_string(path).ok()?))
     }
 
-    /// Longest `lpstat` may take: a CUPS that doesn't answer gives no printers instead of a
-    /// listing that never ends.
-    const LPSTAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    /// Longest a CUPS command may take: a CUPS that doesn't answer gives no printers instead of
+    /// a listing that never ends.
+    const CUPS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    /// `lpstat -e`'s output, or `None` when it fails or takes longer than [`LPSTAT_TIMEOUT`]
-    /// (then it is stopped).
-    fn lpstat_destinations() -> Option<String> {
+    /// A CUPS command's output in the C locale (its messages untranslated, so they parse), or
+    /// `None` when it fails or takes longer than [`CUPS_TIMEOUT`] (then it is stopped).
+    fn cups_output(program: &str, args: &[&str]) -> Option<String> {
         use std::io::Read;
-        let mut child = Command::new("lpstat").arg("-e").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
-        let mut stdout = child.stdout.take()?;
-        // Read on a thread, so a full pipe can't keep lpstat from ending.
+        let mut child = Command::new(program)
+            .args(args)
+            .env("LC_ALL", "C")
+            .env("LANG", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let stdout = child.stdout.take()?;
+        // Read on a thread, so a full pipe can't keep the command from ending.
         let reader = std::thread::spawn(move || {
             let mut s = String::new();
-            let _ = stdout.read_to_string(&mut s);
+            let _ = stdout.take(MAX_PPD).read_to_string(&mut s);
             s
         });
         let start = std::time::Instant::now();
@@ -195,7 +325,7 @@ mod system {
             match child.try_wait() {
                 Ok(Some(status)) if status.success() => return reader.join().ok(),
                 Ok(Some(_)) | Err(_) => return None,
-                Ok(None) if start.elapsed() > LPSTAT_TIMEOUT => {
+                Ok(None) if start.elapsed() > CUPS_TIMEOUT => {
                     let _ = child.kill();
                     let _ = child.wait();
                     return None;
@@ -205,12 +335,30 @@ mod system {
         }
     }
 
-    /// The CUPS destinations as devices (none when CUPS is missing). A destination without a
-    /// readable PPD (an IPP queue the system made on the fly) offers no papers of its own and is
-    /// left out.
+    /// The papers of destination `name`: its PPD's, else (no PPD file the user can read) the
+    /// ones `lpoptions` lists. The flag says which.
+    fn papers(name: &str) -> Option<(Ppd, bool)> {
+        if let Some(p) = ppd(name).filter(|p| !p.papers.is_empty()) {
+            return Some((p, true));
+        }
+        let p = parse_lpoptions(&cups_output("lpoptions", &["-p", name, "-l"])?);
+        (!p.papers.is_empty()).then_some((p, false))
+    }
+
+    /// The CUPS destinations as devices (none when CUPS is missing), the system's default
+    /// printer marked. A destination whose papers can't be read is left out.
     pub fn printers() -> Vec<PlotterConfig> {
-        let Some(out) = lpstat_destinations() else { return Vec::new() };
-        parse_destinations(&out).into_iter().filter_map(|n| ppd(&n).filter(|p| !p.papers.is_empty()).map(|p| printer_config(&n, &p))).collect()
+        let Some(out) = cups_output("lpstat", &["-e"]) else { return Vec::new() };
+        let default = cups_output("lpstat", &["-d"]).and_then(|t| parse_default_destination(&t));
+        parse_destinations(&out)
+            .into_iter()
+            .filter_map(|n| {
+                let (p, _) = papers(&n)?;
+                let mut c = printer_config(&n, &p);
+                c.system_default = default.as_deref() == Some(n.as_str());
+                Some(c)
+            })
+            .collect()
     }
 
     /// Send `pdf` to `printer` on the paper called `paper` (a name [`printers`] gave).
@@ -219,9 +367,11 @@ mod system {
         if !valid_name(printer) {
             return Err(format!("`{printer}` is not a printer name"));
         }
-        let keyword = ppd(printer).and_then(|p| p.papers.into_iter().find(|x| x.name.eq_ignore_ascii_case(paper)).map(|x| x.keyword));
+        let option = papers(printer)
+            .and_then(|(p, from_ppd)| p.papers.into_iter().find(|x| x.name.eq_ignore_ascii_case(paper)).map(|x| paper_option(&x.keyword, from_ppd)));
         let mut child = Command::new("lp")
-            .args(lp_args(printer, keyword.as_deref(), copies, title))
+            .args(lp_args(printer, option.as_deref(), copies, title))
+            .env("LC_ALL", "C")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -292,7 +442,7 @@ mod tests {
         assert_eq!(parse_destinations("EPSON_A\nEPSON_B\n\nbad/name\n"), ["EPSON_A", "EPSON_B"]);
         assert_eq!(parse_request_id("request id is EPSON_A-42 (1 file(s))\n").as_deref(), Some("EPSON_A-42"));
         assert_eq!(parse_request_id("nothing"), None);
-        let a = lp_args("EPSON_A", Some("Letter"), 0, "Plan\u{7}.dwg - Model");
+        let a = lp_args("EPSON_A", Some(&paper_option("Letter", true)), 0, "Plan\u{7}.dwg - Model");
         assert_eq!(
             a,
             [
@@ -312,5 +462,39 @@ mod tests {
             ]
         );
         assert_eq!(lp_args("P", None, 5000, "")[3], "999");
+        assert_eq!(paper_option("iso_a4_210x297mm", false), "media=iso_a4_210x297mm");
+    }
+
+    /// A queue without a readable PPD: its papers from `lpoptions -l`, PWG, Adobe and plain
+    /// keywords, the default marked, unknown and custom sizes left out.
+    #[test]
+    fn lpoptions_papers_of_a_driverless_queue() {
+        let text = "ColorModel/Color Mode: *RGB Gray\n\
+                    PageSize/Media Size: iso_a3_297x420mm *iso_a4_210x297mm na_letter_8.5x11in w612h1008 Legal A4.Fullbleed Custom.WIDTHxHEIGHT EnvWeird\n\
+                    Duplex/2-Sided Printing: *None DuplexNoTumble\n";
+        let p = parse_lpoptions(text);
+        let names: Vec<&str> = p.papers.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["A3", "A4", "Letter", "216 x 356 mm", "Legal", "A4 (borderless)"]);
+        assert_eq!(p.default_size, "iso_a4_210x297mm");
+        let c = printer_config("Office", &p);
+        assert_eq!(c.default_paper, "A4");
+        assert_eq!(c.description, "System printer");
+        let a4 = c.paper("A4").unwrap();
+        assert!((a4.width - 210.0).abs() < 0.01 && (a4.height - 297.0).abs() < 0.01, "{a4:?}");
+        assert!(a4.margins.iter().all(|m| (m - IPP_MARGIN_MM).abs() < 0.01), "{a4:?}");
+        let letter = c.paper("Letter").unwrap();
+        assert!((letter.width - 215.9).abs() < 0.01 && (letter.height - 279.4).abs() < 0.01);
+        assert_eq!(c.paper("A4 (borderless)").unwrap().margins, [0.0; 4]);
+        // A `media` option when there is no PageSize; nothing at all gives no papers.
+        assert_eq!(parse_lpoptions("media/Media: *na_legal_8.5x14in\n").papers.len(), 1);
+        assert!(parse_lpoptions("Duplex/2-Sided Printing: *None\n").papers.is_empty());
+        assert!(parse_lpoptions("PageSize/Media Size: iso_a4_0x0mm iso_a4_NaNxNaNmm w-1h5\n").papers.is_empty());
+    }
+
+    #[test]
+    fn the_default_destination() {
+        assert_eq!(parse_default_destination("system default destination: Office_T120\n").as_deref(), Some("Office_T120"));
+        assert_eq!(parse_default_destination("no system default destination\n"), None);
+        assert_eq!(parse_default_destination("system default destination: bad/name\n"), None);
     }
 }

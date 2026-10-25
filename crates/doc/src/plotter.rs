@@ -117,6 +117,9 @@ pub struct PlotterConfig {
     /// file): a plot to it is a PDF the host prints rather than a file.
     #[serde(skip)]
     pub system: bool,
+    /// With `system`: the operating system's default printer (never in a file either).
+    #[serde(skip)]
+    pub system_default: bool,
 }
 
 impl Default for PlotterConfig {
@@ -130,6 +133,7 @@ impl Default for PlotterConfig {
             default_paper: String::new(),
             papers: Vec::new(),
             system: false,
+            system_default: false,
         }
     }
 }

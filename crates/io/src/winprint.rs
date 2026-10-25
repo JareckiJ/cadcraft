@@ -79,6 +79,7 @@ pub fn printer_config(name: &str, default_printer: bool, papers: &[WinPaper], de
         default_paper,
         papers: device_papers,
         system: true,
+        system_default: default_printer,
     }
     .sanitized()
 }
@@ -248,6 +249,7 @@ mod tests {
         assert!(c.system);
         assert_eq!(c.output, PlotOutput::Pdf);
         assert_eq!(c.description, "Windows printer (default)");
+        assert!(c.system_default);
         let names: Vec<&str> = c.papers.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Letter", "A4", "A3"]);
         assert_eq!(c.default_paper, "A4");

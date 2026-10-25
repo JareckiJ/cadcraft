@@ -11,6 +11,8 @@ use serde_json::{Value, json};
 
 /// The jobs printed: printer, paper, copies, title, the options the plot hook got.
 static JOBS: Mutex<Vec<(String, String, u32, String, Value)>> = Mutex::new(Vec::new());
+/// The tests share [`JOBS`]: one at a time.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 fn echo_plot(_: &Drawing, _: &Space, opts: &Value) -> Result<Vec<u8>, String> {
     Ok(opts.to_string().into_bytes())
@@ -26,6 +28,7 @@ fn printers() -> Vec<PlotterConfig> {
             DevicePaper { name: "Roll 24 in".into(), width: 609.6, height: 914.4, margins: [5.0; 4] },
         ],
         system: true,
+        system_default: true,
         ..PlotterConfig::default()
     }]
 }
@@ -48,6 +51,7 @@ fn session() -> Session {
 
 #[test]
 fn system_printers_are_devices_and_plot_prints_on_them() {
+    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut s = session();
     let r = s.execute("plottermanager", &json!({})).unwrap();
     let names: Vec<&str> = r["devices"].as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap()).collect();
@@ -93,7 +97,39 @@ fn system_printers_are_devices_and_plot_prints_on_them() {
     let list = s.execute("plottermanager", &json!({ "action": "list" })).unwrap();
     let t120 = list["devices"].as_array().unwrap().iter().find(|d| d["name"] == "Office_T120").cloned().unwrap();
     assert_eq!(t120["system"], true);
+    assert_eq!(t120["default"], true, "the system's default printer says so");
     let set = s.execute("plottermanager", &json!({ "action": "set", "name": "Office_T120", "description": "x" }));
     assert!(set.unwrap_err().to_string().contains("system printer"));
     assert!(s.execute("plottermanager", &json!({ "action": "delete", "name": "Office_T120" })).is_err());
+}
+
+/// Plot to file with a printer: the PDF is written first, then printed; a file that can't be
+/// written stops the plot before anything prints. REFRESH asks for the printers again.
+#[test]
+fn plot_to_file_and_print_and_refresh_the_printers() {
+    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = session();
+    let dir = std::env::temp_dir().join(format!("cadcraft-plot-to-file-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("plan.pdf");
+    let path_s = path.to_string_lossy().to_string();
+    let r = s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "path": path_s })).unwrap();
+    assert_eq!(r["job"], "Office_T120-7");
+    assert_eq!(r["path"], path_s.as_str());
+    let written = std::fs::read(&path).unwrap();
+    let (printer, _, _, _, opts) = JOBS.lock().unwrap().pop().unwrap();
+    assert_eq!(printer, "Office_T120");
+    // The file is the PDF that was printed.
+    assert_eq!(serde_json::from_slice::<Value>(&written).unwrap(), opts);
+
+    let bad = dir.join("missing-folder").join("plan.pdf");
+    let e = s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "path": bad.to_string_lossy() })).unwrap_err();
+    assert!(e.to_string().contains("plan.pdf"), "{e}");
+    assert!(JOBS.lock().unwrap().is_empty(), "nothing printed when the file couldn't be written");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let r = s.execute("plottermanager", &json!({ "action": "refresh" })).unwrap();
+    assert_eq!(r["printers"], true);
+    let list = s.execute("plottermanager", &json!({ "action": "list" })).unwrap();
+    assert!(list["devices"].as_array().unwrap().iter().any(|d| d["name"] == "Office_T120"));
 }
