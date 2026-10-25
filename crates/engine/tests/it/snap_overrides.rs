@@ -177,3 +177,16 @@ fn tan_for_a_3p_circle_touches_an_arc_within_its_sweep() {
     assert!(s.prompt_text().contains("third point"), "{}", s.prompt_text());
     assert!(!s.doc().unwrap().model.iter().any(|e| matches!(e.kind, EntityKind::Circle(_))));
 }
+
+#[test]
+fn tan_for_a_3p_circle_takes_the_solution_that_touches_the_arc() {
+    // #1512: through 26,20 and 26,26, the circles tangent to the circle at 20,20 radius 3 touch it
+    // at about 29.6° and -103.3°. Picked at 20° on an arc swept from 200° to 25°, the 29.6°
+    // circle is nearer the pick but off the arc: the -103.3° one (radius 6.0826) is drawn.
+    let mut s = Session::new();
+    s.execute("arc", &serde_json::json!({"center": [20, 20], "radius": 3, "start": 200, "end": 25})).unwrap();
+    s.script("CIRCLE 3P 26,20 26,26 TAN 22.82,21.03\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    let (c, r) = last_circle(&s);
+    assert!((c.dist(Vec2::new(20.0, 20.0)) - (r - 3.0)).abs() < 1e-9 && (r - 6.082575694955838).abs() < 1e-9, "{c:?} r={r}");
+}

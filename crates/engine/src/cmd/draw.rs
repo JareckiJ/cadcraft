@@ -913,9 +913,9 @@ impl CircleM {
             super::curves::TanObj::Circle(circle)
         };
         let pts = [a, b, c];
-        let found = super::curves::ttt([(target(0, a), a), (target(1, b), b), (target(2, c), c)])?;
         // The circle must touch an arc within its sweep, not elsewhere on the arc's circle.
-        pts.iter().enumerate().all(|(i, p)| tan(i).is_none_or(|t| t.contains(target(i, *p).touch(&found)))).then_some(found)
+        let on_arcs = |found: &Circle| pts.iter().enumerate().all(|(i, p)| tan(i).is_none_or(|t| t.contains(target(i, *p).touch(found))));
+        super::curves::ttt_where([(target(0, a), a), (target(1, b), b), (target(2, c), c)], on_arcs)
     }
 }
 
