@@ -1701,7 +1701,7 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     d.header.set_i64("INSUNITS", 0);
     let mut rx = Rx { pstyles: plot_style_names(&secs), ..Rx::default() };
     let mut blocks: Vec<(String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)> = Vec::new();
-    let mut layout_objs: Vec<(String, u32, String, PageSetup)> = Vec::new();
+    let mut layout_objs: Vec<(String, u32, String, PageSetup, Option<(Vec2, Vec2)>)> = Vec::new();
     let mut entities = Vec::new();
     let mut objs = Objects::default();
     // Every handle another program's file already uses is taken before anything gets a new one:
@@ -1774,7 +1774,17 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
                         // LAYOUT has two 330s: owner dict and the block record; take the last.
                         let br = tg.iter().rfind(|x| x.code == 330).map(Tag::str).unwrap_or_default();
                         let plot = T(tg.get(..start).unwrap_or(&[]));
-                        layout_objs.push((t.s(1).unwrap_or_default(), t.i(71).unwrap_or(0) as u32, br.to_ascii_uppercase(), page_setup(&plot)));
+                        // Limits (10/11); kept only when all four values are finite and differ
+                        // from what CADCraft writes for a layout it created.
+                        let pt = |c: i32| Some(Vec2::new(t.f(c)?, t.f(c + 10)?)).filter(|p| p.x.is_finite() && p.y.is_finite());
+                        let limits = pt(10).zip(pt(11)).filter(|l| *l != (Vec2::ZERO, Vec2::new(12.0, 9.0)));
+                        layout_objs.push((
+                            t.s(1).unwrap_or_default(),
+                            t.i(71).unwrap_or(0) as u32,
+                            br.to_ascii_uppercase(),
+                            page_setup(&plot),
+                            limits,
+                        ));
                     }
                 }
             }
@@ -1787,11 +1797,11 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     // Layouts.
     let mut paper_block_for: HashMap<String, String> = HashMap::new();
     layout_objs.sort_by_key(|l| l.1);
-    for (name, order, br, page) in &layout_objs {
+    for (name, order, br, page, limits) in &layout_objs {
         if name.eq_ignore_ascii_case("Model") {
             continue;
         }
-        d.layouts.push(Layout { page: page.clone(), ..Layout::new(name, *order) });
+        d.layouts.push(Layout { page: page.clone(), limits: *limits, ..Layout::new(name, *order) });
         if let Some(bname) = rx.brs.get(br) {
             paper_block_for.insert(bname.to_ascii_uppercase(), name.clone());
         }
@@ -2366,6 +2376,9 @@ fn page_setup(t: &T) -> PageSetup {
     .into();
     p.plot_window = [t.fd(48, 0.0), t.fd(49, 0.0), t.fd(140, 0.0), t.fd(141, 0.0)].map(|v| if v.is_finite() { v } else { 0.0 });
     p.plot_style_table = t.s(7).unwrap_or_default();
+    // Paper image origin (148/149); kept only when both values are finite and not 0,0 (what
+    // CADCraft writes for a page setup it created).
+    p.paper_image_origin = t.f(148).zip(t.f(149)).map(|(x, y)| Vec2::new(x, y)).filter(|o| o.x.is_finite() && o.y.is_finite() && *o != Vec2::ZERO);
     p
 }
 
