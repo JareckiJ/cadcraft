@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 
 use super::helpers::v3;
 use super::machines::{SelOutcome, SelectPhase, SelectRun};
-use super::*;
+use super::{CommandSpec, bad, point_param, point_req, points_param, str_param, targets};
+
 use crate::{Accept, EngineError, Input, Interactive, LeaderOrder, MLeaderOptions, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -897,7 +898,7 @@ fn pick_at(s: &Session, p: Vec2) -> Option<Handle> {
 }
 
 /// The straight or curved piece of `h` picked at `p`: a line, an arc, or the polyline segment nearest `p`.
-fn segment_at(s: &Session, h: Handle, p: Vec2) -> Option<Segment> {
+pub(super) fn segment_at(s: &Session, h: Handle, p: Vec2) -> Option<Segment> {
     match &s.doc().ok()?.entity(h)?.kind {
         EntityKind::Line(l) => Some(Segment::Line(cadcraft_geom::Line::new(l.a.xy(), l.b.xy()))),
         EntityKind::Arc(a) => Some(Segment::Arc { arc: cadcraft_geom::Arc::new(a.center.xy(), a.radius, a.start, a.end), ccw: true }),
