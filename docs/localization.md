@@ -33,7 +33,7 @@ dialogs, and the About window's controls. The command reference can be searched 
 command ID, English label, or translated label. A missing entry falls back to English and
 never fails a build; `cargo xtask i18n` (a step of `cargo xtask ci`) lists each language's.
 
-Czech has 1,370 catalog rows, covering every key of the reference catalog that the code
+Czech has 1,373 catalog rows, covering every key of the reference catalog that the code
 looks up and every marked UI literal, including Options, plus the dimension property labels and
 command prompts that so far only other catalogs had. Four `menu` entries distinguish menu headings from object/command
 labels: **Zobrazení / Pohled**, **Kreslení / Kreslit**, **Kótování / Kóta**, and **Modifikace / Upravit**.
