@@ -960,12 +960,12 @@ checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 [[package]]
 name = "craft-docpath"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 
 [[package]]
 name = "craft-pdf"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 dependencies = [
  "hayro-syntax",
  "krilla",
@@ -975,7 +975,7 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 dependencies = [
  "egui",
  "log",
@@ -1840,7 +1840,7 @@ checksum = "9f4d0e94ddd48749f06bbe4e5389fb9799a0c45bcaf00495042076ef05e3241a"
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 dependencies = [
  "hayro-ccitt",
 ]
@@ -1854,7 +1854,7 @@ checksum = "c75ab947623ef4ccaa7acf0579edf7cbb5a73838e3839a7be73335e522f433a1"
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 dependencies = [
  "hayro-jbig2",
  "hayro-jpeg2000",
@@ -2200,7 +2200,7 @@ dependencies = [
 [[package]]
 name = "krilla"
 version = "0.8.2"
-source = "git+https://github.com/storytold/craft-libs?rev=4dc543cb449cc232e4c3d58f78a05c1ab169db9e#4dc543cb449cc232e4c3d58f78a05c1ab169db9e"
+source = "git+https://github.com/storytold/craft-libs?rev=b6d35e28f4d19145c9c7595742cc3ea6fb8352d5#b6d35e28f4d19145c9c7595742cc3ea6fb8352d5"
 dependencies = [
  "base64",
  "bumpalo",
