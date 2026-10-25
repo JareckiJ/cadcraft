@@ -887,7 +887,7 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     if let Some(printer) = printer {
         // "Plot to file" too: the PDF is written first, so a file that can't be written stops
         // the plot before anything is printed (and a retry doesn't print it twice).
-        let saved = match str_param(p, "path") {
+        let saved: Option<&str> = match str_param(p, "path") {
             #[cfg(not(target_arch = "wasm32"))]
             Some(path) => {
                 crate::atomic_write::write_atomic(std::path::Path::new(path), &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
