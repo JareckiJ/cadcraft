@@ -86,6 +86,8 @@ menu	Modify	Edita
 	Plot several sheets	Stampa più fogli
 	{n} sheets in one PDF, each with its own page setup (change them in the Page Setup Manager):	{n} fogli in un solo PDF, ciascuno con la propria impostazione pagina (si modificano nel Gestore impostazioni pagina):
 	{n} sheets	{n} fogli
+	Select all	Seleziona tutti
+	{n} layouts selected: a change applies to all of them	{n} layout selezionati: una modifica vale per tutti
 	Attribute Definition	Definizione di attributo
 	Attribute Display	Visualizzazione attributi
 	Audit	Controlla

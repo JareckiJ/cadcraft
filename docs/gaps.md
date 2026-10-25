@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-25 · **Change:** minor (Windows system printers: H3 narrowed, F14 updated; the Plot dialog plots several sheets; Plot Preview shows plot styles, zooms and pans) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-25 · **Change:** minor (Windows system printers: H3 narrowed, F14 updated; the Plot dialog plots several sheets; Plot Preview shows plot styles, zooms and pans; the Page Setup Manager changes several layouts at once) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -156,6 +156,7 @@ Detail: [localization-parity.md](localization-parity.md).
 | 2026-10-24 | minor | DIMTFILL and DIMTFILLCLR: a dimension's text background (none, the drawing's background color, or a color) hides what is drawn under the text; SETVAR, DIMOVERRIDE and style fields, DIMSTYLE groups 69 and 70 in DXF from R2007 (CADCraft xdata before), and a SOLID in the `*D` block and from EXPLODE for DIMTFILL 2: F7 narrowed |
 | 2026-10-24 | minor | The Plot dialog has "Plot several sheets": the ticked layouts (or all of them) go into one PDF, one page each, every sheet with its own page setup (the engine's `layouts` list) |
 | 2026-10-24 | minor | Plot Preview draws the sheet as it plots: the page setup's plot style table (colours, screening, lineweights, line ends and fills; before, only the Plot dialog's preview did, and its "None" now overrides the layout's table), and the window zooms (mouse wheel, + / −, Fit or double-click) and pans (drag); the part in view is drawn again at the screen's resolution once the view rests (PNG plots take `crop`, a part of the sheet as fractions) |
+| 2026-10-24 | minor | The Page Setup Manager picks several layouts (Ctrl, Shift, Select all) and a change applies to all of them; PAGESETUP takes `layouts` (a list of names or "all") for the same: one undo step, all or nothing |
 | 2026-10-22 | minor | APPLOAD typed or from Tools ▸ Load Application opens a `.lsp` file browser starting in the last-used folder (kept in the preferences); a picked file loads interactively like a typed name (routines that ask for input wait), the web says to drop the file (no file system), and the JSON form `{path}` reads the path as given and returns the commands the file defined, never opening a dialog (#1820): E1 narrowed |
 | 2026-10-16 | minor | ALIASEDIT typed or from Tools ▸ Customize opens the Command Aliases dialog (user aliases next to the built-in ones; Add, Edit, Remove; OK, Cancel, Apply), #1381: U12 and E5 narrowed |
 | 2026-10-16 | minor | MOCORO (Tools ▸ Express Tools ▸ Move/Copy/Rotate): select objects and a base point once, then Move, Copy, Rotate, Scale, Base and Undo until eXit, one undo step; JSON form `{base, ops}`: E3 narrowed |
