@@ -1387,3 +1387,45 @@ menu	Modify	Edita
 	DOCFA compatible	compatibile con DOCFA
 	DWG has no polygon layer for DOCFA: it computes the surfaces inside DOCFA.	Il DWG non ha il layer dei poligoni per DOCFA: le superfici le calcola DOCFA stesso.
 	DXF and DWG 2000 open in DOCFA. For a file ready to import choose File > Save As and tick the DOCFA profile.	DXF e DWG 2000 si aprono in DOCFA. Per un file pronto all'importazione scegliere File > Salva con nome e attivare il profilo DOCFA.
+	Above	Sopra
+	Angular precision	Precisione angolare
+	Angular units	Unità angolari
+	Architectural	Architettoniche
+	Arrow size	Dimensione delle frecce
+	Changes apply to the current dimension style at once and are kept for new drawings. Other drawings keep their own styles.	Le modifiche si applicano subito allo stile di quota corrente e vengono mantenute per i nuovi disegni. Gli altri disegni conservano i propri stili.
+	Comma (,)	Virgola (,)
+	Current dimension style	Stile di quota corrente
+	Decimal	Decimali
+	Decimal degrees	Gradi decimali
+	Decimal separator	Separatore decimale
+	Degrees, minutes, seconds	Gradi, primi, secondi
+	Edit as JSON	Modifica come JSON
+	Engineering	Ingegneristiche
+	Extension beyond dimension line	Estensione oltre la linea di quota
+	Extension line offset	Distanza della linea di estensione dall'origine
+	Forget defaults for new drawings	Dimentica i valori predefiniti per i nuovi disegni
+	Fractional	Frazionarie
+	Gradians	Gradianti
+	JIS	JIS
+	Linear scale factor	Fattore di scala lineare
+	Linear units	Unità lineari
+	No drawing is open: these values are kept for new drawings.	Nessun disegno aperto: questi valori vengono mantenuti per i nuovi disegni.
+	Not valid JSON	JSON non valido
+	Offset from dimension line	Distanza del testo dalla linea di quota
+	Outside	All'esterno
+	Overall scale	Scala complessiva
+	Period (.)	Punto (.)
+	Precision (decimal places)	Precisione (cifre decimali)
+	Prefix	Prefisso
+	Radians	Radianti
+	Round off to	Arrotonda a
+	Scientific	Scientifiche
+	Space	Spazio
+	Suffix	Suffisso
+	Suppress leading zeros	Sopprimi gli zeri iniziali
+	Suppress trailing zeros	Sopprimi gli zeri finali
+	Text position	Posizione del testo
+	The settings must be a JSON object.	Le impostazioni devono essere un oggetto JSON.
+	Windows desktop	Formato Windows
+	Zero suppression	Soppressione degli zeri
+	{n} settings	{n} impostazioni

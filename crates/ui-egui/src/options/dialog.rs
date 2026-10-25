@@ -12,13 +12,15 @@ use crate::animation::AnimationPref;
 use crate::theme::{ThemePref, Tokens};
 
 /// The tabs: (id in the dialog name, label).
-pub(super) const TABS: [(&str, &str); 6] = [
+pub(super) const TABS: [(&str, &str); 8] = [
     ("display", "Display"),
     ("files", "Open and Save"),
     ("drafting", "Drafting"),
+    ("dimensions", "Dimensions"),
     ("selection", "Selection"),
     ("preferences", "User Preferences"),
     ("profiles", "Profiles"),
+    ("advanced", "All settings"),
 ];
 
 const WIDTH: f32 = 580.0;
@@ -28,6 +30,8 @@ const MIN_TAB_HEIGHT: f32 = 200.0;
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool) {
     let tab = name.strip_prefix("options:").and_then(|t| TABS.iter().find(|(id, _)| *id == t)).map_or("display", |(id, _)| *id);
     let mut changes = Map::new();
+    // The All settings tab's edits run apart, so a refused value is shown in the tab.
+    let mut edits = Map::new();
     let mut next_tab = None;
     let mut start = None;
     let mut close = false;
@@ -54,6 +58,8 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
             match tab {
                 "files" => files(app, ui, &mut changes),
                 "drafting" => drafting(app, ui, &mut changes, &mut start),
+                "dimensions" => super::dimensions::dimensions(app, ui, &mut changes),
+                "advanced" => super::advanced::advanced(app, ui, &mut edits),
                 "selection" => selection(app, ui, &mut changes),
                 "preferences" => preferences(app, ui, &mut changes),
                 "profiles" => profiles(app, ui, &mut changes),
@@ -80,16 +86,26 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     if !changes.is_empty() {
         let _ = app.run("options", Value::Object(changes));
     }
+    if !edits.is_empty() {
+        let error = egui::Id::new(super::advanced::ERROR);
+        let result = app.run("options", Value::Object(edits));
+        ctx.data_mut(|d| match result {
+            Ok(_) => d.remove::<String>(error),
+            Err(e) => {
+                d.insert_temp(error, e);
+            }
+        });
+    }
     if let Some(id) = start {
         app.start(id);
     }
 }
 
-fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
+pub(super) fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id).num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, add);
 }
 
-fn hint(ui: &mut egui::Ui, text: &str) {
+pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).small().color(Tokens::get().text_dim));
 }
 

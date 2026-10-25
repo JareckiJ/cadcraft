@@ -1,0 +1,143 @@
+//! The Options dialog's Dimensions tab and its JSON keys: `dimStyle` sets the open drawing's
+//! current dimension style and is kept for new drawings, `dimDefaults` only for new drawings; a
+//! refused value changes nothing; the profile keeps them across a restart.
+
+use cadcraft_engine::Session;
+use cadcraft_ui_egui::{CadApp, Services};
+use serde_json::{Value, json};
+
+fn app() -> CadApp {
+    CadApp::new(Session::new(), Services::default())
+}
+
+fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
+    fn collect(shape: &egui::Shape, text: &mut String) {
+        match shape {
+            egui::Shape::Text(s) => {
+                text.push_str(s.galley.text());
+                text.push('\n');
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, text)),
+            _ => {}
+        }
+    }
+    let mut text = String::new();
+    shapes.iter().for_each(|s| collect(&s.shape, &mut text));
+    text
+}
+
+fn render(app: &mut CadApp, ctx: &egui::Context) -> String {
+    let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
+    let mut text = String::new();
+    for _ in 0..2 {
+        app.logic(ctx);
+        let mut output = ctx.run_ui(input.clone(), |ui| app.ui(ui));
+        text = painted_text(&output.shapes);
+        output.textures_delta.clear();
+    }
+    text
+}
+
+/// The current dimension style's variable `var` in the open drawing.
+fn current(a: &mut CadApp, var: &str) -> Value {
+    let name = cadcraft_ui_egui::options::current_dim_style_name(a).unwrap_or_default();
+    let r = a.session.execute("dimstyle.list", &json!({ "name": name })).unwrap();
+    r["variables"][var].clone()
+}
+
+#[test]
+fn dim_style_sets_the_current_style_and_is_reported() {
+    let mut a = app();
+    let before = current(&mut a, "DIMDEC");
+    let r = a.run("options", json!({ "dimStyle": { "DIMDEC": 2, "dimdsep": ",", "DIMZIN": 12 } })).unwrap();
+    assert_eq!(current(&mut a, "DIMDEC"), json!(2));
+    assert_eq!(current(&mut a, "DIMDSEP"), json!(","));
+    assert_eq!(current(&mut a, "DIMZIN"), json!(12));
+    assert_ne!(before, json!(2), "the test changes something");
+    // Reported as the current style's values, and kept as the defaults for new drawings.
+    assert_eq!(r["dimStyle"]["DIMDEC"], json!(2));
+    assert_eq!(r["dimStyle"]["DIMDSEP"], json!(","));
+    assert_eq!(r["dimDefaults"], json!({ "DIMDEC": 2, "DIMDSEP": ",", "DIMZIN": 12 }));
+}
+
+#[test]
+fn new_drawings_take_the_defaults_and_other_drawings_keep_their_style() {
+    let mut a = app();
+    a.run("options", json!({ "dimStyle": { "DIMDEC": 1, "DIMDSEP": "," } })).unwrap();
+    let first = a.session.active;
+    a.run("new", json!({})).unwrap();
+    assert_ne!(a.session.active, first);
+    assert_eq!(current(&mut a, "DIMDEC"), json!(1));
+    assert_eq!(current(&mut a, "DIMDSEP"), json!(","));
+    // Changing the current drawing's style later leaves the first one as it was.
+    a.run("options", json!({ "dimStyle": { "DIMDEC": 5 } })).unwrap();
+    a.run("document.switch", json!({ "index": first })).unwrap();
+    assert_eq!(current(&mut a, "DIMDEC"), json!(1));
+    // `dimDefaults` is for new drawings only.
+    a.run("options", json!({ "dimDefaults": { "DIMDEC": 3 } })).unwrap();
+    assert_eq!(current(&mut a, "DIMDEC"), json!(1), "the open drawing keeps its style");
+    a.run("new", json!({})).unwrap();
+    assert_eq!(current(&mut a, "DIMDEC"), json!(3));
+    // Forgotten, new drawings are as built in again.
+    a.run("options", json!({ "dimDefaults": {} })).unwrap();
+    a.run("new", json!({})).unwrap();
+    assert_ne!(current(&mut a, "DIMDEC"), json!(3));
+}
+
+#[test]
+fn refused_values_and_unknown_names_change_nothing() {
+    let mut a = app();
+    let before = a.run("options", json!({})).unwrap();
+    for bad in [
+        json!({ "dimStyle": { "DIMDEC": -1 } }),
+        json!({ "dimStyle": { "DIMFOO": 1 } }),
+        json!({ "dimStyle": { "DIMTXT": 0 } }),
+        json!({ "dimStyle": 5 }),
+        json!({ "dimDefaults": { "DIMBLK": "x" } }),
+        json!({ "dimStyle": { "DIMDEC": 2 }, "PICKBOX": "nonsense" }),
+    ] {
+        assert!(a.run("options", bad.clone()).is_err(), "{bad}");
+    }
+    let after = a.run("options", json!({})).unwrap();
+    assert_eq!(before["dimStyle"], after["dimStyle"]);
+    assert_eq!(after["dimDefaults"], json!({}));
+}
+
+#[test]
+fn the_profile_keeps_the_defaults_and_reset_forgets_them() {
+    let mut a = app();
+    a.run("options", json!({ "dimStyle": { "DIMDEC": 2, "DIMDSEP": "," } })).unwrap();
+    let saved = a.profile_json();
+    let mut b = app();
+    b.load_profile(&saved);
+    assert_eq!(b.session.dim_defaults.get("DIMDEC"), Some(&json!(2)));
+    // The startup drawing is made before the profile is read: it takes the defaults too.
+    assert_eq!(current(&mut b, "DIMDEC"), json!(2));
+    b.run("new", json!({})).unwrap();
+    assert_eq!(current(&mut b, "DIMDSEP"), json!(","));
+    // A hand-edited profile with a bad entry still restores the rest.
+    let mut c = app();
+    c.load_profile(r#"{"version":1,"dimDefaults":{"DIMDEC":"junk"},"systemCursor":true}"#);
+    assert!(c.session.dim_defaults.is_empty());
+    b.run("options", json!({ "reset": true })).unwrap();
+    assert!(b.session.dim_defaults.is_empty());
+}
+
+#[test]
+fn the_dimensions_and_all_settings_tabs_render() {
+    let mut a = app();
+    a.ui.dialog = Some("options:dimensions".into());
+    let ctx = egui::Context::default();
+    let text = render(&mut a, &ctx);
+    for want in
+        ["Dimensions", "Current dimension style", "Linear units", "Decimal separator", "Precision (decimal places)", "Suppress trailing zeros"]
+    {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    assert_eq!(a.ui.dialog.as_deref(), Some("options:dimensions"));
+    a.ui.dialog = Some("options:advanced".into());
+    let text = render(&mut a, &ctx);
+    for want in ["All settings", "APERTURE", "AUTOSNAP", "Filter", "Edit as JSON"] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+}

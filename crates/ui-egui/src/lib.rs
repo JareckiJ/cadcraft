@@ -673,6 +673,7 @@ impl CadApp {
                 chrome::start_page(self, ui);
             }
         });
+        chrome::options_button(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         palettes::patterns::prompt_picker(self, ui.ctx());
         closing::prompt(self, ui.ctx());
