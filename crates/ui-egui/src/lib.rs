@@ -12,6 +12,7 @@ pub mod aliasdlg;
 pub mod animation;
 pub mod autosave;
 pub mod bedit;
+pub mod blockmgr;
 pub mod canvas;
 pub mod chrome;
 pub mod clipboard;
@@ -96,6 +97,8 @@ pub struct UiState {
     pub in_window_menu: bool,
     pub start_tab: bool,
     pub dialog: Option<String>,
+    /// Show the Block Manager as a floating window instead of a right-hand panel.
+    pub blocks_window: bool,
     pub history_lines: usize,
     /// Interface theme: "system" (follow the OS light/dark appearance), "light" or "dark".
     pub theme: theme::ThemePref,
@@ -176,6 +179,7 @@ impl Default for UiState {
             in_window_menu: !cfg!(target_os = "macos"),
             start_tab: false,
             dialog: None,
+            blocks_window: false,
             history_lines: 3,
             theme: theme::ThemePref::default(),
             animations: animation::AnimationPref::default(),

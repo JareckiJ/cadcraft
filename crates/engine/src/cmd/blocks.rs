@@ -748,6 +748,16 @@ impl Interactive for InsertM {
                 }
             }
             InsStage::PresetScale => {
+                if let Input::Text(t) = &i
+                    && let Some((x, y)) = t.split_once(',').filter(|_| !self.explode)
+                {
+                    self.scale = Some(Vec2::new(nonzero(x.trim())?, nonzero(y.trim())?));
+                    if self.at.is_some() {
+                        return self.advance(s);
+                    }
+                    self.stage = InsStage::Point;
+                    return Ok(Step::Continue);
+                }
                 let f = match i {
                     Input::Text(t) => nonzero(&t)?,
                     Input::Enter => 1.0,

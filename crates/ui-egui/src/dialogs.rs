@@ -26,7 +26,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "about" => about(ctx, &mut open),
         "preview" => crate::exchange::dialog(app, ctx, &mut open),
         "commands" => commands(app, ctx, &mut open),
-        "blocks" => blocks(app, ctx, &mut open),
+        "blocks" => crate::blockmgr::dialog(app, ctx, &mut open),
         "bedit" => crate::bedit::dialog(app, ctx, &mut open),
         "authoring" => crate::bedit::authoring_dialog(app, ctx, &mut open),
         "stylesmanager" => crate::plotstyles::dialog(app, ctx, &mut open),
@@ -391,6 +391,7 @@ fn commands(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
+#[allow(dead_code)]
 fn blocks(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut pick = None;
     egui::Window::new(crate::tl!("Blocks")).id(egui::Id::new("Blocks")).open(open).default_size(vec2(320.0, 360.0)).show(ctx, |ui| {
@@ -412,8 +413,11 @@ fn blocks(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
 /// Start INSERT with `name` already given at its block name prompt, so the next prompt asks for
 /// the insertion point.
-fn insert_block(app: &mut CadApp, name: &str) {
-    app.start("insert");
+pub(crate) fn insert_block(app: &mut CadApp, name: &str) {
+    // The engine's INSERT itself (the UI's INSERT opens the Block Manager).
+    if let Err(e) = app.session.start("insert") {
+        app.session.echo(e.to_string());
+    }
     if app.session.running.as_ref().is_none_or(|r| r.id != "insert") {
         return;
     }
