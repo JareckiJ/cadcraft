@@ -87,9 +87,9 @@ fn dxf_at_every_version_reads_back_the_same() {
             assert_eq!(acadver(&bytes), v.code(), "{what}");
             assert_eq!(cadcraft_dxf::is_binary(&bytes), binary, "{what}");
             let raw = bytes.windows("图号".len()).any(|w| w == "图号".as_bytes());
-            assert_eq!(raw, v.utf8(), "{what}: UTF-8 text from 2007, \\U+ escapes before");
+            assert_eq!(raw, v.utf8(), "{what}: UTF-8 text from 2007, the code page (CJK as \\U+ escapes) before");
             if !v.utf8() && !binary {
-                assert!(bytes.is_ascii(), "{what}");
+                assert!(std::str::from_utf8(&bytes).is_err(), "{what}: Latin-1 text as ANSI_1252 bytes, as AutoCAD writes it");
             }
             let back = read(&bytes, "x.dxf").unwrap();
             assert_eq!(first_text(&back).as_deref(), Some(INTL), "{what}");
@@ -99,11 +99,16 @@ fn dxf_at_every_version_reads_back_the_same() {
     }
 }
 
-/// R2000 ASCII is exactly the R2000 DXF CADCraft always wrote.
+/// R2000 ASCII holds exactly the tags of the R2000 DXF CADCraft always wrote; only its non-ASCII
+/// text is now in the code page instead of escaped.
 #[test]
 fn r2000_ascii_is_unchanged() {
     let d = sample();
-    assert_eq!(write_with(&d, "x.dxf", &opts(Version::R2000, false)).unwrap(), write_dxf(&d).into_bytes());
+    let saved = write_with(&d, "x.dxf", &opts(Version::R2000, false)).unwrap();
+    assert_eq!(cadcraft_dxf::parse(&saved).unwrap(), cadcraft_dxf::parse(write_dxf(&d).as_bytes()).unwrap());
+    let mut ascii = Drawing::new_metric();
+    ascii.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 0.0, 0.0) })).unwrap();
+    assert_eq!(write_with(&ascii, "x.dxf", &opts(Version::R2000, false)).unwrap(), write_dxf(&ascii).into_bytes(), "ASCII text: byte for byte");
 }
 
 /// Without a version asked for: 2018 for a new drawing, otherwise the file's own version (the

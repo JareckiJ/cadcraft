@@ -75,7 +75,7 @@ impl Version {
     }
 
     /// Whether text in this version's DXF is UTF-8 (2007 and later). Older versions keep text in
-    /// the `$DWGCODEPAGE` code page, which CADCraft avoids by escaping non-ASCII as `\U+XXXX`.
+    /// the `$DWGCODEPAGE` code page, characters outside it as `\U+XXXX` escapes.
     pub fn utf8(self) -> bool {
         self >= Version::R2007
     }

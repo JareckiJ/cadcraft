@@ -1551,6 +1551,25 @@ fn non_ascii_text_is_escaped_for_r2000_and_roundtrips() {
     assert_eq!(write_dxf(&back).matches("\\U+").count(), text.matches("\\U+").count());
 }
 
+/// A DXF saved at 2000 or 2004 has its text in its code page, as AutoCAD writes it: the Latin-1
+/// characters of `ANSI_1252` as single bytes (older readers such as the Italian cadastre's DOCFA
+/// show `\U+00C4` literally), the others as `\U+XXXX`. It reads back the same.
+#[test]
+fn a_2000_save_writes_text_in_its_code_page_and_roundtrips() {
+    let d = intl_sample();
+    for version in [crate::Version::R2000, crate::Version::R2004] {
+        let bytes = crate::write_with(&d, "intl.dxf", &crate::SaveOptions { version: Some(version), binary: false }).unwrap();
+        assert!(std::str::from_utf8(&bytes).is_err(), "{version}: code page bytes, not UTF-8");
+        let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+        assert!(has(b"\\U+56FE\\U+53F7 \xc4\xb0\xf8 \xd8 \\U+D83D\\U+DE00"), "{version}: CJK and astral escaped, Latin-1 as bytes");
+        assert!(!has(b"\\U+00C4"));
+        assert_intl(&read_dxf(&bytes).unwrap());
+    }
+    // 2007 and later stay UTF-8.
+    let bytes = crate::write_with(&d, "intl.dxf", &crate::SaveOptions { version: Some(crate::Version::R2018), binary: false }).unwrap();
+    assert!(std::str::from_utf8(&bytes).is_ok_and(|t| t.contains("图号 Ä°ø Ø")));
+}
+
 /// Real R2007+ files are UTF-8 and older ones are in their code page; both still read.
 #[test]
 fn reads_utf8_and_code_page_text() {

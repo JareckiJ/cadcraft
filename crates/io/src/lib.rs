@@ -88,11 +88,7 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
     match ext(name).as_str() {
         "dxf" | "" => {
             let tags = dxf_write::tags(d, version);
-            Ok(if opts.binary {
-                cadcraft_dxf::write_binary(&tags, version.utf8())
-            } else {
-                cadcraft_dxf::write_ascii_as(&tags, version.utf8()).into_bytes()
-            })
+            Ok(if opts.binary { cadcraft_dxf::write_binary(&tags, version.utf8()) } else { cadcraft_dxf::write_ascii_bytes(&tags, version.utf8()) })
         }
         // The DWG bridge reads our R2000 DXF and writes the DWG at the version asked for. Without
         // one, at least 2004: R2000 DWG has no true colours, transparency, table styles or
