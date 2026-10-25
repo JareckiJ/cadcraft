@@ -304,7 +304,14 @@ impl ShxFont {
                 7 => {
                     let (num, extra) = match self.kind {
                         Kind::Shapes => (u32::from(byte(i).unwrap_or(0)), 1),
-                        Kind::Unifont => (u32::from(u16::from_be_bytes([byte(i).unwrap_or(0), byte(i + 1).unwrap_or(0)])), 2),
+                        // Little-endian, like every number in a unifont file; a font that wrote
+                        // it high byte first still finds its shape.
+                        Kind::Unifont => {
+                            let (lo, hi) = (byte(i).unwrap_or(0), byte(i + 1).unwrap_or(0));
+                            let le = u32::from(u16::from_le_bytes([lo, hi]));
+                            let be = u32::from(u16::from_be_bytes([lo, hi]));
+                            (if self.shapes.contains_key(&le) || !self.shapes.contains_key(&be) { le } else { be }, 2)
+                        }
                         Kind::Bigfont => match byte(i) {
                             Some(0) => (u32::from(u16::from_be_bytes([byte(i + 1).unwrap_or(0), byte(i + 2).unwrap_or(0)])), 7),
                             _ => (u32::from(byte(i).unwrap_or(0)), 1),
@@ -669,6 +676,35 @@ mod tests {
             b.extend(d);
         }
         b
+    }
+
+    /// A tiny `unifont 1.0` font of our own: `A` up 4, `C` sub-shape `A` (code 7 then the shape
+    /// number as two bytes, low byte first).
+    fn unifont_sample() -> Vec<u8> {
+        let mut b = b"AutoCAD-86 unifont 1.0\r\n\x1a".to_vec();
+        let shapes: Vec<(u16, Vec<u8>)> = vec![
+            (u16::from(b'A'), [b"A\0".to_vec(), vec![0x44, 0x20, 0]].concat()),
+            (u16::from(b'C'), [b"C\0".to_vec(), vec![7, b'A', 0, 0]].concat()),
+        ];
+        let info = [b"U\0".to_vec(), vec![4, 1, 0, 0, 0, 0]].concat();
+        b.extend(u32::try_from(shapes.len() + 1).unwrap_or(0).to_le_bytes());
+        b.extend(u16::try_from(info.len()).unwrap_or(0).to_le_bytes());
+        b.extend(&info);
+        for (n, d) in &shapes {
+            b.extend(n.to_le_bytes());
+            b.extend(u16::try_from(d.len()).unwrap_or(0).to_le_bytes());
+            b.extend(d);
+        }
+        b
+    }
+
+    #[test]
+    fn a_unifont_subshape_number_is_little_endian() {
+        let f = ShxFont::parse("u", &unifont_sample()).expect("parses");
+        assert_eq!(f.kind, Kind::Unifont);
+        let c = f.glyph(u32::from(b'C')).expect("C");
+        assert_eq!(c.strokes, f.glyph(u32::from(b'A')).expect("A").strokes, "C draws its sub-shape A");
+        assert_eq!(c.advance, 2.0);
     }
 
     #[test]

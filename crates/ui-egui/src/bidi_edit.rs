@@ -256,7 +256,9 @@ impl Layout {
                 return self.lines.get(li + 1).map_or(c, |n| n.start);
             }
         } else if li > 0 {
-            return self.lines.get(li - 1).map_or(c, |p| p.end);
+            // At a soft wrap the previous line ends where this one starts: the same caret place,
+            // which belongs to this line. Go one character into the previous line instead.
+            return self.lines.get(li - 1).map_or(c, |p| if p.end == c { c.saturating_sub(1).max(p.start) } else { p.end });
         }
         c
     }
@@ -647,6 +649,29 @@ mod tests {
         assert!(replace(&mut chars, &mut st, "123456", 6), "capped at the limit");
         assert_eq!(chars.len(), 6);
         assert_eq!(word_left(&"one two".chars().collect::<Vec<_>>(), 7), 4);
+    }
+
+    /// Left (and Right) walk through a soft-wrapped paragraph, across the wrap, end to end.
+    #[test]
+    fn arrows_cross_a_soft_wrap_both_ways() {
+        let c: Vec<char> = "aaaa bbbb cccc dddd".chars().collect();
+        let one = editor_glyphs::advance(&look(0).font, false, 'a', 20.0);
+        let l = layout(&c, &look, Some(one * 6.5), 20.0);
+        assert!(l.lines.len() >= 2, "wrapped");
+        assert!(l.lines.windows(2).any(|w| w[0].end == w[1].start), "a soft wrap shares its caret place");
+        let walk = |from: usize, dir: f32| {
+            let mut at = from;
+            for _ in 0..c.len() * 2 {
+                let n = l.step(at, dir);
+                if n == at {
+                    break;
+                }
+                at = n;
+            }
+            at
+        };
+        assert_eq!(walk(c.len(), -1.0), 0, "Left from the end reaches the start");
+        assert_eq!(walk(0, 1.0), c.len(), "Right from the start reaches the end");
     }
 
     #[test]

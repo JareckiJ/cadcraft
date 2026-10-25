@@ -887,7 +887,7 @@ pub(crate) fn edge_segments_owned(s: &Session, edges: Edges, near: Option<cadcra
             let list = cadcraft_render::build_entities(
                 d,
                 std::iter::once(&**e),
-                &cadcraft_render::Options { text: false, fill: false, ..Default::default() },
+                &cadcraft_render::Options { text: false, fill: false, continuous: true, ..Default::default() },
             );
             for p in list.prims.iter().filter(|p| matches!(p.kind, cadcraft_render::Kind::Polyline)) {
                 out.extend(list.points(p).windows(2).filter_map(|w| Some((e.handle, Segment::Line(Line::new(*w.first()?, *w.get(1)?))))));

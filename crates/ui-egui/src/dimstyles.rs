@@ -879,6 +879,9 @@ struct Editor {
     base: Map<String, Value>,
     style: Map<String, Value>,
     tab: usize,
+    /// The drawing the style was read from ([`cadcraft_engine::DocState::uid`]): the editor is
+    /// cancelled when another drawing becomes active, so OK never writes this style into it.
+    doc: u64,
 }
 
 #[derive(Clone)]
@@ -946,6 +949,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     };
     // The drawing the previews take user arrowheads, text styles and linetypes from.
     let src = app.session.state().ok().map(|s| s.doc.clone());
+    let doc = app.session.state().map_or(0, |s| s.uid);
     let src = src.as_deref();
     let mut st: State = ctx.data(|m| m.get_temp(state_id())).unwrap_or_default();
     let current = d.header.str("DIMSTYLE", "Standard");
@@ -1078,7 +1082,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                         }
                         if ui.add(egui::Button::new(crate::tl!("Modify...")).min_size(w)).clicked() {
                             let m = style_map(&sel_style);
-                            st.editor = Some(Editor { mode: Mode::Modify, name: sel.clone(), base: m.clone(), style: m, tab: 0 });
+                            st.editor = Some(Editor { mode: Mode::Modify, name: sel.clone(), base: m.clone(), style: m, tab: 0, doc });
                         }
                         let cur_style = styles.iter().find(|x| x.name.eq_ignore_ascii_case(&current)).cloned().unwrap_or_default();
                         if ui
@@ -1089,7 +1093,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                             let base = style_map(&cur_style);
                             let mut with = base.clone();
                             with.extend(overrides.clone());
-                            st.editor = Some(Editor { mode: Mode::Override, name: current.clone(), base, style: with, tab: 0 });
+                            st.editor = Some(Editor { mode: Mode::Override, name: current.clone(), base, style: with, tab: 0, doc });
                         }
                         if ui.add(egui::Button::new(crate::tl!("Compare...")).min_size(w)).clicked() {
                             st.compare = Some((sel.clone(), current.clone()));
@@ -1155,14 +1159,18 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             let mut m = style_map(&from);
             m.insert("name".into(), json!(n.name.trim()));
             m.insert("annotative".into(), json!(n.annotative));
-            st.editor = Some(Editor { mode: Mode::New, name: n.name.trim().to_string(), base: m.clone(), style: m, tab: 0 });
+            st.editor = Some(Editor { mode: Mode::New, name: n.name.trim().to_string(), base: m.clone(), style: m, tab: 0, doc });
             st.new = None;
         } else {
             st.new = keep.then_some(n);
         }
     }
 
-    // The style editor.
+    // The style editor, for the drawing it was opened in only.
+    if st.editor.as_ref().is_some_and(|ed| ed.doc != doc) {
+        st.editor = None;
+        app.set_status(crate::tl!("Another drawing became active: the dimension style changes were not applied."));
+    }
     if let Some(mut ed) = st.editor.clone() {
         let mut close = false;
         let mut ok = false;

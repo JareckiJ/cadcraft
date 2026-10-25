@@ -87,9 +87,15 @@ fn chain(mut edges: Vec<(Vec2, Vec2)>, tol: f64) -> Vec<Vec<Vec2>> {
 /// Trim the hatch at `pick` against the cutting edges `cut`: the hatch that is left (`None`: none
 /// of its area is) and the outline of the part taken away (its outer loop, then its islands).
 pub(crate) fn trim_hatch(h: &Hatch, cut: &[Segment], pick: Vec2) -> Result<(Option<EntityKind>, Vec<Vec<Vec2>>)> {
-    let raw: Vec<Vec<Vec2>> =
-        h.loops.iter().map(|l| cadcraft_geom::Polyline { vertices: l.vertices.clone(), closed: true }.tessellate(1e300)).collect();
-    let bounds = Bounds2::from_points(raw.iter().flatten().copied());
+    // The exact extents, arcs included: a circle kept as two half-circle arcs is as tall as it is
+    // wide, not the flat sliver its chords make.
+    let bounds = Bounds2::from_points(
+        h.loops
+            .iter()
+            .map(|l| cadcraft_geom::Polyline { vertices: l.vertices.clone(), closed: true }.bounds())
+            .flat_map(|b| [b.min, b.max])
+            .filter(|p| p.is_finite()),
+    );
     let size = bounds.width().hypot(bounds.height());
     if !size.is_finite() || size <= 0.0 {
         return Err(EngineError::Other("Cannot trim that object.".into()));
@@ -259,6 +265,29 @@ mod tests {
         let EntityKind::Hatch(lh) = &left else { panic!() };
         assert!(!lh.associative);
         assert!(face.first().is_some_and(|f| f.iter().all(|p| p.x <= 4.0 + 1e-6)));
+    }
+
+    /// A round hatch kept as two half-circle arcs (bulge 1): a line across its top is found as a
+    /// cutting edge and only the cap above it is taken away (#2034 review).
+    #[test]
+    fn a_line_across_a_circular_hatch_trims_the_cap() {
+        let circle = HatchLoop {
+            vertices: vec![
+                PolyVertex { p: Vec2::new(10.0, 0.0), bulge: 1.0, ..PolyVertex::new(Vec2::ZERO) },
+                PolyVertex { p: Vec2::new(-10.0, 0.0), bulge: 1.0, ..PolyVertex::new(Vec2::ZERO) },
+            ],
+            outer: true,
+            sources: Vec::new(),
+        };
+        let h = hatch(vec![circle]);
+        let cut = [Segment::Line(Line::new(Vec2::new(-20.0, 5.0), Vec2::new(20.0, 5.0)))];
+        let (left, _) = trim_hatch(&h, &cut, Vec2::new(0.0, 8.0)).unwrap();
+        let Some(EntityKind::Hatch(left)) = left else { panic!("the hatch below the line is left") };
+        let pts: Vec<Vec2> = cadcraft_render::hatch_fill_loops(&left, 1e-2).into_iter().flatten().collect();
+        let top = pts.iter().map(|p| p.y).fold(f64::MIN, f64::max);
+        let bottom = pts.iter().map(|p| p.y).fold(f64::MAX, f64::min);
+        assert!((top - 5.0).abs() < 1e-3, "the cap above y=5 is gone: top {top}");
+        assert!((bottom + 10.0).abs() < 0.05, "the rest stays: bottom {bottom}");
     }
 
     #[test]

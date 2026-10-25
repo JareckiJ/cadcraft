@@ -101,7 +101,7 @@ fn int(nodes: &[(String, Node)], key: &str) -> Option<i64> {
 }
 
 /// One style: its colour (object or RGB, grey, screened), lineweight (`0` = the object's, else
-/// a 1-based index into the file's lineweight table, in millimetres), ends and joins.
+/// an index into the file's lineweight table, in millimetres), ends and joins.
 fn style(nodes: &[(String, Node)], weights: &[f64]) -> PlotStyle {
     let name = value(nodes, "name").unwrap_or("").to_string();
     let mut s = PlotStyle::object(&name);
@@ -117,7 +117,7 @@ fn style(nodes: &[(String, Node)], weights: &[f64]) -> PlotStyle {
     s.grayscale = policy & 2 != 0;
     s.screening = int(nodes, "screen").map_or(100, |v| v.clamp(0, 100) as u8);
     s.lineweight = match int(nodes, "lineweight") {
-        Some(i) if i > 0 => weights.get((i - 1) as usize).map(|mm| (mm * 100.0).round().clamp(0.0, 211.0) as u16),
+        Some(i) if i > 0 => usize::try_from(i).ok().and_then(|i| weights.get(i)).map(|mm| (mm * 100.0).round().clamp(0.0, 211.0) as u16),
         _ => None,
     };
     s.end = match int(nodes, "end_style") {
@@ -142,9 +142,13 @@ fn style(nodes: &[(String, Node)], weights: &[f64]) -> PlotStyle {
 pub fn read(bytes: &[u8], name: &str) -> Result<PlotStyleTable, String> {
     let t = text(bytes)?;
     let nodes = parse(&t);
-    let named = bytes.get(..60).is_some_and(|h| h.windows(6).any(|w| w == b"STBVER"));
-    // Lineweights in millimetres; the file may list them in inches (display units 1).
-    let inches = int(&nodes, "custom_lineweight_display_units") == Some(1);
+    // A named table says it has no colour (ACI) table; both kinds share the CTBVER1 header.
+    let named = match value(&nodes, "aci_table_available") {
+        Some(v) => v.trim().eq_ignore_ascii_case("FALSE"),
+        None => bytes.get(..60).is_some_and(|h| h.windows(6).any(|w| w == b"STBVER")),
+    };
+    // Lineweights are stored in millimetres; `custom_lineweight_display_units` only says how the
+    // plot style editor shows them.
     let mut weights: Vec<(usize, f64)> = block(&nodes, "custom_lineweight_table")
         .unwrap_or(&[])
         .iter()
@@ -155,7 +159,7 @@ pub fn read(bytes: &[u8], name: &str) -> Result<PlotStyleTable, String> {
         .filter(|(_, v)| v.is_finite() && *v >= 0.0)
         .collect();
     weights.sort_by_key(|(i, _)| *i);
-    let weights: Vec<f64> = weights.into_iter().map(|(_, v)| if inches { v * 25.4 } else { v }).collect();
+    let weights: Vec<f64> = weights.into_iter().map(|(_, v)| v).collect();
     let mut styles: Vec<(usize, PlotStyle)> = block(&nodes, "plot_style")
         .unwrap_or(&[])
         .iter()
@@ -182,18 +186,26 @@ mod tests {
     /// A small table in the file format, made here (a colour-dependent table whose colour 1 is red
     /// at 0.35 mm and colour 2 black at the object's lineweight).
     fn file() -> Vec<u8> {
-        let mut text = String::from(
-            "description=\"Test\naci_table_available=TRUE\nscale_factor=1.0\napply_factor=FALSE\ncustom_lineweight_display_units=0\nplot_style{\n",
+        made(true, 0)
+    }
+
+    /// The test table: colour-dependent (`aci`) or named, lineweights shown in millimetres (0) or
+    /// inches (1). Style 0 plots at lineweight index 10, 0.35 mm.
+    fn made(aci: bool, units: u8) -> Vec<u8> {
+        let mut text = format!(
+            "description=\"Test\naci_table_available={}\nscale_factor=1.0\napply_factor=FALSE\ncustom_lineweight_display_units={units}\nplot_style{{\n",
+            if aci { "TRUE" } else { "FALSE" }
         );
-        for i in 0..255 {
+        let count = if aci { 255 } else { 3 };
+        for i in 0..count {
             let (color, lw) = match i {
-                0 => ("-1006698496", 11),
+                0 => ("-1006698496", 10),
                 1 => ("-16777216", 0),
                 _ => ("-1", 0),
             };
+            let name = if aci { format!("Color_{}", i + 1) } else { ["Normal", "Walls", "Hidden"].get(i).copied().unwrap_or("Style").to_string() };
             text.push_str(&format!(
-                " {i}{{\n  name=\"Color_{}\n  color={color}\n  color_policy=5\n  screen=100\n  linetype=31\n  lineweight={lw}\n  end_style=4\n  join_style=5\n }}\n",
-                i + 1
+                " {i}{{\n  name=\"{name}\n  color={color}\n  color_policy=5\n  screen=100\n  linetype=31\n  lineweight={lw}\n  end_style=4\n  join_style=5\n }}\n"
             ));
         }
         text.push_str("}\ncustom_lineweight_table{\n");
@@ -221,6 +233,25 @@ mod tests {
         assert_eq!(black.color.map(|c| (c.0, c.1, c.2)), Some((0, 0, 0)));
         assert_eq!(black.lineweight, None);
         assert!(t.by_color(3).unwrap().color.is_none());
+    }
+
+    /// A named table has the same CTBVER1 header as a colour one; it says `aci_table_available=FALSE`.
+    /// Its style names are kept, and a lineweight index reads the table at that index.
+    #[test]
+    fn a_named_table_is_read_as_named_with_its_style_names() {
+        let t = super::read(&made(false, 0), "Mine.stb").unwrap();
+        assert!(!t.is_color_dependent());
+        let names: Vec<&str> = t.styles.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Walls") && names.contains(&"Hidden"), "{names:?}");
+        let normal = t.styles.iter().find(|s| s.name == "Normal").unwrap();
+        assert_eq!(normal.lineweight, Some(35), "index 10 is 0.35 mm, not the one before it");
+    }
+
+    /// Lineweights shown in inches are still stored in millimetres.
+    #[test]
+    fn inch_display_units_do_not_scale_stored_lineweights() {
+        let t = super::read(&made(true, 1), "Inch.ctb").unwrap();
+        assert_eq!(t.by_color(1).unwrap().lineweight, Some(35));
     }
 
     #[test]

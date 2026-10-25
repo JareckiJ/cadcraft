@@ -9,9 +9,13 @@ use crate::CadApp;
 use crate::icons::{self, Icon};
 use crate::theme::Tokens;
 
-/// One sheet in the list: the drawing it belongs to (its title) and the layout (or `Model`).
+/// One sheet in the list: the drawing it belongs to and the layout (or `Model`). The drawing is
+/// known by its identity ([`cadcraft_engine::DocState::uid`]), not its title: two open files can
+/// both be `plan.dwg`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sheet {
+    pub doc: u64,
+    /// The drawing's title, for the list.
     pub drawing: String,
     pub layout: String,
 }
@@ -21,7 +25,7 @@ pub struct Sheet {
 struct State {
     sheets: Vec<Sheet>,
     /// The drawing the list was filled from when the window opened.
-    filled_for: Option<String>,
+    filled_for: Option<u64>,
     /// The picked rows (Ctrl and Shift pick several).
     selected: Vec<usize>,
     /// Where Shift+click extends from.
@@ -31,7 +35,7 @@ struct State {
     /// Where a selection rectangle started (in the list's empty space).
     band_from: Option<egui::Pos2>,
     /// The drawing whose sheets the Add section shows.
-    add_from: Option<String>,
+    add_from: Option<u64>,
     separate: bool,
     note: Option<String>,
 }
@@ -41,11 +45,11 @@ fn state_id() -> egui::Id {
 }
 
 /// The sheets of drawing `d` in tab order: Model when it has objects, then the layouts.
-pub fn sheets_of(d: &cadcraft_doc::Drawing, title: &str) -> Vec<Sheet> {
+pub fn sheets_of(d: &cadcraft_doc::Drawing, doc: u64, title: &str) -> Vec<Sheet> {
     let mut layouts: Vec<_> = d.layouts.iter().collect();
     layouts.sort_by_key(|l| l.tab_order);
     let model = (!d.model.is_empty()).then(|| "Model".to_string());
-    model.into_iter().chain(layouts.iter().map(|l| l.name.clone())).map(|layout| Sheet { drawing: title.to_string(), layout }).collect()
+    model.into_iter().chain(layouts.iter().map(|l| l.name.clone())).map(|layout| Sheet { doc, drawing: title.to_string(), layout }).collect()
 }
 
 /// Move the sheet at `from` to stand before `slot` (0..=len).
@@ -59,17 +63,13 @@ pub fn move_sheet(v: &mut Vec<Sheet>, from: usize, slot: usize) -> Option<usize>
     Some(to)
 }
 
-/// The PUBLISH parameters for `sheets` (drawing titles resolved to open drawings).
-pub fn publish_params(app: &CadApp, sheets: &[Sheet], combine: bool, path: Option<&str>) -> Result<Value, String> {
+/// The PUBLISH parameters for `sheets`, each resolved to the open drawing it came from (`docs`:
+/// the open drawings' identities in order); an error names a sheet whose drawing was closed.
+pub fn publish_params(docs: &[u64], sheets: &[Sheet], combine: bool, path: Option<&str>) -> Result<Value, String> {
     let list: Vec<Value> = sheets
         .iter()
         .map(|s| {
-            let i = app
-                .session
-                .docs
-                .iter()
-                .position(|d| d.title == s.drawing)
-                .ok_or_else(|| format!("{}: {}", crate::tl!("The drawing is closed"), s.drawing))?;
+            let i = docs.iter().position(|d| *d == s.doc).ok_or_else(|| format!("{}: {}", crate::tl!("The drawing is closed"), s.drawing))?;
             Ok(json!({ "drawing": i, "layout": s.layout }))
         })
         .collect::<Result<_, String>>()?;
@@ -115,7 +115,7 @@ enum Act {
     Duplicate,
     Remove,
     Add(Sheet),
-    AddAll(String),
+    AddAll(u64),
     Clear,
     Plot,
 }
@@ -124,18 +124,34 @@ enum Act {
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
     let current = app.session.state().map(|s| s.title.clone()).unwrap_or_default();
+    let current_doc = app.session.state().map_or(0, |s| s.uid);
     // Opened for a drawing: its sheets, in tab order (others are added by hand).
-    if st.filled_for.as_deref() != Some(current.as_str()) {
-        st.sheets = app.session.doc().map(|d| sheets_of(d, &current)).unwrap_or_default();
-        st.filled_for = Some(current.clone());
+    if st.filled_for != Some(current_doc) {
+        st.sheets = app.session.doc().map(|d| sheets_of(d, current_doc, &current)).unwrap_or_default();
+        st.filled_for = Some(current_doc);
         st.selected.clear();
-        st.add_from = Some(current.clone());
+        st.add_from = Some(current_doc);
         st.note = None;
     }
     st.selected.retain(|i| *i < st.sheets.len());
-    let titles: Vec<String> = app.session.docs.iter().map(|d| d.title.clone()).collect();
+    let uids: Vec<u64> = app.session.docs.iter().map(|d| d.uid).collect();
+    // The open drawings as the Add list names them: the folder too where two share a title.
+    let titles: Vec<(u64, String)> = app
+        .session
+        .docs
+        .iter()
+        .map(|d| {
+            let twin = app.session.docs.iter().filter(|o| o.title == d.title).count() > 1;
+            let folder = d.path.as_deref().and_then(|p| std::path::Path::new(p).parent()).map(|f| f.display().to_string());
+            let name = match folder {
+                Some(f) if twin => format!("{} — {f}", d.title),
+                _ => d.title.clone(),
+            };
+            (d.uid, name)
+        })
+        .collect();
     let paper = |s: &Sheet| -> String {
-        let Some(d) = app.session.docs.iter().find(|d| d.title == s.drawing) else { return crate::tl!("closed").to_string() };
+        let Some(d) = app.session.docs.iter().find(|d| d.uid == s.doc) else { return crate::tl!("closed").to_string() };
         if s.layout == "Model" {
             return String::new();
         }
@@ -370,22 +386,23 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             // Adding sheets: from any open drawing.
             ui.horizontal(|ui| {
                 ui.label(crate::tl!("Add sheets from"));
-                let from = st.add_from.clone().filter(|f| titles.contains(f)).unwrap_or_else(|| current.clone());
-                let shown = crate::i18n::widget(ui, &from, egui::TextStyle::Body);
+                let from = st.add_from.filter(|f| uids.contains(f)).unwrap_or(current_doc);
+                let from_name = titles.iter().find(|(u, _)| *u == from).map(|(_, n)| n.clone()).unwrap_or_default();
+                let shown = crate::i18n::widget(ui, &from_name, egui::TextStyle::Body);
                 egui::ComboBox::from_id_salt("cc_batch_from").selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                    for title in &titles {
+                    for (uid, title) in &titles {
                         let name = crate::i18n::widget(ui, title, egui::TextStyle::Body);
-                        if ui.selectable_label(*title == from, name).clicked() {
-                            st.add_from = Some(title.clone());
+                        if ui.selectable_label(*uid == from, name).clicked() {
+                            st.add_from = Some(*uid);
                         }
                     }
                 });
                 if ui.button(crate::tl!("Add All")).clicked() {
-                    act = Some(Act::AddAll(from.clone()));
+                    act = Some(Act::AddAll(from));
                 }
             });
-            let from = st.add_from.clone().filter(|f| titles.contains(f)).unwrap_or_else(|| current.clone());
-            let available = app.session.docs.iter().find(|d| d.title == from).map(|d| sheets_of(&d.doc, &from)).unwrap_or_default();
+            let from = st.add_from.filter(|f| uids.contains(f)).unwrap_or(current_doc);
+            let available = app.session.docs.iter().find(|d| d.uid == from).map(|d| sheets_of(&d.doc, d.uid, &d.title)).unwrap_or_default();
             egui::ScrollArea::horizontal().id_salt("cc_batch_add").max_height(34.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     for s in available {
@@ -504,9 +521,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             st.sheets.push(s);
             st.selected = vec![st.sheets.len() - 1];
         }
-        Some(Act::AddAll(title)) => {
-            if let Some(d) = app.session.docs.iter().find(|d| d.title == title) {
-                st.sheets.extend(sheets_of(&d.doc, &title));
+        Some(Act::AddAll(uid)) => {
+            if let Some(d) = app.session.docs.iter().find(|d| d.uid == uid) {
+                st.sheets.extend(sheets_of(&d.doc, d.uid, &d.title));
             }
         }
         Some(Act::Clear) => {
@@ -521,7 +538,9 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 .unwrap_or_else(|| "Drawing".into());
             let picked = app.services.pick_save.as_ref().and_then(|pick| pick(&format!("{stem}.pdf")));
             if let Some(path) = picked {
-                match publish_params(app, &st.sheets, !st.separate, Some(&path)).and_then(|p| app.run("publish", p)) {
+                match publish_params(&app.session.docs.iter().map(|d| d.uid).collect::<Vec<_>>(), &st.sheets, !st.separate, Some(&path))
+                    .and_then(|p| app.run("publish", p))
+                {
                     Ok(r) => {
                         let msg = r["message"].as_str().unwrap_or("").to_string();
                         app.session.echo(msg);
@@ -546,10 +565,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Sheet, move_sheet, move_sheets};
+    use super::{Sheet, move_sheet, move_sheets, publish_params};
 
     fn s(n: &str) -> Sheet {
-        Sheet { drawing: "A.dwg".into(), layout: n.into() }
+        Sheet { doc: 1, drawing: "A.dwg".into(), layout: n.into() }
     }
 
     #[test]
@@ -574,5 +593,17 @@ mod tests {
         assert_eq!(names(&v), "13524");
         assert_eq!(move_sheets(&mut v, &[2], 1), vec![1]);
         assert_eq!(names(&v), "15324");
+    }
+
+    /// Two open files with the same name (`/A/plan.dwg`, `/B/plan.dwg`): each sheet plots from
+    /// the drawing it was added from, and a closed drawing is an error, not another drawing.
+    #[test]
+    fn sheets_resolve_by_drawing_identity_not_title() {
+        let a = Sheet { doc: 7, drawing: "plan.dwg".into(), layout: "A1".into() };
+        let b = Sheet { doc: 9, drawing: "plan.dwg".into(), layout: "A1".into() };
+        let p = publish_params(&[7, 9], &[b.clone(), a.clone()], true, None).unwrap();
+        assert_eq!(p["sheets"][0]["drawing"], 1);
+        assert_eq!(p["sheets"][1]["drawing"], 0);
+        assert!(publish_params(&[7], &[b], true, None).is_err());
     }
 }

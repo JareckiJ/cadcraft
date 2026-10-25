@@ -228,6 +228,9 @@ pub struct Options {
     /// rebuild the view no longer needs). A cancelled build returns a partial list, which the
     /// caller must discard; see [`Options::cancelled`].
     pub cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Draw every curve as one continuous stroke, without its linetype's dashes: the geometry
+    /// itself, for hatch boundaries and cutting edges taken from what blocks draw.
+    pub continuous: bool,
 }
 
 impl Options {
@@ -251,6 +254,7 @@ impl Default for Options {
             skip_viewport: None,
             transparency: false,
             cancel: None,
+            continuous: false,
         }
     }
 }
@@ -1079,6 +1083,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
         Some(over) => over,
         None => lt,
     };
+    let lt = if b.opts.continuous { None } else { lt };
     let tol = b.opts.tolerance / ctx.xf.scale_factor().max(1e-12);
     let lw = if b.opts.lineweights { lw } else { 0.0 };
     // Stroke a polyline with the entity's linetype.
@@ -1613,7 +1618,7 @@ pub fn dimension_in(d: &Drawing, dm: &cadcraft_doc::Dimension) -> DimGeometry {
 
 /// Draw a polyline with a linetype (None: continuous).
 fn stroke_with(b: &mut Builder, ctx: &Ctx, rgb: Ink, lw: f32, lt: Option<&cadcraft_doc::Linetype>, ltscale: f64, pts: &[Vec2]) {
-    match lt {
+    match lt.filter(|_| !b.opts.continuous) {
         Some(lt) => {
             let min = b.opts.min_dash / ctx.xf.scale_factor().max(1e-12);
             for dash in linetype::apply(pts, lt, ltscale, min) {

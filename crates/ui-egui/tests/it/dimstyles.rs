@@ -64,6 +64,31 @@ fn modify_and_set_current_and_compare() {
     assert!(h.query_by_label_contains("The two styles are the same.").is_some());
 }
 
+/// The style editor belongs to the drawing it was opened in: switching to another drawing
+/// cancels it, so its OK can't write the first drawing's style into the second (#2034 review).
+#[test]
+fn the_style_editor_is_cancelled_when_another_drawing_becomes_active() {
+    let mut h = harness(|app| {
+        app.run("dimstyle", json!({ "name": "Standard", "textHeight": 7.0 })).unwrap();
+        app.run("new", json!({})).unwrap();
+        app.run("dimstyle", json!({ "name": "Standard", "textHeight": 3.0 })).unwrap();
+        // The manager opens on the first of the two drawings.
+        app.session.active = app.session.docs.len() - 2;
+        app.ui.dialog = Some("dimstyle".into());
+    });
+    click(&mut h, "Standard");
+    click(&mut h, "Modify...");
+    assert!(h.query_by_label_contains("Modify Dimension Style:").is_some(), "the editor opens");
+    // Another drawing becomes active (its file tab), the editor still on screen.
+    let other = h.state().session.docs.len() - 1;
+    h.state_mut().session.active = other;
+    h.run_steps(4);
+    assert!(h.query_by_label_contains("Modify Dimension Style:").is_none(), "the editor is cancelled");
+    assert!(h.query_all_by_label("OK").next().is_none(), "no OK left to press");
+    let second = h.state().session.doc().unwrap().dim_style("Standard").unwrap().text_height;
+    assert_eq!(second, 3.0, "the second drawing keeps its own style");
+}
+
 #[test]
 fn a_selected_dimension_shows_its_style_settings_in_properties() {
     let mut hx = String::new();

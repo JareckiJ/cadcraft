@@ -83,7 +83,7 @@ fn object_polys(d: &Drawing, e: &Entity, tol: f64, ext: Bounds2) -> Vec<Vec<Vec2
             let list = cadcraft_render::build_entities(
                 d,
                 std::iter::once(e),
-                &cadcraft_render::Options { tolerance: tol, text: false, fill: false, ..Default::default() },
+                &cadcraft_render::Options { tolerance: tol, text: false, fill: false, continuous: true, ..Default::default() },
             );
             return list.prims.iter().filter(|p| matches!(p.kind, cadcraft_render::Kind::Polyline)).map(|p| list.points(p).to_vec()).collect();
         }
@@ -1027,6 +1027,44 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// A block whose lines are drawn with a dashed linetype: its outline still bounds a hatch, and
+    /// its lines still cut, across the gaps between dashes (#2034 review).
+    #[test]
+    fn dashed_lines_in_a_block_bound_hatches_and_cut() {
+        let mut s = Session::new();
+        s.doc_mut().unwrap().linetypes.push(cadcraft_doc::Linetype::simple("DASHED", "", &[2.0, -1.0]));
+        let r = s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+        let rect = r["handle"].as_str().or_else(|| r["handles"][0].as_str()).unwrap().to_string();
+        let mid = s.execute("line", &json!({ "points": [[5, 0], [5, 10]] })).unwrap();
+        let mid = mid["handles"][0].as_str().unwrap().to_string();
+        for h in [&rect, &mid] {
+            let h = Handle::parse_hex(h).unwrap();
+            s.doc_mut().unwrap().modify_entity(h, |e| e.common.linetype = "DASHED".into()).unwrap();
+        }
+        s.execute("block", &json!({ "name": "ROOM", "base": [0, 0], "handles": [rect, mid], "keep": "convert" })).unwrap();
+        s.execute("hatch", &json!({ "points": [[2, 5]], "pattern": "SOLID" })).unwrap();
+        let (_, h) = only_hatch(&s);
+        let b = cadcraft_geom::Bounds2::from_points(h.loops.iter().flat_map(|l| l.vertices.iter().map(|v| v.p)));
+        assert!((b.min.x - 0.0).abs() < 1e-6 && (b.max.x - 5.0).abs() < 1e-6, "the left half of the room: {b:?}");
+        // A line across the room, trimmed at the block's dashed middle line where a gap is
+        // drawn (5 to 6 above the start of the dashes).
+        let l = s.execute("line", &json!({ "points": [[1, 5.5], [9, 5.5]] })).unwrap();
+        let l = l["handles"][0].as_str().unwrap().to_string();
+        s.execute("trim", &json!({ "handle": l, "pick": [8, 5.5] })).unwrap();
+        let lines: Vec<cadcraft_doc::Line> = s
+            .doc()
+            .unwrap()
+            .model
+            .iter()
+            .filter_map(|e| match &e.kind {
+                EntityKind::Line(l) if (l.a.y - 5.5).abs() < 1e-9 => Some(l.clone()),
+                _ => None,
+            })
+            .collect();
+        let [line] = lines.as_slice() else { panic!("one trimmed line is left: {lines:?}") };
+        assert!((line.a.x.max(line.b.x) - 5.0).abs() < 1e-6, "cut at the dashed line: {line:?}");
+    }
 
     /// The drawing's only hatch and its handle (hatches go to the back of the draw order, so not the last entity).
     fn only_hatch(s: &Session) -> (String, Hatch) {
