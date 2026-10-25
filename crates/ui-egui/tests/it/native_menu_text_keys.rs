@@ -49,6 +49,8 @@ fn edit_menu_keys_edit_the_focused_text_field_and_otherwise_the_drawing() {
     h.run_steps(3);
     expression(&h).type_text("2+3");
     h.run_steps(3);
+    assert_eq!(menus::text_field_window(&h.ctx), Some(egui::ViewportId::ROOT));
+    assert!(menus::edits_text("pasteclip") && !menus::edits_text("line"));
     menu(&mut h, "selectall");
     menu(&mut h, "cutclip");
     assert_eq!(expression(&h).value().as_deref(), Some(""), "Select All and Cut act on the field");
@@ -57,7 +59,7 @@ fn edit_menu_keys_edit_the_focused_text_field_and_otherwise_the_drawing() {
 
     h.ctx.memory_mut(|m| m.stop_text_input());
     h.run_steps(3);
-    assert!(!h.ctx.text_edit_focused());
+    assert_eq!(menus::text_field_window(&h.ctx), None);
     menu(&mut h, "u");
     assert_ne!(h.state().session.doc().unwrap(), &drawing, "without a focused field, Undo undoes the line");
 }

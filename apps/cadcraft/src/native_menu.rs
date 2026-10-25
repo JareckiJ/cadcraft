@@ -142,8 +142,9 @@ impl NativeMenu {
             return;
         }
         self.last_refresh = now;
+        let typing = menus::text_field_window(ctx).is_some();
         for (cmd, _, item) in self.items.values() {
-            let en = cadcraft_engine::find_command(cmd).is_none_or(|c| (c.enabled)(&app.session).is_ok());
+            let en = (typing && menus::edits_text(cmd)) || cadcraft_engine::find_command(cmd).is_none_or(|c| (c.enabled)(&app.session).is_ok());
             item.set_enabled(en);
         }
     }

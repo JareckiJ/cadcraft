@@ -647,8 +647,7 @@ pub fn activate(app: &mut CadApp, id: &str) {
 /// the keyboard, in the main window or a floating panel's own window, the field gets the key
 /// and the drawing command does not run.
 pub fn activate_native(app: &mut CadApp, ctx: &egui::Context, id: &str) {
-    let window = craft_ui::docking::typing_window(ctx).or_else(|| ctx.text_edit_focused().then_some(egui::ViewportId::ROOT));
-    let (Some(window), Some(text)) = (window, text_command(id, ctx.os().is_mac())) else {
+    let (Some(window), Some(text)) = (text_field_window(ctx), text_command(id, ctx.os().is_mac())) else {
         activate(app, id);
         return;
     };
@@ -660,6 +659,18 @@ pub fn activate_native(app: &mut CadApp, ctx: &egui::Context, id: &str) {
         }
         TextCommand::Events(events) => craft_ui::docking::send_keys(ctx, window, events),
     }
+}
+
+/// The window whose text field has the keyboard: a floating panel's own OS window, or the main
+/// window.
+pub fn text_field_window(ctx: &egui::Context) -> Option<egui::ViewportId> {
+    craft_ui::docking::typing_window(ctx).or_else(|| ctx.text_edit_focused().then_some(egui::ViewportId::ROOT))
+}
+
+/// Whether a focused text field takes the menu command `id` ([`activate_native`]): a native
+/// menu keeps such items enabled while one has the keyboard, whatever the drawing allows.
+pub fn edits_text(id: &str) -> bool {
+    text_command(id, false).is_some()
 }
 
 /// What a focused text field does for an Edit menu command.
