@@ -2,7 +2,7 @@
 //! save itself replaces the file atomically: no temporary files are left behind.
 
 use cadcraft_engine::Session;
-use cadcraft_engine::cmd::file::{IoHooks, backup_path, looks_like_drawing, set_io};
+use cadcraft_engine::cmd::file::{IoHooks, backup_path, looks_complete, looks_like_drawing, set_io};
 use serde_json::json;
 
 fn hooks() {
@@ -97,11 +97,23 @@ fn a_damaged_file_never_replaces_a_good_backup_and_isavebak_0_keeps_none() {
     s.execute("qsave", &json!({})).unwrap();
     assert_eq!((circles(&path), circles(&backup_path(&path))), (3, 1));
 
+    // Cut off with a drawing's start kept (half a DXF, a DWG's version tag alone): the backup
+    // stays too.
+    let whole = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &whole[..whole.len() / 2]).unwrap();
+    add_circle(&mut s, 11.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(circles(&backup_path(&path)), 1, "half a DXF");
+    std::fs::write(&path, b"AC1032").unwrap();
+    add_circle(&mut s, 12.0);
+    s.execute("qsave", &json!({})).unwrap();
+    assert_eq!(circles(&backup_path(&path)), 1, "a DWG's tag alone");
+
     // ISAVEBAK 0: the backup is left as it was.
     s.execute("setvar", &json!({ "name": "ISAVEBAK", "value": 0 })).unwrap();
     add_circle(&mut s, 15.0);
     s.execute("qsave", &json!({})).unwrap();
-    assert_eq!((circles(&path), circles(&backup_path(&path))), (4, 1));
+    assert_eq!((circles(&path), circles(&backup_path(&path))), (6, 1));
     assert_eq!(files(&dir), ["Plan.bak", "Plan.dxf"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -174,4 +186,20 @@ fn a_symlink_at_the_backup_is_not_followed() {
     assert!(std::fs::symlink_metadata(backup_path(&path)).unwrap().is_file(), "the .bak is a file now");
     assert_eq!(circles(&backup_path(&path)), 1);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A drawing looks whole from its end: an ASCII DXF ends with 0/EOF, a binary one with EOF and
+/// its NUL, and a DWG is not a few bytes long.
+#[test]
+fn whole_drawings_are_told_from_cut_off_ones() {
+    let ascii = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  0\r\nENDSEC\r\n  0\r\nEOF\r\n";
+    assert!(looks_complete(ascii, ascii, ascii.len() as u64));
+    let cut = &ascii[..30];
+    assert!(!looks_complete(cut, cut, cut.len() as u64));
+    let mut binary = b"AutoCAD Binary DXF\r\n\x1a\0".to_vec();
+    binary.extend_from_slice(b"\0\0SECTION\0\0\0EOF\0");
+    assert!(looks_complete(&binary, &binary, binary.len() as u64));
+    assert!(!looks_complete(&binary, &binary[..binary.len() - 5], binary.len() as u64 - 5));
+    assert!(!looks_complete(b"AC1032", b"AC1032", 6));
+    assert!(looks_complete(b"AC1032", b"", 30_000));
 }

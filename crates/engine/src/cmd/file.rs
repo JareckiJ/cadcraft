@@ -468,6 +468,30 @@ pub fn looks_like_drawing(bytes: &[u8]) -> bool {
     }
 }
 
+/// How much of a drawing's end [`looks_complete`] reads.
+const TAIL_BYTES: u64 = 256;
+
+/// The smallest DWG [`looks_complete`] takes for a whole drawing: an empty drawing is over 10 KB
+/// in every version, so a file cut off after its header is not.
+const MIN_DWG_BYTES: u64 = 2048;
+
+/// Whether a drawing that [`looks_like_drawing`] (`head`, its start) also looks whole from its
+/// end (`tail`, its last bytes) and size `len`, without reading it all: a DXF ends with
+/// `0`/`EOF` (a binary one with `EOF` and its NUL), and a DWG has at least [`MIN_DWG_BYTES`]. A
+/// file cut off by a failed save or another program then doesn't replace a good backup.
+pub fn looks_complete(head: &[u8], tail: &[u8], len: u64) -> bool {
+    let dwg = head.len() >= 6 && head.starts_with(b"AC") && head[2..6].iter().all(|b| b.is_ascii_digit());
+    if dwg {
+        return len >= MIN_DWG_BYTES;
+    }
+    if cadcraft_dxf::is_binary(head) {
+        return tail.ends_with(b"EOF\0");
+    }
+    let text = String::from_utf8_lossy(tail);
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty()).rev();
+    matches!((lines.next(), lines.next()), (Some(last), Some("0")) if last.eq_ignore_ascii_case("EOF"))
+}
+
 /// Before `path` is replaced: copy it to its `.bak`, streamed and written atomically too
 /// ([`crate::atomic_write::write_atomic_with`]). Nothing
 /// to keep when there is no file yet. A file that doesn't look like a drawing
@@ -483,8 +507,17 @@ fn backup(path: &std::path::Path) -> std::io::Result<()> {
     };
     let mut head = Vec::with_capacity(4096);
     (&mut src).take(4096).read_to_end(&mut head)?;
-    if !looks_like_drawing(&head) {
-        log::warn!("save: {} doesn't look like a drawing; its backup is left as it was", path.display());
+    // Its end too (a DXF's EOF), then on from where the start left off for the copy.
+    let len = src.metadata()?.len();
+    let mut tail = Vec::new();
+    {
+        use std::io::Seek;
+        src.seek(std::io::SeekFrom::Start(len.saturating_sub(TAIL_BYTES)))?;
+        (&mut src).take(TAIL_BYTES).read_to_end(&mut tail)?;
+        src.seek(std::io::SeekFrom::Start(head.len() as u64))?;
+    }
+    if !looks_like_drawing(&head) || !looks_complete(&head, &tail, len) {
+        log::warn!("save: {} doesn't look like a whole drawing; its backup is left as it was", path.display());
         return Ok(());
     }
     let bak = backup_path(path);
