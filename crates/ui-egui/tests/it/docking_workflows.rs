@@ -44,7 +44,7 @@ fn drag(harness: &mut Harness<'_, CadApp>, from: egui::Pos2, to: egui::Pos2) {
 }
 
 fn area() -> egui::Id {
-    egui::Id::new("cadcraft-docking")
+    egui::Id::unique("cadcraft-docking")
 }
 
 /// The rect the dock area drew last frame for `hit`.

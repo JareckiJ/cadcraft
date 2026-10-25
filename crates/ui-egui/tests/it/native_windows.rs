@@ -60,7 +60,7 @@ fn modal_dialogs_block_native_panel_windows() {
 
     // Any other egui modal, from the frame after it is shown.
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-        egui::Modal::new(egui::Id::new("test_modal")).show(ui.ctx(), |ui| ui.label("modal"));
+        egui::Modal::new(egui::Id::unique("test_modal")).show(ui.ctx(), |ui| ui.label("modal"));
     });
     out.textures_delta.clear();
     assert!(native_input_blocked(&app, &ctx), "egui modal");
