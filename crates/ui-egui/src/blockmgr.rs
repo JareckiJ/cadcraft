@@ -180,22 +180,135 @@ pub fn reference_count(d: &Drawing, name: &str) -> usize {
         .count()
 }
 
-/// Build the preview of block `name`: its objects as they draw, and their extents.
-fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bounds2)> {
-    let b = d.block(name)?;
+/// Maximum work units (visited entities and expanded block references) and output primitives/vertices
+/// allowed when building a single palette thumbnail before returning an empty placeholder.
+const MAX_PREVIEW_BUDGET: usize = 8_192;
+
+/// Compute the bounds and expanded entity cost of `block_name` using a shared `budget` and shared
+/// `(block_name, depth)` memoization table across all root and nested references. Returns `None`
+/// when the block is missing or the preview budget is exhausted.
+fn preview_block_bounds(
+    d: &Drawing,
+    block_name: &str,
+    depth: usize,
+    budget: &mut usize,
+    memo: &mut HashMap<(String, usize), (Bounds2, usize)>,
+) -> Option<(Bounds2, usize)> {
+    if depth >= cadcraft_doc::MAX_BLOCK_DEPTH {
+        return Some((Bounds2::EMPTY, 0));
+    }
+    let key = (block_name.to_ascii_lowercase(), depth);
+    if let Some(&(bounds, cost)) = memo.get(&key) {
+        *budget = budget.checked_sub(cost)?;
+        return Some((bounds, cost));
+    }
+    let b = d.block(block_name)?;
     let mut bounds = Bounds2::EMPTY;
-    for e in b.entities.iter().take(200_000) {
-        let eb = cadcraft_doc::entity_bounds(d, e, 0);
+    let mut total_cost = 0usize;
+    for e in b.entities.iter() {
+        *budget = budget.checked_sub(1)?;
+        total_cost = total_cost.saturating_add(1);
+        let eb = match &e.kind {
+            EntityKind::Insert(ins) => {
+                let copies = (ins.cols.max(1) as usize).saturating_mul(ins.rows.max(1) as usize);
+                if copies > *budget {
+                    return None;
+                }
+                let (inner, child_cost) =
+                    if d.block(&ins.block).is_some() { preview_block_bounds(d, &ins.block, depth + 1, budget, memo)? } else { (Bounds2::EMPTY, 0) };
+                let extra_copies = copies.saturating_sub(1).saturating_mul(child_cost.saturating_add(1));
+                *budget = budget.checked_sub(extra_copies)?;
+                total_cost = total_cost.saturating_add(child_cost).saturating_add(extra_copies);
+                let mut ib = if inner.is_empty() {
+                    Bounds2::EMPTY
+                } else {
+                    let base = d.block(&ins.block).map_or(Vec2::ZERO, |blk| blk.base.xy());
+                    let m = ins.transform(base);
+                    let mut b0 = Bounds2::from_points(inner.corners().map(|c| m.apply(c)));
+                    if ins.cols > 1 || ins.rows > 1 {
+                        let off = Vec2::new(
+                            ins.col_spacing * f64::from(ins.cols.saturating_sub(1)),
+                            ins.row_spacing * f64::from(ins.rows.saturating_sub(1)),
+                        )
+                        .rotate(ins.rotation);
+                        b0 = b0.union(&Bounds2::from_points(b0.corners().map(|c| c + off)));
+                    }
+                    b0
+                };
+                if !ins.attribs.is_empty() {
+                    let mut attr_only = ins.clone();
+                    attr_only.block.clear();
+                    let ae = cadcraft_doc::Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::Insert(attr_only) };
+                    ib = ib.union(&cadcraft_doc::entity_bounds(d, &ae, depth));
+                }
+                ib
+            }
+            EntityKind::Dimension(dm) => {
+                if let Some(ref dim_blk) = dm.block
+                    && d.block(dim_blk).is_some()
+                {
+                    let (_, child_cost) = preview_block_bounds(d, dim_blk, depth + 1, budget, memo)?;
+                    total_cost = total_cost.saturating_add(child_cost);
+                }
+                let mut no_blk = dm.clone();
+                no_blk.block = None;
+                let de = cadcraft_doc::Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::Dimension(no_blk) };
+                let mut db = cadcraft_doc::entity_bounds(d, &de, depth);
+                if let Some(ref dim_blk) = dm.block
+                    && let Some(&(inner, _)) = memo.get(&(dim_blk.to_ascii_lowercase(), depth + 1))
+                {
+                    db = db.union(&inner);
+                }
+                db
+            }
+            EntityKind::MLeader(ml) => {
+                let mut mb = Bounds2::EMPTY;
+                if let Some(ref ins) = ml.block
+                    && d.block(&ins.block).is_some()
+                {
+                    let (inner, child_cost) = preview_block_bounds(d, &ins.block, depth + 1, budget, memo)?;
+                    total_cost = total_cost.saturating_add(child_cost);
+                    if !inner.is_empty() {
+                        let base = d.block(&ins.block).map_or(Vec2::ZERO, |blk| blk.base.xy());
+                        let m = ins.transform(base);
+                        mb = Bounds2::from_points(inner.corners().map(|c| m.apply(c)));
+                    }
+                }
+                let mut no_blk = ml.clone();
+                no_blk.block = None;
+                let me = cadcraft_doc::Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::MLeader(no_blk) };
+                cadcraft_doc::entity_bounds(d, &me, depth).union(&mb)
+            }
+            _ => cadcraft_doc::entity_bounds(d, e, depth),
+        };
         if !eb.is_empty() && eb.width().is_finite() && eb.height().is_finite() {
             bounds = bounds.union(&eb);
         }
     }
+    memo.insert(key, (bounds, total_cost));
+    Some((bounds, total_cost))
+}
+
+/// Build the preview of block `name`: its objects as they draw, and their extents.
+/// Shares a single work and output budget (`MAX_PREVIEW_BUDGET`) across bounds calculation and
+/// rendering, returning a bounded placeholder preview if the budget is exhausted.
+fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bounds2)> {
+    let b = d.block(name)?;
+    let mut budget = MAX_PREVIEW_BUDGET;
+    let mut memo = HashMap::new();
+    let Some((bounds, _)) = preview_block_bounds(d, name, 0, &mut budget, &mut memo) else {
+        return Some((cadcraft_render::DisplayList::default(), Bounds2::EMPTY));
+    };
     if bounds.is_empty() {
         return Some((cadcraft_render::DisplayList::default(), bounds));
     }
     let size = bounds.width().max(bounds.height()).max(1e-9);
     let opts = cadcraft_render::Options { tolerance: size / 500.0, min_dash: size / 300.0, view_height: size, ..Default::default() };
-    let list = cadcraft_render::build_entities(d, b.entities.iter().map(|e| &**e), &opts);
+    let list = cadcraft_render::build_entities(d, b.entities.iter().take(budget).map(|e| &**e), &opts);
+    let output_cost = list.expanded.saturating_add(list.prims.len()).saturating_add(list.verts.len() / 8).saturating_add(list.tris.len() / 8);
+    if output_cost > budget {
+        return Some((cadcraft_render::DisplayList::default(), Bounds2::EMPTY));
+    }
     Some((list, bounds))
 }
 
@@ -798,9 +911,9 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
                     // Repeat INSERT ended (cancelled with Esc or replaced by another command).
                     st.repeating = false;
                     st.repeat = false;
-                } else if !st.repeat {
-                    // Repeat placement was unchecked in the palette while INSERT was waiting for a point.
-                    let _ = app.session.input(cadcraft_engine::Input::Keyword("NoRepeat".into()));
+                } else if !st.repeat && app.session.input(cadcraft_engine::Input::Keyword("NoRepeat".into())).is_ok() {
+                    // Repeat placement was unchecked in the palette while INSERT was running;
+                    // clear palette tracking only after the engine accepts NoRepeat.
                     st.repeating = false;
                 }
             }

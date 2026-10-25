@@ -694,7 +694,7 @@ impl Interactive for InsertM {
                 let name = self.file.as_ref().map(|f| f.name.clone()).unwrap_or_default();
                 Prompt::new(format!("Block \"{name}\" already exists. Redefine it?"), super::curves::KW).kw(&["Yes", "No"]).default("N")
             }
-            InsStage::Point => Prompt::new("Specify insertion point", Accept::POINT).kw(&["Basepoint", "Scale", "Rotate"]),
+            InsStage::Point => Prompt::new("Specify insertion point", Accept::POINT).kw(&["Basepoint", "Scale", "Rotate", "Repeat", "NoRepeat"]),
             InsStage::BasePoint => Prompt::new("Specify base point", Accept::POINT),
             InsStage::PresetScale => Prompt::new("Specify scale factor for XYZ axes", Accept::NUMBER).default("1"),
             InsStage::PresetRotation => Prompt::new("Specify rotation angle", Accept::NUMBER).default("0"),
@@ -712,6 +712,16 @@ impl Interactive for InsertM {
     }
     /// Feed user input into the interactive `INSERT` state machine.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if let Input::Keyword(k) = &i {
+            if k == "Repeat" {
+                self.repeat = true;
+                return Ok(Step::Continue);
+            }
+            if k == "NoRepeat" {
+                self.repeat = false;
+                return Ok(Step::Continue);
+            }
+        }
         match self.stage {
             InsStage::Name => {
                 let n = match i {
@@ -754,8 +764,6 @@ impl Interactive for InsertM {
                 Input::Keyword(k) if k == "Basepoint" => self.stage = InsStage::BasePoint,
                 Input::Keyword(k) if k == "Scale" => self.stage = InsStage::PresetScale,
                 Input::Keyword(k) if k == "Rotate" => self.stage = InsStage::PresetRotation,
-                Input::Keyword(k) if k == "Repeat" => self.repeat = true,
-                Input::Keyword(k) if k == "NoRepeat" => self.repeat = false,
                 _ => {}
             },
             InsStage::BasePoint => {
@@ -922,3 +930,48 @@ impl Interactive for AttdefM {
 mod attribs;
 mod battman;
 mod blockreplace;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that the interactive `INSERT` prompt advertises `Repeat` and `NoRepeat`, and that
+    /// `NoRepeat` disarms repeat placement at any stage without answering scale or rotation prompts.
+    #[test]
+    fn interactive_insert_accepts_repeat_and_norepeat_across_stages() {
+        let mut s = Session::new();
+        s.execute("line", &serde_json::json!({ "points": [[0, 0], [5, 0]] })).unwrap();
+        s.execute("block", &serde_json::json!({ "name": "B1", "base": [0, 0], "keep": "delete", "handles": ["100"] })).unwrap();
+
+        s.start("insert").unwrap();
+        s.input(Input::Text("B1".into())).unwrap();
+        let p = s.current_prompt().unwrap();
+        assert!(p.keywords.iter().any(|k| k == "Repeat"));
+        assert!(p.keywords.iter().any(|k| k == "NoRepeat"));
+
+        // Enable Repeat from the command line, preset scale and rotation, then place once: INSERT stays running.
+        s.cmdline("Repeat").unwrap();
+        s.cmdline("Scale").unwrap();
+        s.cmdline("1").unwrap();
+        s.cmdline("Rotate").unwrap();
+        s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
+        // Now at Rotation prompt (since Rotate was not answered with a number before Point, wait: let's test PresetRotation then Rotation stage).
+        s.cancel();
+
+        // Start INSERT, enable Repeat, pick insertion point, then disarm Repeat with NoRepeat during Rotation stage.
+        s.start("insert").unwrap();
+        s.cmdline("B1").unwrap();
+        s.cmdline("Repeat").unwrap();
+        s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
+        s.input(Input::Enter).unwrap(); // X scale = 1
+        s.input(Input::Enter).unwrap(); // Y scale = 1 -> now at Rotation stage
+        assert!(s.current_prompt().unwrap().message.contains("rotation"));
+        // Sending NoRepeat at the Rotation stage must not answer the rotation prompt or place the block yet.
+        s.input(Input::Keyword("NoRepeat".into())).unwrap();
+        assert!(s.running.is_some());
+        assert!(s.current_prompt().unwrap().message.contains("rotation"));
+        // Answering rotation now places the block and finishes INSERT because repeat was disarmed.
+        s.input(Input::Text("45".into())).unwrap();
+        assert!(s.running.is_none());
+    }
+}
