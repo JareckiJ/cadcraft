@@ -999,6 +999,6 @@ mod tests {
         anon.entities.push(tagged(5, Some("20")));
         anon.entities.push(tagged(6, None));
         assert_eq!(by_tag(&d, &def), vec![(10, Handle(1)), (20, Handle(2))]);
-        assert_eq!(by_tag(&d, &anon), vec![(20, Handle(5)), (1_000_002, Handle(6))]);
+        assert_eq!(by_tag(&d, &anon), vec![(20, Handle(5)), (1_000_001, Handle(6))]);
     }
 }
