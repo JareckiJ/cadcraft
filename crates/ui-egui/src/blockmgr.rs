@@ -31,7 +31,7 @@ struct Preview {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("cc_block_manager")
+    egui::Id::unique("cc_block_manager")
 }
 
 /// The named blocks a user works with: not the generated (`*D12`) ones nor layout blocks.
@@ -119,7 +119,7 @@ pub fn paint_list(p: &egui::Painter, r: Rect, list: &cadcraft_render::DisplayLis
 fn preview(app: &CadApp, ctx: &egui::Context, name: &str) -> Option<Preview> {
     let revision = app.session.state().map(|s| s.revision).unwrap_or(0);
     let key = (name.to_string(), revision);
-    let id = egui::Id::new("cc_block_manager_preview");
+    let id = egui::Id::unique("cc_block_manager_preview");
     if let Some(p) = ctx.data(|d| d.get_temp::<Preview>(id)).filter(|p| p.key == key) {
         return Some(p);
     }
@@ -433,7 +433,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let Some(v) = view(app, ctx, &mut st) else { return };
     let mut act = None;
     egui::Window::new(crate::tl!("Block Manager"))
-        .id(egui::Id::new("Blocks"))
+        .id(egui::Id::unique("Blocks"))
         .open(open)
         .default_size(vec2(640.0, 440.0))
         .min_size(vec2(480.0, 320.0))

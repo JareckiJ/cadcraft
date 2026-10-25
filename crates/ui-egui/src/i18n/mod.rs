@@ -439,20 +439,11 @@ fn display_pieces(s: &str) -> Vec<String> {
 /// `s` (a file, drawing, block or layer name…) laid out on one line in reading order: right-to-left
 /// runs read as they do in the file manager, `שלום.dwg` with the extension on the right.
 pub fn job(s: &str, font: egui::FontId, color: egui::Color32) -> egui::text::LayoutJob {
-    if !has_rtl(s) {
-        return egui::text::LayoutJob::simple_singleline(s.to_string(), font, color);
-    }
-    // Sections pushed one by one: `append` would merge them back into one (same format), and the
-    // shaper works section by section.
-    let mut job = egui::text::LayoutJob::default();
-    for piece in display_pieces(s) {
-        let start = job.text.len();
-        job.text.push_str(&piece);
-        job.sections.push(egui::text::LayoutSection {
-            leading_space: 0.0,
-            byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(job.text.len()),
-            format: egui::TextFormat::simple(font.clone(), color),
-        });
+    let mut job = egui::text::LayoutJob::simple_singleline(s.to_string(), font, color);
+    // The text shaper orders right-to-left runs itself (UAX #9); the line reads left to right, as
+    // the interface does, so a Hebrew name keeps its extension on the right.
+    if has_rtl(s) {
+        job.direction = egui::epaint::text::TextDirection::LeftToRight;
     }
     job
 }
@@ -498,8 +489,9 @@ mod ltr_tests {
         assert_eq!(super::display_pieces("plan.dwg"), ["plan.dwg"]);
         // Points stay on their letter.
         assert_eq!(super::display_pieces("שָׁלוֹם"), ["ם", "וֹ", "ל", "שָׁ"]);
+        // The shaper orders the runs itself, on a left-to-right line.
         let job = super::job("שלום.dwg", egui::FontId::proportional(12.0), egui::Color32::WHITE);
-        assert_eq!(job.sections.len(), 5);
+        assert_eq!(job.direction, egui::epaint::text::TextDirection::LeftToRight);
     }
 }
 

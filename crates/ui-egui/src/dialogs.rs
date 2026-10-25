@@ -42,12 +42,13 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     }
 }
 
+/// Drafting Settings window: snap/grid modes and spacing, isometric snap, polar tracking and object snaps, editing the session settings directly.
 fn dsettings(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let settings = app.session.drafting_settings();
     let (mut snapunit, mut gridunit) = (settings.snapunit, settings.gridunit);
     // Shorter than its contents: they scroll (the window fits small screens).
     let max_h = (ctx.content_rect().height() * 0.6).clamp(240.0, 460.0);
-    egui::Window::new(crate::tl!("Drafting Settings")).id(egui::Id::new("Drafting Settings")).open(open).resizable(false).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Drafting Settings")).id(egui::Id::unique("Drafting Settings")).open(open).resizable(false).show(ctx, |ui| {
         egui::ScrollArea::vertical().max_height(max_h).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
             let s = &mut app.session.settings;
             ui.heading(crate::tl!("Snap and Grid"));
@@ -58,10 +59,10 @@ fn dsettings(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 ui.radio_value(&mut s.isodraft, true, crate::tl!("Isometric snap"));
             });
             ui.horizontal(|ui| {
-                ui.label(crate::tl!("Snap X spacing"));
-                ui.add(egui::DragValue::new(&mut snapunit.x).speed(0.05).range(0.0001..=1e6).clamp_existing_to_range(false));
-                ui.label(crate::tl!("Y"));
-                ui.add(egui::DragValue::new(&mut snapunit.y).speed(0.05).range(0.0001..=1e6).clamp_existing_to_range(false));
+                let x_label = ui.label(crate::tl!("Snap X spacing"));
+                ui.add(egui::DragValue::new(&mut snapunit.x).speed(0.05).range(0.0001..=1e6).clamp_existing_to_range(false)).labelled_by(x_label.id);
+                let y_label = ui.label(crate::tl!("Y"));
+                ui.add(egui::DragValue::new(&mut snapunit.y).speed(0.05).range(0.0001..=1e6).clamp_existing_to_range(false)).labelled_by(y_label.id);
             });
             // SNAPTYPE and POLARDIST.
             ui.horizontal(|ui| {
@@ -71,16 +72,16 @@ fn dsettings(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             });
             ui.add_enabled_ui(s.polarsnap, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(crate::tl!("Polar distance"));
-                    ui.add(egui::DragValue::new(&mut s.polardist).speed(0.05).range(0.0..=1e6));
+                    let label = ui.label(crate::tl!("Polar distance"));
+                    ui.add(egui::DragValue::new(&mut s.polardist).speed(0.05).range(0.0..=1e6)).labelled_by(label.id);
                 });
             });
             ui.checkbox(&mut s.gridmode, crate::tl!("Grid On (F7)"));
             ui.horizontal(|ui| {
-                ui.label(crate::tl!("Grid spacing"));
-                ui.add(egui::DragValue::new(&mut gridunit.x).speed(0.05).range(0.0..=1e6).clamp_existing_to_range(false));
-                ui.label(crate::tl!("Major line every"));
-                ui.add(egui::DragValue::new(&mut s.gridmajor).range(1..=100));
+                let grid_label = ui.label(crate::tl!("Grid spacing"));
+                ui.add(egui::DragValue::new(&mut gridunit.x).speed(0.05).range(0.0..=1e6).clamp_existing_to_range(false)).labelled_by(grid_label.id);
+                let major_label = ui.label(crate::tl!("Major line every"));
+                ui.add(egui::DragValue::new(&mut s.gridmajor).range(1..=100)).labelled_by(major_label.id);
             });
             ui.separator();
             ui.heading(crate::tl!("Polar Tracking"));
@@ -90,12 +91,13 @@ fn dsettings(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             let current = (s.polarang.to_degrees() * 1e6).round() / 1e6;
             let mut deg = current;
             ui.horizontal(|ui| {
-                ui.label(crate::tl!("Increment angle"));
-                egui::ComboBox::from_id_salt("polarang").selected_text(format!("{deg}")).show_ui(ui, |ui| {
+                let label = ui.label(crate::tl!("Increment angle"));
+                let combo = egui::ComboBox::from_id_salt("polarang").selected_text(format!("{deg}")).show_ui(ui, |ui| {
                     for a in [90.0, 45.0, 30.0, 22.5, 18.0, 15.0, 10.0, 5.0] {
                         ui.selectable_value(&mut deg, a, format!("{a}"));
                     }
                 });
+                combo.response.labelled_by(label.id);
             });
             if deg != current {
                 s.polarang = deg.to_radians();
@@ -170,14 +172,15 @@ fn tracking_options(ui: &mut egui::Ui, s: &mut cadcraft_engine::Settings) {
     }
     let mut additional = s.polar_flags & polarmode::ADDITIONAL != 0;
     ui.horizontal(|ui| {
-        if ui.checkbox(&mut additional, crate::tl!("Additional angles")).changed() {
+        let additional_label = ui.checkbox(&mut additional, crate::tl!("Additional angles"));
+        if additional_label.changed() {
             s.polar_flags ^= polarmode::ADDITIONAL;
         }
         // The list as typed (degrees separated by `;`), kept while it doesn't parse yet.
-        let id = ui.id().with("polaraddang");
+        let id = ui.scope_id().with("polaraddang");
         let shown = cadcraft_engine::sysvars::format_angle_list(&s.polaraddang);
         let mut text = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| shown.clone());
-        let resp = ui.add_enabled(additional, egui::TextEdit::singleline(&mut text).desired_width(140.0));
+        let resp = ui.add_enabled(additional, egui::TextEdit::singleline(&mut text).desired_width(140.0)).labelled_by(additional_label.id);
         if resp.changed()
             && let Some(angles) = cadcraft_engine::sysvars::parse_angle_list(&text)
         {
@@ -259,7 +262,7 @@ fn length_precisions(lunits: i64) -> Vec<(i64, String)> {
 /// through the `units` command on OK.
 fn units(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     use cadcraft_engine::units::{format_angle, format_distance};
-    let id = egui::Id::new("units_dialog_values");
+    let id = egui::Id::unique("units_dialog_values");
     let mut v = ctx.data_mut(|d| d.get_temp::<[i64; 5]>(id)).unwrap_or_else(|| {
         app.session
             .doc()
@@ -323,11 +326,12 @@ fn units(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     }
 }
 
+/// About window with About, Contributors and Models tabs, version, licence and project links.
 fn about(ctx: &egui::Context, open: &mut bool) {
     let t = Tokens::get();
-    let tab_id = egui::Id::new("about_tab");
+    let tab_id = egui::Id::unique("about_tab");
     egui::Window::new(crate::tl!("About CADCraft"))
-        .id(egui::Id::new("About CADCraft"))
+        .id(egui::Id::unique("About CADCraft"))
         .open(open)
         .default_size(vec2(640.0, 420.0))
         .collapsible(false)
@@ -362,7 +366,7 @@ fn about(ctx: &egui::Context, open: &mut bool) {
 
 /// Help ▸ Text Formulas: how formulas in text work and the functions they use.
 fn formulas(ctx: &egui::Context, open: &mut bool) {
-    egui::Window::new(crate::tl!("Text Formulas")).id(egui::Id::new("Text Formulas")).open(open).default_size(vec2(680.0, 520.0)).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Text Formulas")).id(egui::Id::unique("Text Formulas")).open(open).default_size(vec2(680.0, 520.0)).show(ctx, |ui| {
         ui.label(crate::tl!(
             "A text that starts with = shows the result of a formula, as in a spreadsheet: =2400-2*18, =ROUND(PI()*125^2/1000000;3), =TEXT(TODAY();\"dd.mm.yyyy\"). The formula stays with the text: editing the text edits the formula. Dates and times follow the computer's clock and are worked out again when the drawing is opened (Tools ▸ Update Fields does it at once). Date fields in AutoCAD drawings are updated the same way."
         ));
@@ -383,16 +387,17 @@ fn formulas(ctx: &egui::Context, open: &mut bool) {
     });
 }
 
+/// Command Reference window; filters commands by id or label (English or translated) and starts the clicked command after closing the dialog.
 fn commands(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut start = None;
-    egui::Window::new(crate::tl!("Command Reference")).id(egui::Id::new("Command Reference")).open(open).default_size(vec2(640.0, 480.0)).show(
+    egui::Window::new(crate::tl!("Command Reference")).id(egui::Id::unique("Command Reference")).open(open).default_size(vec2(640.0, 480.0)).show(
         ctx,
         |ui| {
-            let id = ui.id().with("cmdfilter");
+            let id = ui.scope_id().with("cmdfilter");
             let mut filter = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_default();
             ui.horizontal(|ui| {
-                ui.label(crate::tl!("Filter"));
-                ui.text_edit_singleline(&mut filter);
+                let label = ui.label(crate::tl!("Filter"));
+                ui.text_edit_singleline(&mut filter).labelled_by(label.id);
             });
             ui.data_mut(|d| d.insert_temp(id, filter.clone()));
             let f = filter.to_lowercase();
@@ -438,8 +443,9 @@ pub(crate) fn insert_block(app: &mut CadApp, name: &str) {
     }
 }
 
+/// Interface Language combo; selecting a language runs `ui.language` with its code.
 fn language(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
-    egui::Window::new(crate::tl!("Interface Language")).id(egui::Id::new("interface_language")).open(open).resizable(false).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Interface Language")).id(egui::Id::unique("interface_language")).open(open).resizable(false).show(ctx, |ui| {
         egui::ComboBox::from_id_salt("interface_language_choice").selected_text(app.ui.interface_language.name()).show_ui(ui, |ui| {
             for preference in crate::i18n::Preference::for_picker() {
                 if ui.selectable_label(app.ui.interface_language == preference, preference.name()).clicked() {

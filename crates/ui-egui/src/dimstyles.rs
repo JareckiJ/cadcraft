@@ -408,9 +408,20 @@ fn color_label(v: &Value) -> String {
 }
 
 fn combo<T: PartialEq + Clone>(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, current: &T, items: &[(T, String)]) -> Option<T> {
+    combo_named(ui, id, None, current, items)
+}
+
+/// [`combo`] with the name screen readers give it (the caption shown before it).
+fn combo_named<T: PartialEq + Clone>(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    name: Option<&str>,
+    current: &T,
+    items: &[(T, String)],
+) -> Option<T> {
     let shown = items.iter().find(|(v, _)| v == current).map_or_else(String::new, |(_, l)| l.clone());
     let mut picked = None;
-    egui::ComboBox::from_id_salt(id)
+    let response = egui::ComboBox::from_id_salt(id)
         .width((ui.available_width() - 14.0).clamp(80.0, 190.0))
         .selected_text(crate::i18n::widget(ui, &shown, egui::TextStyle::Button))
         .height(320.0)
@@ -420,7 +431,11 @@ fn combo<T: PartialEq + Clone>(ui: &mut egui::Ui, id: impl std::hash::Hash + std
                     picked = Some(v.clone());
                 }
             }
-        });
+        })
+        .response;
+    if let Some(name) = name {
+        response.accessible_name(name);
+    }
     picked
 }
 
@@ -884,7 +899,7 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("cc_dimstyle_manager")
+    egui::Id::unique("cc_dimstyle_manager")
 }
 
 /// Dimension style names used by dimensions, leaders and tolerances anywhere in the drawing.
@@ -944,7 +959,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let modal = st.editor.is_some() || st.new.is_some() || st.compare.is_some();
 
     egui::Window::new(crate::tl!("Dimension Style Manager"))
-        .id(egui::Id::new("cc_dimstyle_window"))
+        .id(egui::Id::unique("cc_dimstyle_window"))
         .open(open)
         .resizable(false)
         .collapsible(false)
@@ -1025,7 +1040,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                         ui.add_space(4.0);
                         ui.label(crate::tl!("List:"));
                         let items = vec![(false, crate::tl!("All styles").to_string()), (true, crate::tl!("Styles in use").to_string())];
-                        if let Some(v) = combo(ui, "cc_dimstyle_listfilter", &st.in_use_only, &items) {
+                        if let Some(v) = combo_named(ui, "cc_dimstyle_listfilter", Some(crate::tl!("List:")), &st.in_use_only, &items) {
                             st.in_use_only = v;
                         }
                     });
@@ -1087,12 +1102,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                         st.compare = None;
                         st.editor = None;
                         st.new = None;
-                        ctx.data_mut(|m| m.insert_temp(egui::Id::new("cc_dimstyle_close"), true));
+                        ctx.data_mut(|m| m.insert_temp(egui::Id::unique("cc_dimstyle_close"), true));
                     }
                 });
             });
         });
-    if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new("cc_dimstyle_close"))).is_some() {
+    if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique("cc_dimstyle_close"))).is_some() {
         *open = false;
     }
 
@@ -1101,7 +1116,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         let mut keep = true;
         let mut go = false;
         egui::Window::new(crate::tl!("Create New Dimension Style"))
-            .id(egui::Id::new("cc_dimstyle_new"))
+            .id(egui::Id::unique("cc_dimstyle_new"))
             .collapsible(false)
             .resizable(false)
             .order(egui::Order::Foreground)
@@ -1114,7 +1129,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     ui.end_row();
                     ui.label(crate::tl!("Start With:"));
                     let items: Vec<(String, String)> = styles.iter().map(|s| (s.name.clone(), s.name.clone())).collect();
-                    if let Some(v) = combo(ui, "cc_dimstyle_new_from", &n.from, &items) {
+                    if let Some(v) = combo_named(ui, "cc_dimstyle_new_from", Some(crate::tl!("Start With:")), &n.from, &items) {
                         n.from = v;
                     }
                     ui.end_row();
@@ -1157,7 +1172,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
             Mode::Override => format!("{} {}", crate::tl!("Override Current Style:"), ed.name),
         };
         egui::Window::new(title)
-            .id(egui::Id::new("cc_dimstyle_editor"))
+            .id(egui::Id::unique("cc_dimstyle_editor"))
             .collapsible(false)
             .resizable(false)
             .order(egui::Order::Foreground)
@@ -1190,7 +1205,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                                                 ui.label(crate::i18n::t(label));
                                                 field_row(
                                                     ui,
-                                                    egui::Id::new(("cc_dimstyle_field", ed.tab, *group, *label)),
+                                                    egui::Id::unique(("cc_dimstyle_field", ed.tab, *group, *label)),
                                                     &names,
                                                     &mut ed.style,
                                                     *kind,
@@ -1260,7 +1275,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     if let Some((mut a, mut b)) = st.compare.clone() {
         let mut keep = true;
         egui::Window::new(crate::tl!("Compare Dimension Styles"))
-            .id(egui::Id::new("cc_dimstyle_compare"))
+            .id(egui::Id::unique("cc_dimstyle_compare"))
             .collapsible(false)
             .resizable(false)
             .order(egui::Order::Foreground)

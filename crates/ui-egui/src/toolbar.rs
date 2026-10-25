@@ -240,7 +240,7 @@ fn history_list(app: &CadApp, ui: &mut egui::Ui, undo: bool) -> Option<usize> {
         ui.label(RichText::new(if undo { crate::tl!("Nothing to undo") } else { crate::tl!("Nothing to redo") }).color(t.text_dim));
         return None;
     }
-    let hover_id = egui::Id::new(("cc_history_hover", undo));
+    let hover_id = egui::Id::unique(("cc_history_hover", undo));
     let hovered: Option<usize> = ui.data(|d| d.get_temp(hover_id));
     let mut now_hovered = None;
     let mut picked = None;
@@ -732,7 +732,7 @@ pub fn top_panels(app: &mut CadApp, ui: &mut egui::Ui) {
         if !st.show || st.dock != Dock::Top {
             continue;
         }
-        egui::Panel::top(egui::Id::new(("cc_toolbar_top", bar.id())))
+        egui::Panel::top(egui::Id::unique(("cc_toolbar_top", bar.id())))
             .exact_size(THICKNESS)
             .resizable(false)
             .frame(egui::Frame::NONE.fill(t.chrome))
@@ -752,7 +752,7 @@ pub fn left_panels(app: &mut CadApp, ui: &mut egui::Ui) {
         if !st.show || st.dock != Dock::Left {
             continue;
         }
-        let id = if bar == Bar::Standard { egui::Id::new("cc_toolbar_left") } else { egui::Id::new(("cc_toolbar_left", bar.id())) };
+        let id = if bar == Bar::Standard { egui::Id::unique("cc_toolbar_left") } else { egui::Id::unique(("cc_toolbar_left", bar.id())) };
         egui::Panel::left(id).exact_size(THICKNESS).resizable(false).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
             let r = ui.max_rect();
             ui.painter().vline(r.right() - 0.5, r.y_range(), Stroke::new(1.0, t.border));
@@ -953,7 +953,7 @@ fn strip(app: &mut CadApp, ui: &mut egui::Ui, area: Rect, vertical: bool, bar: B
     let shown_bars = Bar::ALL.map(|b| state(&app.ui, b).show);
     let mut items = sanitize(&st.items);
     let mut action: Option<Action> = None;
-    let id = if bar == Bar::Standard { ui.id().with("cc_toolbar") } else { egui::Id::new(("cc_toolbar", bar.id())) };
+    let id = if bar == Bar::Standard { ui.scope_id().with("cc_toolbar") } else { egui::Id::unique(("cc_toolbar", bar.id())) };
     let layers = if items.iter().any(|i| i == LAYER_COMBO) { layer_rows(app) } else { None };
 
     // Main-axis start and end, cross-axis centre; `slot` is a rect at a main-axis position.
@@ -1343,7 +1343,7 @@ pub const APP_MENU: &[(&str, &str)] = &[
 /// The CADCraft application icon, decoded once.
 fn app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     const PNG: &[u8] = include_bytes!("../../../assets/app-icon/cadcraft-64.png");
-    let id = egui::Id::new("cc_app_icon");
+    let id = egui::Id::unique("cc_app_icon");
     if let Some(t) = ctx.data(|d| d.get_temp::<Option<egui::TextureHandle>>(id)) {
         return t;
     }
@@ -1421,7 +1421,7 @@ fn app_menu_row(ui: &mut egui::Ui, command: &str, label: &str) -> egui::Response
     let width = ui.available_width().max(260.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
     let text = crate::i18n::t(label);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text.to_string()));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text.to_string()));
     if resp.hovered() {
         ui.painter().rect_filled(rect, 3.0, t.control_hover);
     }
@@ -1521,7 +1521,7 @@ fn row(ui: &mut egui::Ui, icon: Icon, name: &str, selected: bool, dim: bool) -> 
 /// `which` is the dialog id, `toolbar:<bar>` (`toolbar` alone: the standard bar).
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, which: &str, open: &mut bool) {
     let bar = which.strip_prefix("toolbar:").and_then(Bar::parse).unwrap_or(Bar::Standard);
-    let id = egui::Id::new("Customize Tool Bar");
+    let id = egui::Id::unique("Customize Tool Bar");
     let state_id = id.with(("state", bar.id()));
     let mut st: DialogState = ctx.data(|d| d.get_temp(state_id)).unwrap_or_default();
     let bar_state = state(&app.ui, bar);

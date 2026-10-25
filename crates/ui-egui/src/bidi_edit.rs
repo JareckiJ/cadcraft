@@ -39,6 +39,9 @@ pub struct EditState {
     preferred_x: Option<f32>,
     undo: Vec<(String, usize)>,
     redo: Vec<(String, usize)>,
+    /// The input method's composition (pre-edit) text: shown at the caret while composing, not
+    /// part of the text until it is committed.
+    pub preedit: String,
 }
 
 impl EditState {
@@ -379,7 +382,9 @@ pub fn show(
         for ev in events {
             let lay = layout(&chars, look, (!single_line).then_some(inner_w), default_size);
             match ev {
+                Event::Ime(egui::ImeEvent::Preedit { text, .. }) => st.preedit = text,
                 Event::Text(s) | Event::Paste(s) | Event::Ime(egui::ImeEvent::Commit(s)) => {
+                    st.preedit.clear();
                     let s: String = s.chars().filter(|c| !c.is_control() || (*c == '\n' && !single_line)).collect();
                     let s = if single_line { s.replace('\n', " ") } else { s };
                     edited |= replace(&mut chars, st, &s, max_chars);
@@ -536,6 +541,18 @@ pub fn show(
         let (top, hgt) = l.map_or((0.0, row_h), |l| (l.top, l.height));
         at(cx, top + hgt)
     };
+    if focused && !st.preedit.is_empty() {
+        // The composition, underlined, after the caret.
+        let l = lay.lines.get(cl);
+        let (top, hgt) = l.map_or((0.0, row_h), |l| (l.top, l.height));
+        let size = look(st.cursor.saturating_sub(1)).size.max(8.0);
+        let g = ui.painter().layout_no_wrap(st.preedit.clone(), egui::FontId::proportional(size), t.text);
+        let w = g.size().x;
+        let y = top + (hgt - g.size().y) / 2.0;
+        clip.rect_filled(Rect::from_min_size(at(cx, top), vec2(w, hgt)), 0.0, t.panel);
+        clip.galley(at(cx, y), g, t.text);
+        clip.line_segment([at(cx, top + hgt - 2.0), at(cx + w, top + hgt - 2.0)], Stroke::new(1.0, t.accent));
+    }
     if focused {
         let l = lay.lines.get(cl);
         let (top, hgt) = l.map_or((0.0, row_h), |l| (l.top, l.height));
@@ -545,14 +562,14 @@ pub fn show(
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
         let caret_rect = Rect::from_min_max(at(cx, top), at(cx + 1.0, top + hgt));
-        ui.ctx().output_mut(|o| {
-            o.ime = Some(egui::output::IMEOutput {
-                purpose: egui::IMEPurpose::Normal,
-                rect,
-                cursor_rect: caret_rect,
-                should_interrupt_composition: false,
-            })
-        });
+        // The IME context is this editor's; a new generation each time it takes the keyboard.
+        let generation_id = id.with("ime_generation");
+        let mut generation: u64 = ui.data(|d| d.get_temp(generation_id)).unwrap_or(0);
+        if response.gained_focus() {
+            generation = generation.wrapping_add(1);
+            ui.data_mut(|d| d.insert_temp(generation_id, generation));
+        }
+        ui.ctx().output_mut(|o| o.ime = Some(egui::output::IMEOutput::new(id, generation, egui::IMEPurpose::Normal, rect, caret_rect)));
     }
     Output { response, changed, caret: caret_bottom }
 }

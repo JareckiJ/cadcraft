@@ -27,6 +27,42 @@ const SWATCHES: [u16; 7] = [1, 2, 3, 4, 5, 6, 7];
 /// Ruler snap, in text heights.
 const SNAP: f64 = 0.25;
 
+/// Keep the actual diameter character in editable text even without optional fonts.
+/// This original circle-and-slash rasterizer is a last fallback, after installed fonts.
+pub(crate) fn install_diameter_glyph(ctx: &egui::Context) {
+    ctx.add_glyph_rasterizer(egui::GlyphRasterizer::new("cadcraft::diameter", |request| {
+        if request.cluster != "⌀" || !request.font_size_px.is_finite() || !(1.0..=1024.0).contains(&request.font_size_px) {
+            return None;
+        }
+        let size = request.font_size_px;
+        let side = (size * 0.8).ceil() as usize + 2;
+        let center = vec2(1.0 + size * 0.4, 1.0 + size * 0.4);
+        let radius = size * 0.3;
+        let half_stroke = (size * 0.05).max(1.0) * 0.5;
+        let start = center + vec2(-radius, radius);
+        let segment = vec2(2.0 * radius, -2.0 * radius);
+        let mut pixels = Vec::with_capacity(side * side);
+        for y in 0..side {
+            for x in 0..side {
+                let point = vec2(x as f32 + 0.5, y as f32 + 0.5);
+                let ring_distance = ((point - center).length() - radius).abs();
+                let along = ((point - start).dot(segment) / segment.length_sq()).clamp(0.0, 1.0);
+                let slash_distance = (point - (start + segment * along)).length();
+                let alpha = ((half_stroke + 0.5 - ring_distance.min(slash_distance)).clamp(0.0, 1.0) * 255.0).round() as u8;
+                pixels.push(Color32::from_white_alpha(alpha));
+            }
+        }
+        Some(egui::RasterizedGlyph {
+            bitmap: egui::GlyphBitmap {
+                image: egui::ColorImage::new([side, side], pixels),
+                offset_px: vec2(0.0, -size * 0.8 - 1.0),
+                is_color: false,
+            },
+            advance_px: size * 0.85 + 2.0,
+        })
+    }));
+}
+
 #[derive(Clone)]
 struct State {
     fmt: Formatted,
@@ -61,11 +97,11 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("mtext_editor_state")
+    egui::Id::unique("mtext_editor_state")
 }
 
 fn edit_id() -> egui::Id {
-    egui::Id::new("mtext_editor_text")
+    egui::Id::unique("mtext_editor_text")
 }
 
 /// The ACI index or true colour as a screen colour.
@@ -205,7 +241,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let pos = pos2(at.x.clamp(rect.left(), max_x), at.y.clamp(rect.top() + st.top, (rect.bottom() - 120.0).max(rect.top() + st.top)));
 
     let top_start = pos.y - st.top;
-    egui::Area::new(egui::Id::new("mtext_editor_area")).order(egui::Order::Foreground).fixed_pos(pos2(pos.x, top_start)).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("mtext_editor_area")).order(egui::Order::Foreground).fixed_pos(pos2(pos.x, top_start)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.accent)).inner_margin(egui::Margin::same(0)).show(ui, |ui| {
             ui.set_width(width);
             let y0 = ui.cursor().top();
@@ -302,7 +338,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     }
     if let Some((_, list)) = completion(&st) {
         let mut clicked = None;
-        egui::Area::new(egui::Id::new("mtext_formula_list")).order(egui::Order::Tooltip).fixed_pos(st.fx_at + vec2(0.0, 4.0)).show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("mtext_formula_list")).order(egui::Order::Tooltip).fixed_pos(st.fx_at + vec2(0.0, 4.0)).show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_min_width(260.0);
                 for (k, (name, args, _)) in list.iter().enumerate().take(10) {
@@ -444,6 +480,7 @@ fn set_flag(c: &mut CharFmt, f: Flag, on: bool) {
     }
 }
 
+/// MTEXT formatting toolbar for the current selection: font, height, bold/italic/underline/overline, colour, alignment, lists, tab, degree/plus-minus and Diameter. Font, bold/italic/underline/overline, ByLayer/palette colour, alignment, list, tab and special-character changes refocus the editor; height and custom RGB colour changes do not.
 fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
     let cur = current(st);
     let range = st.sel.0.min(st.sel.1)..st.sel.0.max(st.sel.1);
@@ -453,28 +490,29 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
         ui.add_space(4.0);
         // Font
         let shown = cur.font.clone().unwrap_or_else(|| st.fmt.base_font.clone());
-        egui::ComboBox::from_id_salt("mtext_font").width(120.0).selected_text(shown.clone()).show_ui(ui, |ui| {
-            // The fonts in the user's font folders, then the usual ones, then the text's own.
-            let mut families = crate::options::font_choices().1;
-            for f in FAMILIES.iter().map(|s| s.to_string()).chain(cur.font.clone()) {
-                if !families.iter().any(|x| x.eq_ignore_ascii_case(&f)) {
-                    families.push(f);
+        egui::ComboBox::from_id_salt("mtext_font")
+            .width(120.0)
+            .selected_text(shown.clone())
+            .show_ui(ui, |ui| {
+                // The fonts in the user's font folders, then the usual ones, then the text's own.
+                let mut families = crate::options::font_choices().1;
+                for f in FAMILIES.iter().map(|s| s.to_string()).chain(cur.font.clone()) {
+                    if !families.iter().any(|x| x.eq_ignore_ascii_case(&f)) {
+                        families.push(f);
+                    }
                 }
-            }
-            for fam in families {
-                if ui.selectable_label(shown == fam, &fam).clicked() {
-                    change(st, |c| c.font = Some(fam.clone()));
-                    refocus = true;
+                for fam in families {
+                    if ui.selectable_label(shown == fam, &fam).clicked() {
+                        change(st, |c| c.font = Some(fam.clone()));
+                        refocus = true;
+                    }
                 }
-            }
-        });
+            })
+            .response
+            .accessible_name(crate::tl!("Font"));
         // Height
         let mut h = cur.height.unwrap_or(base_h);
-        if ui
-            .add(egui::DragValue::new(&mut h).speed(base_h * 0.02).range(base_h * 0.05..=base_h * 50.0).max_decimals(4))
-            .on_hover_text(crate::tl!("Text height"))
-            .changed()
-        {
+        if height_field(ui, &mut h, base_h) {
             let none = (h - base_h).abs() < 1e-9;
             change(st, |c| c.height = (!none).then_some(h));
         }
@@ -543,11 +581,11 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
             }
         }
         ui.separator();
-        if ui.button("•≡").on_hover_text(crate::tl!("Bulleted list")).clicked() {
+        if icon_button(ui, false, crate::tl!("Bulleted list"), |p, r, c| paint_list(p, r, c, false)).clicked() {
             st.fmt.make_list(range.clone(), ListStyle::Bullet, 3.0 * base_h);
             refocus = true;
         }
-        if ui.button("1≡").on_hover_text(crate::tl!("Numbered list")).clicked() {
+        if icon_button(ui, false, crate::tl!("Numbered list"), |p, r, c| paint_list(p, r, c, true)).clicked() {
             st.fmt.make_list(range.clone(), ListStyle::Number, 3.0 * base_h);
             refocus = true;
         }
@@ -563,11 +601,17 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
         });
         egui::Popup::menu(&resp).show(|ui| {
             ui.label(RichText::new(crate::tl!("Additional symbols")).strong());
+            // Only the signs the interface fonts can draw (all of them with the system fonts; the
+            // web build has the bundled ones), and the diameter sign, which is painted.
+            let font = FontId::proportional(17.0);
+            let shown: Vec<&(&str, &str)> =
+                SYMBOLS.iter().filter(|(sym, _)| *sym == "⌀" || ui.fonts_mut(|f| sym.chars().all(|c| f.has_glyph(&font, c)))).collect();
             egui::Grid::new("mtext_symbols").spacing(vec2(2.0, 2.0)).show(ui, |ui| {
-                for (i, (sym, name)) in SYMBOLS.iter().enumerate() {
+                for (i, (sym, name)) in shown.into_iter().enumerate() {
                     let b = egui::Button::new(RichText::new(*sym).size(17.0)).min_size(vec2(30.0, 28.0));
                     if ui
                         .add(b)
+                        .accessible_name(crate::i18n::t(name))
                         .on_hover_text(format!("{}  ({sym}, U+{:04X})", crate::i18n::t(name), sym.chars().next().map_or(0, u32::from)))
                         .clicked()
                     {
@@ -656,7 +700,9 @@ fn icon_button_sized(
     }
     let color = if resp.hovered() || on { t.text } else { ui.visuals().text_color() };
     paint(ui.painter(), Rect::from_center_size(rect.center(), icon), color);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    // Named on the node itself as well: on a clicked frame `widget_info` only emits an event.
+    let resp = resp.accessible_name(tip);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     resp.on_hover_text(crate::i18n::t(tip))
 }
 
@@ -679,6 +725,31 @@ fn paint_align(p: &egui::Painter, r: Rect, c: Color32, al: ParaAlign) {
         };
         p.line_segment([pos2(x0, y), pos2(x0 + w, y)], stroke);
     }
+}
+
+/// A list: three lines, each after a bullet or its number (painted: the bundled fonts may not
+/// have the list signs).
+fn paint_list(p: &egui::Painter, r: Rect, c: Color32, numbered: bool) {
+    let stroke = Stroke::new(1.4, c);
+    for row in 0..3 {
+        let y = r.top() + 3.0 + row as f32 * 5.0;
+        let mark = pos2(r.left() + 3.0, y);
+        if numbered {
+            p.text(mark, Align2::CENTER_CENTER, (row + 1).to_string(), FontId::proportional(7.0), c);
+        } else {
+            p.circle_filled(mark, 1.4, c);
+        }
+        p.line_segment([pos2(r.left() + 7.0, y), pos2(r.right(), y)], stroke);
+    }
+}
+
+/// The toolbar's height field. It has no visible caption, so its accessibility label carries
+/// what its tooltip says.
+fn height_field(ui: &mut egui::Ui, height: &mut f64, base_h: f64) -> bool {
+    ui.add(egui::DragValue::new(height).speed(base_h * 0.02).range(base_h * 0.05..=base_h * 50.0).max_decimals(4))
+        .on_hover_text(crate::tl!("Text height"))
+        .accessible_name(crate::tl!("Text height"))
+        .changed()
 }
 
 /// Insert tab: an arrow running into a stop.
@@ -727,7 +798,7 @@ fn header(ui: &mut egui::Ui, title: &str, cell: bool) -> bool {
             let k = Rect::from_center_size(rect.center(), vec2(9.0, 9.0));
             ui.painter().line_segment([k.left_top(), k.right_bottom()], Stroke::new(1.5, c));
             ui.painter().line_segment([k.right_top(), k.left_bottom()], Stroke::new(1.5, c));
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::tl!("Close")));
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::tl!("Close")));
             close = resp.on_hover_text(crate::tl!("Close (same as Cancel)")).clicked();
         });
     });
@@ -785,7 +856,7 @@ fn ruler(ui: &mut egui::Ui, st: &mut State, px: f32, width: f32, base_h: f64) {
         let y = if up { rect.bottom() - 1.0 } else { rect.top() + 1.0 };
         let dir = if up { -1.0 } else { 1.0 };
         let hit = Rect::from_center_size(pos2(x, y + dir * 4.0), vec2(10.0, 10.0));
-        let r = ui.interact(hit, ui.id().with(("mtext_indent", k)), Sense::drag());
+        let r = ui.interact(hit, ui.scope_id().with(("mtext_indent", k)), Sense::drag());
         let col = if r.hovered() || r.dragged() { t.accent } else { t.icon };
         painter.add(Shape::convex_polygon(vec![pos2(x - 4.0, y), pos2(x + 4.0, y), pos2(x, y + dir * 8.0)], col, Stroke::NONE));
         if r.dragged()
@@ -930,8 +1001,90 @@ fn fmt_base(f: &crate::editor_glyphs::EditorFont) -> String {
 mod tests {
     use super::*;
     use cadcraft_engine::Session;
+    use egui::accesskit::Role;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
 
     use crate::Services;
+
+    fn blank() -> State {
+        State {
+            fmt: Formatted::default(),
+            typing: CharFmt::default(),
+            typing_at: 0,
+            top: 70.0,
+            sel: (0, 0),
+            caret: None,
+            key: String::new(),
+            focus: false,
+            font: crate::editor_glyphs::EditorFont::default(),
+            edit: crate::bidi_edit::EditState::default(),
+            fx_index: 0,
+            fx_closed: None,
+            fx_at: egui::Pos2::ZERO,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            undo_at: 0.0,
+        }
+    }
+
+    /// Additional symbols ▸ Diameter inserts U+2300 into both the formatted text and
+    /// `to_contents()`, and leaves no unnamed widget.
+    #[test]
+    fn diameter_insertion_keeps_real_text_and_renders_without_optional_fonts() {
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 500.0)).with_context_setup(install_diameter_glyph).build_ui_state(
+            |ui, state| {
+                toolbar(ui, state, 2.5);
+                text_box(ui, state, 2.5, 20.0, 1000.0, &Tokens::get(), false);
+            },
+            blank(),
+        );
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Additional symbols").click();
+        harness.run();
+        harness.get_by_role_and_label(Role::Button, "Diameter").click();
+        harness.run();
+        assert_eq!(harness.state().fmt.text(), "⌀");
+        assert_eq!(harness.state().fmt.to_contents(), "⌀");
+        assert!(harness.unnamed_widgets().is_empty(), "unnamed controls: {:?}", harness.unnamed_widgets());
+    }
+
+    /// The toolbar's controls are found by name under the bundled fonts, and none is unnamed.
+    #[test]
+    fn the_whole_toolbar_uses_bundled_glyphs_and_names_its_controls() {
+        let mut state = blank();
+        let mut harness = Harness::builder().with_size(vec2(1100.0, 120.0)).build_ui(move |ui| toolbar(ui, &mut state, 2.5));
+        harness.run();
+        for name in [
+            "Align left",
+            "Center",
+            "Align right",
+            "Justify",
+            "Bulleted list",
+            "Numbered list",
+            "Insert tab",
+            "Additional symbols",
+            "Text color",
+            "Font",
+            "Text height",
+        ] {
+            assert!(harness.query_by_label(name).is_some(), "missing semantic control {name}");
+        }
+        assert!(harness.unnamed_widgets().is_empty(), "unnamed controls: {:?}", harness.unnamed_widgets());
+    }
+
+    /// The height field has no visible caption, so its accessibility label is set explicitly.
+    #[test]
+    fn height_field_is_named_for_accessibility_under_bundled_fonts() {
+        let mut harness = Harness::builder().with_size(vec2(360.0, 80.0)).build_ui(|ui| {
+            let mut height = 2.5;
+            height_field(ui, &mut height, 2.5);
+        });
+        harness.run();
+        let field = harness.get_by_role_and_label(Role::SpinButton, "Text height");
+        assert_eq!(field.accesskit_node().label().as_deref(), Some("Text height"));
+        assert!(harness.unnamed_widgets().is_empty(), "unnamed controls: {:?}", harness.unnamed_widgets());
+    }
 
     #[test]
     fn editor_opens_only_for_mtext_text_entry_and_finishes_with_formatted_contents() {

@@ -293,8 +293,8 @@ fn a_millimetre_layout_of_an_inch_drawing_plots_on_a_page_its_own_size() {
     d.add(&Space::Paper(name.clone()), Common::default(), EntityKind::Line(Line { a: Vec3::new(10.0, 10.0, 0.0), b: Vec3::new(400.0, 280.0, 0.0) }))
         .expect("line");
     let pdf = cadcraft_io::pdf::pdf(&d, &Space::Paper(name), &cadcraft_io::PdfOptions::default()).expect("pdf");
-    let text = String::from_utf8_lossy(&pdf);
-    let i = text.find("/MediaBox [0 0 ").expect("media box") + "/MediaBox [0 0 ".len();
-    let dims: Vec<f64> = text[i..].split(']').next().unwrap_or("").split_whitespace().filter_map(|v| v.parse().ok()).collect();
-    assert!(dims.len() == 2 && (dims[0] - 1190.55).abs() < 1.0 && (dims[1] - 841.89).abs() < 1.0, "{dims:?}");
+    let doc = crate::pdf_read::read(&pdf);
+    let m = doc.pages.first().expect("a page").media;
+    let (w, h) = (m[2] - m[0], m[3] - m[1]);
+    assert!((w - 1190.55).abs() < 1.0 && (h - 841.89).abs() < 1.0, "{w} x {h}");
 }

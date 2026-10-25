@@ -37,7 +37,7 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("cc_batch_plot")
+    egui::Id::unique("cc_batch_plot")
 }
 
 /// The sheets of drawing `d` in tab order: Model when it has objects, then the layouts.
@@ -147,12 +147,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut close = false;
     // Modal: a dimmed backdrop over the whole program takes every click outside the window.
     let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("cc_batch_plot_backdrop")).order(egui::Order::Middle).fixed_pos(screen.min).interactable(true).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("cc_batch_plot_backdrop")).order(egui::Order::Middle).fixed_pos(screen.min).interactable(true).show(ctx, |ui| {
         let (r, _) = ui.allocate_exact_size(screen.size(), Sense::click_and_drag());
         ui.painter().rect_filled(r, 0.0, egui::Color32::from_black_alpha(110));
     });
     egui::Window::new(crate::tl!("Batch Plot"))
-        .id(egui::Id::new("cc_batch_plot_window"))
+        .id(egui::Id::unique("cc_batch_plot_window"))
         .order(egui::Order::Foreground)
         .open(open)
         .default_size(vec2(700.0, 520.0))

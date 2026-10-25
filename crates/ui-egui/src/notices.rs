@@ -12,7 +12,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let mut close = false;
     egui::Window::new(crate::i18n::t(&n.title))
-        .id(egui::Id::new("cc_notice"))
+        .id(egui::Id::unique("cc_notice"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, -60.0))

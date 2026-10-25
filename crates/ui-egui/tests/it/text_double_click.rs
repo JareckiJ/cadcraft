@@ -4,7 +4,7 @@ use cadcraft_engine::doc::EntityKind;
 use cadcraft_engine::geom::Vec2;
 use cadcraft_engine::{Input, Session};
 use cadcraft_ui_egui::{CadApp, Services};
-use egui::{Event, Modifiers, PointerButton, Pos2, vec2};
+use egui::{Event, ImeEvent, Key, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
 
@@ -67,6 +67,25 @@ fn double_click_on_text_starts_textedit_for_that_object() {
         // A double-click edits that one object: the command ends with it.
         assert!(h.state().session.running.is_none(), "object {i}");
     }
+}
+
+#[test]
+fn double_clicked_text_takes_ime_composition_and_commit() {
+    let mut h = harness();
+    double_click(&mut h, Vec2::new(4.0, 1.2));
+    assert_eq!(h.state().session.current_prompt().unwrap().message, "Enter new text");
+    assert!(h.state().session.text_editor().is_some(), "the in-place editor has the keyboard");
+    // Composition is shown in the editor, not saved; the commit is inserted exactly once and
+    // replaces the text the editor opened with selected (#1761).
+    h.event(Event::Ime(ImeEvent::Preedit { text: "zhong".into(), active_range_chars: None }));
+    h.run_steps(1);
+    assert_eq!(text_at(&h, 0), "HELLO");
+    assert!(h.state().cmd.buffer.is_empty(), "nothing reaches the command line");
+    h.event(Event::Ime(ImeEvent::Commit("中文".into())));
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+    assert_eq!(text_at(&h, 0), "中文");
 }
 
 #[test]
