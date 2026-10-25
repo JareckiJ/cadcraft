@@ -2836,6 +2836,39 @@ pub(crate) mod tests {
         v.iter().map(|&h| Handle(h)).collect()
     }
 
+    /// A click on an AutoComplete row beside the cursor starts that command and places no point
+    /// (#2127).
+    #[test]
+    fn a_click_on_a_suggestion_beside_the_cursor_starts_it() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let frame = |app: &mut CadApp, events: Vec<egui::Event>| {
+            let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new());
+        let center = app.canvas.rect.map_or(pos2(700.0, 450.0), |r| r.center());
+        frame(&mut app, vec![egui::Event::PointerMoved(center)]);
+        frame(&mut app, vec![egui::Event::Text("l".into())]);
+        frame(&mut app, Vec::new());
+        let (row, id) = app.canvas.tip_rows.first().cloned().expect("the list is drawn beside the cursor");
+        assert_eq!(id, "LINE");
+        // The pointer moves to the row; the crosshair stays where typing started.
+        let at = row.center();
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        assert_eq!(app.canvas.typing_at, Some(center));
+        let click = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(&mut app, vec![click(true)]);
+        frame(&mut app, vec![click(false)]);
+        assert!(app.session.running.is_some(), "LINE started");
+        assert!(app.cmd.buffer.is_empty());
+        assert!(app.session.doc().unwrap().model.iter().next().is_none(), "the click placed no point");
+    }
+
     /// With no command running, Dynamic Input shows the typed command name and its AutoComplete
     /// matches beside the cursor; nothing when DYNMODE or DYNPROMPT is off (#2127).
     #[test]
