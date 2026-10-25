@@ -46,6 +46,7 @@ pub mod palettes;
 pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
+pub mod saveas;
 pub mod shortcut_menus;
 pub mod theme;
 #[cfg(not(target_arch = "wasm32"))]
@@ -223,6 +224,8 @@ pub struct CadApp {
     pub status: Option<(String, f64)>,
     /// Drawings being read on worker threads ([`opening`]).
     pub opening: opening::Opening,
+    /// The Save As dialog's choices while it is open ([`saveas`]).
+    pub saveas: Option<saveas::SaveAsState>,
     pub integrated_titlebar: bool,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Fresh surface and identity snapshot (see [`capture`]).
@@ -296,6 +299,7 @@ impl CadApp {
             cmd: cmdline::CmdLine::default(),
             status: None,
             opening: opening::Opening::default(),
+            saveas: None,
             integrated_titlebar: false,
             control_rx: None,
             capture_geometry: None,
