@@ -2612,7 +2612,15 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(3, &l.name);
         w.s(350, layout_handles.get(i).cloned().unwrap_or_default());
     }
-    let layout_obj = |w: &mut W, h: &str, name: &str, tab: i64, brh: &str, flags: i64, page: &PageSetup, view: Option<(Vec2, f64)>| {
+    let layout_obj = |w: &mut W,
+                      h: &str,
+                      name: &str,
+                      tab: i64,
+                      brh: &str,
+                      flags: i64,
+                      page: &PageSetup,
+                      view: Option<(Vec2, f64)>,
+                      limits: Option<(Vec2, Vec2)>| {
         // Plot scale: a standard scale when fitting or 1:1, otherwise custom (142 paper units
         // per 143 drawing units).
         let scale = if page.scale.is_finite() && page.scale > 0.0 { page.scale } else { 1.0 };
@@ -2665,14 +2673,19 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(7, &page.plot_style_table);
         w.i(75, if page.scale_to_fit { 0 } else { 16 });
         w.f(147, scale);
-        w.f(148, 0.0);
-        w.f(149, 0.0);
+        // Paper image origin and limits: the file's own values, else the defaults (a layout
+        // CADCraft created, or a non-finite value).
+        let finite = |p: &Vec2| p.x.is_finite() && p.y.is_finite();
+        let origin = page.paper_image_origin.filter(finite).unwrap_or(Vec2::ZERO);
+        w.f(148, origin.x);
+        w.f(149, origin.y);
         w.s(100, "AcDbLayout");
         w.s(1, name);
         w.i(70, flags);
         w.i(71, tab);
-        w.p2(10, Vec2::ZERO);
-        w.p2(11, Vec2::new(12.0, 9.0));
+        let (lim_min, lim_max) = limits.filter(|(a, b)| finite(a) && finite(b)).unwrap_or((Vec2::ZERO, Vec2::new(12.0, 9.0)));
+        w.p2(10, lim_min);
+        w.p2(11, lim_max);
         w.p(12, Vec3::ZERO);
         w.p(14, Vec3::ZERO);
         w.p(15, Vec3::ZERO);
@@ -2697,10 +2710,10 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     // plot type 5, "Layout information" (DXF Reference, PLOTSETTINGS group 74), which means
     // nothing for model space: another program's Plot dialog then shows no plot area or scale.
     let model_page = PageSetup { plot_area: "extents".into(), scale_to_fit: true, ..PageSetup::default() };
-    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None);
+    layout_obj(&mut w, &model_layout, "Model", 0, &ms_br, 1, &model_page, None, None);
     for (i, (_, brh, l)) in ps_brs.iter().enumerate() {
         let h = layout_handles.get(i).cloned().unwrap_or_default();
-        layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, 1, &l.page, l.view);
+        layout_obj(&mut w, &h, &l.name, i64::from(l.tab_order.max(1)), brh, 1, &l.page, l.view, l.limits);
     }
     // Raster image definitions.
     w.t.extend(crate::dxf_image::objects(&cx.images, &root_dict));
