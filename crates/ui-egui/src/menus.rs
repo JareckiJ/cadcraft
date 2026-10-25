@@ -75,6 +75,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.dialog.qselect", "Quick Select...", &[], None),
     ("ui.dialog.parameters", "Parameters Manager", &["Window", "Parameters Manager"], None),
     ("ui.dialog.dsettings", "Drafting Settings...", &[], None),
+    #[cfg(not(target_arch = "wasm32"))]
+    ("ui.updates.check", "Check for Updates…", &["Help", "Check for Updates…"], None),
     ("ui.dialog.about", "About CADCraft", &["Help", "About CADCraft"], None),
     ("ui.dialog.commands", "Command Reference", &["Help", "CADCraft Help"], Some("F1")),
     ("ui.dialog.formulas", "Text Formulas", &["Help", "Text Formulas"], None),
@@ -393,6 +395,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         | "ui.dialog.qselect"
         | "ui.dialog.parameters" => {
             app.ui.dialog = Some(id.trim_start_matches("ui.dialog.").to_string());
+            Ok(Value::Null)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        "ui.updates.check" => {
+            crate::updates_ui::check_now(app);
             Ok(Value::Null)
         }
         "ui.dialog.close" => {

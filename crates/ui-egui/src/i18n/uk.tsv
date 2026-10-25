@@ -1910,3 +1910,6 @@
 	Fixes an angle with a dimensional constraint.	Задає кут розмірною залежністю.
 	Fixes the radius of a circle or arc with a dimensional constraint.	Задає радіус кола або дуги розмірною залежністю.
 	Fixes the diameter of a circle or arc with a dimensional constraint.	Задає діаметр кола або дуги розмірною залежністю.
+	Check for Updates…	Перевірити оновлення…
+	CADCraft is up to date.	Встановлено найновішу версію CADCraft.
+	Could not check for updates.	Не вдалося перевірити оновлення.

@@ -1795,3 +1795,6 @@
 	Fixes an angle with a dimensional constraint.	Задаёт угол размерной зависимостью.
 	Fixes the radius of a circle or arc with a dimensional constraint.	Задаёт радиус окружности или дуги размерной зависимостью.
 	Fixes the diameter of a circle or arc with a dimensional constraint.	Задаёт диаметр окружности или дуги размерной зависимостью.
+	Check for Updates…	Проверить обновления…
+	CADCraft is up to date.	У вас последняя версия CADCraft.
+	Could not check for updates.	Не удалось проверить обновления.
