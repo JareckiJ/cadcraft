@@ -677,6 +677,13 @@ impl CadApp {
         // The forwarded window's modifiers hold for the frame its keys go in (Shift+Copy is
         // COPYBASE); the next frame puts the main window's back, before its own changes.
         if !self.forwarded.is_empty() {
+            // A modifier the main window changed meanwhile is the one to put back.
+            if let Some(own) = raw.events.iter().rev().find_map(|event| match event {
+                egui::Event::ModifiersChanged(modifiers) => Some(*modifiers),
+                _ => None,
+            }) {
+                self.restore_modifiers = Some(own);
+            }
             if let Some(modifiers) = self.forwarded_modifiers.take() {
                 raw.events.push(egui::Event::ModifiersChanged(modifiers));
             }

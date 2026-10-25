@@ -10,7 +10,13 @@ use egui::{Event, Key, Modifiers};
 use serde_json::json;
 
 fn frame(app: &mut CadApp, ctx: &egui::Context) {
-    let mut raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() };
+    frame_with(app, ctx, Vec::new());
+}
+
+/// A frame whose main-window input carries `events`.
+fn frame_with(app: &mut CadApp, ctx: &egui::Context, events: Vec<Event>) {
+    let mut raw =
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), events, ..Default::default() };
     app.raw_input_hook(ctx, &mut raw);
     cadcraft_ui_egui::cmdline::capture_tab(ctx, &mut raw);
     let mut out = ctx.run_ui(raw, |ui| {
@@ -94,4 +100,17 @@ fn keys_forwarded_from_a_native_window_reach_the_command_line_and_shortcuts() {
     pump(&mut app, &ctx);
     assert_eq!(running(&app), Some("copybase"));
     assert_eq!(ctx.input(|i| i.modifiers), Modifiers::NONE);
+}
+
+#[test]
+fn a_main_window_modifier_change_outlasts_keys_forwarded_meanwhile() {
+    let ctx = egui::Context::default();
+    let mut app = CadApp::new(Session::new(), Services::default());
+    pump(&mut app, &ctx);
+    frame_with(&mut app, &ctx, vec![Event::ModifiersChanged(Modifiers::SHIFT)]);
+    app.forward_native_input(&ctx, vec![key(Key::F8, true, Modifiers::COMMAND), key(Key::F8, false, Modifiers::COMMAND)], Some(Modifiers::COMMAND));
+    // Shift is released in the main window in the frame the forwarded keys go in.
+    frame_with(&mut app, &ctx, vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    pump(&mut app, &ctx);
+    assert_eq!(ctx.input(|i| i.modifiers), Modifiers::NONE, "the released Shift is not put back");
 }
