@@ -39,6 +39,10 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         // Errors are echoed on the command line by `run`.
         let _ = app.run(cmd, p);
     }
+    // Opened from the Plot dialog's "Edit…": closing goes back to Plot.
+    if !*open {
+        crate::managers::return_to_plot(app, ctx);
+    }
 }
 
 /// Plot Style Manager window; returns the command (`stylesmanager` or `pagesetup`) to run after drawing.
