@@ -297,7 +297,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
 /// of the persisted desktop workspace.
 pub fn show_mobile(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
-    let panel_id = egui::Id::new("cadcraft-mobile-active-panel");
+    let panel_id = egui::Id::unique("cadcraft-mobile-active-panel");
 
     // 0 = canvas, 1 = tools, 2 = layers, 3 = properties.
     let mut active = ui.ctx().data(|d| d.get_temp::<u8>(panel_id).unwrap_or(0));
@@ -315,7 +315,7 @@ pub fn show_mobile(app: &mut crate::CadApp, ui: &mut egui::Ui) {
         }
 
         // CADCRAFT_MOBILE_PAN_MODE
-        let pan_id = egui::Id::new("cadcraft-mobile-pan-enabled");
+        let pan_id = egui::Id::unique("cadcraft-mobile-pan-enabled");
         let mut pan_enabled = ui.ctx().data(|d| d.get_temp::<bool>(pan_id).unwrap_or(false));
 
         if ui.selectable_label(pan_enabled, "Pan").clicked() {

@@ -390,7 +390,7 @@ mod web {
                         // Embedded, the parent sends the drawing: start on the Start tab, not Drawing1.
                         let session = if app_bridge.is_some() { Session::empty() } else { Session::new() };
                         cc.egui_ctx.data_mut(|d| {
-                            d.insert_temp(egui::Id::new("cadcraft-mobile-mode"), query_param("mobile").as_deref() == Some("1"));
+                            d.insert_temp(egui::Id::unique("cadcraft-mobile-mode"), query_param("mobile").as_deref() == Some("1"));
                         });
                         let mut app = CadApp::new(session, services());
                         register_mobile_commands(&cc.egui_ctx);

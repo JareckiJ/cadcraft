@@ -1477,7 +1477,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // In mobile Pan Mode, one-finger primary dragging navigates
     // the viewport instead of selecting or placing CAD entities.
     #[cfg(target_arch = "wasm32")]
-    let mobile_pan = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-pan-enabled")).unwrap_or(false));
+    let mobile_pan = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("cadcraft-mobile-pan-enabled")).unwrap_or(false));
     #[cfg(not(target_arch = "wasm32"))]
     let mobile_pan = false;
 

@@ -787,7 +787,7 @@ impl CadApp {
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             if has_doc {
-                if cfg!(target_arch = "wasm32") && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-mode")).unwrap_or(false)) {
+                if cfg!(target_arch = "wasm32") && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("cadcraft-mobile-mode")).unwrap_or(false)) {
                     docking::show_mobile(self, ui);
                 } else {
                     docking::show(self, ui);

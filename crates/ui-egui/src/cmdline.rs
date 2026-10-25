@@ -707,7 +707,7 @@ fn history(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect, bar: Rect) {
 
     if resp.clicked()
         && resp.interact_pointer_pos().is_some_and(|p| bar.contains(p) && !on_toggle(p))
-        && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-mode")).unwrap_or(false))
+        && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("cadcraft-mobile-mode")).unwrap_or(false))
     {
         #[cfg(target_arch = "wasm32")]
         {
