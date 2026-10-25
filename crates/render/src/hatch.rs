@@ -13,7 +13,57 @@ use cadcraft_color::{Color, Rgb};
 use cadcraft_doc::library::{PatternLine, pattern_for};
 use cadcraft_doc::{Drawing, Entity, Gradient, Hatch};
 use cadcraft_geom::{Bounds2, Polyline, Vec2, point_in_polygon};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+/// Shared hatch work allowance for one thumbnail. Cloned render options share this allowance.
+#[derive(Debug)]
+pub struct HatchBudget {
+    remaining: AtomicUsize,
+}
+
+impl HatchBudget {
+    pub fn new(work: usize) -> Self {
+        Self { remaining: AtomicUsize::new(work) }
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.remaining.load(Ordering::Relaxed)
+    }
+}
+
+/// Reserve work before allocation/iteration. Failed reservations exhaust the shared budget.
+pub(crate) fn charge(budget: Option<&HatchBudget>, amount: usize) -> bool {
+    let Some(budget) = budget else { return true };
+    let mut current = budget.remaining.load(Ordering::Relaxed);
+    loop {
+        let Some(next) = current.checked_sub(amount) else {
+            budget.remaining.store(0, Ordering::Relaxed);
+            return false;
+        };
+        match budget.remaining.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+/// Emergency contours remain bounded even when the caller supplies untrusted geometry directly.
+fn contours(b: &mut Builder, ctx: &Ctx, h: &Hatch, rgb: Ink, lw: f32, tol: f64) {
+    let mut left = 65_536usize;
+    if h.loops.len() > 8192 {
+        return;
+    }
+    for boundary in &h.loops {
+        if boundary.vertices.len() > 8192 || b.opts.cancelled() {
+            return;
+        }
+        let cost = boundary.vertices.iter().try_fold(1usize, |sum, v| sum.checked_add(if v.bulge == 0.0 { 2 } else { 4097 }));
+        let Some(next) = cost.and_then(|cost| left.checked_sub(cost)) else { return };
+        left = next;
+        let points = Polyline { vertices: boundary.vertices.clone(), closed: true }.tessellate(tol);
+        b.polyline(ctx, rgb, lw, &points);
+    }
+}
 
 /// Draw a hatch entity: `rgb` is its resolved colour, `tol` the chord tolerance.
 /// Whether a build's cancel flag has been set.
@@ -22,18 +72,17 @@ fn is_set(cancel: Option<&AtomicBool>) -> bool {
 }
 
 pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, h: &Hatch, rgb: Ink, lw: f32, tol: f64) {
-    if b.opts.hatch_boundaries_only {
-        // No island comparisons, triangulation, gradient subdivision or pattern expansion.
-        for boundary in &h.loops {
-            if b.opts.cancelled() {
-                return;
-            }
-            let points = Polyline { vertices: boundary.vertices.clone(), closed: true }.tessellate(tol);
-            b.polyline(ctx, rgb, lw, &points);
-        }
+    let allowance = b.opts.hatch_budget.clone();
+    let budget = allowance.as_deref();
+    let Some(loops) = fill_loops_limited(h, tol, budget) else {
+        contours(b, ctx, h, rgb, lw, tol);
+        return;
+    };
+    // Pattern definitions are drawing-controlled: charge before `lines_of` clones their dashes.
+    if !charge(budget, h.pattern_lines.len()) || h.pattern_lines.iter().any(|f| !charge(budget, f.dashes.len().saturating_mul(8))) {
+        contours(b, ctx, h, rgb, lw, tol);
         return;
     }
-    let loops = fill_loops(h, tol);
     // Gradient and background colours given ByLayer follow the hatch's own layer.
     let layer = if e.common.layer == "0" { ctx.block_layer.as_deref().unwrap_or("0") } else { e.common.layer.as_str() };
     let layer_color = ctx.layer_color(layer).unwrap_or(Color::Index(7));
@@ -44,9 +93,12 @@ pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, h: &Hatch, rgb: Ink, 
     let dense = b.opts.fill && reads_solid(ctx.d, h, px);
     if h.solid || h.pattern.eq_ignore_ascii_case("SOLID") || h.gradient.is_some() || dense {
         if b.opts.fill {
-            let tris = fill::triangulate_evenodd(&loops);
+            let Some(tris) = fill::triangulate_evenodd_limited(&loops, budget) else {
+                contours(b, ctx, h, rgb, lw, tol);
+                return;
+            };
             match &h.gradient {
-                Some(g) => gradient(b, ctx, g, layer_color, &tris),
+                Some(g) => gradient(b, ctx, g, layer_color, &tris, budget),
                 None => b.tris(ctx, rgb, &tris),
             }
         }
@@ -55,14 +107,23 @@ pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, h: &Hatch, rgb: Ink, 
     if let Some(bg) = h.background
         && b.opts.fill
     {
-        b.tris(ctx, ink(bg, layer_color, ctx.block_color), &fill::triangulate_evenodd(&loops));
+        let Some(tris) = fill::triangulate_evenodd_limited(&loops, budget) else {
+            contours(b, ctx, h, rgb, lw, tol);
+            return;
+        };
+        b.tris(ctx, ink(bg, layer_color, ctx.block_color), &tris);
     }
     // The area being looked at, in the hatch's units.
     let view = b.opts.view.and_then(|v| {
         let inv = ctx.xf.inverse()?;
         Some(Bounds2::from_points(v.corners().iter().map(|p| inv.apply(*p))))
     });
-    for seg in pattern_lines_until(ctx.d, h, &loops, px, view.as_ref(), b.opts.cancel.as_deref()) {
+    let lines = pattern_lines_limited(ctx.d, h, &loops, px, view.as_ref(), b.opts.cancel.as_deref(), budget);
+    if budget.is_some_and(|b| b.remaining() == 0) {
+        contours(b, ctx, h, rgb, lw, tol);
+        return;
+    }
+    for seg in lines {
         if seg.len() == 1 {
             if let Some(p) = seg.first() {
                 b.point(ctx, rgb, *p);
@@ -139,22 +200,46 @@ const MAX_DEDUP_COMPARISONS: u64 = 50_000_000;
 /// within islands alternate), 1 outer keeps the outermost loops and their first islands, 2
 /// ignore keeps only the outermost loops. Nesting depth = how many other loops enclose a loop.
 pub fn fill_loops(h: &Hatch, tol: f64) -> Vec<Vec<Vec2>> {
+    fill_loops_limited(h, tol, None).unwrap_or_default()
+}
+
+fn fill_loops_limited(h: &Hatch, tol: f64, budget: Option<&HatchBudget>) -> Option<Vec<Vec<Vec2>>> {
+    if !charge(budget, h.loops.len()) {
+        return None;
+    }
+    if budget.is_some() {
+        for boundary in &h.loops {
+            if !charge(budget, boundary.vertices.len()) {
+                return None;
+            }
+            for vertex in &boundary.vertices {
+                if !charge(budget, if vertex.bulge == 0.0 { 2 } else { 4097 }) {
+                    return None;
+                }
+            }
+        }
+    }
     let mut loops: Vec<Vec<Vec2>> = h.loops.iter().map(|l| Polyline { vertices: l.vertices.clone(), closed: true }.tessellate(tol)).collect();
+    let points = loops.iter().fold(0usize, |sum, l| sum.saturating_add(l.len()));
+    // Bound duplicate comparisons and island tests before either starts.
+    if !charge(budget, points.saturating_mul(points).saturating_mul(2)) {
+        return None;
+    }
     dedup_polygons(&mut loops);
     let max_depth = match h.style {
         1 => 1,
         2 => 0,
-        _ => return loops,
+        _ => return Some(loops),
     };
     let verts: usize = loops.iter().map(Vec::len).sum();
     if loops.len().saturating_mul(verts) > MAX_ISLAND_WORK {
-        return loops;
+        return Some(loops);
     }
     let depth = |i: usize, l: &[Vec2]| {
         let Some(p) = probe(l) else { return 0 };
         loops.iter().enumerate().filter(|(j, o)| *j != i && point_in_polygon(o, p)).count()
     };
-    loops.iter().enumerate().filter(|(i, l)| depth(*i, l) <= max_depth).map(|(_, l)| l.clone()).collect()
+    Some(loops.iter().enumerate().filter(|(i, l)| depth(*i, l) <= max_depth).map(|(_, l)| l.clone()).collect())
 }
 
 /// A point of a loop to test its nesting with: the middle of its first non-degenerate edge
@@ -177,16 +262,22 @@ const MAX_GRADIENT_TRIS: usize = 200_000;
 /// A two-colour gradient over the fill triangles `tris`: a base fill in the middle colour (it
 /// hides seams between steps), then the triangles split into small pieces, each drawn in the
 /// colour step of the gradient value at its centroid.
-fn gradient(b: &mut Builder, ctx: &Ctx, g: &Gradient, layer: Color, tris: &[Vec2]) {
+fn gradient(b: &mut Builder, ctx: &Ctx, g: &Gradient, layer: Color, tris: &[Vec2], budget: Option<&HatchBudget>) {
     let c1 = ink(g.color1, layer, ctx.block_color);
     let c2 = ink(g.color2, layer, ctx.block_color);
     b.tris(ctx, mix(c1, c2, 0.5), tris);
     let Some(field) = Field::new(g, tris) else { return };
     let mut steps: Vec<Vec<Vec2>> = vec![Vec::new(); GRADIENT_LEVELS];
     let max2 = field.cell * field.cell;
+    if !charge(budget, tris.len()) {
+        return;
+    }
     let mut stack: Vec<[Vec2; 3]> = tris.as_chunks::<3>().0.to_vec();
     let mut drawn = 0usize;
     while let Some([a, bb, c]) = stack.pop() {
+        if !charge(budget, 12) {
+            break;
+        }
         // Split the longest edge while the budget allows.
         let edges = [(a, bb, c), (bb, c, a), (c, a, bb)];
         let (p, q, r) = edges.into_iter().max_by(|x, y| (x.0 - x.1).len2().total_cmp(&(y.0 - y.1).len2())).unwrap_or((a, bb, c));
@@ -392,6 +483,18 @@ pub(crate) fn pattern_lines_until(
     view: Option<&Bounds2>,
     cancel: Option<&AtomicBool>,
 ) -> Vec<Vec<Vec2>> {
+    pattern_lines_limited(d, h, loops, px, view, cancel, None)
+}
+
+fn pattern_lines_limited(
+    d: &Drawing,
+    h: &Hatch,
+    loops: &[Vec<Vec2>],
+    px: f64,
+    view: Option<&Bounds2>,
+    cancel: Option<&AtomicBool>,
+    budget: Option<&HatchBudget>,
+) -> Vec<Vec<Vec2>> {
     let lines = lines_of(d, h);
     let scale = scale_of(h);
     let px = if px.is_finite() && px > 0.0 { px } else { 0.0 };
@@ -401,6 +504,9 @@ pub(crate) fn pattern_lines_until(
     // their cost (CWE-400).
     let mut work: u64 = MAX_HATCH_WORK;
     for fam in &lines {
+        if !charge(budget, fam.dashes.len().saturating_add(1)) {
+            break;
+        }
         // A family with dashes but no positive (ink) element can never draw: skip it so its gaps
         // are not swept at all.
         if !fam.dashes.is_empty() && !fam.dashes.iter().any(|d| *d >= 0.0) {
@@ -414,7 +520,7 @@ pub(crate) fn pattern_lines_until(
             continue;
         }
         let dashes: Vec<f64> = fam.dashes.iter().map(|d| d * scale).collect();
-        Family { origin, ang, delta, spacing, dashes: &dashes }.sweep(loops, px, view, cancel, &mut out, &mut work);
+        Family { origin, ang, delta, spacing, dashes: &dashes }.sweep(loops, px, view, cancel, &mut out, &mut work, budget);
         if out.len() >= MAX_RUNS || work == 0 || is_set(cancel) {
             break;
         }
@@ -477,7 +583,20 @@ impl Family<'_> {
     }
 
     /// Intersect a pattern family with boundary loops, respecting view, output, cancellation, and shared dash-work limits.
-    fn sweep(&self, loops: &[Vec<Vec2>], px: f64, view: Option<&Bounds2>, cancel: Option<&AtomicBool>, out: &mut Vec<Vec<Vec2>>, work: &mut u64) {
+    fn sweep(
+        &self,
+        loops: &[Vec<Vec2>],
+        px: f64,
+        view: Option<&Bounds2>,
+        cancel: Option<&AtomicBool>,
+        out: &mut Vec<Vec<Vec2>>,
+        work: &mut u64,
+        budget: Option<&HatchBudget>,
+    ) {
+        let points = loops.iter().fold(0usize, |n, l| n.saturating_add(l.len()));
+        if !charge(budget, points.saturating_add(loops.len())) {
+            return;
+        }
         let local: Vec<Vec<Vec2>> = loops.iter().map(|l| l.iter().map(|p| self.to_local(*p)).collect()).collect();
         let bb = Bounds2::from_points(local.iter().flatten().copied());
         if bb.is_empty() {
@@ -511,6 +630,9 @@ impl Family<'_> {
         let draws = self.dashes.iter().any(|d| *d >= 0.0);
         let solid_line = self.dashes.is_empty() || pat_len < 1e-12 || (px > 0.0 && pat_len < 2.0 * px && draws);
         for k in k0..=k1 {
+            if !charge(budget, points.saturating_mul(16).saturating_add(1)) {
+                return;
+            }
             if out.len() >= MAX_RUNS || *work == 0 || is_set(cancel) {
                 return;
             }
@@ -539,19 +661,22 @@ impl Family<'_> {
                 if solid_line {
                     out.push(vec![self.to_world(Vec2::new(x0, y)), self.to_world(Vec2::new(x1, y))]);
                 } else {
-                    self.dash(x0, x1, y, offset, pat_len, out, work);
+                    self.dash(x0, x1, y, offset, pat_len, out, work, budget);
                 }
             }
         }
     }
 
     /// The dashes and dots of the span `x0..x1` of the line at `y`, phase anchored at x = `offset`.
-    fn dash(&self, x0: f64, x1: f64, y: f64, offset: f64, pat_len: f64, out: &mut Vec<Vec<Vec2>>, work: &mut u64) {
+    fn dash(&self, x0: f64, x1: f64, y: f64, offset: f64, pat_len: f64, out: &mut Vec<Vec<Vec2>>, work: &mut u64, budget: Option<&HatchBudget>) {
         let start_rep = ((x0 - offset) / pat_len).floor();
         let mut x = offset + start_rep * pat_len;
         let mut guard = 0;
         'outer: while x < x1 {
             for d in self.dashes {
+                if !charge(budget, 4) {
+                    return;
+                }
                 guard += 1;
                 *work = work.saturating_sub(1);
                 if guard > 100_000 || out.len() >= MAX_RUNS || *work == 0 {

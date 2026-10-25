@@ -208,7 +208,7 @@ fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
             1usize.checked_add(p.vertices.len())?.checked_add(output)?
         }
         EntityKind::Hatch(h) => {
-            // Preview rendering draws boundaries only. Charge loops, cloned input vertices
+            // Charge loops, cloned input vertices
             // and worst-case curve tessellation before bounds or rendering touch them.
             let mut cost = 1usize.checked_add(h.loops.len())?;
             if cost > remaining {
@@ -361,7 +361,7 @@ fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bound
         tolerance: size / 500.0,
         min_dash: size / 300.0,
         view_height: size,
-        hatch_boundaries_only: true,
+        hatch_budget: Some(Arc::new(cadcraft_render::HatchBudget::new(250_000))),
         ..Default::default()
     };
     let list = cadcraft_render::build_entities(d, b.entities.iter().map(|e| &**e), &opts);
@@ -1169,9 +1169,9 @@ mod tests {
         }
     }
 
-    /// Ordinary hatches retain visible previews; only their expensive fill generation is skipped.
+    /// Ordinary thumbnails retain fills, motifs and curved boundaries, matching normal rendering.
     #[test]
-    fn ordinary_hatches_keep_visible_boundary_previews() {
+    fn ordinary_hatches_keep_fills_and_patterns_in_previews() {
         use cadcraft_doc::{Block, Drawing, Entity, Handle, Hatch};
         let mut d = Drawing::default();
         for (name, solid, bulge) in [("Solid", true, 0.0), ("Pattern", false, 0.0), ("Curved", true, 1.0)] {
@@ -1192,7 +1192,11 @@ mod tests {
             let (list, bounds) = super::build(&d, name).unwrap();
             assert!(!bounds.is_empty(), "{name}");
             assert!(!list.prims.is_empty(), "{name}");
-            assert!(list.tris.is_empty(), "no fill generation in thumbnails");
+            if solid {
+                assert!(!list.tris.is_empty(), "{name}: filled thumbnail, not just an outline");
+            } else {
+                assert!(list.verts.len() > 4, "pattern lines are retained");
+            }
         }
         let normal = cadcraft_render::build_entities(&d, d.block("Solid").unwrap().entities.iter().map(|e| &**e), &Default::default());
         assert!(!normal.tris.is_empty(), "normal canvas rendering still fills hatches");
