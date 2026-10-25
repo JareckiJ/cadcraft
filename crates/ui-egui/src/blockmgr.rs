@@ -1201,7 +1201,8 @@ mod tests {
             if solid {
                 assert!(!list.tris.is_empty(), "{name}: filled thumbnail, not just an outline");
             } else {
-                assert!(list.verts.len() > 4, "pattern lines are retained");
+                let polylines = list.prims.iter().filter(|p| p.kind == cadcraft_render::Kind::Polyline).count();
+                assert!(polylines > 1, "pattern lines are retained");
             }
         }
         let normal = cadcraft_render::build_entities(&d, d.block("Solid").unwrap().entities.iter().map(|e| &**e), &Default::default());

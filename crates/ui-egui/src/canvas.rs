@@ -2214,13 +2214,24 @@ fn cycle_badge(p: &egui::Painter, at: Pos2) {
     }
 }
 
+/// The sheet of paper the current layout tab is configured with, if any.
+fn current_sheet(app: &CadApp) -> Option<cadcraft_render::paper::Sheet> {
+    match app.session.layout_space() {
+        cadcraft_doc::Space::Paper(ref name) => {
+            let st = app.session.state().ok()?;
+            cadcraft_render::paper::sheet(&st.doc, name)
+        }
+        cadcraft_doc::Space::Model => None,
+    }
+}
+
 /// Earlier releases in a batched frame cannot use `Response::hovered()` (it describes
 /// only the final pointer position). Reuse the exact navigation widget hit rectangles.
 fn over_navigation_control(app: &CadApp, rect: Rect, p: Pos2) -> bool {
     if app.ui.show_ucs_icon && crate::viewcube::ucs_arms(rect).iter().any(|r| r.contains(p)) {
         return true;
     }
-    if app.ui.show_viewcube && app.canvas.list.as_ref().is_none_or(|l| l.sheet.is_none()) {
+    if app.ui.show_viewcube && current_sheet(app).is_none() {
         let layout = crate::viewcube::Layout::new(rect);
         return layout.bounds.contains(p) || layout.pill.contains(p);
     }
@@ -3025,5 +3036,34 @@ mod hatch_pick_tests {
         assert_eq!(app.hatch_dlg.as_ref().map(|s| s.edit.iter().map(|h| h.hex()).collect::<Vec<_>>()), Some(vec![hx]));
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
+    }
+
+    #[test]
+    fn navigation_control_hit_test_follows_layout_space_not_stale_list() {
+        use cadcraft_geom::Bounds2;
+        use cadcraft_render::DisplayList;
+        use egui::{Pos2, Rect, vec2};
+
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 1000.0));
+        let layout = crate::viewcube::Layout::new(rect);
+        let p = layout.center;
+
+        app.canvas.list = None;
+        assert!(super::over_navigation_control(&app, rect, p));
+
+        app.session.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
+        assert!(!super::over_navigation_control(&app, rect, p));
+
+        app.session.execute("layout.set", &json!({ "name": "Model" })).unwrap();
+        app.canvas.list = Some(DisplayList {
+            sheet: Some(cadcraft_render::paper::Sheet {
+                size: Vec2::new(100.0, 100.0),
+                printable: Bounds2::new(Vec2::ZERO, Vec2::new(100.0, 100.0)),
+                unit_mm: 1.0,
+            }),
+            ..Default::default()
+        });
+        assert!(super::over_navigation_control(&app, rect, p));
     }
 }

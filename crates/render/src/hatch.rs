@@ -222,7 +222,7 @@ fn fill_loops_limited(h: &Hatch, tol: f64, budget: Option<&HatchBudget>) -> Opti
     let mut loops: Vec<Vec<Vec2>> = h.loops.iter().map(|l| Polyline { vertices: l.vertices.clone(), closed: true }.tessellate(tol)).collect();
     let points = loops.iter().fold(0usize, |sum, l| sum.saturating_add(l.len()));
     // Bound duplicate comparisons and island tests before either starts.
-    if !charge(budget, points.saturating_mul(points).saturating_mul(2)) {
+    if loops.len() > 1 && !charge(budget, points.saturating_mul(points).saturating_mul(2)) {
         return None;
     }
     dedup_polygons(&mut loops);
