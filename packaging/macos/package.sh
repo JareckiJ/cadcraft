@@ -2,6 +2,7 @@
 # Build, sign and (optionally) notarize the macOS release artifacts:
 #
 #   $DIST/cadcraft-<version>-macos-<arch>.dmg          CADCraft.app on a drag-to-Applications DMG
+#   $DIST/cadcraft-<version>-macos-<arch>-portable.zip CADCraft.app alone: unzip anywhere and run it
 #   $DIST/cadcraft-cli-<version>-macos-<arch>.zip      the headless CLI
 #
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
@@ -42,6 +43,7 @@ WORK="$CARGO_TARGET_DIR/macos-package"
 APP="$WORK/CADCraft.app"
 DMG="$DIST/cadcraft-$VERSION-macos-$ARCH.dmg"
 CLI_ZIP="$DIST/cadcraft-cli-$VERSION-macos-$ARCH.zip"
+PORTABLE_ZIP="$DIST/cadcraft-$VERSION-macos-$ARCH-portable.zip"
 
 NOTARIZE=0
 if [[ "$IDENTITY" = "-" ]]; then
@@ -125,6 +127,12 @@ if [[ "$NOTARIZE" = 1 ]]; then
   spctl --assess --type execute -vvv "$APP"
 fi
 
+# ---- portable zip ------------------------------------------------------------------------------
+# The same signed (and stapled) bundle without the disk image: unzip anywhere, no installation.
+echo "==> building $PORTABLE_ZIP"
+rm -f "$PORTABLE_ZIP"
+ditto -c -k --keepParent "$APP" "$PORTABLE_ZIP"
+
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> building $DMG"
 STAGE="$WORK/dmg"
@@ -166,4 +174,4 @@ if [[ "$NOTARIZE" = 1 ]]; then notarize "$CLI_ZIP"; fi
 
 "$WORK/bin/cadcraft-cli" --version
 echo "==> done"
-ls -lh "$DMG" "$CLI_ZIP"
+ls -lh "$DMG" "$PORTABLE_ZIP" "$CLI_ZIP"
