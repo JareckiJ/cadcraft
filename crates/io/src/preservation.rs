@@ -338,18 +338,26 @@ pub(crate) fn dxf_customs_lost(d: &Drawing, version: crate::Version, dropped: &[
         exact.entry((*k, t.clone(), *h)).or_default().push(i);
         by_type.entry((*k, t.clone())).or_default().push_back(i);
     }
+    // Exact handles first, for every dropped record, so a type-only match can't take a slot
+    // another record names by handle.
+    let mut slot: Vec<Option<usize>> =
+        dropped.iter().map(|r| exact.get_mut(&(r.kind, r.type_name.to_ascii_uppercase(), r.handle)).and_then(Vec::pop)).collect();
+    let mut taken = vec![false; kept.len()];
+    for i in slot.iter().flatten() {
+        if let Some(t) = taken.get_mut(*i) {
+            *t = true;
+        }
+    }
     let mut out = Vec::with_capacity(dropped.len());
-    for r in dropped {
+    for (r, at) in dropped.iter().zip(slot.iter_mut()) {
         let name = r.type_name.to_ascii_uppercase();
-        let mut at = exact
-            .get_mut(&(r.kind, name.clone(), r.handle))
-            .and_then(|v| v.iter().position(|i| kept.get(*i).is_some_and(Option::is_some)).map(|p| v.swap_remove(p)));
         if at.is_none()
             && let Some(q) = by_type.get_mut(&(r.kind, name))
         {
             while let Some(i) = q.pop_front() {
-                if kept.get(i).is_some_and(Option::is_some) {
-                    at = Some(i);
+                if let Some(t @ false) = taken.get_mut(i) {
+                    *t = true;
+                    *at = Some(i);
                     break;
                 }
             }
@@ -426,5 +434,22 @@ mod tests {
         assert_eq!(super::base64(b"foo"), "Zm9v");
         assert_eq!(super::base64(b"foobar"), "Zm9vYmFy");
         assert_eq!(super::base64(&[0xFF, 0xFE, 0x00]), "//4A");
+    }
+
+    /// Exact handles are matched first: a record listed earlier, matched only by type, can't take
+    /// the slot a later record names by handle.
+    #[test]
+    fn exact_handles_are_matched_before_types() {
+        use cadcraft_doc::foreign::ForeignObject;
+        use cadcraft_doc::{Drawing, Handle, RawTag};
+        let object =
+            |h: u64, payload: &str| ForeignObject { handle: Handle(h), kind: "X_OBJ".into(), tags: vec![RawTag { code: 1, value: payload.into() }] };
+        let mut d = Drawing::default();
+        std::sync::Arc::make_mut(&mut d.foreign).objects = vec![object(0x40, "forty"), object(0x41, "forty-one")];
+        let dropped = |h: u64| cadcraft_dwg::Dropped { kind: "object", type_name: "X_OBJ".into(), handle: h };
+        // 0x99 matches nothing by handle; 0x40 names the first slot.
+        let lost = super::dxf_customs_lost(&d, crate::Version::R2018, &[dropped(0x99), dropped(0x40)]);
+        let payload = |i: usize| lost.get(i).and_then(|r| r.dxf.first()).map(|(_, v)| v.clone());
+        assert_eq!((payload(0), payload(1)), (Some("forty-one".into()), Some("forty".into())));
     }
 }

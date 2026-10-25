@@ -193,9 +193,9 @@ pub fn back_up_source(path: &str, source: Option<&str>, loss: Option<&Loss>) -> 
     }
 }
 
-/// Whether the file an `old` report describes already lacks every record the `new` report lists
-/// (same kind, type and handle), and at least as many it doesn't list: then the save loses
-/// nothing that is still in the file.
+/// Whether the file an `old` report describes already lacks every record the `new` report holds
+/// (same kind, type and handle): then the save loses nothing that is still in the file. A `new`
+/// report with records it doesn't list (beyond its detail cap) can't be compared and never is.
 #[cfg(not(target_arch = "wasm32"))]
 fn lacks_already(old: &Value, new: &Value) -> bool {
     let ids = |v: &Value| -> std::collections::HashSet<(String, String, String)> {
@@ -206,7 +206,7 @@ fn lacks_already(old: &Value, new: &Value) -> bool {
             .unwrap_or_default()
     };
     let unlisted = |v: &Value| v.get("unlisted").and_then(Value::as_u64).unwrap_or(0);
-    unlisted(new) <= unlisted(old) && ids(new).is_subset(&ids(old))
+    unlisted(new) == 0 && ids(new).is_subset(&ids(old))
 }
 
 /// A file's size and FNV-1a 64 hash: what binds a loss report to the file it describes.
@@ -237,7 +237,7 @@ fn stamp_json(stamp: Option<(u64, u64)>) -> Value {
 /// Keep `loss` beside the saved file `path` as `<path>.lost.json`, with the file's size and hash
 /// (`file`) so a later save can tell whether the report still describes it, and permissions no
 /// broader than the file's; when the save lacks nothing, a report left there by an earlier save is
-/// removed (it no longer describes the file). Returns the report's path. The web has no files
+/// removed (it no longer describes the file), and failing to remove it is an error. Returns the report's path. The web has no files
 /// beside a download: nothing is kept there.
 pub fn keep_loss_report(path: &str, loss: Option<&Loss>) -> std::result::Result<Option<String>, String> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -256,12 +256,11 @@ pub fn keep_loss_report(path: &str, loss: Option<&Loss>) -> std::result::Result<
                     .map_err(|e| format!("{report}: {e}"))?;
                 Ok(Some(report))
             }
-            None => {
-                if std::path::Path::new(&report).is_file() {
-                    let _ = std::fs::remove_file(&report);
-                }
-                Ok(None)
-            }
+            // It holds the lost records' own data: a report that can't be removed is an error.
+            None => match std::fs::remove_file(&report) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{report} (no longer up to date) couldn't be removed: {e}")),
+                _ => Ok(None),
+            },
         }
     }
     #[cfg(target_arch = "wasm32")]

@@ -46,6 +46,21 @@ fn a_report_listing_other_records_does_not_stop_the_backup() -> TestResult {
     Ok(())
 }
 
+/// A save with records beyond its report's detail cap can't be compared: it is always backed up.
+#[test]
+fn a_save_with_unlisted_records_is_backed_up() -> TestResult {
+    let d = dir("unlisted")?;
+    let path = d.join("u.dwg");
+    let p = path.to_str().ok_or("path")?;
+    std::fs::write(&path, b"drawing")?;
+    keep_loss_report(p, Some(&loss(3)))?;
+    let mut capped = loss(3);
+    capped.json = "{\"lost\":3,\"unlisted\":3,\"records\":[]}".into();
+    assert!(back_up_source(p, Some(p), Some(&capped))?.is_some());
+    std::fs::remove_dir_all(&d)?;
+    Ok(())
+}
+
 /// A report kept for one file doesn't stop the backup of a different file at the same path.
 #[test]
 fn a_report_of_another_file_does_not_stop_the_backup() -> TestResult {
