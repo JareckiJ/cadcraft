@@ -75,6 +75,16 @@ fn bulge_quarter_arc() {
 }
 
 #[test]
+fn tiny_bulge_is_not_a_full_circle() {
+    let a = Vec2::new(0.0, 0.0);
+    let b = Vec2::new(10.0, 0.0);
+    let p = Polyline { vertices: vec![PolyVertex::with_bulge(a, 1e-10), PolyVertex::new(b)], closed: false };
+    assert!((p.len() - 10.0).abs() < 1e-6, "len={}", p.len());
+    let bb = p.bounds();
+    assert!(bb.max.x < 10.001 && bb.max.y < 0.001 && bb.min.y > -0.001, "bounds={bb:?}");
+}
+
+#[test]
 fn polyline_area_and_length() {
     let p = Polyline::from_points(&[Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(4.0, 3.0), Vec2::new(0.0, 3.0)], true);
     assert!(close(p.area(), 12.0));
@@ -320,4 +330,14 @@ fn long_secant_keeps_both_intersections() {
     assert_eq!(hits.len(), 2);
     assert!(hits[0].0.near(Vec2::new(-2.0, 0.0), 1e-8), "{hits:?}");
     assert!(hits[1].0.near(Vec2::new(2.0, 0.0), 1e-8), "{hits:?}");
+}
+
+#[test]
+fn open_polyline_centroid_ignores_last_bulge() {
+    let pts = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0)];
+    let mut pl = Polyline::from_points(&pts, false);
+    let before = pl.centroid().unwrap();
+    pl.vertices[2].bulge = 1.0;
+    let after = pl.centroid().unwrap();
+    assert!(before.near(after, 1e-9), "{before:?} -> {after:?}");
 }
