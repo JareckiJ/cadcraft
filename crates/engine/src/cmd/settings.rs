@@ -47,12 +47,19 @@ pub fn specs() -> Vec<CommandSpec> {
             .enabled(always)
             .noundo()
             .transparent(),
-        CommandSpec::new("dynmode", "Dynamic Input", |s, p| toggle(s, p, |st| &mut st.dynmode, "Dynamic Input"))
-            .key("F12")
-            .params("{on?: bool}")
-            .enabled(always)
-            .noundo()
-            .transparent(),
+        CommandSpec::new("dynmode", "Dynamic Input", |s, p| {
+            let r = toggle(s, p, |st| &mut st.dynmode, "Dynamic Input");
+            // DYNMODE 0 (both inputs off): F12 turns both back on.
+            if s.settings.dynmode && s.settings.dyninput == 0 {
+                s.settings.dyninput = 3;
+            }
+            r
+        })
+        .key("F12")
+        .params("{on?: bool}")
+        .enabled(always)
+        .noundo()
+        .transparent(),
         CommandSpec::new("lwdisplay", "Show/Hide Lineweight", |s, p| toggle(s, p, |st| &mut st.lwdisplay, "Lineweight"))
             .params("{on?: bool}")
             .enabled(always)

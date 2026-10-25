@@ -364,7 +364,14 @@ pub struct Settings {
     pub measureinit: bool,
     /// -VIEW sEttings > Layer snapshot: named views save the layer settings with them.
     pub view_layer_snapshot: bool,
+    /// Dynamic Input on (F12, the sign of DYNMODE).
     pub dynmode: bool,
+    /// What Dynamic Input shows (DYNMODE's magnitude, bits): 1 pointer input, 2 dimension input;
+    /// 3 (default) both.
+    pub dyninput: u8,
+    /// DYNPIVIS: when pointer input shows: 0 once coordinates are typed, 1 (default) when a command
+    /// asks for a point, 2 always, even with no command running.
+    pub dynpivis: u8,
     /// DYNDIGRIP: which dimensions grip dimensional input shows while a grip is stretched (bits:
     /// 1 resulting length, 2 length change, 4 absolute angle, 8 angle change, 16 radius); read
     /// when DYNDIVIS = 2.
@@ -483,6 +490,8 @@ impl Default for Settings {
             measureinit: false,
             view_layer_snapshot: true,
             dynmode: true,
+            dyninput: 3,
+            dynpivis: 1,
             dyndigrip: 31,
             dyndivis: 1,
             dynpi_cartesian: false,
@@ -529,6 +538,19 @@ impl Default for Settings {
             polardist: 0.0,
             auditctl: false,
         }
+    }
+}
+
+impl Settings {
+    /// Dynamic Input shows pointer input: X,Y boxes for a first point, and the boxes for next
+    /// points in the DYNPIFORMAT/DYNPICOORDS format.
+    pub fn dyn_pointer(&self) -> bool {
+        self.dynmode && self.dyninput & 1 != 0
+    }
+    /// Dynamic Input shows dimension input: distance and angle from the last point, grip
+    /// dimensions (DYNDIGRIP, DYNDIVIS) and a distance prompt's length field.
+    pub fn dyn_dimension(&self) -> bool {
+        self.dynmode && self.dyninput & 2 != 0
     }
 }
 

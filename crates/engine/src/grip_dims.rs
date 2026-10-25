@@ -178,10 +178,10 @@ impl Locus {
 }
 
 /// The dimensions to show for the grip the current prompt stretches, in cycle order (Tab), as
-/// DYNDIVIS and DYNDIGRIP ask; empty when no single grip is being stretched or Dynamic Input
+/// DYNDIVIS and DYNDIGRIP ask; empty when no single grip is being stretched or dimension input
 /// is off.
 pub fn grip_dims(s: &Session) -> Vec<GripDim> {
-    if !s.settings.dynmode {
+    if !s.settings.dyn_dimension() {
         return Vec::new();
     }
     let Some((h, i)) = s.current_prompt().and_then(|p| p.grip) else { return Vec::new() };

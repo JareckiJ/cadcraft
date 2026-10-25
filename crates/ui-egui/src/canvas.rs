@@ -2349,12 +2349,33 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool)
             hover
         }
     };
-    let Some(prompt) = app.session.current_prompt() else { return };
+    let st = &app.session.settings;
+    // Live values beside the cursor: pointer input unless DYNPIVIS 0 waits for typing, and
+    // dimension input's distance and angle from the last point.
+    let (pointer_values, dimension_values) = (st.dyn_pointer() && st.dynpivis != 0, st.dyn_dimension());
+    let Some(prompt) = app.session.current_prompt() else {
+        // DYNPIVIS 2: the cursor's coordinates even with no command running.
+        if pointer_values
+            && st.dynpivis == 2
+            && app.cmd.buffer.is_empty()
+            && let Some(c) = app.canvas.cursor
+        {
+            let galley = p.layout_no_wrap(
+                format!("{}, {}", distance_text(&app.session, c.x), distance_text(&app.session, c.y)),
+                crate::theme::small(),
+                Tokens::get().text,
+            );
+            let r = tooltip_frame(p, at, galley.size() + vec2(12.0, 8.0));
+            p.galley(r.min + vec2(6.0, 4.0), galley, Tokens::get().text);
+        }
+        return;
+    };
     // DYNPROMPT = 0: no prompt beside the cursor (the value boxes stay).
-    let show_prompt = app.session.settings.dynprompt;
+    let show_prompt = st.dynprompt;
     let options = show_prompt && !prompt.keywords.is_empty();
     if !fields
         && let Some(f) = crate::cmdline::dyn_frame(app)
+        && crate::cmdline::dyn_values_shown(app, &f)
         && let Some(e) = crate::dyninput::parse(&app.cmd.buffer, &f)
         && let Some(c) = app.canvas.cursor
     {
@@ -2371,14 +2392,14 @@ fn dynamic_input(app: &mut CadApp, p: &egui::Painter, hover: Pos2, fields: bool)
         // The field shows the distance and what is typed.
     } else if !app.cmd.buffer.is_empty() {
         text = format!("{}: {}", crate::i18n::t(&prompt.message), app.cmd.buffer);
-    } else if let (Some(base), Some(c)) = (prompt.base, app.canvas.cursor) {
+    } else if let (Some(base), Some(c), true) = (prompt.base, app.canvas.cursor, pointer_values || dimension_values) {
         text = format!(
             "{}   {}  <  {}°",
             crate::i18n::t(&prompt.message),
             distance_text(&app.session, base.dist(c)),
             (base.angle_to(c).to_degrees() * 10.0).round() / 10.0
         );
-    } else if let Some(c) = app.canvas.cursor {
+    } else if let (Some(c), true) = (app.canvas.cursor, pointer_values) {
         text = format!("{}   {}, {}", crate::i18n::t(&prompt.message), distance_text(&app.session, c.x), distance_text(&app.session, c.y));
     }
     let t = Tokens::get();

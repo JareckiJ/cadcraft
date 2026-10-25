@@ -40,14 +40,27 @@ pub const MAX_LINES: usize = 12;
 const LINE_H: f32 = 16.0;
 
 /// The Dynamic Input frame for the prompt on screen, or `None` when the value boxes are not live
-/// (Dynamic Input off, no point prompt or a pending selection window).
+/// (Dynamic Input off, no point prompt or a pending selection window). A first point takes pointer
+/// input; next points take pointer input or dimension input, which is distance and angle from
+/// the last point whatever DYNPIFORMAT and DYNPICOORDS say.
 pub fn dyn_frame(app: &CadApp) -> Option<crate::dyninput::Frame> {
     let st = &app.session.settings;
-    if !st.dynmode || app.session.pending_window.is_some() {
+    if app.session.pending_window.is_some() {
         return None;
     }
     let p = app.session.current_prompt().filter(cadcraft_engine::pointmod::accepts)?;
-    Some(crate::dyninput::Frame { base: p.base, cartesian: st.dynpi_cartesian, absolute: st.dynpi_absolute })
+    let pointer = st.dyn_pointer();
+    if !pointer && !(p.base.is_some() && st.dyn_dimension()) {
+        return None;
+    }
+    Some(crate::dyninput::Frame { base: p.base, cartesian: pointer && st.dynpi_cartesian, absolute: pointer && st.dynpi_absolute })
+}
+
+/// Whether the value boxes show before anything is typed: DYNPIVIS 0 keeps pointer input out of
+/// sight until coordinates are typed (dimension input shows at once).
+pub fn dyn_values_shown(app: &CadApp, f: &crate::dyninput::Frame) -> bool {
+    let st = &app.session.settings;
+    st.dynpivis != 0 || (f.base.is_some() && st.dyn_dimension()) || !app.cmd.buffer.trim().is_empty()
 }
 
 /// Take Tab away from egui before it moves keyboard focus to the next widget (which would leave
@@ -665,6 +678,42 @@ mod tests {
         assert!(z.lines.is_some_and(|r| canvas.contains_rect(r)));
         assert!(canvas.contains_rect(z.grip));
         assert_eq!(app.ui.history_lines, 12);
+    }
+
+    #[test]
+    fn pointer_and_dimension_input_each_drive_the_value_boxes() {
+        let mut app = CadApp::new(Session::new(), crate::Services::default());
+        let set = |app: &mut CadApp, dynmode: i32| {
+            app.session.settings.dynmode = dynmode > 0;
+            app.session.settings.dyninput = dynmode.unsigned_abs() as u8;
+        };
+        app.session.settings.dynpi_cartesian = true;
+        app.cmdline("line");
+        // A first point takes pointer input only.
+        set(&mut app, 2);
+        assert!(dyn_frame(&app).is_none());
+        set(&mut app, 1);
+        assert!(dyn_frame(&app).is_some_and(|f| f.base.is_none()));
+        app.cmdline("0,0");
+        // Next points: dimension input alone is distance and angle from the last point.
+        set(&mut app, 2);
+        let f = dyn_frame(&app).expect("dimension input at a next point");
+        assert!(f.base.is_some() && !f.cartesian && !f.absolute);
+        set(&mut app, 3);
+        assert!(dyn_frame(&app).is_some_and(|f| f.cartesian), "pointer input keeps DYNPIFORMAT");
+        set(&mut app, -3);
+        assert!(dyn_frame(&app).is_none(), "F12 off");
+        // DYNPIVIS 0: pointer input waits for typing; dimension input shows at once.
+        app.session.settings.dynpivis = 0;
+        set(&mut app, 1);
+        let f = dyn_frame(&app).expect("pointer input");
+        assert!(!dyn_values_shown(&app, &f));
+        app.cmd.buffer = "5".into();
+        assert!(dyn_values_shown(&app, &f));
+        app.cmd.buffer.clear();
+        set(&mut app, 3);
+        let f = dyn_frame(&app).expect("both inputs");
+        assert!(dyn_values_shown(&app, &f));
     }
 
     fn frame(app: &mut CadApp, ctx: &egui::Context, events: Vec<Event>) {

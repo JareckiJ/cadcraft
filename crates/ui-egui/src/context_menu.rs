@@ -267,7 +267,7 @@ pub fn snap_entries(app: &CadApp) -> Vec<Vec<Entry>> {
 /// Run an item of the object snap menu: type its modifier at the prompt, or open the settings.
 pub fn choose_snap(app: &mut CadApp, id: &str) {
     if id == OSNAP_SETTINGS {
-        activate(app, id);
+        app.ui.dialog = Some("dsettings:osnap".into());
     } else {
         app.cmdline(id);
     }

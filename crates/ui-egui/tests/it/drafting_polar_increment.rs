@@ -11,7 +11,7 @@ fn shown_increment(degrees: f64) -> (String, f64, f64) {
     let mut app = CadApp::new(Session::new(), Services::default());
     app.run("setvar", json!({"name": "POLARANG", "value": degrees})).unwrap();
     let stored = app.session.settings.polarang;
-    app.ui.dialog = Some("dsettings".into());
+    app.ui.dialog = Some("dsettings:polar".into());
     let mut h = Harness::builder().with_size(egui::vec2(800.0, 600.0)).build_ui_state(
         |ui, app: &mut CadApp| {
             theme::apply(ui.ctx(), egui::Theme::Dark, false);
