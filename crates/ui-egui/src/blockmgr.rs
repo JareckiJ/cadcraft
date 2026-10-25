@@ -184,6 +184,31 @@ pub fn reference_count(d: &Drawing, name: &str) -> usize {
 /// allowed when building a single palette thumbnail before returning an empty placeholder.
 const MAX_PREVIEW_BUDGET: usize = 8_192;
 
+/// Charge polyline input before bounds traversal clones its vertices, and reserve a conservative
+/// tessellation cost before rendering. Curved segments can emit up to 4097 points at any zoom
+/// (`geom::arc_segments`); wide bands also emit triangles and a centre line. Counting these in
+/// the shared block budget covers nested references and arrays, not just top-level entities.
+fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
+    let cost = match kind {
+        EntityKind::LwPolyline(p) => {
+            if p.vertices.len() > remaining {
+                return None;
+            }
+            let wide = p.const_width > 0.0 || p.vertices.iter().any(|v| v.start_width > 0.0 || v.end_width > 0.0);
+            let segments = if p.closed { p.vertices.len() } else { p.vertices.len().saturating_sub(1) };
+            let mut points = 0usize;
+            for v in p.vertices.iter().take(segments) {
+                points = points.checked_add(if v.bulge == 0.0 { 2 } else { 4097 })?;
+            }
+            let output = points.checked_mul(if wide { 8 } else { 1 })?.div_ceil(8);
+            1usize.checked_add(p.vertices.len())?.checked_add(output)?
+        }
+        EntityKind::Polyline3d(p) => 1usize.checked_add(p.points.len().checked_mul(2)?)?,
+        _ => 1,
+    };
+    (cost <= remaining).then_some(cost)
+}
+
 /// Compute the bounds and expanded entity cost of `block_name` using a shared `budget` and shared
 /// `(block_name, depth)` memoization table across all root and nested references. Returns `None`
 /// when the block is missing or the preview budget is exhausted.
@@ -206,8 +231,9 @@ fn preview_block_bounds(
     let mut bounds = Bounds2::EMPTY;
     let mut total_cost = 0usize;
     for e in b.entities.iter() {
-        *budget = budget.checked_sub(1)?;
-        total_cost = total_cost.saturating_add(1);
+        let cost = preview_entity_cost(&e.kind, *budget)?;
+        *budget = budget.checked_sub(cost)?;
+        total_cost = total_cost.checked_add(cost)?;
         let eb = match &e.kind {
             EntityKind::Insert(ins) => {
                 let copies = (ins.cols.max(1) as usize).saturating_mul(ins.rows.max(1) as usize);
@@ -290,8 +316,9 @@ fn preview_block_bounds(
 }
 
 /// Build the preview of block `name`: its objects as they draw, and their extents.
-/// Shares a single work and output budget (`MAX_PREVIEW_BUDGET`) across bounds calculation and
-/// rendering, returning a bounded placeholder preview if the budget is exhausted.
+/// Preflights entity expansion and polyline geometry before bounds calculation or rendering.
+/// The final output check also limits retained preview size; it is not an allocation guard for
+/// other entity kinds. An exhausted budget produces an empty placeholder, never a partial block.
 fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bounds2)> {
     let b = d.block(name)?;
     let mut budget = MAX_PREVIEW_BUDGET;
@@ -304,7 +331,7 @@ fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bound
     }
     let size = bounds.width().max(bounds.height()).max(1e-9);
     let opts = cadcraft_render::Options { tolerance: size / 500.0, min_dash: size / 300.0, view_height: size, ..Default::default() };
-    let list = cadcraft_render::build_entities(d, b.entities.iter().take(budget).map(|e| &**e), &opts);
+    let list = cadcraft_render::build_entities(d, b.entities.iter().map(|e| &**e), &opts);
     let output_cost = list.expanded.saturating_add(list.prims.len()).saturating_add(list.verts.len() / 8).saturating_add(list.tris.len() / 8);
     if output_cost > budget {
         return Some((cadcraft_render::DisplayList::default(), Bounds2::EMPTY));
@@ -547,6 +574,11 @@ fn draw_block_item(
     resp
 }
 
+/// A double-click's second release must not restart placement begun by its first click.
+fn should_grab(drag: bool, click: bool, double_click: bool, grab_on_click: bool) -> bool {
+    drag || if grab_on_click { click && !double_click } else { double_click }
+}
+
 /// The manager's contents: top filter + view-mode slider/menu, scrollable block grid/list with
 /// visible-only previews, insertion options, and block editing controls.
 fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut PreviewCache, as_panel: bool, act: &mut Option<Act>) {
@@ -646,7 +678,7 @@ fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut Pr
                 if drag {
                     r.ctx.stop_dragging();
                 }
-                if drag || dbl || (click && st.grab_on_click) {
+                if should_grab(drag, click, dbl, st.grab_on_click) {
                     *act = Some(Act::Grab((*n).clone()));
                 }
                 r.on_hover_text(format!("{n}\n{}", crate::tl!("Click or drag to take in hand, then click on the drawing to place")));
@@ -836,7 +868,9 @@ fn cancel_pending_insert(app: &mut CadApp, st: &mut State) {
 /// Do what a button asked; false when the manager window should close (a command takes over).
 fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) -> bool {
     if esc_pressed {
-        st.repeat = false;
+        if st.repeating {
+            st.repeat = false;
+        }
         cancel_pending_insert(app, st);
     } else if st.rename.is_some() {
         cancel_pending_insert(app, st);
@@ -1015,6 +1049,91 @@ mod tests {
     use super::{Preview, PreviewCache, State, ViewMode, grab_block};
     use crate::{CadApp, Services};
 
+    /// Escape in a filter, dialog or unrelated command must preserve the user's preference.
+    #[test]
+    fn unrelated_escape_preserves_repeat_preference() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let mut st = State { repeat: true, ..Default::default() };
+        super::apply(&mut app, &mut st, None, true);
+        assert!(st.repeat);
+        app.session.start("line").unwrap();
+        super::apply(&mut app, &mut st, None, true);
+        assert!(st.repeat);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("line"));
+    }
+
+    /// Feed the first and second click releases as egui reports them, plus drag-only gestures.
+    #[test]
+    fn double_click_grabs_only_once_in_either_mode() {
+        for grab_on_click in [false, true] {
+            let grabs = [(false, true, false), (false, true, true)]
+                .into_iter()
+                .filter(|&(drag, click, dbl)| super::should_grab(drag, click, dbl, grab_on_click))
+                .count();
+            assert_eq!(grabs, 1);
+            assert!(super::should_grab(true, false, false, grab_on_click));
+            assert!(!super::should_grab(false, false, false, grab_on_click));
+        }
+    }
+
+    /// One entity can contain more geometry than thousands of simple entities. Reject it before
+    /// bounds traversal (which itself clones polylines), including through nested block references.
+    #[test]
+    fn oversized_polyline_previews_are_rejected_before_bounds() {
+        use cadcraft_doc::{Block, Drawing, Entity, Handle, LwPolyline, Polyline3d};
+        use cadcraft_geom::PolyVertex;
+        let mut d = Drawing::default();
+        for (name, count, bulge, width) in [("Large", 8193, 0.0, 0.0), ("Curved", 64, 1.0, 0.0), ("Wide", 8, 1.0, 2.0)] {
+            let vertices = (0..count).map(|i| PolyVertex { bulge, ..PolyVertex::new(Vec2::new(f64::from(i), 0.0)) }).collect();
+            let mut block = Block::new(name);
+            block.entities.push(Entity::new(
+                Handle(1),
+                EntityKind::LwPolyline(LwPolyline { vertices, closed: false, const_width: width, elevation: 0.0, plinegen: false }),
+            ));
+            d.blocks.insert(name.into(), Arc::new(block));
+        }
+        let mut block = Block::new("ThreeD");
+        block
+            .entities
+            .push(Entity::new(Handle(2), EntityKind::Polyline3d(Polyline3d { points: vec![cadcraft_geom::Vec3::ZERO; 8193], closed: false })));
+        d.blocks.insert("ThreeD".into(), Arc::new(block));
+        let mut nested = Block::new("Nested");
+        let insert = cadcraft_doc::Insert {
+            block: "Large".into(),
+            insert: cadcraft_geom::Vec3::ZERO,
+            scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: Vec::new(),
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        };
+        nested.entities.push(Entity::new(Handle(4), EntityKind::Insert(insert)));
+        d.blocks.insert("Nested".into(), Arc::new(nested));
+        for name in ["Large", "Curved", "Wide", "ThreeD", "Nested"] {
+            let mut budget = super::MAX_PREVIEW_BUDGET;
+            assert!(super::preview_block_bounds(&d, name, 0, &mut budget, &mut Default::default()).is_none());
+            let (list, bounds) = super::build(&d, name).unwrap();
+            assert!(list.prims.is_empty());
+            assert!(bounds.is_empty());
+        }
+        // A normal-sized polyline still has a visible preview.
+        let mut block = Block::new("Small");
+        block.entities.push(Entity::new(
+            Handle(3),
+            EntityKind::LwPolyline(LwPolyline {
+                vertices: vec![PolyVertex::new(Vec2::ZERO), PolyVertex::new(Vec2::X)],
+                closed: false,
+                const_width: 0.0,
+                elevation: 0.0,
+                plinegen: false,
+            }),
+        ));
+        d.blocks.insert("Small".into(), Arc::new(block));
+        assert!(!super::build(&d, "Small").unwrap().0.prims.is_empty());
+    }
+
     /// Verify block enumeration, reference counting and preview display-list generation.
     #[test]
     fn blocks_list_their_references_and_build_a_preview() {
@@ -1075,10 +1194,7 @@ mod tests {
         let h = c["handle"].as_str().unwrap().to_string();
         app.session.execute("block", &json!({"name": "Valve", "base": [0, 0], "handles": [h], "keep": "delete"})).unwrap();
 
-        let mut st = State::default();
-        st.scale_x = 2.0;
-        st.scale_y = 1.5;
-        st.rotation = 90.0;
+        let st = State { scale_x: 2.0, scale_y: 1.5, rotation: 90.0, ..Default::default() };
         grab_block(&mut app, "Valve", &st);
 
         // The block is now in hand at the insertion point prompt, with live preview under the cursor.
@@ -1142,8 +1258,7 @@ mod tests {
         let h = c["handle"].as_str().unwrap().to_string();
         app.session.execute("block", &json!({"name": "Pin", "base": [0, 0], "handles": [h], "keep": "delete"})).unwrap();
 
-        let mut st = State::default();
-        st.repeat = true;
+        let mut st = State { repeat: true, ..Default::default() };
 
         // Grab "Pin" with Repeat placement enabled.
         super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);

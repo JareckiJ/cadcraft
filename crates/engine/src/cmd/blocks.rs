@@ -949,13 +949,16 @@ mod tests {
         assert!(p.keywords.iter().any(|k| k == "Repeat"));
         assert!(p.keywords.iter().any(|k| k == "NoRepeat"));
 
-        // Enable Repeat from the command line, preset scale and rotation, then place once: INSERT stays running.
+        // Complete a placement and verify Repeat returns INSERT to the insertion-point prompt.
         s.cmdline("Repeat").unwrap();
-        s.cmdline("Scale").unwrap();
-        s.cmdline("1").unwrap();
-        s.cmdline("Rotate").unwrap();
         s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
-        // Now at Rotation prompt (since Rotate was not answered with a number before Point, wait: let's test PresetRotation then Rotation stage).
+        s.input(Input::Enter).unwrap(); // X scale
+        s.input(Input::Enter).unwrap(); // Y scale
+        s.input(Input::Text("0".into())).unwrap(); // Rotation
+        assert_eq!(s.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
+        assert!(s.current_prompt().unwrap().accept.point);
+        assert_eq!(s.current_prompt().unwrap().message, "Specify insertion point");
+        assert_eq!(s.doc().unwrap().model.len(), 1);
         s.cancel();
 
         // Start INSERT, enable Repeat, pick insertion point, then disarm Repeat with NoRepeat during Rotation stage.
