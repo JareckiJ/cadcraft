@@ -986,6 +986,12 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
                     // clear palette tracking only after the engine accepts NoRepeat.
                     st.repeating = false;
                 }
+            } else if st.repeat
+                && app.session.running.as_ref().is_some_and(|r| r.id == "insert")
+                && app.session.input(cadcraft_engine::Input::Keyword("Repeat".into())).is_ok()
+            {
+                // Repeat placement was checked after grabbing the block; arm repeat on the running INSERT.
+                st.repeating = true;
             }
         }
     }
