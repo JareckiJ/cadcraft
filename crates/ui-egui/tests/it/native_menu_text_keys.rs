@@ -29,7 +29,7 @@ fn menu(h: &mut Harness<'_, CadApp>, id: &str) {
     let ctx = h.ctx.clone();
     menus::activate_native(h.state_mut(), &ctx, id);
     let mut raw = egui::RawInput::default();
-    h.state_mut().raw_input_hook(&mut raw);
+    h.state_mut().raw_input_hook(&ctx, &mut raw);
     h.input_mut().events.extend(raw.events);
     h.run_steps(3);
 }
