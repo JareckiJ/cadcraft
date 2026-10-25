@@ -27,6 +27,8 @@ chrono = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+# Tests build the dock area as the desktop app does (headless contexts keep floats in-window).
+craft-ui = { workspace = true, features = ["native-windows"] }
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
 # Validates the canvas WGSL and its GLSL ES 3.0 (WebGL2) translation in tests (same naga wgpu uses).
 naga = { version = "30", features = ["wgsl-in", "glsl-out"] }

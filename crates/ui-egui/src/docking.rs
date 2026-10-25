@@ -334,7 +334,20 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     style.new_dock_zones = true;
     style.drop_edges = Sides::NONE;
     style.title_bar_docks = false;
-    let output = DockArea::new(egui::Id::new("cadcraft-docking")).show_content(ui, &workspace.layout, &style, &mut Panels { app });
+    let area = DockArea::new(egui::Id::new("cadcraft-docking")).input_blocked(native_input_blocked(app, ui.ctx()));
+    let mut output = area.show_content(ui, &workspace.layout, &style, &mut Panels { app });
+    // Keys typed in a floating panel's own OS window run the main window's shortcuts and
+    // command line; files dropped on one open like files dropped on the main window.
+    app.forward_native_input(ui.ctx(), std::mem::take(&mut output.forwarded_events), output.forwarded_modifiers);
+    #[cfg(not(target_arch = "wasm32"))]
+    for files in std::mem::take(&mut output.window_files) {
+        for file in files.dropped {
+            let path = file.path().to_string_lossy().to_string();
+            if !path.is_empty() {
+                app.open_path(&path);
+            }
+        }
+    }
     // Existing panel close buttons and commands still own their visibility switches.
     let rendered = workspace;
     let mut workspace = app.ui.docking.clone();
@@ -355,6 +368,13 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             app.set_status(format!("Panel move was not applied: {error}"));
         }
     }
+}
+
+/// Whether the floating panels' own OS windows ignore input: while a modal dialog is up, since
+/// egui's `Modal` blocks only the main window. egui's modal layer is last frame's; the app's
+/// state covers the frame a modal opens in.
+pub fn native_input_blocked(app: &crate::CadApp, ctx: &egui::Context) -> bool {
+    app.shows_modal() || ctx.memory(|memory| memory.top_modal_layer()).is_some()
 }
 
 /// The panels' contents, names, size limits and icons for the dock area.

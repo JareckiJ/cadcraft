@@ -224,6 +224,12 @@ pub struct CadApp {
     queued_shots: Vec<(u64, f64, u32)>,
     shot_token: u64,
     pub synthetic: Vec<egui::Event>,
+    /// Keys, text and clipboard events a floating panel's own OS window left over, with the
+    /// modifiers held there, for the main window's next input ([`Self::forward_native_input`]).
+    forwarded: Vec<egui::Event>,
+    forwarded_modifiers: Option<egui::Modifiers>,
+    /// The main window's own modifiers, put back the frame after forwarded keys went in.
+    restore_modifiers: Option<egui::Modifiers>,
     /// Caps the frame rate when presenting without vsync (see [`gpu::FrameCap`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub frame_cap: Option<gpu::FrameCap>,
@@ -280,6 +286,9 @@ impl CadApp {
             queued_shots: Vec::new(),
             shot_token: 0,
             synthetic: Vec::new(),
+            forwarded: Vec::new(),
+            forwarded_modifiers: None,
+            restore_modifiers: None,
             #[cfg(not(target_arch = "wasm32"))]
             frame_cap: None,
             fonts_language: None,
@@ -550,6 +559,9 @@ impl CadApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        if self.restore_modifiers.is_some() {
+            ctx.request_repaint();
+        }
         // A long LISP routine runs a slice per frame, so the window stays live (and Esc stops it).
         self.session.lisp_tick();
         if self.session.lisp_busy() {
@@ -613,11 +625,47 @@ impl CadApp {
         }
     }
 
-    /// Wait for the frame cap (if any), then inject synthetic events (one pointer event per frame).
+    /// Queue keys typed in a floating panel's own OS window (craft-ui's
+    /// `DockOutput::forwarded_events` and `forwarded_modifiers`) for the main window's next
+    /// input. egui gives each OS window only its own input, and the shortcuts, the command line
+    /// and the canvas all read the main window's, so the keys go in there as if typed in it.
+    pub fn forward_native_input(&mut self, ctx: &egui::Context, events: Vec<egui::Event>, modifiers: Option<egui::Modifiers>) {
+        if events.is_empty() {
+            return;
+        }
+        self.forwarded.extend(events);
+        if modifiers.is_some() {
+            self.forwarded_modifiers = modifiers;
+        }
+        if self.restore_modifiers.is_none() {
+            self.restore_modifiers = Some(ctx.input(|i| i.modifiers));
+        }
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+
+    /// Whether a modal dialog is up: the "Save changes?" prompt or Drawing Recovery. The
+    /// floating panels' own OS windows take no input meanwhile (egui's `Modal` blocks only the
+    /// main window). The app's other dialogs are ordinary windows that leave the drawing usable.
+    pub fn shows_modal(&self) -> bool {
+        self.close_prompt().is_some() || !self.recovery.items.is_empty()
+    }
+
+    /// Wait for the frame cap (if any), then inject keys forwarded from floating panels' OS
+    /// windows and synthetic events (one pointer event per frame).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(cap) = &mut self.frame_cap {
             cap.wait();
+        }
+        // The forwarded window's modifiers hold for the frame its keys go in (Shift+Copy is
+        // COPYBASE); the next frame puts the main window's back, before its own changes.
+        if !self.forwarded.is_empty() {
+            if let Some(modifiers) = self.forwarded_modifiers.take() {
+                raw.events.push(egui::Event::ModifiersChanged(modifiers));
+            }
+            raw.events.append(&mut self.forwarded);
+        } else if let Some(modifiers) = self.restore_modifiers.take() {
+            raw.events.insert(0, egui::Event::ModifiersChanged(modifiers));
         }
         if self.synthetic.is_empty() {
             return;
