@@ -5,11 +5,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use cadcraft_ui_egui::UiState;
 use serde_json::{Value, json};
 
 const MAX_BYTES: u64 = 64 * 1024;
+/// Dragging a floating window changes its rect every frame; writes (each with an fsync) are
+/// spaced at least this far apart, and the newest state is written when the interval ends.
+const MIN_WRITE_INTERVAL: Duration = Duration::from_millis(500);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub struct Workspace {
@@ -17,6 +21,7 @@ pub struct Workspace {
     last_attempt: Option<Value>,
     read_failed: bool,
     pending_write_error: Option<String>,
+    last_write: Option<Instant>,
 }
 
 fn config_dir_from(platform: &str, get: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
@@ -143,38 +148,47 @@ impl Workspace {
         match result {
             Ok(ui) => {
                 let initial = ui.as_ref().cloned().unwrap_or_default();
-                (Self { path, last_attempt: snapshot(&initial).ok(), read_failed: false, pending_write_error: None }, ui, None)
+                (Self { path, last_attempt: snapshot(&initial).ok(), read_failed: false, pending_write_error: None, last_write: None }, ui, None)
             }
             Err(error) => (
-                Self { path, last_attempt: None, read_failed: true, pending_write_error: None },
+                Self { path, last_attempt: None, read_failed: true, pending_write_error: None, last_write: None },
                 None,
                 Some(format!("Workspace could not be restored; its file was left unchanged. {error}")),
             ),
         }
     }
 
-    pub fn save_if_changed(&mut self, ui: &UiState) -> Result<(), String> {
-        let Some(path) = &self.path else { return Ok(()) };
+    /// Writes `ui` if it differs from the last state written. `Ok(Some(wait))` means a change
+    /// is held back by [`MIN_WRITE_INTERVAL`]; call again after `wait` to write it.
+    pub fn save_if_changed(&mut self, ui: &UiState, now: Instant) -> Result<Option<Duration>, String> {
+        let Some(path) = &self.path else { return Ok(None) };
         if self.read_failed {
             // Preserve a corrupt, oversized or newer-version file until the user repairs it.
-            return Ok(());
+            return Ok(None);
         }
         let value = snapshot(ui)?;
         if self.last_attempt.as_ref() == Some(&value) {
-            return self.pending_write_error.clone().map_or(Ok(()), Err);
+            return self.pending_write_error.clone().map_or(Ok(None), Err);
+        }
+        if let Some(wait) = self.last_write.and_then(|last| MIN_WRITE_INTERVAL.checked_sub(now.saturating_duration_since(last)))
+            && !wait.is_zero()
+        {
+            return Ok(Some(wait));
         }
         // Keep a failed state's warning without retrying disk I/O every rendered frame.
         self.last_attempt = Some(value.clone());
+        self.last_write = Some(now);
         let result = write(path, &value);
         self.pending_write_error = result.as_ref().err().cloned();
-        result
+        result.map(|()| None)
     }
 
     pub fn save_on_exit(&mut self, ui: &UiState) -> Result<(), String> {
         if self.pending_write_error.is_some() {
             self.last_attempt = None;
         }
-        self.save_if_changed(ui)
+        self.last_write = None;
+        self.save_if_changed(ui, Instant::now()).map(|_| ())
     }
 }
 
@@ -223,7 +237,7 @@ mod tests {
             start_tab: true,
             ..Default::default()
         };
-        first.save_if_changed(&ui).unwrap();
+        first.save_if_changed(&ui, Instant::now()).unwrap();
         let bytes = fs::read(&path).unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert!(value["workspace"].get("dialog").is_none());
@@ -236,7 +250,7 @@ mod tests {
         let mut transient_only = ui.clone();
         transient_only.dialog = None;
         transient_only.start_tab = false;
-        first.save_if_changed(&transient_only).unwrap();
+        first.save_if_changed(&transient_only, Instant::now()).unwrap();
         assert_eq!(fs::read(&path).unwrap(), bytes);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -254,7 +268,7 @@ mod tests {
         ui.docking = app.ui.docking;
         ui.docking.set_visible(Panel::ToolSets, false, None, permissions).unwrap();
         ui.show_toolsets = false;
-        store.save_if_changed(&ui).unwrap();
+        store.save_if_changed(&ui, Instant::now()).unwrap();
         let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         assert_eq!(saved["workspace"]["dockingVersion"], json!(LAYOUT_VERSION));
         let (_, reloaded, error) = Workspace::at(Some(path));
@@ -313,7 +327,7 @@ mod tests {
             let (mut store, ui, error) = Workspace::at(Some(path.clone()));
             assert!(ui.is_none());
             assert!(error.as_deref().is_some_and(|error| error.contains("left unchanged")));
-            store.save_if_changed(&UiState { show_palettes: false, ..Default::default() }).unwrap();
+            store.save_if_changed(&UiState { show_palettes: false, ..Default::default() }, Instant::now()).unwrap();
             assert_eq!(fs::read(&path).unwrap(), bytes);
         }
         fs::remove_dir_all(directory).unwrap();
@@ -346,15 +360,40 @@ mod tests {
     }
 
     #[test]
+    fn rapid_changes_are_written_once_per_interval_with_the_newest_state() {
+        let directory = temp_dir();
+        let path = directory.join("workspace.json");
+        let (mut store, _, _) = Workspace::at(Some(path.clone()));
+        let start = Instant::now();
+        let mut ui = UiState { history_lines: 1, ..Default::default() };
+        assert_eq!(store.save_if_changed(&ui, start).unwrap(), None);
+        // A drag: a new state every frame, none of them written until the interval ends.
+        for (frame, lines) in (2..=5).enumerate() {
+            ui.history_lines = lines;
+            let now = start + Duration::from_millis(16 * (frame as u64 + 1));
+            let wait = store.save_if_changed(&ui, now).unwrap();
+            assert_eq!(wait, Some(MIN_WRITE_INTERVAL - (now - start)));
+        }
+        assert_eq!(read(&path).unwrap().unwrap().history_lines, 1);
+        assert_eq!(store.save_if_changed(&ui, start + MIN_WRITE_INTERVAL).unwrap(), None);
+        assert_eq!(read(&path).unwrap().unwrap().history_lines, 5);
+        ui.history_lines = 6;
+        assert!(store.save_if_changed(&ui, start + MIN_WRITE_INTERVAL).unwrap().is_some());
+        store.save_on_exit(&ui).unwrap();
+        assert_eq!(read(&path).unwrap().unwrap().history_lines, 6);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn invalid_update_cannot_replace_last_good_workspace() {
         let directory = temp_dir();
         let path = directory.join("workspace.json");
         let (mut store, _, _) = Workspace::at(Some(path.clone()));
         let mut ui = UiState { show_palettes: false, ..Default::default() };
-        store.save_if_changed(&ui).unwrap();
+        store.save_if_changed(&ui, Instant::now()).unwrap();
         let good = fs::read(&path).unwrap();
         ui.collapsed_groups = vec!["x".repeat(257)];
-        assert!(store.save_if_changed(&ui).is_err());
+        assert!(store.save_if_changed(&ui, Instant::now()).is_err());
         assert_eq!(fs::read(&path).unwrap(), good);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -367,9 +406,9 @@ mod tests {
         // Simulate a destination becoming unavailable after startup.
         fs::create_dir(&path).unwrap();
         let ui = UiState { show_palettes: false, ..Default::default() };
-        let first_error = store.save_if_changed(&ui).unwrap_err();
+        let first_error = store.save_if_changed(&ui, Instant::now()).unwrap_err();
         fs::remove_dir(&path).unwrap();
-        assert_eq!(store.save_if_changed(&ui).unwrap_err(), first_error);
+        assert_eq!(store.save_if_changed(&ui, Instant::now()).unwrap_err(), first_error);
         assert!(!path.exists(), "ordinary frames must not retry disk writes");
         store.save_on_exit(&ui).unwrap();
         assert!(!read(&path).unwrap().unwrap().show_palettes);

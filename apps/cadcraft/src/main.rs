@@ -42,8 +42,16 @@ struct App {
 }
 
 impl App {
-    fn persist_workspace(&mut self, final_attempt: bool) {
-        let result = if final_attempt { self.workspace.save_on_exit(&self.cad.ui) } else { self.workspace.save_if_changed(&self.cad.ui) };
+    /// `ctx` is `None` only for the final attempt at exit.
+    fn persist_workspace(&mut self, ctx: Option<&egui::Context>) {
+        let result = match ctx {
+            None => self.workspace.save_on_exit(&self.cad.ui),
+            Some(ctx) => self.workspace.save_if_changed(&self.cad.ui, std::time::Instant::now()).map(|wait| {
+                if let Some(wait) = wait {
+                    ctx.request_repaint_after(wait);
+                }
+            }),
+        };
         if let Err(error) = result {
             if self.workspace_error.as_ref() != Some(&error) {
                 eprintln!("CADCraft workspace: {error}");
@@ -78,7 +86,7 @@ impl eframe::App for App {
         self.cad.system_animations = self.system_animations.current();
         self.cad.logic(ctx);
         self.spacemouse.poll(&mut self.cad, ctx);
-        self.persist_workspace(false);
+        self.persist_workspace(Some(ctx));
         if std::mem::take(&mut self.cad.quit_requested) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -90,12 +98,12 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.cad.ui(ui);
-        self.persist_workspace(false);
+        self.persist_workspace(Some(ui.ctx()));
     }
     /// A normal exit: the workspace is saved, and this run's autosave files are not needed (a
     /// crash leaves them for recovery).
     fn on_exit(&mut self) {
-        self.persist_workspace(true);
+        self.persist_workspace(None);
         self.cad.shutdown_autosave();
     }
     /// Preferences (the interface theme) survive restarts; window and egui state are not kept.
