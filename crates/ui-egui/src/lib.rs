@@ -37,6 +37,7 @@ pub mod icons;
 pub mod layers;
 pub mod managers;
 pub mod menus;
+pub mod modal;
 pub mod opening;
 pub mod options;
 pub mod palettes;
