@@ -69,8 +69,9 @@ saving (--save OUT.dxf|OUT.dwg):
   --save-version V         the file version: R12, 2000, 2004, 2007, 2010, 2013 or 2018
                            (default: the drawing's own). R12 is a reduced copy: the notes say
                            what became what.
-  --docfa                  R12 DXF for the Italian cadastre's DOCFA (model space, blocks
-                           exploded, no hatches, colours on DOCFA_POLIGONI polygons, ASCII).
+  --docfa                  the Italian cadastre's DOCFA profile (model space, blocks exploded,
+                           no hatches, colours on DOCFA_POLIGONI polygons, ASCII, metres): R12 DXF
+                           by default, DXF 2000/2004 with --save-version, DWG 2000 for OUT.dwg.
   --unit m|cm|mm           with --docfa: the drawing's unit (the file is in metres).
 
 image framing (png 2400x1600, svg, pdf; always model space):
@@ -259,8 +260,12 @@ fn export_framed(s: &Session, out: &str, window: Option<Bounds2>) -> Result<(), 
 /// `--save` with a version, the DOCFA profile or a unit: the file as `saveas` writes it, with
 /// the notes of what an R12 file (a reduced copy) converts or leaves out.
 fn save_with(s: &Session, out: &str, opts: &cadcraft_io::SaveOptions) -> Result<(), String> {
-    if (opts.docfa || opts.scale.is_some()) && !out.to_ascii_lowercase().ends_with(".dxf") {
-        return Err("--docfa and --unit write an R12 DXF file: --save OUT.dxf".into());
+    let lower = out.to_ascii_lowercase();
+    if opts.docfa && !(lower.ends_with(".dxf") || lower.ends_with(".dwg")) {
+        return Err("--docfa writes a DXF or DWG file: --save OUT.dxf or OUT.dwg".into());
+    }
+    if opts.scale.is_some() && !opts.docfa && !lower.ends_with(".dxf") {
+        return Err("--unit applies to --docfa and to R12 DXF files (--save-version R12 --save OUT.dxf)".into());
     }
     let d = s.doc().map_err(|e| e.to_string())?;
     let bytes = cadcraft_io::write_with(d, out, opts).map_err(|e| e.to_string())?;
@@ -912,6 +917,26 @@ mod tests {
 
     fn b(x0: f64, y0: f64, x1: f64, y1: f64) -> Bounds2 {
         Bounds2::new(Vec2::new(x0, y0), Vec2::new(x1, y1))
+    }
+
+    /// `--save` with the DOCFA profile writes R12 DXF, DXF 2000 and DWG 2000, and refuses the rest.
+    #[test]
+    fn save_with_docfa_takes_dxf_and_dwg() {
+        let s = sample_session();
+        let dir = std::env::temp_dir().join(format!("cadcraft-cli-docfa-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let docfa = cadcraft_io::SaveOptions { docfa: true, scale: Some(0.001), ..Default::default() };
+        let (dxf, dwg, dxf2000) = (path("a.dxf"), path("a.dwg"), path("b.dxf"));
+        save_with(&s, &dxf, &docfa).unwrap();
+        assert!(std::fs::read_to_string(&dxf).unwrap().contains("AC1009"), "R12 DXF by default");
+        save_with(&s, &dwg, &docfa).unwrap();
+        assert!(std::fs::read(&dwg).unwrap().starts_with(b"AC1015"), "DWG 2000");
+        save_with(&s, &dxf2000, &cadcraft_io::SaveOptions { version: Some(cadcraft_io::Version::R2000), ..docfa }).unwrap();
+        assert!(std::fs::read_to_string(&dxf2000).unwrap().contains("AC1015"), "DXF 2000");
+        assert!(save_with(&s, &path("a.svg"), &docfa).is_err());
+        assert!(save_with(&s, &path("a.png"), &cadcraft_io::SaveOptions { scale: Some(0.5), ..Default::default() }).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn sample_session() -> Session {

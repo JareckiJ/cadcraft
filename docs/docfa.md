@@ -35,7 +35,8 @@ reduction, then the normal DXF/DWG writers), so they keep exact arcs and polylin
   or `export {"path": "plan-docfa.dxf", "docfa": true, "unit": "cm"}`. `scale` takes a number
   instead of `unit` (drawing units × scale = metres). The result's `notes` and the command line
   say what was converted or left out.
-- **Headless:** `cadcraft-cli run plan.dwg --save plan-docfa.dxf --docfa --unit cm`.
+- **Headless:** `cadcraft-cli run plan.dwg --save plan-docfa.dxf --docfa --unit cm` (R12 DXF);
+  add `--save-version 2000` for DXF 2000, or `--save plan-docfa.dwg` for DWG 2000.
 - **Plain R12** (other legacy readers, no DOCFA rules): the same places with version **R12**
   instead of the profile: `saveas {"path": "plan.dxf", "version": "R12"}`, the dialog's version
   list, `--save-version R12`.
