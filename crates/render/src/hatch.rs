@@ -22,6 +22,17 @@ fn is_set(cancel: Option<&AtomicBool>) -> bool {
 }
 
 pub(super) fn draw(b: &mut Builder, ctx: &Ctx, e: &Entity, h: &Hatch, rgb: Ink, lw: f32, tol: f64) {
+    if b.opts.hatch_boundaries_only {
+        // No island comparisons, triangulation, gradient subdivision or pattern expansion.
+        for boundary in &h.loops {
+            if b.opts.cancelled() {
+                return;
+            }
+            let points = Polyline { vertices: boundary.vertices.clone(), closed: true }.tessellate(tol);
+            b.polyline(ctx, rgb, lw, &points);
+        }
+        return;
+    }
     let loops = fill_loops(h, tol);
     // Gradient and background colours given ByLayer follow the hatch's own layer.
     let layer = if e.common.layer == "0" { ctx.block_layer.as_deref().unwrap_or("0") } else { e.common.layer.as_str() };

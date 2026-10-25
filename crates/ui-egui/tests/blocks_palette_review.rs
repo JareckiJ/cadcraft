@@ -66,3 +66,49 @@ fn selection_menu_click_cannot_place_a_block_when_insert_starts() {
         h.render().unwrap().save(dir.join("blocks-palette.png")).unwrap();
     }
 }
+
+/// Hatched blocks remain visible in the palette instead of empty placeholders.
+#[test]
+fn hatched_blocks_have_visible_palette_previews() {
+    use cadcraft_engine::doc::{Block, Drawing, Entity, EntityKind, Handle, Hatch, HatchLoop};
+    use std::sync::Arc;
+    let mut drawing = Drawing::default();
+    for (index, (name, solid, curved)) in
+        [("Solid hatch", true, false), ("Pattern hatch", false, false), ("Curved hatch", true, true)].into_iter().enumerate()
+    {
+        let mut hatch: Hatch =
+            serde_json::from_value(json!({"pattern": if solid { "SOLID" } else { "ANSI31" }, "solid": solid, "loops": []})).unwrap();
+        let mut vertices: Vec<_> = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]
+            .into_iter()
+            .map(cadcraft_geom::PolyVertex::new)
+            .collect();
+        if curved {
+            vertices[0].bulge = 1.0;
+        }
+        hatch.loops.push(HatchLoop { vertices, outer: true, sources: Vec::new() });
+        let mut block = Block::new(name);
+        block.entities.push(Entity::new(Handle(index as u64 + 1), EntityKind::Hatch(hatch)));
+        drawing.blocks.insert(name.into(), Arc::new(block));
+    }
+    let mut session = Session::empty();
+    session.open_drawing(drawing, "Hatch previews", None);
+    let mut app = CadApp::new(session, Services::default());
+    app.ui.blocks_window = true;
+    app.start("insert");
+    let shots = std::env::var_os("CADCRAFT_BLOCK_SHOTS").map(std::path::PathBuf::from);
+    let builder = Harness::builder().with_size(vec2(1000.0, 760.0));
+    let builder = if shots.is_some() { builder.wgpu() } else { builder };
+    let mut h = builder.build_ui_state(
+        |ui, app: &mut CadApp| {
+            cadcraft_ui_egui::theme::apply(ui.ctx(), egui::Theme::Dark, false);
+            cadcraft_ui_egui::dialogs::show(app, ui.ctx());
+        },
+        app,
+    );
+    h.run_steps(5);
+    assert_eq!(cadcraft_ui_egui::blockmgr::cached_preview_count(&h.ctx), 3);
+    if let Some(dir) = shots {
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(dir.join("hatched-block-previews.png")).unwrap();
+    }
+}

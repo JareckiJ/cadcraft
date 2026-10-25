@@ -345,6 +345,7 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         min_dash: 2f64.powi(lod_band) * 2.0,
         text: true,
         fill: true,
+        hatch_boundaries_only: false,
         lineweights: lwdisplay,
         view_height: st.paper_view().height,
         plot_style_table: None,
@@ -506,6 +507,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             min_dash: 2f64.powi(band) * 2.0,
             text: true,
             fill: true,
+            hatch_boundaries_only: false,
             lineweights: lwdisplay,
             view_height: st.paper_view().height,
             plot_style_table: None,
@@ -1578,7 +1580,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
             for pos in earlier {
-                if !rect.contains(*pos) || over_canvas_menu(app, *pos) || ui.ctx().layer_id_at(*pos) != Some(ui.layer_id()) {
+                if !rect.contains(*pos)
+                    || over_canvas_menu(app, *pos)
+                    || over_navigation_control(app, rect, *pos)
+                    || ui.ctx().layer_id_at(*pos) != Some(ui.layer_id())
+                {
                     continue;
                 }
                 let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
@@ -2206,6 +2212,19 @@ fn cycle_badge(p: &egui::Painter, at: Pos2) {
         p.rect_filled(r, 1.0, t.cmd_bg);
         p.rect_stroke(r, 1.0, Stroke::new(1.0, t.text), egui::StrokeKind::Inside);
     }
+}
+
+/// Earlier releases in a batched frame cannot use `Response::hovered()` (it describes
+/// only the final pointer position). Reuse the exact navigation widget hit rectangles.
+fn over_navigation_control(app: &CadApp, rect: Rect, p: Pos2) -> bool {
+    if app.ui.show_ucs_icon && crate::viewcube::ucs_arms(rect).iter().any(|r| r.contains(p)) {
+        return true;
+    }
+    if app.ui.show_viewcube && app.canvas.list.as_ref().is_none_or(|l| l.sheet.is_none()) {
+        let layout = crate::viewcube::Layout::new(rect);
+        return layout.bounds.contains(p) || layout.pill.contains(p);
+    }
+    false
 }
 
 /// Whether `p` lies on a menu the canvas paints itself — the selection cycling list's rows or the

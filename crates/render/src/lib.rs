@@ -206,6 +206,9 @@ pub struct Options {
     pub text: bool,
     /// Highlighted (selected) handles are not special here; the canvas overlays them.
     pub fill: bool,
+    /// Draw hatch boundaries instead of generating fills, gradients or pattern lines.
+    /// Useful for lightweight thumbnails; callers still bound boundary input/tessellation.
+    pub hatch_boundaries_only: bool,
     pub lineweights: bool,
     /// Height of the visible area in world units of the space being built. Relative point
     /// sizes (`PDSIZE` <= 0) are a percentage of it; 0 = the height of the space's extents.
@@ -242,6 +245,7 @@ impl Default for Options {
             min_dash: 0.0,
             text: true,
             fill: true,
+            hatch_boundaries_only: false,
             lineweights: false,
             view_height: 0.0,
             plot_style_table: None,

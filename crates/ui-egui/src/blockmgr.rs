@@ -207,11 +207,29 @@ fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
             let output = points.checked_mul(if wide { 8 } else { 1 })?.div_ceil(8);
             1usize.checked_add(p.vertices.len())?.checked_add(output)?
         }
-        // Hatch rendering clones/tessellates boundaries and generates fills/patterns before
-        // returning output. Its renderer limits exceed the thumbnail budget. Until that path
-        // accepts this budget, reject hatches before even computing bounds, including nested
-        // blocks. A placeholder preserves insertion/editing without automatic expensive work.
-        EntityKind::Hatch(_) => return None,
+        EntityKind::Hatch(h) => {
+            // Preview rendering draws boundaries only. Charge loops, cloned input vertices
+            // and worst-case curve tessellation before bounds or rendering touch them.
+            let mut cost = 1usize.checked_add(h.loops.len())?;
+            if cost > remaining {
+                return None;
+            }
+            for boundary in &h.loops {
+                cost = cost.checked_add(boundary.vertices.len())?;
+                if cost > remaining {
+                    return None;
+                }
+                let mut points = 1usize;
+                for vertex in &boundary.vertices {
+                    points = points.checked_add(if vertex.bulge == 0.0 { 2 } else { 4097 })?;
+                }
+                cost = cost.checked_add(points.div_ceil(8))?;
+                if cost > remaining {
+                    return None;
+                }
+            }
+            cost
+        }
         EntityKind::Polyline3d(p) => 1usize.checked_add(p.points.len().checked_mul(2)?)?,
         _ => 1,
     };
@@ -325,7 +343,7 @@ fn preview_block_bounds(
 }
 
 /// Build the preview of block `name`: its objects as they draw, and their extents.
-/// Preflights entity expansion and polyline geometry, and rejects hatch previews before bounds or rendering.
+/// Preflights entity expansion, polylines and hatch boundaries before bounds or rendering.
 /// The final output check also limits retained preview size; it is not an allocation guard for
 /// other entity kinds. An exhausted budget produces an empty placeholder, never a partial block.
 fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bounds2)> {
@@ -339,7 +357,13 @@ fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bound
         return Some((cadcraft_render::DisplayList::default(), bounds));
     }
     let size = bounds.width().max(bounds.height()).max(1e-9);
-    let opts = cadcraft_render::Options { tolerance: size / 500.0, min_dash: size / 300.0, view_height: size, ..Default::default() };
+    let opts = cadcraft_render::Options {
+        tolerance: size / 500.0,
+        min_dash: size / 300.0,
+        view_height: size,
+        hatch_boundaries_only: true,
+        ..Default::default()
+    };
     let list = cadcraft_render::build_entities(d, b.entities.iter().map(|e| &**e), &opts);
     let output_cost = list.expanded.saturating_add(list.prims.len()).saturating_add(list.verts.len() / 8).saturating_add(list.tris.len() / 8);
     if output_cost > budget {
@@ -774,17 +798,17 @@ fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut Pr
         ui.horizontal(|ui| {
             ui.checkbox(&mut st.prompt_scale, crate::tl!("Scale")).on_hover_text(crate::tl!("Specify scale on screen when placing"));
             ui.add_enabled_ui(!st.prompt_scale, |ui| {
-                ui.label("X:");
-                ui.add(egui::DragValue::new(&mut st.scale_x).speed(0.05).range(0.0001..=1e6));
-                ui.label("Y:");
-                ui.add(egui::DragValue::new(&mut st.scale_y).speed(0.05).range(0.0001..=1e6));
+                let x_label = ui.label("X:");
+                ui.add(egui::DragValue::new(&mut st.scale_x).speed(0.05).range(0.0001..=1e6)).labelled_by(x_label.id);
+                let y_label = ui.label("Y:");
+                ui.add(egui::DragValue::new(&mut st.scale_y).speed(0.05).range(0.0001..=1e6)).labelled_by(y_label.id);
             });
         });
         ui.horizontal(|ui| {
             ui.checkbox(&mut st.prompt_rotation, crate::tl!("Rotation")).on_hover_text(crate::tl!("Specify rotation angle on screen when placing"));
             ui.add_enabled_ui(!st.prompt_rotation, |ui| {
-                ui.label(crate::tl!("Angle"));
-                ui.add(egui::DragValue::new(&mut st.rotation).speed(1.0).range(-360.0..=360.0));
+                let angle_label = ui.label(crate::tl!("Angle"));
+                ui.add(egui::DragValue::new(&mut st.rotation).speed(1.0).range(-360.0..=360.0)).labelled_by(angle_label.id);
             });
         });
         ui.horizontal_wrapped(|ui| {
@@ -1118,9 +1142,9 @@ mod tests {
         assert!(cache.references.is_none());
     }
 
-    /// Reject automatic hatch work before bounds/tessellation, even through nested references.
+    /// Reject oversized hatch boundaries before bounds/tessellation, including nested references.
     #[test]
-    fn hatch_previews_use_placeholders_before_expensive_processing() {
+    fn oversized_hatch_previews_use_placeholders_before_expensive_processing() {
         use cadcraft_doc::{Block, Drawing, Entity, Handle, Hatch, HatchLoop};
         let mut d = Drawing::default();
         let mut hatch: Hatch = serde_json::from_value(json!({"pattern": "SOLID", "solid": true, "loops": []})).unwrap();
@@ -1143,6 +1167,35 @@ mod tests {
             assert!(list.prims.is_empty());
             assert!(bounds.is_empty());
         }
+    }
+
+    /// Ordinary hatches retain visible previews; only their expensive fill generation is skipped.
+    #[test]
+    fn ordinary_hatches_keep_visible_boundary_previews() {
+        use cadcraft_doc::{Block, Drawing, Entity, Handle, Hatch};
+        let mut d = Drawing::default();
+        for (name, solid, bulge) in [("Solid", true, 0.0), ("Pattern", false, 0.0), ("Curved", true, 1.0)] {
+            let mut hatch: Hatch = serde_json::from_value(json!({
+                "pattern": if solid { "SOLID" } else { "ANSI31" }, "solid": solid,
+                "loops": []
+            }))
+            .unwrap();
+            let mut vertices: Vec<_> = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]
+                .into_iter()
+                .map(cadcraft_geom::PolyVertex::new)
+                .collect();
+            vertices[0].bulge = bulge;
+            hatch.loops.push(cadcraft_doc::HatchLoop { vertices, outer: true, sources: Vec::new() });
+            let mut b = Block::new(name);
+            b.entities.push(Entity::new(Handle(1), EntityKind::Hatch(hatch)));
+            d.blocks.insert(name.into(), Arc::new(b));
+            let (list, bounds) = super::build(&d, name).unwrap();
+            assert!(!bounds.is_empty(), "{name}");
+            assert!(!list.prims.is_empty(), "{name}");
+            assert!(list.tris.is_empty(), "no fill generation in thumbnails");
+        }
+        let normal = cadcraft_render::build_entities(&d, d.block("Solid").unwrap().entities.iter().map(|e| &**e), &Default::default());
+        assert!(!normal.tris.is_empty(), "normal canvas rendering still fills hatches");
     }
 
     /// Escape in a filter, dialog or unrelated command must preserve the user's preference.

@@ -161,7 +161,7 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 | Tool Sets palette (Drafting, Modeling, … with flyouts) | yes | yes for 2D groups |
 | Properties Inspector, Quick Properties | yes | yes (every control acts or is visibly unavailable, #182); block references show read-only Position X/Y/Z from their stored insertion point; coordinate editing is still missing |
 | Layer Properties Manager (filters, states, VP overrides) | yes | yes |
-| Blocks palette, Content | yes | Docked/floating Blocks palette with list and icon views, click/drag insertion and repeat placement (#2122). Escape outside placement preserves the repeat preference; double-click starts insertion once. Clicks on disappearing canvas menus do not place blocks. Programmatic INSERT stays in the engine; block names and reference counts are cached by drawing/revision/selection. Oversized polylines and blocks containing hatches use empty thumbnail placeholders before bounds/rendering; hatches await a renderer with a shared work budget. Other geometry still relies on renderer limits. |
+| Blocks palette, Content | yes | Docked/floating Blocks palette with list and icon views, click/drag insertion and repeat placement (#2122). Escape outside placement preserves the repeat preference; double-click starts insertion once. Clicks on disappearing canvas menus do not place blocks; batched clicks also exclude visible ViewCube/WCS and UCS icon targets. Programmatic INSERT stays in the engine; block names and reference counts are cached by drawing/revision/selection. Hatch thumbnails show bounded contours without expensive fills or patterns; ordinary hatched blocks keep their previews. Oversized polyline/hatch boundaries use empty placeholders before bounds/rendering. Other geometry still relies on renderer limits. |
 | Status bar toggles | ~25 | most toggles; Annotation Visibility and Workspace do nothing |
 | ViewCube | interactive 3D | clickable for 2D (Top/Home → extents); dragging does nothing (#7) |
 | Navigation bar, SteeringWheels | yes | no |
@@ -203,6 +203,8 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-25 | minor | Restore hatched-block thumbnails using bounded contours; retain full hatch fills/patterns in normal canvas and exports (#2122) |
+| 2026-10-25 | minor | Batched canvas clicks respect visible ViewCube/WCS and UCS icon targets, including earlier releases in one frame; hidden controls do not reserve drawing space (#2122) |
 | 2026-10-25 | minor | Blocks palette: separate interactive INSERT from JSON dispatch, consume clicks on disappearing canvas menus, cache names/reference counts, and reject automatic hatch previews before expensive processing (#2122) |
 | 2026-10-25 | minor | Blocks palette: preserve repeat preference on unrelated Escape, avoid double-click restart, and preflight polyline vertex/tessellation costs before preview bounds and rendering (#2122) |
 | 2026-10-22 | minor | Polyline segment midpoint grips use rectangles, distinct from square vertex grips, with matching hover and pick bounds (#1950) |
