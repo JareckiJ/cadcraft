@@ -109,7 +109,7 @@ pub struct Suggestion {
 }
 
 /// Matching command names/aliases for AutoComplete.
-fn suggestions(prefix: &str) -> Vec<Suggestion> {
+pub(crate) fn suggestions(prefix: &str) -> Vec<Suggestion> {
     if prefix.is_empty() || prefix.contains(' ') {
         return Vec::new();
     }
@@ -492,12 +492,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
             }
         }
     }
-    let g = p.layout_no_wrap(app.cmd.buffer.clone(), font, t.text);
+    // Typed beside the cursor (Dynamic Input), the command line stays empty.
+    let at_cursor = crate::canvas::command_tip_shown(app);
+    let g = p.layout_no_wrap(if at_cursor { String::new() } else { app.cmd.buffer.clone() }, font, t.text);
     let gw = g.size().x;
     p.galley(pos2(x, bar.center().y - g.size().y / 2.0), g, t.text);
     // Caret.
     let blink = (ui.input(|i| i.time) * 2.0).floor() as i64 % 2 == 0;
-    if blink {
+    if blink && !at_cursor {
         p.line_segment([pos2(x + gw + 1.0, bar.top() + 5.0), pos2(x + gw + 1.0, bar.bottom() - 5.0)], Stroke::new(1.0, t.text));
     }
     // History chevron.
@@ -508,7 +510,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
         false,
     );
     // AutoComplete list.
-    if !app.session.prompting() {
+    if !app.session.prompting() && !at_cursor {
         let sug = suggestions(&app.cmd.buffer);
         if !sug.is_empty() {
             let rh = 20.0;
@@ -570,7 +572,7 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let top = window.or(lines).map_or(bar.top(), |r| r.top());
     let grip = Rect::from_min_max(pos2(bar.left(), top - 3.0), pos2(bar.right(), top + 3.0));
     let mut all = bar.union(grip);
-    if !app.session.prompting() {
+    if !app.session.prompting() && !crate::canvas::command_tip_shown(app) {
         let k = suggestions(&app.cmd.buffer).len();
         if k > 0 {
             let above = if n == 0 { 0.0 } else { LINE_H * n as f32 + 6.0 };
