@@ -41,6 +41,8 @@ pub(crate) const MAX_PLOT_STYLE_NAMES: usize = 100_000;
 
 /// Caps for hostile input.
 pub(crate) const MAX_XDATA_ITEMS: usize = 4096;
+/// Maximum encoded byte size for an extended data record (AutoCAD limits xdata to 16 KB).
+pub(crate) const MAX_XDATA_BYTES: usize = 16_384;
 pub(crate) const MAX_PAYLOAD: usize = 64 << 20;
 pub(crate) const MAX_CONSTRAINTS: usize = 1_000_000;
 pub(crate) const MAX_LAYER_STATES: usize = 100_000;
@@ -501,10 +503,20 @@ pub(crate) fn marks_xdata(m: &cadcraft_doc::DimMarks) -> Vec<Tag> {
     }
     // Put the relationship first: an inspection label may itself be "BREAKAUTO".
     let mut out = Vec::new();
-    if let Some(a) = &m.auto_break {
-        out.extend([Tag::s(1000, "BREAKAUTO"), Tag::s(1002, "{"), Tag::f(1040, a.size)]);
-        out.extend(a.objects.iter().take(cadcraft_doc::MAX_DIM_BREAK_OBJECTS).map(|h| Tag::s(1005, h.hex())));
-        out.push(Tag::s(1002, "}"));
+    if let Some(a) = &m.auto_break
+        && a.objects.len() <= cadcraft_doc::MAX_DIM_BREAK_OBJECTS
+    {
+        let hex_handles: Vec<String> = a.objects.iter().map(|h| h.hex()).collect();
+        // Encoded byte size against AutoCAD's 16 KB xdata limit. In binary DXF / AutoCAD xdata:
+        // 2-byte group code, 8-byte real, string length + 1 (null terminator).
+        // Fixed tags: 1000 "BREAKAUTO" (12 B), 1002 "{" (4 B), 1040 size (10 B), 1002 "}" (4 B) = 30 B.
+        // Each 1005 handle string: 2 (code) + hex.len() + 1 (null) = 3 + hex.len() bytes.
+        let encoded_size = 30 + hex_handles.iter().map(|h| 3 + h.len()).sum::<usize>();
+        if encoded_size <= MAX_XDATA_BYTES {
+            out.extend([Tag::s(1000, "BREAKAUTO"), Tag::s(1002, "{"), Tag::f(1040, a.size)]);
+            out.extend(hex_handles.into_iter().map(|h| Tag::s(1005, h)));
+            out.push(Tag::s(1002, "}"));
+        }
     }
     if !v.is_empty() {
         out.extend([Tag::s(1000, "MARKS"), Tag::s(1002, "{")]);

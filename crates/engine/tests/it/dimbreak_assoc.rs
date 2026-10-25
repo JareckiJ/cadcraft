@@ -317,3 +317,66 @@ fn sources_in_other_spaces_and_legacy_gaps_do_not_get_followed() {
     s.execute("setvar", &json!({ "name": "DIMSCALE", "value": 2 })).unwrap();
     assert_eq!(dim(&s, h).marks.breaks.len(), 1);
 }
+
+#[test]
+fn array_and_explode_remap_auto_break_handles() {
+    let mut s = Session::new();
+    let h = linear(&mut s);
+    let source = line(&mut s, 4.0);
+    auto(&mut s, h, source);
+    assert_gap(&s, h, 4.0, 3.0);
+
+    // Stage 1: Make an associative array: 1 row, 2 cols, colSpacing 20.
+    let arr = s.execute("arrayrect", &json!({ "handles": [h.hex(), source.hex()], "rows": 1, "cols": 2, "colSpacing": 20.0 })).unwrap();
+    assert_eq!(arr["associative"], true);
+    let arr_h = Handle::parse_hex(arr["handle"].as_str().unwrap()).unwrap();
+
+    // Verify stage 1: in the source block, the dimension's auto_break object was remapped
+    // to the cloned line handle inside the source block.
+    let src_line_handle = {
+        let d = s.doc().unwrap();
+        let p = d.array_params(d.entity(arr_h).unwrap()).unwrap();
+        let src_blk = d.block(&p.source).unwrap();
+        let src_line = src_blk.entities.iter().find(|e| matches!(e.kind, EntityKind::Line(_))).unwrap();
+        let src_dim = src_blk
+            .entities
+            .iter()
+            .find_map(|e| match &e.kind {
+                EntityKind::Dimension(dm) => Some(dm),
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(src_line.handle, source);
+        assert_eq!(src_dim.marks.auto_break.as_ref().unwrap().objects, vec![src_line.handle]);
+        src_line.handle
+    };
+
+    // Stage 2: Explode the array into top-level entities.
+    let exp = s.execute("explode", &json!({ "handles": [arr_h.hex()] })).unwrap();
+    let new_hs: Vec<Handle> = exp["handles"].as_array().unwrap().iter().map(|v| Handle::parse_hex(v.as_str().unwrap()).unwrap()).collect();
+    assert_eq!(new_hs.len(), 4); // 2 items * 2 entities
+
+    // Filter into dimensions and lines in model space.
+    let (dim_hs, line_hs) = {
+        let d = s.doc().unwrap();
+        let dims: Vec<Handle> = new_hs.iter().copied().filter(|h| matches!(&d.entity(*h).unwrap().kind, EntityKind::Dimension(_))).collect();
+        let lines: Vec<Handle> = new_hs.iter().copied().filter(|h| matches!(&d.entity(*h).unwrap().kind, EntityKind::Line(_))).collect();
+        (dims, lines)
+    };
+    assert_eq!(dim_hs.len(), 2);
+    assert_eq!(line_hs.len(), 2);
+
+    for (dim_h, line_h) in dim_hs.iter().zip(line_hs.iter()) {
+        let dm = dim(&s, *dim_h);
+        assert_ne!(dm.marks.auto_break.as_ref().unwrap().objects, vec![source]);
+        assert_ne!(dm.marks.auto_break.as_ref().unwrap().objects, vec![src_line_handle]);
+        assert_eq!(dm.marks.auto_break.as_ref().unwrap().objects, vec![*line_h]);
+    }
+
+    // Both exploded dimensions have their gaps active.
+    let gap0_x = dim(&s, dim_hs[0]).marks.breaks[0].at.x;
+    let gap1_x = dim(&s, dim_hs[1]).marks.breaks[0].at.x;
+    assert!((gap0_x - 4.0).abs() < 1e-9 || (gap0_x - 24.0).abs() < 1e-9);
+    assert!((gap1_x - 4.0).abs() < 1e-9 || (gap1_x - 24.0).abs() < 1e-9);
+    assert!((gap0_x - gap1_x).abs() > 10.0);
+}

@@ -124,3 +124,28 @@ fn automatic_break_source_input_is_bounded_and_bad_handles_are_skipped() {
     let back = read_dxf(oversized.as_bytes()).unwrap();
     assert_eq!(marks_of(&back)[0].auto_break.as_ref().unwrap().objects.len(), cadcraft_doc::MAX_DIM_BREAK_OBJECTS);
 }
+
+#[test]
+fn automatic_break_xdata_is_omitted_when_oversized_or_exceeding_byte_limit() {
+    let mut d = Drawing::new_imperial();
+    // Exceeds MAX_DIM_BREAK_OBJECTS: entire BREAKAUTO record must be omitted.
+    let too_many_objects: Vec<Handle> = (0..=cadcraft_doc::MAX_DIM_BREAK_OBJECTS).map(|i| Handle(i as u64 + 1)).collect();
+    let m = DimMarks { auto_break: Some(AutoDimBreak { objects: too_many_objects, size: 0.5 }), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    assert!(!text.contains("BREAKAUTO"), "oversized object list must omit BREAKAUTO entirely");
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert!(marks_of(&back)[0].auto_break.is_none());
+
+    // Exceeds 16 KB xdata limit even when objects.len() <= MAX_DIM_BREAK_OBJECTS:
+    // 3000 handles with 5 hex digits each: 30 + 3000 * (3 + 5) = 24,030 bytes > 16,384 bytes.
+    let mut d2 = Drawing::new_imperial();
+    let large_xdata_objects: Vec<Handle> = (0x10000..0x10BB8).map(Handle).collect();
+    assert!(large_xdata_objects.len() <= cadcraft_doc::MAX_DIM_BREAK_OBJECTS);
+    let m2 = DimMarks { auto_break: Some(AutoDimBreak { objects: large_xdata_objects, size: 0.5 }), ..Default::default() };
+    d2.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m2)).unwrap();
+    let text2 = write_dxf(&d2);
+    assert!(!text2.contains("BREAKAUTO"), "xdata exceeding 16 KB limit must omit BREAKAUTO entirely");
+    let back2 = read_dxf(text2.as_bytes()).unwrap();
+    assert!(marks_of(&back2)[0].auto_break.is_none());
+}

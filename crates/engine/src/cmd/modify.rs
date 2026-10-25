@@ -1499,15 +1499,52 @@ pub(crate) fn explode_with(
         let own_pieces = !matches!(e.kind, EntityKind::Insert(_));
         let d = s.doc_mut()?;
         d.remove_entity(*h);
+        let mut item_remap: std::collections::HashMap<Handle, Handle> = std::collections::HashMap::new();
+        let mut item_entities: Vec<Entity> = Vec::new();
+
+        let push_item =
+            |entities: &mut Vec<Entity>, remap: &std::collections::HashMap<Handle, Handle>, d: &mut cadcraft_doc::Drawing, out: &mut Vec<Handle>| {
+                for mut e in entities.drain(..) {
+                    if let EntityKind::Dimension(dm) = &mut e.kind
+                        && let Some(a) = &mut dm.marks.auto_break
+                    {
+                        for source in &mut a.objects {
+                            if let Some(new_h) = remap.get(source) {
+                                *source = *new_h;
+                            }
+                        }
+                    }
+                    out.push(e.handle);
+                    if let Some(st) = d.space_mut(&space) {
+                        st.push(e);
+                    }
+                }
+            };
+
         for mut p in parts {
             if own_pieces {
                 p.common.xdata.clear();
+                p.handle = d.new_handle();
+                out.push(p.handle);
+                if let Some(st) = d.space_mut(&space) {
+                    st.push(p);
+                }
+                continue;
             }
-            p.handle = d.new_handle();
-            out.push(p.handle);
-            if let Some(st) = d.space_mut(&space) {
-                st.push(p);
+            let src_h = p.handle;
+            if src_h.0 != 0 && item_remap.contains_key(&src_h) {
+                push_item(&mut item_entities, &item_remap, d, &mut out);
+                item_remap.clear();
             }
+            let new_h = d.new_handle();
+            p.handle = new_h;
+            if src_h.0 != 0 {
+                item_remap.insert(src_h, new_h);
+            }
+            item_entities.push(p);
+        }
+        if !item_entities.is_empty() {
+            push_item(&mut item_entities, &item_remap, d, &mut out);
         }
     }
     s.set_selection(Vec::new());
