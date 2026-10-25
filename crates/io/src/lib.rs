@@ -17,6 +17,7 @@ pub mod pdf;
 pub mod plotter;
 pub mod svg;
 mod svg_read;
+pub mod winprint;
 
 /// Multilines and their styles (MLINE, MLINESTYLE).
 mod dxf_mline;

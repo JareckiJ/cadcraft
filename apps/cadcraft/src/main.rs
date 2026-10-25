@@ -135,6 +135,12 @@ pub fn install_io() {
         list: cadcraft_io::cups::printers,
         print: |j| cadcraft_io::cups::print(j.printer, j.paper, j.copies, j.title, j.pdf),
     });
+    // System printers: the Windows spooler.
+    #[cfg(windows)]
+    cadcraft_engine::cmd::plotters::set_system_printers(cadcraft_engine::cmd::plotters::SystemPrinters {
+        list: cadcraft_io::winprint::printers,
+        print: |j| cadcraft_io::winprint::print(j.printer, j.paper, j.copies, j.title, j.pdf),
+    });
     // AutoLISP's entget, entmake and entmod see entities as DXF groups.
     cadcraft_engine::cmd::file::set_entity_codec(cadcraft_engine::cmd::file::EntityCodec {
         groups: cadcraft_io::entity_groups,
