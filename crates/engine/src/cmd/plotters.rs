@@ -177,10 +177,11 @@ fn system_printers() -> Vec<PlotterConfig> {
             let list = h.list;
             let spawned = std::thread::Builder::new().name("system-printers".into()).spawn(move || {
                 let found: Vec<PlotterConfig> = list().into_iter().filter(|p| p.system && !is_builtin(&p.name)).collect();
+                // Only the latest listing writes: one given up and finishing after a newer one
+                // started would put an older list back.
                 let mut c = printer_cache();
-                (c.list, c.at, c.hung) = (found, Some(std::time::Instant::now()), false);
                 if c.listing == Some(started) {
-                    c.listing = None;
+                    (c.list, c.at, c.hung, c.listing) = (found, Some(std::time::Instant::now()), false, None);
                 }
             });
             if spawned.is_err() {
