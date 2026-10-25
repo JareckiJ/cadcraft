@@ -485,12 +485,10 @@ impl CadApp {
             lisp_ide::load_path_into_ide(self, path);
             return;
         }
-        // A LISP file (dropped on the window): loaded as APPLOAD loads it.
+        // A LISP file (dropped on the window or picked via APPLOAD / Open): load via IDE so
+        // its `c:` commands appear on the command line, in Up/Down history, and in the floating menu.
         if is_lisp_file(path) {
-            match cadcraft_engine::lisp::builtins::read_text_file(path) {
-                Some(text) => self.load_lisp(path, &text),
-                None => self.open_failed(format!("APPLOAD: can't read {path}")),
-            }
+            lisp_ide::load_path_into_ide(self, path);
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -522,8 +520,22 @@ impl CadApp {
     /// Load a LISP file: its routine runs and may wait for the user (APPLOAD typed or from the
     /// menu runs this way too).
     fn load_lisp(&mut self, name: &str, text: &str) {
-        if let Err(e) = self.session.lisp_load(name, text, false) {
-            self.session.echo(e.to_string());
+        let cmds = lisp_ide::extract_c_commands(text);
+        match self.session.lisp_load(name, text, false) {
+            Ok(Some(Ok(_))) | Ok(None) => {
+                for cmd in &cmds {
+                    self.cmd.push_history(cmd);
+                }
+                if !cmds.is_empty() {
+                    self.session.echo(format!("Loaded {name} — Commands: {}", cmds.join(", ")));
+                }
+            }
+            Ok(Some(Err(e))) => {
+                self.session.echo(e);
+            }
+            Err(e) => {
+                self.session.echo(e.to_string());
+            }
         }
     }
 
