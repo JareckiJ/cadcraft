@@ -1238,7 +1238,8 @@ pub(crate) fn current_preview(app: &CadApp) -> Result<(Value, String), String> {
     let d = app.session.doc().map_err(|e| e.to_string())?;
     let target = app.session.layout_space().tab_name().to_string();
     let page = plot_page(d, &target);
-    let st = PlotState { generation: 0, page, sheets: vec![target.clone()], target, window: [0.0; 4], center: true, offset_mm: [0.0, 0.0], copies: 1 };
+    let st =
+        PlotState { generation: 0, page, sheets: vec![target.clone()], target, window: [0.0; 4], center: true, offset_mm: [0.0, 0.0], copies: 1 };
     Ok((plot_params(&st, Some(preview_dpi(&st.page))), plot_caption(&st)))
 }
 
