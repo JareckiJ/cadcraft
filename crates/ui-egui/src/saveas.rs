@@ -127,7 +127,7 @@ pub fn open(app: &mut CadApp) {
 
 /// `path` with the chosen type's extension: kept when the picker gave it (any case), added
 /// otherwise (`plan.dwg` saved as DXF is `plan.dwg.dxf`), so the type chosen is the type written.
-fn with_extension(path: &str, ext: &str) -> String {
+pub(crate) fn with_extension(path: &str, ext: &str) -> String {
     let has = std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
     if has { path.to_string() } else { format!("{path}.{ext}") }
 }

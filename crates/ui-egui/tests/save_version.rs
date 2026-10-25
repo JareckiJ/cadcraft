@@ -37,6 +37,16 @@ fn default_save_version_applies_to_new_drawings_and_persists() {
     assert_eq!(std::fs::read(picked()).unwrap(), b"2010|false");
     let _ = std::fs::remove_file(picked());
 
+    // QSAVE of an untitled drawing (the picker alone): a name picked with another extension
+    // gets the default format's, so DXF is what is written.
+    let dwg = std::env::temp_dir().join(format!("cadcraft-ui-save-version-{}.dwg", std::process::id()));
+    let services = Services { pick_save: Some(Box::new(move |_: &str| Some(dwg.to_string_lossy().to_string()))), ..Services::default() };
+    let mut untitled = CadApp::new(Session::new(), services);
+    untitled.start("qsave");
+    let written = std::env::temp_dir().join(format!("cadcraft-ui-save-version-{}.dwg.dxf", std::process::id()));
+    assert!(written.exists(), "saved as {written:?}");
+    let _ = std::fs::remove_file(&written);
+
     // Menu items, preferences (bad values ignored) and resetting the palettes.
     app.start("ui.saveversion.2004");
     assert_eq!(app.ui.save_version, "2004");
