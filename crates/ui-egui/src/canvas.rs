@@ -2214,24 +2214,14 @@ fn cycle_badge(p: &egui::Painter, at: Pos2) {
     }
 }
 
-/// The sheet of paper the current layout tab is configured with, if any.
-fn current_sheet(app: &CadApp) -> Option<cadcraft_render::paper::Sheet> {
-    match app.session.layout_space() {
-        cadcraft_doc::Space::Paper(ref name) => {
-            let st = app.session.state().ok()?;
-            cadcraft_render::paper::sheet(&st.doc, name)
-        }
-        cadcraft_doc::Space::Model => None,
-    }
-}
-
 /// Earlier releases in a batched frame cannot use `Response::hovered()` (it describes
 /// only the final pointer position). Reuse the exact navigation widget hit rectangles.
 fn over_navigation_control(app: &CadApp, rect: Rect, p: Pos2) -> bool {
     if app.ui.show_ucs_icon && crate::viewcube::ucs_arms(rect).iter().any(|r| r.contains(p)) {
         return true;
     }
-    if app.ui.show_viewcube && current_sheet(app).is_none() {
+    let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
+    if app.ui.show_viewcube && sheet.is_none() {
         let layout = crate::viewcube::Layout::new(rect);
         return layout.bounds.contains(p) || layout.pill.contains(p);
     }
@@ -3039,7 +3029,7 @@ mod hatch_pick_tests {
     }
 
     #[test]
-    fn navigation_control_hit_test_follows_layout_space_not_stale_list() {
+    fn navigation_control_hit_test_matches_displayed_viewcube() {
         use cadcraft_geom::Bounds2;
         use cadcraft_render::DisplayList;
         use egui::{Pos2, Rect, vec2};
@@ -3052,10 +3042,8 @@ mod hatch_pick_tests {
         app.canvas.list = None;
         assert!(super::over_navigation_control(&app, rect, p));
 
-        app.session.execute("layout.set", &json!({ "name": "Layout1" })).unwrap();
-        assert!(!super::over_navigation_control(&app, rect, p));
-
-        app.session.execute("layout.set", &json!({ "name": "Model" })).unwrap();
+        // When the display list holds a paper sheet (before or during layout rebuild),
+        // the ViewCube is not displayed, so clicks on bare canvas are not discarded.
         app.canvas.list = Some(DisplayList {
             sheet: Some(cadcraft_render::paper::Sheet {
                 size: Vec2::new(100.0, 100.0),
@@ -3064,6 +3052,10 @@ mod hatch_pick_tests {
             }),
             ..Default::default()
         });
+        assert!(!super::over_navigation_control(&app, rect, p));
+
+        // Model space display list without a sheet: ViewCube is displayed and hit-tested.
+        app.canvas.list = Some(DisplayList::default());
         assert!(super::over_navigation_control(&app, rect, p));
     }
 }

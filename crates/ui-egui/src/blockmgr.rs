@@ -247,6 +247,15 @@ fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
             let output = w.boundary.len().checked_mul(4)?.div_ceil(8);
             1usize.checked_add(w.boundary.len())?.checked_add(output)?
         }
+        EntityKind::MLeader(m) => {
+            let leaders = m.leaders.iter().try_fold(0usize, |cost, line| {
+                let points = line.len().checked_add(1)?;
+                let rendered_points = if m.spline && points > 2 { 4_000 } else { points };
+                cost.checked_add(points)?.checked_add(rendered_points.div_ceil(8))
+            })?;
+            let text = m.text.as_ref().map_or(0, |t| t.contents.len());
+            1usize.checked_add(leaders)?.checked_add(text)?
+        }
         _ => 1,
     };
     (cost <= remaining).then_some(cost)
@@ -1408,6 +1417,18 @@ mod tests {
             .entities
             .push(Entity::new(Handle(1), EntityKind::Line(Line { a: cadcraft_geom::Vec3::ZERO, b: cadcraft_geom::Vec3::new(5.0, 5.0, 0.0) })));
         d.blocks.insert("Target".into(), Arc::new(target));
+
+        let oversized_mleader_lines = EntityKind::MLeader(MLeader {
+            leaders: vec![vec![cadcraft_geom::Vec3::ZERO; super::MAX_PREVIEW_BUDGET + 1]],
+            landing: cadcraft_geom::Vec3::ZERO,
+            dogleg: 0.0,
+            text: None,
+            style: "STANDARD".into(),
+            arrow_size: 1.0,
+            spline: false,
+            block: None,
+        });
+        assert!(super::preview_entity_cost(&oversized_mleader_lines, super::MAX_PREVIEW_BUDGET).is_none());
 
         let oversized_mleader = EntityKind::MLeader(MLeader {
             leaders: vec![vec![cadcraft_geom::Vec3::ZERO, cadcraft_geom::Vec3::new(10.0, 0.0, 0.0)]],
