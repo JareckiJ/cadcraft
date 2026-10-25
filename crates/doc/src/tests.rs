@@ -581,3 +581,14 @@ fn space_names_its_tab() {
     assert_eq!(p.layout(), Some("Sheet A"));
     assert_eq!(p.tab_name(), "Sheet A");
 }
+
+#[test]
+fn auto_dim_break_remap_handles() {
+    let mut a = AutoDimBreak { objects: vec![Handle(1), Handle(2), Handle(3)], size: 0.5 };
+    a.remap_handles(|h| match h.0 {
+        1 => Some(Handle(10)),
+        2 => Some(Handle(20)),
+        _ => None,
+    });
+    assert_eq!(a.objects, vec![Handle(10), Handle(20), Handle(3)]);
+}

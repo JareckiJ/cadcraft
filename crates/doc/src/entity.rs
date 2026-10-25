@@ -653,6 +653,17 @@ pub struct AutoDimBreak {
     pub size: f64,
 }
 
+impl AutoDimBreak {
+    /// Remap source handles using `remap`, leaving unmapped handles unchanged.
+    pub fn remap_handles(&mut self, mut remap: impl FnMut(Handle) -> Option<Handle>) {
+        for source in &mut self.objects {
+            if let Some(new_h) = remap(*source) {
+                *source = new_h;
+            }
+        }
+    }
+}
+
 /// Most source objects retained by one automatic dimension break (including file input).
 pub const MAX_DIM_BREAK_OBJECTS: usize = 20_000;
 

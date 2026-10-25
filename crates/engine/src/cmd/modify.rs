@@ -132,11 +132,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
                 if let EntityKind::Dimension(dm) = &mut e.kind
                     && let Some(a) = &mut dm.marks.auto_break
                 {
-                    for source in &mut a.objects {
-                        if let Some(copy) = copies.get(source) {
-                            *source = *copy;
-                        }
-                    }
+                    a.remap_handles(|h| copies.get(&h).copied());
                 }
             })?;
         }
@@ -1508,11 +1504,7 @@ pub(crate) fn explode_with(
                     if let EntityKind::Dimension(dm) = &mut e.kind
                         && let Some(a) = &mut dm.marks.auto_break
                     {
-                        for source in &mut a.objects {
-                            if let Some(new_h) = remap.get(source) {
-                                *source = *new_h;
-                            }
-                        }
+                        a.remap_handles(|h| remap.get(&h).copied());
                     }
                     out.push(e.handle);
                     if let Some(st) = d.space_mut(&space) {

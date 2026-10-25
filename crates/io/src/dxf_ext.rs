@@ -476,6 +476,21 @@ pub(crate) fn arclen_xdata(center: cadcraft_geom::Vec3) -> Vec<Tag> {
     vec![Tag::s(1000, "ARCLEN"), Tag::s(1002, "{"), Tag::f(1010, center.x), Tag::f(1020, center.y), Tag::f(1030, center.z), Tag::s(1002, "}")]
 }
 
+/// Encoded byte length of an extended data tag in AutoCAD binary xdata (2-byte group code
+/// followed by the type-specific binary value).
+pub(crate) fn encoded_len(t: &Tag) -> usize {
+    use cadcraft_dxf::{Kind, kind_of};
+    match kind_of(t.code) {
+        Kind::Str => 2 + t.str().len() + 1,
+        Kind::Real => 2 + 8,
+        Kind::Int16 => 2 + 2,
+        Kind::Int32 => 2 + 4,
+        Kind::Int64 => 2 + 8,
+        Kind::Bool => 2 + 1,
+        Kind::Hex => 2 + 1 + (t.str().len() / 2),
+    }
+}
+
 /// Dimension marks as CADCraft xdata (`1000 MARKS`, `1002 {`, items, `1002 }`): `1000 JOGLINE`
 /// and a point; `1000 JOGGED`, the centre and the jog point; `1000 BREAK`, a point, `1040` size
 /// and `1070` auto; `1000 INSPECT`, `1070` shape, `1000` label and `1000` rate. Points are
@@ -501,18 +516,33 @@ pub(crate) fn marks_xdata(m: &cadcraft_doc::DimMarks) -> Vec<Tag> {
     if let Some(i) = &m.inspect {
         v.extend([Tag::s(1000, "INSPECT"), Tag::i(1070, i64::from(i.shape)), Tag::s(1000, i.label.clone()), Tag::s(1000, i.rate.clone())]);
     }
+
+    // Encoded byte size of other xdata on the entity: application header (1001 CADCRAFT)
+    // plus the MARKS record (1000 MARKS, 1002 {, tags in v, 1002 }) if non-empty.
+    let other_len = encoded_len(&Tag::s(1001, APP))
+        + if v.is_empty() {
+            0
+        } else {
+            encoded_len(&Tag::s(1000, "MARKS"))
+                + encoded_len(&Tag::s(1002, "{"))
+                + v.iter().map(encoded_len).sum::<usize>()
+                + encoded_len(&Tag::s(1002, "}"))
+        };
+
     // Put the relationship first: an inspection label may itself be "BREAKAUTO".
     let mut out = Vec::new();
     if let Some(a) = &m.auto_break
         && a.objects.len() <= cadcraft_doc::MAX_DIM_BREAK_OBJECTS
     {
         let hex_handles: Vec<String> = a.objects.iter().map(|h| h.hex()).collect();
-        // Encoded byte size against AutoCAD's 16 KB xdata limit. In binary DXF / AutoCAD xdata:
-        // 2-byte group code, 8-byte real, string length + 1 (null terminator).
-        // Fixed tags: 1000 "BREAKAUTO" (12 B), 1002 "{" (4 B), 1040 size (10 B), 1002 "}" (4 B) = 30 B.
-        // Each 1005 handle string: 2 (code) + hex.len() + 1 (null) = 3 + hex.len() bytes.
-        let encoded_size = 30 + hex_handles.iter().map(|h| 3 + h.len()).sum::<usize>();
-        if encoded_size <= MAX_XDATA_BYTES {
+        let breakauto_fixed_len = encoded_len(&Tag::s(1000, "BREAKAUTO"))
+            + encoded_len(&Tag::s(1002, "{"))
+            + encoded_len(&Tag::f(1040, a.size))
+            + encoded_len(&Tag::s(1002, "}"));
+        let breakauto_handles_len: usize = hex_handles.iter().map(|h| encoded_len(&Tag::s(1005, h))).sum();
+        let breakauto_len = breakauto_fixed_len + breakauto_handles_len;
+
+        if breakauto_len + other_len <= MAX_XDATA_BYTES {
             out.extend([Tag::s(1000, "BREAKAUTO"), Tag::s(1002, "{"), Tag::f(1040, a.size)]);
             out.extend(hex_handles.into_iter().map(|h| Tag::s(1005, h)));
             out.push(Tag::s(1002, "}"));

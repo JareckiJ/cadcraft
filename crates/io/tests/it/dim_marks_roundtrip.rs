@@ -148,4 +148,18 @@ fn automatic_break_xdata_is_omitted_when_oversized_or_exceeding_byte_limit() {
     assert!(!text2.contains("BREAKAUTO"), "xdata exceeding 16 KB limit must omit BREAKAUTO entirely");
     let back2 = read_dxf(text2.as_bytes()).unwrap();
     assert!(marks_of(&back2)[0].auto_break.is_none());
+
+    // BREAKAUTO alone fits, but BREAKAUTO + MARKS + app header exceeds 16 KB:
+    // BREAKAUTO is omitted, MARKS is preserved.
+    let mut d3 = Drawing::new_imperial();
+    let near_limit_objects: Vec<Handle> = (0x10000..0x107F8).map(Handle).collect();
+    let breaks = vec![DimBreak { at: Vec3::ZERO, size: 0.5, auto: false }; 5];
+    let m3 = DimMarks { auto_break: Some(AutoDimBreak { objects: near_limit_objects, size: 0.5 }), breaks, ..Default::default() };
+    d3.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m3)).unwrap();
+    let text3 = write_dxf(&d3);
+    assert!(!text3.contains("BREAKAUTO"), "combined xdata exceeding 16 KB must omit BREAKAUTO");
+    assert!(text3.contains("MARKS"), "MARKS must be preserved even when BREAKAUTO is omitted");
+    let back3 = read_dxf(text3.as_bytes()).unwrap();
+    assert!(marks_of(&back3)[0].auto_break.is_none());
+    assert_eq!(marks_of(&back3)[0].breaks.len(), 5);
 }

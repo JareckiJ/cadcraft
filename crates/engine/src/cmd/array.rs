@@ -138,11 +138,7 @@ pub(crate) fn make_assoc(s: &mut Session, objs: &[Handle], base: Vec2, mut p: Ar
         if let EntityKind::Dimension(dm) = &mut e.kind
             && let Some(a) = &mut dm.marks.auto_break
         {
-            for source in &mut a.objects {
-                if let Some(src_h) = orig_to_src.get(source) {
-                    *source = *src_h;
-                }
-            }
+            a.remap_handles(|h| orig_to_src.get(&h).copied());
         }
         src.entities.push(e);
     }
