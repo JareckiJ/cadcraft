@@ -28,6 +28,9 @@ chrono = { workspace = true }
 image = { workspace = true }
 web-time = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+craft-update = { workspace = true }
+
 [dev-dependencies]
 # Tests build the dock area as the desktop app does (headless contexts keep floats in-window).
 craft-ui = { workspace = true, features = ["native-windows"] }
