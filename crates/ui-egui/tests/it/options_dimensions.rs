@@ -141,3 +141,24 @@ fn the_dimensions_and_all_settings_tabs_render() {
         assert!(text.contains(want), "{want}: {text}");
     }
 }
+
+#[test]
+fn the_all_settings_tab_lists_the_interface_state_and_set_ui_state_checks_it() {
+    let mut a = app();
+    // Filtered to the toolbar, the tab shows the interface state's row.
+    a.ui.dialog = Some("options:advanced".into());
+    let ctx = egui::Context::default();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("cc_options_advanced_filter"), "toolbar".to_string()));
+    let text = render(&mut a, &ctx);
+    for want in ["Interface state", "showToolbar"] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    // The same call changes it, and a bad value or an invalid layout changes nothing.
+    assert!(a.ui.show_toolbar);
+    let patch = json!({ "showToolbar": false });
+    a.set_ui_state(patch.as_object().unwrap()).unwrap();
+    assert!(!a.ui.show_toolbar);
+    let bad = json!({ "showToolbar": "maybe" });
+    assert!(a.set_ui_state(bad.as_object().unwrap()).is_err());
+    assert!(!a.ui.show_toolbar, "a refused value leaves the state as it was");
+}

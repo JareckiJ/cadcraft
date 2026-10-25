@@ -84,7 +84,20 @@ fn set_error(ui: &egui::Ui, text: Option<String>) {
     });
 }
 
-pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, Value>) {
+/// Interface state fields the All settings tab leaves alone: the open dialog and the panel layout
+/// (their own commands and dialogs change them).
+const INTERFACE_SKIPPED: [&str; 2] = ["dialog", "docking"];
+
+/// The interface state (`ui.set` fields) that the options JSON form does not report already.
+fn interface_state(app: &CadApp, report: &Map<String, Value>) -> Map<String, Value> {
+    match serde_json::to_value(&app.ui) {
+        Ok(Value::Object(m)) => m.into_iter().filter(|(k, _)| !report.contains_key(k) && !INTERFACE_SKIPPED.contains(&k.as_str())).collect(),
+        _ => Map::new(),
+    }
+}
+
+/// `edits` go through the `options` call; `ui_edits` through [`CadApp::set_ui_state`].
+pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, Value>, ui_edits: &mut Map<String, Value>) {
     let t = Tokens::get();
     let report = match super::report(app) {
         Value::Object(m) => m,
@@ -99,9 +112,10 @@ pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, 
         if ui.add(egui::TextEdit::singleline(&mut filter).desired_width(180.0)).changed() {
             ui.data_mut(|d| d.insert_temp(egui::Id::new(FILTER), filter.clone()));
         }
-        ui.label(RichText::new(crate::tf!("{n} settings", n = report.len())).small().color(t.text_dim));
+        ui.label(RichText::new(crate::tf!("{n} settings", n = report.len() + interface_state(app, &report).len())).small().color(t.text_dim));
     });
     let needle = filter.trim().to_ascii_lowercase();
+    let interface = interface_state(app, &report);
     ui.add_space(4.0);
     egui::ScrollArea::vertical().id_salt("options_advanced").max_height(250.0).auto_shrink([false, true]).show(ui, |ui| {
         super::dialog::grid(ui, "options_advanced_grid", |ui| {
@@ -112,6 +126,17 @@ pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, 
                 ui.label(RichText::new(key).monospace());
                 row(ui, key, value, edits);
                 ui.end_row();
+            }
+            let shown: Vec<_> = interface.iter().filter(|(k, _)| needle.is_empty() || k.to_ascii_lowercase().contains(&needle)).collect();
+            if !shown.is_empty() {
+                ui.label(RichText::new(crate::tl!("Interface state")).strong());
+                ui.label(RichText::new(crate::tl!("Panels, toolbars and recent files")).small().color(t.text_dim));
+                ui.end_row();
+                for (key, value) in shown {
+                    ui.label(RichText::new(key).monospace());
+                    row(ui, key, value, ui_edits);
+                    ui.end_row();
+                }
             }
         });
     });

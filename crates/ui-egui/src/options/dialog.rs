@@ -32,6 +32,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     let mut changes = Map::new();
     // The All settings tab's edits run apart, so a refused value is shown in the tab.
     let mut edits = Map::new();
+    let mut ui_edits = Map::new();
     let mut next_tab = None;
     let mut start = None;
     let mut close = false;
@@ -59,7 +60,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
                 "files" => files(app, ui, &mut changes),
                 "drafting" => drafting(app, ui, &mut changes, &mut start),
                 "dimensions" => super::dimensions::dimensions(app, ui, &mut changes),
-                "advanced" => super::advanced::advanced(app, ui, &mut edits),
+                "advanced" => super::advanced::advanced(app, ui, &mut edits, &mut ui_edits),
                 "selection" => selection(app, ui, &mut changes),
                 "preferences" => preferences(app, ui, &mut changes),
                 "profiles" => profiles(app, ui, &mut changes),
@@ -85,6 +86,16 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     }
     if !changes.is_empty() {
         let _ = app.run("options", Value::Object(changes));
+    }
+    if !ui_edits.is_empty() {
+        let result = app.set_ui_state(&ui_edits);
+        let error = egui::Id::new(super::advanced::ERROR);
+        ctx.data_mut(|d| match result {
+            Ok(()) => d.remove::<String>(error),
+            Err(e) => {
+                d.insert_temp(error, e);
+            }
+        });
     }
     if !edits.is_empty() {
         let error = egui::Id::new(super::advanced::ERROR);
