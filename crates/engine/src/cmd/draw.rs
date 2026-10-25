@@ -741,7 +741,7 @@ struct CircleM {
     mode: u8, // 0 center-radius, 1 = 3P, 2 = 2P, 3 = TTR
     pts: Vec<Vec2>,
     /// 3P: the circle or arc each point was picked on with a tangent snap, by point.
-    tans: Vec<Option<Circle>>,
+    tans: Vec<Option<snap::SnapCurve>>,
     diameter: bool,
     /// The `Ttr` option hands over to the tangent-circle machine.
     delegate: Option<Box<dyn Interactive>>,
@@ -834,12 +834,7 @@ impl Interactive for CircleM {
             }
             // 3P: a point picked with a tangent snap makes the circle tangent to that curve (#1512).
             Input::Deferred(d) if self.mode == 1 => {
-                let tan = match d.curve {
-                    snap::SnapCurve::Circle { center, radius } | snap::SnapCurve::Arc { center, radius, .. } if d.mode == snap::mode::TAN => {
-                        Some(Circle::new(center, radius))
-                    }
-                    _ => None,
-                };
+                let tan = (d.mode == snap::mode::TAN && !matches!(d.curve, snap::SnapCurve::Line { .. })).then_some(d.curve);
                 self.tans.resize(self.pts.len(), None);
                 self.tans.push(tan);
                 self.input(s, Input::Point(d.at))
@@ -908,9 +903,19 @@ impl CircleM {
         if self.tans.iter().all(Option::is_none) {
             return Circle::from_3_points(a, b, c);
         }
-        // A plain point is a circle of radius zero to pass through.
-        let obj = |i: usize, p: Vec2| (super::curves::TanObj::Circle(self.tans.get(i).copied().flatten().unwrap_or(Circle::new(p, 0.0))), p);
-        super::curves::ttt([obj(0, a), obj(1, b), obj(2, c)])
+        let tan = |i: usize| self.tans.get(i).copied().flatten();
+        // A plain point is a circle of radius zero to pass through; an arc is solved as its circle.
+        let target = |i: usize, p: Vec2| {
+            let circle = match tan(i) {
+                Some(snap::SnapCurve::Circle { center, radius } | snap::SnapCurve::Arc { center, radius, .. }) => Circle::new(center, radius),
+                _ => Circle::new(p, 0.0),
+            };
+            super::curves::TanObj::Circle(circle)
+        };
+        let pts = [a, b, c];
+        let found = super::curves::ttt([(target(0, a), a), (target(1, b), b), (target(2, c), c)])?;
+        // The circle must touch an arc within its sweep, not elsewhere on the arc's circle.
+        pts.iter().enumerate().all(|(i, p)| tan(i).is_none_or(|t| t.contains(target(i, *p).touch(&found)))).then_some(found)
     }
 }
 

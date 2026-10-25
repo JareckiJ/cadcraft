@@ -202,9 +202,9 @@ fn prim_segments(p: &Prim) -> Vec<Segment> {
 /// Tangent and perpendicular snaps need the base point (the other end of the line). With no
 /// base and `deferred` set (the prompt says it can resolve them, `Prompt.deferred`),
 /// they snap as *deferred*: the hit carries the curve and is resolved once the other end is
-/// known. With a base and `deferred` set, tangents are deferred too (CIRCLE's radius: the circle
-/// around the base that touches the curve, #1512). Deferred hits only win where no other snap
-/// does (they are as unspecific as Nearest).
+/// known. With a base and `deferred` set, tangents to circles and arcs are deferred too (CIRCLE's
+/// radius: the circle around the base that touches the curve, #1512). Deferred hits only win
+/// where no other snap does (they are as unspecific as Nearest).
 pub fn osnap(d: &Drawing, space: &Space, cursor: Vec2, aperture: f64, osmode: u32, base: Option<Vec2>, deferred: bool) -> Option<SnapHit> {
     if osmode == 0 || osmode & mode::OFF != 0 {
         return None;
@@ -491,8 +491,10 @@ fn finish(
                     _ => {}
                 }
             }
-            if osmode & mode::TAN != 0 && !deferred {
+            if osmode & mode::TAN != 0 {
                 let pts = match p {
+                    // A deferred prompt resolves tangents to circles and arcs itself.
+                    Prim::Seg(Segment::Arc { .. }) | Prim::Circle(_) if deferred => Vec::new(),
                     // Only the tangent points that lie on the arc itself (not its circle).
                     Prim::Seg(Segment::Arc { arc, .. }) => Circle::new(arc.center, arc.radius)
                         .tangent_points(bp)
