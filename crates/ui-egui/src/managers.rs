@@ -660,6 +660,11 @@ fn area_label(a: &str) -> &str {
     }
 }
 
+/// A tab as the Plot dialog shows it: "Model" in the interface language, a layout by its name.
+fn tab_label(name: &str) -> &str {
+    if name == "Model" { crate::tl!("Model") } else { name }
+}
+
 /// A device or plot style table name as shown: "None" in the interface language.
 fn shown_label(name: &str) -> &str {
     if name == "None" { crate::tl!("None") } else { name }
@@ -1017,10 +1022,16 @@ impl PlotState {
 }
 
 /// The plot stamp the dialog asks for: the drawing, the sheet, the date and time (UTC), the
-/// device, the paper and the scale (the engine and the plotter fill in the braces).
-fn stamp_template() -> String {
+/// device, the paper and the scale. `page` names the device and paper (the preview plots the same
+/// sheet to an image); without one, the engine and the plotter fill them in for each sheet, and
+/// always the drawing, the sheet and the scale.
+fn stamp_template(page: Option<&cadcraft_doc::PageSetup>) -> String {
     let secs = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    format!("{{drawing}}, {{layout}}, {} UTC, {{device}}, {{paper}}, {{scale}}", crate::autosave::utc(secs))
+    let (device, paper) = match page {
+        Some(p) => (if device_label(p) == "None" { "CADCraft PDF" } else { p.device.as_str() }, p.paper.as_str()),
+        None => ("{device}", "{paper}"),
+    };
+    format!("{{drawing}}, {{layout}}, {} UTC, {device}, {paper}, {{scale}}", crate::autosave::utc(secs))
 }
 
 /// The page setup a plot of `target` starts from: the layout's, or model-space defaults (fitted
@@ -1077,8 +1088,8 @@ fn sheets_params(sheets: &[String]) -> Value {
 /// One line about a sheet's page setup for the summary shown with several sheets ticked.
 fn sheet_summary(d: &cadcraft_doc::Drawing, name: &str) -> String {
     let page = plot_page(d, name);
-    let orientation = if page.landscape { "landscape" } else { "portrait" };
-    format!("{name}: {} · {orientation} · {}", page.paper, style_label(&page))
+    let orientation = if page.landscape { crate::tl!("landscape") } else { crate::tl!("portrait") };
+    format!("{}: {} · {orientation} · {}", tab_label(name), page.paper, shown_label(style_label(&page)))
 }
 
 /// The `plot` parameters for the dialog's settings (without the output path). `preview_dpi`
@@ -1126,7 +1137,7 @@ fn plot_params(st: &PlotState, preview_dpi: Option<f64>) -> Value {
             json!(if !st.with_styles || style_label(page) == "None" { "None" } else { page.plot_style_table.as_str() }),
         );
         if st.stamp {
-            o.insert("stamp".into(), json!(stamp_template()));
+            o.insert("stamp".into(), json!(stamp_template(Some(page))));
         }
         if st.target == "Model" {
             o.insert("plotArea".into(), json!(page.plot_area));
@@ -1259,7 +1270,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     let default_size = vec2(900.0, 640.0).min(viewport.size());
     let min_size = vec2(760.0, 520.0).min(default_size);
     let id = egui::Id::unique(("plot", st.target.clone()));
-    egui::Window::new(crate::tf!("Plot - {layout}", layout = st.target))
+    egui::Window::new(crate::tf!("Plot - {layout}", layout = tab_label(&st.target)))
         .id(egui::Id::unique("cc_plot_window"))
         .open(open)
         .collapsible(false)
@@ -1284,9 +1295,11 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                             egui::Grid::new("plot_layout_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
                                 let caption = ui.label(crate::tl!("Layout"));
                                 let combo =
-                                    egui::ComboBox::from_id_salt("plot_layout").selected_text(st.target.as_str()).width(190.0).show_ui(ui, |ui| {
+                                    egui::ComboBox::from_id_salt("plot_layout").selected_text(tab_label(&st.target)).width(190.0).show_ui(ui, |ui| {
                                         for n in &targets {
-                                            if ui.selectable_label(*n == st.target, n).clicked() && (*n != st.target || st.sheets.len() > 1) {
+                                            if ui.selectable_label(*n == st.target, tab_label(n)).clicked()
+                                                && (*n != st.target || st.sheets.len() > 1)
+                                            {
                                                 st.page = plot_page(d, n);
                                                 st.target = n.clone();
                                                 st.sheets = vec![n.clone()];
@@ -1317,7 +1330,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                                 egui::ScrollArea::vertical().id_salt("plot_sheets").max_height(120.0).auto_shrink([true, true]).show(ui, |ui| {
                                     for n in &targets {
                                         let mut on = st.sheets.contains(n);
-                                        if ui.checkbox(&mut on, n).changed() {
+                                        if ui.checkbox(&mut on, tab_label(n)).changed() {
                                             toggle_sheet(&mut st.sheets, &targets, n, on);
                                             // One sheet left: it is the one whose settings the dialog edits.
                                             if let [only] = st.sheets.as_slice()
@@ -1494,26 +1507,32 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
                             });
                         }
                         plot_section(right, crate::tl!("Plot options"), |ui| {
-                            if !several {
-                                egui::Grid::new("plot_options_grid").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
+                            egui::Grid::new("plot_options_grid").num_columns(2).spacing(vec2(10.0, 4.0)).show(ui, |ui| {
+                                if !several {
                                     let rows = PageRows { lineweights: true, plot_transparency: true, ..NO_ROWS };
                                     if let Some((k, v)) = page_rows(ui, id, &st.page, &rows, &choices, None, false) {
                                         apply_page_change(&mut st.page, k, &v);
                                     }
-                                });
-                                ui.add_enabled_ui(style_label(&st.page) != "None", |ui| {
-                                    ui.checkbox(&mut st.with_styles, crate::tl!("Plot with plot styles")).on_hover_text(crate::tl!(
-                                        "Off: plot the objects' own colours and lineweights, keeping the table chosen above"
-                                    ));
-                                });
-                            }
-                            ui.checkbox(&mut st.stamp, crate::tl!("Plot stamp on")).on_hover_text(crate::tl!(
-                                "A line at the sheet's lower-left corner: drawing, layout, date and time (UTC), device, paper and scale"
-                            ));
-                            if !several && !model {
-                                ui.checkbox(&mut st.save_to_layout, crate::tl!("Save changes to layout"))
-                                    .on_hover_text(crate::tl!("OK also saves these settings in the layout's page setup"));
-                            }
+                                    ui.label("");
+                                    ui.add_enabled_ui(style_label(&st.page) != "None", |ui| {
+                                        ui.checkbox(&mut st.with_styles, crate::tl!("Plot with plot styles")).on_hover_text(crate::tl!(
+                                            "Off: plot the objects' own colours and lineweights, keeping the table chosen above"
+                                        ));
+                                    });
+                                    ui.end_row();
+                                }
+                                ui.label("");
+                                ui.checkbox(&mut st.stamp, crate::tl!("Plot stamp on")).on_hover_text(crate::tl!(
+                                    "A line at the sheet's lower-left corner: drawing, layout, date and time (UTC), device, paper and scale"
+                                ));
+                                ui.end_row();
+                                if !several && !model {
+                                    ui.label("");
+                                    ui.checkbox(&mut st.save_to_layout, crate::tl!("Save changes to layout"))
+                                        .on_hover_text(crate::tl!("OK also saves these settings in the layout's page setup"));
+                                    ui.end_row();
+                                }
+                            });
                         });
                         if !several {
                             plot_section(right, crate::tl!("Drawing orientation"), |ui| {
@@ -1589,7 +1608,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
             && st.stamp
             && let Some(o) = params.as_object_mut()
         {
-            o.insert("stamp".into(), json!(stamp_template()));
+            o.insert("stamp".into(), json!(stamp_template(None)));
         }
         // Several sheets always make a PDF; one sheet's file type follows its device.
         let ext = if several { "pdf" } else { ext };
@@ -1669,7 +1688,8 @@ fn preview_dpi(page: &cadcraft_doc::PageSetup) -> f64 {
 fn plot_caption(st: &PlotState) -> String {
     let mut info = format!("{} · {}", st.target, st.page.paper);
     if st.page.landscape {
-        info.push_str(" · landscape");
+        info.push_str(" · ");
+        info.push_str(crate::tl!("landscape"));
     }
     info
 }
@@ -1870,7 +1890,8 @@ mod plot_dialog_tests {
         assert!(plot_params(&st, None).get("stamp").is_none());
         st.stamp = true;
         let stamp = plot_params(&st, None)["stamp"].as_str().unwrap().to_string();
-        assert!(stamp.starts_with("{drawing}, {layout}, ") && stamp.ends_with(" UTC, {device}, {paper}, {scale}"), "{stamp}");
+        let paper = st.page.paper.clone();
+        assert!(stamp.starts_with("{drawing}, {layout}, ") && stamp.ends_with(&format!(" UTC, CADCraft PDF, {paper}, {{scale}}")), "{stamp}");
         assert!(plot_params(&st, Some(150.0)).get("stamp").is_some(), "the preview shows the stamp too");
     }
 

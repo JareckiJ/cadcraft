@@ -518,6 +518,10 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         let on = paper.map(|pp| pp.name.clone()).or_else(|| layout.as_ref().map(|pg| pg.paper.clone())).unwrap_or_default();
         o.insert("printerPaper".into(), json!(on));
     }
+    // The stamp names the device's paper (the plotter only sees its size).
+    if let (Some(pp), Some(Value::String(t))) = (paper, o.get_mut("stamp")) {
+        *t = t.replace("{paper}", &pp.name);
+    }
     if let Some(pp) = paper {
         o.remove("paper");
         o.insert("width".into(), json!(pp.width));

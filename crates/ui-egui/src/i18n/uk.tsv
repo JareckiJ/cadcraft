@@ -1438,3 +1438,5 @@
 	Sent {what} to {printer} (job {job})	{what} надіслано на {printer} (завдання {job})
 	Plotted {what} to {path}	{what} надруковано в {path}
 	Plotted {what} ({bytes} bytes; there is no file dialog here)	{what} надруковано ({bytes} байт; тут немає вікна вибору файлу)
+	landscape	альбомна
+	portrait	книжкова

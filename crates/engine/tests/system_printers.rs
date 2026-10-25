@@ -132,7 +132,7 @@ fn plot_to_file_and_print_and_refresh_the_printers() {
     s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "stamp": true })).unwrap();
     let stamp = JOBS.lock().unwrap().pop().unwrap().4["stamp"].as_str().unwrap().to_string();
     let title = s.state().unwrap().title.clone();
-    assert_eq!(stamp, format!("{title}, {{layout}}, Office_T120, {{paper}}, {{scale}}"));
+    assert_eq!(stamp, format!("{title}, {{layout}}, Office_T120, Letter, {{scale}}"), "the device's paper by its name");
     let r = s.execute("exportpdf", &json!({ "layout": "Model", "stamp": "Checked {device}\u{7}" })).unwrap();
     let opts: Value = serde_json::from_slice(&cadcraft_engine::cmd::file::base64_decode(r["data"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(opts["stamp"], "Checked CADCraft PDF");

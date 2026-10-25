@@ -1433,3 +1433,5 @@ menu	Modify	Edita
 	Sent {what} to {printer} (job {job})	{what} inviato a {printer} (lavoro {job})
 	Plotted {what} to {path}	{what} stampato in {path}
 	Plotted {what} ({bytes} bytes; there is no file dialog here)	{what} stampato ({bytes} byte; qui non c'è una finestra per i file)
+	landscape	orizzontale
+	portrait	verticale
