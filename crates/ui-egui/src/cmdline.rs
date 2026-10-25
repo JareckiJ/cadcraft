@@ -395,6 +395,9 @@ fn visible_lines(app: &CadApp, canvas: Rect, bar: Rect) -> usize {
     app.ui.history_lines.min(MAX_LINES).min(available)
 }
 
+/// The command line at the bottom of the drawing (`canvas`): the history lines above the bar, the
+/// prompt with its keywords, the typed text with its caret and the AutoComplete list; the typed
+/// text and its list stay off the bar while Dynamic Input shows them beside the cursor (#2127).
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let t = Tokens::get();
     let w = (canvas.width() * 0.48).clamp(360.0, 760.0).min((canvas.width() - 8.0).max(0.0));
@@ -559,6 +562,8 @@ struct Zones {
     all: Rect,
 }
 
+/// Where the command line's parts sit around the bar `bar`; the AutoComplete list counts in `all`
+/// only while it shows on the command line, not beside the cursor (#2127).
 fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let n = if app.cmd.expanded { 0 } else { visible_lines(app, canvas, bar).min(app.session.log.len()) };
     let lines =
