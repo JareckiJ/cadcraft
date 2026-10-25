@@ -24,6 +24,7 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    /// Convert a slider index (`0..=2`) to its corresponding [`ViewMode`].
     pub fn from_index(idx: u8) -> Self {
         match idx {
             0 => Self::List,
@@ -32,6 +33,7 @@ impl ViewMode {
         }
     }
 
+    /// Numeric slider index (`0` = List, `1` = Medium Icons, `2` = Large Icons).
     pub fn index(self) -> u8 {
         match self {
             Self::List => 0,
@@ -40,6 +42,7 @@ impl ViewMode {
         }
     }
 
+    /// Human-readable English label for UI translation lookup.
     pub fn label(self) -> &'static str {
         match self {
             Self::List => "List",
@@ -79,6 +82,7 @@ pub struct State {
 }
 
 impl Default for State {
+    /// Construct the default palette state (`MediumIcons`, uniform scale `1.0`, `grab_on_click` enabled).
     fn default() -> Self {
         Self {
             selected: None,
@@ -138,15 +142,18 @@ impl PreviewCache {
         self.entries.len()
     }
 
+    /// Whether no block previews are currently cached.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }
 
+/// Egui temporary data id storing the [`State`] of the Blocks palette.
 fn state_id() -> egui::Id {
     egui::Id::new("cc_block_manager")
 }
 
+/// Egui temporary data id storing the [`PreviewCache`] of visible blocks.
 fn cache_id() -> egui::Id {
     egui::Id::new("cc_block_manager_previews")
 }
@@ -334,6 +341,7 @@ struct View {
     can_write: bool,
 }
 
+/// Gather the block list, selected block metadata and write capability for this frame.
 fn view(app: &CadApp, st: &mut State) -> Option<View> {
     let sess = app.session.state().ok()?;
     let d = &sess.doc;
@@ -702,8 +710,12 @@ fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut Pr
 }
 
 /// Total number of entities in model space and paper space layouts.
-fn drawing_entity_count(app: &CadApp) -> usize {
-    app.session.doc().map_or(0, |d| d.model.len() + d.layouts.iter().map(|l| l.entities.len()).sum::<usize>())
+/// Count placed instances for repeat-placement tracking: block references to `name`, or total
+/// drawing entities when `explode` is enabled (`*name` inserts raw entities rather than an `Insert`).
+fn placement_count(app: &CadApp, name: &str, explode: bool) -> usize {
+    app.session
+        .doc()
+        .map_or(0, |d| if explode { d.model.len() + d.layouts.iter().map(|l| l.entities.len()).sum::<usize>() } else { reference_count(d, name) })
 }
 
 /// Cancel an in-progress `INSERT` and stop repeat placement.
@@ -725,8 +737,10 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
     match act {
         Some(Act::Grab(n)) => {
             grab_block(app, &n, st);
-            if st.repeat {
-                st.repeating = Some((n, drawing_entity_count(app)));
+            // Only arm repeat-placement when the palette's own INSERT started.
+            if st.repeat && app.session.running.as_ref().is_some_and(|r| r.id == "insert") {
+                let count = placement_count(app, &n, st.explode);
+                st.repeating = Some((n, count));
             } else {
                 st.repeating = None;
             }
@@ -792,17 +806,15 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
         None => {
             if !st.repeat || esc_pressed {
                 st.repeating = None;
-            } else if st.repeating.is_none()
-                && app.session.running.as_ref().is_some_and(|r| r.id == "insert")
-                && let Some(name) = st.selected.clone()
-            {
-                st.repeating = Some((name, drawing_entity_count(app)));
+            } else if app.session.running.as_ref().is_some_and(|r| r.id != "insert") {
+                // Another command took over: the palette's placement is over.
+                st.repeating = None;
             } else if app.session.running.is_none()
                 && let Some((name, prev_count)) = st.repeating.clone()
             {
                 // Repeat placement only when the previous INSERT actually added an entity to the
                 // drawing; cancelling with Esc leaves the entity count unchanged and stops repeating.
-                let cur_count = drawing_entity_count(app);
+                let cur_count = placement_count(app, &name, st.explode);
                 if cur_count > prev_count {
                     grab_block(app, &name, st);
                     st.repeating = Some((name, cur_count));
@@ -849,7 +861,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
     let Some(v) = view(app, &mut st) else { return };
     cache.sync_revision(v.uid, v.revision);
     let mut act = None;
-    if let Ok(doc) = app.session.doc().cloned() {
+    if let Ok(doc) = app.session.state().map(|s| Arc::clone(&s.doc)) {
         egui::ScrollArea::vertical().id_salt("dock-blocks").auto_shrink([false, false]).show(ui, |ui| {
             egui::Frame::NONE.inner_margin(6.0).show(ui, |ui| body(ui, &doc, &v, &mut st, &mut cache, true, &mut act));
         });
@@ -870,7 +882,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let Some(v) = view(app, &mut st) else { return };
     cache.sync_revision(v.uid, v.revision);
     let mut act = None;
-    if let Ok(doc) = app.session.doc().cloned() {
+    if let Ok(doc) = app.session.state().map(|s| Arc::clone(&s.doc)) {
         egui::Window::new(crate::tl!("Blocks"))
             .id(egui::Id::new("Blocks"))
             .open(open)
@@ -909,6 +921,7 @@ mod tests {
     use super::{Preview, PreviewCache, State, ViewMode, grab_block};
     use crate::{CadApp, Services};
 
+    /// Verify block enumeration, reference counting and preview display-list generation.
     #[test]
     fn blocks_list_their_references_and_build_a_preview() {
         let mut s = Session::new();
@@ -925,6 +938,7 @@ mod tests {
         assert!((bounds.width() - 4.0).abs() < 1e-6);
     }
 
+    /// Verify view-mode index round-tripping and eviction of off-screen previews.
     #[test]
     fn offscreen_previews_are_unloaded_and_view_modes_roundtrip() {
         for (idx, mode) in [(0, ViewMode::List), (1, ViewMode::MediumIcons), (2, ViewMode::LargeIcons)] {
@@ -959,6 +973,7 @@ mod tests {
         assert!(cache.is_empty());
     }
 
+    /// Verify that grabbing a block presets scale/rotation and places it on a single canvas click.
     #[test]
     fn grab_block_puts_it_in_hand_and_places_on_single_click() {
         let mut app = CadApp::new(Session::new(), Services::default());
@@ -998,6 +1013,7 @@ mod tests {
         assert!((ins[0].rotation.to_degrees() - 90.0).abs() < 1e-6);
     }
 
+    /// Verify that the scroll viewport only builds and retains previews for visible blocks.
     #[test]
     fn palette_loads_only_visible_blocks_in_scroll_viewport() {
         let mut app = CadApp::new(Session::new(), Services::default());
@@ -1024,6 +1040,7 @@ mod tests {
         }
     }
 
+    /// Verify repeat-placement re-grabbing, Escape cancellation, and cancellation when another command starts.
     #[test]
     fn repeat_placement_places_multiple_times_and_escape_cancels_it() {
         let mut app = CadApp::new(Session::new(), Services::default());
@@ -1067,5 +1084,13 @@ mod tests {
         assert!(app.session.running.is_none());
         assert!(st.repeating.is_none());
         assert!(!st.repeat);
+
+        // Starting another command (e.g. LINE) replaces INSERT and clears repeating so finishing LINE does not re-grab.
+        st.repeat = true;
+        super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);
+        assert!(st.repeating.is_some());
+        app.session.start("line").unwrap();
+        super::apply(&mut app, &mut st, None, false);
+        assert!(st.repeating.is_none());
     }
 }

@@ -157,6 +157,7 @@ impl SaveFormat {
 }
 
 impl Default for UiState {
+    /// Construct the default interface state for a new CADCraft session.
     fn default() -> Self {
         UiState {
             docking: docking::default_workspace(),

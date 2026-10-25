@@ -25,6 +25,7 @@ pub enum Panel {
 
 impl Panel {
     pub const ALL: &[Self] = &[Self::Canvas, Self::ToolSets, Self::Layers, Self::Properties, Self::ExternalRefs];
+    /// Stable JSON identifier for this dock panel.
     pub fn id(self) -> &'static str {
         match self {
             Self::Canvas => "canvas",
@@ -36,6 +37,7 @@ impl Panel {
             Self::Blocks => "blocks",
         }
     }
+    /// Human-readable panel title.
     fn label(self) -> &'static str {
         match self {
             Self::Canvas => "Drawing",
@@ -217,6 +219,7 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
     Ok(json!({"docking": app.ui.docking}))
 }
 
+/// Render the docked workspace layout and apply any user dock actions.
 pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     let mut workspace = app.ui.docking.clone();
@@ -294,6 +297,7 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Minimum and maximum size constraints for `panel`.
 fn panel_limits(panel: &Panel) -> PanelLimits {
     let (min, max_width) = match panel {
         Panel::Canvas => (egui::vec2(300.0, 180.0), 1_000_000.0),

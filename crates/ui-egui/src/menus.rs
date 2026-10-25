@@ -83,6 +83,7 @@ pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value) -> Option<Resu
     crate::i18n::with_language(app.language(), || run_ui_command_inner(app, id, params))
 }
 
+/// Route a UI command by `id`, returning `None` when `id` is an engine command instead.
 fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if let Some(result) = crate::spacemouse::route(app, id, params) {
         return Some(result);

@@ -491,6 +491,7 @@ impl Interactive for BlockM {
             _ => self.sel.prompt(),
         }
     }
+    /// Feed user input into the interactive `INSERT` state machine.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match (&self.name, self.base) {
             (None, _) if self.existing.is_some() => {
@@ -696,6 +697,7 @@ impl Interactive for InsertM {
             }
         }
     }
+    /// Feed user input into the interactive `INSERT` state machine.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         match self.stage {
             InsStage::Name => {
@@ -868,6 +870,7 @@ impl Interactive for AttdefM {
             _ => Prompt::new("Specify start point of text", Accept::POINT),
         }
     }
+    /// Feed user input into the interactive `INSERT` state machine.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let text = match &i {
             Input::Text(t) => Some(t.clone()),

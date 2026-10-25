@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::CadApp;
 use crate::theme::Tokens;
 
+/// Render the currently active modal or floating dialog (`app.ui.dialog`).
 pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     crate::mtext_editor::show(app, ctx);
     crate::quick::quick_properties(app, ctx);
@@ -388,26 +389,6 @@ fn commands(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     if let Some(c) = start {
         app.ui.dialog = None;
         app.start(c);
-    }
-}
-
-#[allow(dead_code)]
-fn blocks(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
-    let mut pick = None;
-    egui::Window::new(crate::tl!("Blocks")).id(egui::Id::new("Blocks")).open(open).default_size(vec2(320.0, 360.0)).show(ctx, |ui| {
-        let Ok(d) = app.session.doc() else { return };
-        let names: Vec<&String> = d.blocks.keys().filter(|k| !k.starts_with('*')).collect();
-        if names.is_empty() {
-            ui.label(crate::tl!("No blocks defined in this drawing."));
-        }
-        for n in names {
-            if ui.button(n).on_hover_text(crate::tl!("Insert this block")).clicked() {
-                pick = Some(n.clone());
-            }
-        }
-    });
-    if let Some(n) = pick {
-        insert_block(app, &n);
     }
 }
 
