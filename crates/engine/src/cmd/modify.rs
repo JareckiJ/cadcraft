@@ -102,6 +102,7 @@ pub fn specs() -> Vec<CommandSpec> {
 pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy: bool) -> Result<Vec<Handle>> {
     let d = s.doc_mut()?;
     let mut out = Vec::new();
+    let mut copies = std::collections::HashMap::new();
     for h in hs {
         let Some(sp) = d.space_of(*h) else { continue };
         if copy {
@@ -112,6 +113,7 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             if let Some(st) = d.space_mut(&sp) {
                 st.push(ne);
                 out.push(nh);
+                copies.insert(*h, nh);
             }
         } else {
             let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
@@ -120,6 +122,23 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
             }
             d.modify_entity(*h, |e| e.kind.transform(m))?;
             out.push(*h);
+        }
+    }
+    // A copied dimension follows the copied breaking objects when they were copied together;
+    // sources left behind still refer to the originals in this drawing.
+    for h in copies.values() {
+        if d.entity(*h).is_some_and(|e| matches!(&e.kind, EntityKind::Dimension(dm) if dm.marks.auto_break.is_some())) {
+            d.modify_entity(*h, |e| {
+                if let EntityKind::Dimension(dm) = &mut e.kind
+                    && let Some(a) = &mut dm.marks.auto_break
+                {
+                    for source in &mut a.objects {
+                        if let Some(copy) = copies.get(source) {
+                            *source = *copy;
+                        }
+                    }
+                }
+            })?;
         }
     }
     Ok(out)

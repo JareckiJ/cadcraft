@@ -2,7 +2,7 @@
 //! DXF Reference), jogs, breaks and inspection frames as CADCraft xdata. Damaged xdata is
 //! skipped.
 
-use cadcraft_doc::{Common, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Inspection, JoggedRadius, Space};
+use cadcraft_doc::{AutoDimBreak, Common, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Handle, Inspection, JoggedRadius, Space};
 use cadcraft_geom::Vec3;
 use cadcraft_io::{read_dxf, write_dxf};
 
@@ -47,7 +47,8 @@ fn dimension_marks_roundtrip() {
             DimBreak { at: Vec3::new(4.0, 3.0, 0.0), size: 0.125, auto: true },
             DimBreak { at: Vec3::new(7.0, 3.0, 0.0), size: 0.5, auto: false },
         ],
-        inspect: Some(Inspection { shape: 1, label: "QC".into(), rate: "25%".into() }),
+        auto_break: Some(AutoDimBreak { objects: vec![Handle(0xABC), Handle(0xDEF)], size: 0.125 }),
+        inspect: Some(Inspection { shape: 1, label: "BREAKAUTO".into(), rate: "25%".into() }),
         ..Default::default()
     };
     let aligned = DimMarks { oblique: Some(100f64.to_radians()), ..Default::default() };
@@ -91,4 +92,35 @@ fn damaged_marks_are_skipped() {
     let back = read_dxf(bad.as_bytes()).unwrap();
     let got = marks_of(&back);
     assert_eq!(got.first(), Some(&DimMarks::default()), "{got:?}");
+}
+
+#[test]
+fn automatic_break_relationship_without_gaps_roundtrips_and_bad_sizes_are_skipped() {
+    let mut d = Drawing::new_imperial();
+    let auto = AutoDimBreak { objects: vec![Handle(0xABC)], size: 0.5 };
+    let m = DimMarks { auto_break: Some(auto.clone()), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    let back = read_dxf(text.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break, Some(auto));
+    for bad in ["nan", "inf", "0", "-1"] {
+        let damaged = text.replacen("BREAKAUTO\r\n1002\r\n{\r\n1040\r\n0.5\r\n", &format!("BREAKAUTO\r\n1002\r\n{{\r\n1040\r\n{bad}\r\n"), 1);
+        assert_ne!(damaged, text);
+        let back = read_dxf(damaged.as_bytes()).unwrap();
+        assert!(marks_of(&back)[0].auto_break.is_none(), "{bad}");
+    }
+}
+
+#[test]
+fn automatic_break_source_input_is_bounded_and_bad_handles_are_skipped() {
+    let mut d = Drawing::new_imperial();
+    let m = DimMarks { auto_break: Some(AutoDimBreak { objects: vec![Handle(0xABC)], size: 0.5 }), ..Default::default() };
+    d.add(&Space::Model, Common::default(), dim(DimKind::Linear { rotation: 0.0 }, m)).unwrap();
+    let text = write_dxf(&d);
+    let damaged = text.replacen("1005\r\nABC\r\n", "1005\r\nnot-a-handle\r\n1005\r\n0\r\n1005\r\nDEF\r\n", 1);
+    let back = read_dxf(damaged.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break.as_ref().unwrap().objects, vec![Handle(0xDEF)]);
+    let oversized = text.replacen("1005\r\nABC\r\n", &"1005\r\nABC\r\n".repeat(cadcraft_doc::MAX_DIM_BREAK_OBJECTS + 10), 1);
+    let back = read_dxf(oversized.as_bytes()).unwrap();
+    assert_eq!(marks_of(&back)[0].auto_break.as_ref().unwrap().objects.len(), cadcraft_doc::MAX_DIM_BREAK_OBJECTS);
 }

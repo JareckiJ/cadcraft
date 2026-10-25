@@ -1,17 +1,13 @@
 //! Dimension edits: DIMEDIT (Home/New/Rotate/Oblique), DIMJOGGED, DIMJOGLINE, DIMBREAK and
 //! DIMINSPECT. Each has a JSON form; the prompt sequences run the same JSON form.
 
-use cadcraft_doc::{DimBreak, DimKind, Dimension, EntityKind, Handle, Inspection, JoggedRadius, Prim};
-use cadcraft_geom::{Segment, Vec2};
+use cadcraft_doc::{AutoDimBreak, DimBreak, DimKind, Dimension, EntityKind, Handle, Inspection, JoggedRadius, MAX_DIM_BREAK_OBJECTS};
+use cadcraft_geom::Vec2;
 use serde_json::{Value, json};
 
 use super::machines::{SelOutcome, SelectPhase};
 use super::*;
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
-
-/// Most objects DIMBREAK Auto looks at, and most breaks it adds to one dimension.
-const MAX_BREAK_OBJECTS: usize = 20_000;
-const MAX_AUTO_BREAKS: usize = 1000;
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
@@ -35,7 +31,7 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(JogLineM::default()))),
         CommandSpec::new("dimbreak", "Dimension Break", run_dimbreak)
             .menu(&["Dimension", "Dimension Break"])
-            .params("{handles?, mode?: auto|manual|remove (default auto), objects?: [hex] (auto: the objects that break; default all crossing objects), first?/second?: [x,y] (manual), size?: number (default 0.125 × DIMSCALE)}")
+            .params("{handles?, mode?: auto|manual|remove (default auto), objects?: [hex] (auto: source objects followed through edits; default current non-text/non-dimension objects in this space), first?/second?: [x,y] (manual), size?: number (default 0.125 × DIMSCALE)}")
             .interactive(|_| Ok(Box::new(DimBreakM::default()))),
         CommandSpec::new("diminspect", "Inspection", run_diminspect)
             .menu(&["Dimension", "Inspection"])
@@ -452,40 +448,6 @@ impl Interactive for JogLineM {
 
 // ---------------- DIMBREAK ----------------
 
-/// Where the dimension's drawn lines cross the objects: (point, direction of the line there).
-fn crossings(dm_lines: &[Vec<Vec2>], prims: &[Prim]) -> Vec<Vec2> {
-    let mut out = Vec::new();
-    for l in dm_lines {
-        for w in l.windows(2) {
-            let seg = Segment::Line(cadcraft_geom::Line::new(w[0], w[1]));
-            for p in prims {
-                let pts = match p {
-                    Prim::Seg(o) => cadcraft_geom::intersect_segments(&seg, o),
-                    Prim::Circle(c) => cadcraft_geom::line_circle(&cadcraft_geom::Line::new(w[0], w[1]), c)
-                        .into_iter()
-                        .filter(|(_, t)| (-1e-9..=1.0 + 1e-9).contains(t))
-                        .map(|(q, _)| q)
-                        .collect(),
-                    Prim::Infinite { base, dir, ray } => cadcraft_geom::line_line_infinite(w[0], w[1], *base, *base + *dir)
-                        .filter(|(_, t, u)| (-1e-9..=1.0 + 1e-9).contains(t) && (!ray || *u >= -1e-9))
-                        .map(|(q, _, _)| vec![q])
-                        .unwrap_or_default(),
-                    _ => Vec::new(),
-                };
-                for q in pts {
-                    if out.len() >= MAX_AUTO_BREAKS {
-                        return out;
-                    }
-                    if !out.iter().any(|o: &Vec2| o.dist(q) < 1e-9) {
-                        out.push(q);
-                    }
-                }
-            }
-        }
-    }
-    out
-}
-
 fn run_dimbreak(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = dims_of(s, &targets(s, p)?);
     if hs.is_empty() {
@@ -500,8 +462,9 @@ fn run_dimbreak(s: &mut Session, p: &Value) -> Result<Value> {
     match mode.as_str() {
         "remove" => {
             let n = edit_dims(s, &hs, &|dm| {
-                let had = !dm.marks.breaks.is_empty();
+                let had = !dm.marks.breaks.is_empty() || dm.marks.auto_break.is_some();
                 dm.marks.breaks.clear();
+                dm.marks.auto_break = None;
                 had
             })?;
             Ok(json!({ "changed": n }))
@@ -520,35 +483,37 @@ fn run_dimbreak(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "auto" => {
             // The breaking objects: those given, else every object (not a dimension or text).
-            let given: Option<Vec<Handle>> = match p.get("objects") {
+            let given: Option<std::collections::HashSet<Handle>> = match p.get("objects") {
                 None | Some(Value::Null) => None,
-                Some(_) => Some(targets(s, &json!({ "handles": p.get("objects") }))?),
+                Some(_) => Some(targets(s, &json!({ "handles": p.get("objects") }))?.into_iter().collect()),
             };
-            let space = s.space();
-            let store = d.space(&space).ok_or_else(|| bad("dimbreak", "no current space"))?;
-            let others: Vec<(Handle, Vec<Prim>)> = store
-                .iter()
-                .filter(|e| match &given {
-                    Some(g) => g.contains(&e.handle),
-                    None => !matches!(e.kind, EntityKind::Dimension(_) | EntityKind::Text(_) | EntityKind::MText(_)),
-                })
-                .take(MAX_BREAK_OBJECTS)
-                .map(|e| (e.handle, e.kind.prims()))
-                .collect();
             let mut plan = Vec::new();
             for h in &hs {
                 let Some(EntityKind::Dimension(dm)) = d.entity(*h).map(|e| &e.kind) else { continue };
-                let mut plain = dm.clone();
-                plain.marks.breaks.clear();
-                let g = cadcraft_render::dimension_in(d, &plain);
-                let prims: Vec<Prim> = others.iter().filter(|(o, _)| o != h).flat_map(|(_, p)| p.iter().cloned()).collect();
-                plan.push((*h, crossings(&g.lines, &prims)));
+                let space = d.space_of(*h).ok_or_else(|| bad("dimbreak", "the dimension is in no space"))?;
+                let store = d.space(&space).ok_or_else(|| bad("dimbreak", "no dimension space"))?;
+                let objects: Vec<Handle> = store
+                    .iter()
+                    .filter(|e| match &given {
+                        Some(g) => g.contains(&e.handle),
+                        None => !matches!(e.kind, EntityKind::Dimension(_) | EntityKind::Text(_) | EntityKind::MText(_)),
+                    })
+                    .take(MAX_DIM_BREAK_OBJECTS + 1)
+                    .map(|e| e.handle)
+                    .collect();
+                if objects.len() > MAX_DIM_BREAK_OBJECTS {
+                    return Err(bad("dimbreak", format!("at most {MAX_DIM_BREAK_OBJECTS} source objects; select fewer objects")));
+                }
+                let auto = AutoDimBreak { objects: objects.iter().copied().filter(|o| o != h).collect(), size };
+                let breaks = crate::dimbreak::automatic(d, &space, dm, &auto);
+                plan.push((*h, auto, breaks));
             }
             let mut n = 0;
-            for (h, pts) in plan {
+            for (h, auto, breaks) in plan {
                 n += edit_dims(s, &[h], &|dm| {
                     dm.marks.breaks.retain(|b| !b.auto);
-                    dm.marks.breaks.extend(pts.iter().map(|q| DimBreak { at: v3(*q), size, auto: true }));
+                    dm.marks.breaks.extend(breaks.iter().cloned());
+                    dm.marks.auto_break = Some(auto.clone());
                     true
                 })?;
             }

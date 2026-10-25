@@ -17,6 +17,7 @@ pub mod blockedit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capped_read;
 pub mod cmd;
+mod dimbreak;
 pub mod doc_path;
 mod finite;
 pub mod grip_dims;

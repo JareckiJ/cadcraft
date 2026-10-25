@@ -343,6 +343,7 @@ pub fn after_command(s: &mut crate::Session, before: Option<&Arc<Drawing>>, uid:
     {
         update(&mut st.doc, before);
         notes = crate::cmd::hatch::refill_associative(&mut st.doc, before);
+        crate::dimbreak::update(&mut st.doc, before);
     }
     notes.into_iter().for_each(|n| s.echo(n));
 }
