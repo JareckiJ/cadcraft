@@ -128,6 +128,13 @@ fn a_pick_in_empty_space_starts_a_fence_in_quick_mode_and_a_window_in_standard_m
     assert!(s.prompt_text().contains("Select object to trim"), "{}", s.prompt_text());
     s.cmdline("").unwrap();
     assert_eq!(lines(&s), with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (15.0, 2.0)), ((10.0, 0.0), (15.0, 0.0))]));
+    // EXTEND's fence extends both lines it crosses to the boundary at x = 10.
+    let mut s = session(&["10,-5 10,5", "0,0 4,0", "0,2 4,2"]);
+    s.script("EXTEND 3,-1 3,3\n").unwrap();
+    assert!(s.prompt_text().contains("Select object to extend"), "{}", s.prompt_text());
+    s.cmdline("").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), vec![((0.0, 0.0), (10.0, 0.0)), ((0.0, 2.0), (10.0, 2.0)), ((10.0, -5.0), (10.0, 5.0))]);
     // Standard mode keeps the crossing window.
     let mut s = ladder();
     s.script("TRIM O S\n\n4,-4\n").unwrap();
