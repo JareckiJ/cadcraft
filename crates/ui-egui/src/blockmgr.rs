@@ -547,6 +547,7 @@ enum Act {
     Grab(String),
     Edit(String),
     Create,
+    StartRename(String),
     Rename(String, String),
     Delete(String),
     Write(String),
@@ -924,7 +925,7 @@ fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut Pr
             *act = Some(Act::Edit(name.clone()));
         }
         if ui.button(crate::tl!("Rename...")).clicked() {
-            st.rename = Some(name.clone());
+            *act = Some(Act::StartRename(name.clone()));
         }
         if ui.button(crate::tl!("Delete")).on_hover_text(crate::tl!("Delete a block that no object uses")).clicked() {
             *act = Some(Act::Delete(name.clone()));
@@ -956,11 +957,10 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
             st.repeat = false;
         }
         cancel_pending_insert(app, st);
-    } else if st.rename.is_some() {
-        cancel_pending_insert(app, st);
     }
     match act {
         Some(Act::Grab(n)) => {
+            st.rename = None;
             grab_block(app, &n, st);
             // Only track repeat-placement when the palette's own INSERT started.
             st.repeating = st.repeat && app.session.running.as_ref().is_some_and(|r| r.id == "insert");
@@ -977,6 +977,11 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
             cancel_pending_insert(app, st);
             app.start("block");
             return false;
+        }
+        Some(Act::StartRename(n)) => {
+            cancel_pending_insert(app, st);
+            st.rename = Some(n);
+            return true;
         }
         Some(Act::Rename(from, to)) => {
             cancel_pending_insert(app, st);
@@ -1661,5 +1666,19 @@ mod tests {
         super::apply(&mut app, &mut st, None, false);
         assert!(!st.repeating);
         assert!(!st.repeat);
+    }
+
+    /// Clicking Insert while the rename editor is open clears rename and starts insertion without cancelling it on the next frame.
+    #[test]
+    fn insert_while_renaming_clears_rename_and_keeps_insert() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let mut st = State { rename: Some("NewName".into()), ..Default::default() };
+        super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);
+        assert!(st.rename.is_none());
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
+
+        // On the next frame, INSERT is still running.
+        super::apply(&mut app, &mut st, None, false);
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
     }
 }
