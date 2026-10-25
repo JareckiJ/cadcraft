@@ -39,27 +39,32 @@ files are not read; we haven't found a public specification of that format.
 ## System printers
 
 The computer's printers come after the plotter configurations in the Plot dialog's
-Printer/plotter list and in PLOT's `device` (`cmd/printers.rs`). Native builds ask the system's
-print queue: CUPS on Linux, macOS and the BSDs (`lpstat -e` lists the printers; `lp -d PRINTER
--n COPIES -t TITLE -o media=A4 [-o landscape] -` takes the PDF on standard input), PowerShell on
-Windows (`Get-Printer`; `Start-Process -Verb PrintTo` hands a temporary PDF to the system's PDF
-handler, which decides copies and paper). The web has no queue.
+Printer/plotter list, under their own *System printers* heading with the system's default marked,
+and in PLOT's `device` (`cmd/printers.rs`). Choosing one turns the dialog's OK into **Print** and
+adds **Copies**; no file is asked for. *Refresh printers* asks the system again (the list is kept
+for ten seconds otherwise).
+
+| System | Printers | The sheet is sent as |
+|---|---|---|
+| Linux, macOS, FreeBSD (CUPS) | `lpstat -e`; the default from `lpstat -d` | PDF on the standard input of `lp -d PRINTER -n COPIES -t TITLE -o media=A4 -o print-scaling=none -`: true scale, CUPS turns the page to fit the paper |
+| Windows | PowerShell `Get-CimInstance Win32_Printer` (with the default printer) | a PNG at the device resolution (300 dpi), printed by a temporary PowerShell script through `System.Drawing.Printing`: the printer's own driver, its paper nearest the sheet (else a custom size) and the copies. No PDF viewer is needed |
+| Web | none | PDF download |
 
 A printer offers the standard ISO, ANSI and ARCH papers with their margins, portrait by default
-(the queue picks the tray; other sizes go as `Custom.WIDTHxHEIGHTmm`). A plot to a printer
-renders the sheet to PDF exactly as a PDF plot does and sends it; nothing is written unless
-`path` is given too. The Plot dialog then shows **Copies** and its button reads **Print**; the
-command line reports the queue's job id ("Printed Layout1 on Office (job Office-12)").
+(the queue picks the tray; other sizes go as `Custom.WIDTHxHEIGHTmm` on CUPS). A plot to a printer
+renders the sheet exactly as a PDF or PNG plot does and sends it; nothing is written unless `path`
+is given too. The command line reports the queue's job id ("Printed Layout1 on Office (job
+Office-12)").
 
 ```
-printers.list                                → {printers: ["Office", "Plotter HP"]}
+printers.list                                → {printers: ["Office", "Plotter HP"], default: "Office", format: "pdf"}
 plot {"device": "Office", "paper": "A3", "landscape": true, "copies": 2}
                                              → {printer, job, copies, bytes, layout, pages, message}
 pagesetup {"layout": "Layout1", "device": "Office", "paper": "A4"}
 ```
 
-EXPORTPDF never prints, whatever the layout's device. Hosts and tests install another queue with
-`cmd::printers::set_printing`.
+EXPORTPDF never prints, whatever the layout's device. Several sheets in one plot go to a PDF file.
+Hosts and tests install another queue with `cmd::printers::set_printing`.
 
 ## Files
 

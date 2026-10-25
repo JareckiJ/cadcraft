@@ -1428,3 +1428,9 @@
 	Windows desktop	Як у Windows
 	Zero suppression	Придушення нулів
 	{n} settings	Налаштувань: {n}
+	System printers	Системні принтери
+	default	типовий
+	No system printers found	Системних принтерів не знайдено
+	Refresh printers	Оновити список принтерів
+	A printer connected to this computer: the sheet goes to its queue	Принтер, підключений до цього комп'ютера: аркуш іде в його чергу друку
+	Copies	Копії

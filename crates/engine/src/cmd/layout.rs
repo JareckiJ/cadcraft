@@ -889,7 +889,8 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         let title = format!("{title} – {layout}");
         let job = super::printers::PrintJob {
             printer: &printer,
-            pdf: &bytes,
+            data: &bytes,
+            format: super::printers::format(),
             paper: &paper,
             width_mm: num("width", page.width_mm),
             height_mm: num("height", page.height_mm),

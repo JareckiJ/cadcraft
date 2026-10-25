@@ -1429,3 +1429,9 @@ menu	Modify	Edita
 	Windows desktop	Formato Windows
 	Zero suppression	Soppressione degli zeri
 	{n} settings	{n} impostazioni
+	System printers	Stampanti di sistema
+	default	predefinita
+	No system printers found	Nessuna stampante di sistema trovata
+	Refresh printers	Aggiorna l'elenco delle stampanti
+	A printer connected to this computer: the sheet goes to its queue	Una stampante collegata a questo computer: il foglio va nella sua coda di stampa
+	Copies	Copie

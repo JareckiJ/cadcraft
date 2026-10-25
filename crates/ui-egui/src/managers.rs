@@ -655,13 +655,35 @@ fn page_rows(
         {
             change = Some(("device", json!("None")));
         }
+        // Plotter configurations first, then the computer's printers under their own heading.
+        let default_printer = cadcraft_engine::cmd::printers::default_printer();
+        let mut printers_shown = false;
         for dev in choices.devices.iter() {
+            let is_printer = dev.description == cadcraft_engine::cmd::printers::DESCRIPTION;
+            if is_printer && !printers_shown {
+                printers_shown = true;
+                ui.separator();
+                ui.label(RichText::new(crate::tl!("System printers")).small().color(Tokens::get().text_dim));
+            }
             let on = dev.name.eq_ignore_ascii_case(&page.device);
-            if ui.selectable_label(on, &dev.name).on_hover_text(format!("{} ({})", dev.description, dev.output.as_str().to_uppercase())).clicked()
-                && (force || !on)
-            {
+            let is_default = is_printer && default_printer.as_deref().is_some_and(|d| d.eq_ignore_ascii_case(&dev.name));
+            let label = if is_default { format!("{} ({})", dev.name, crate::tl!("default")) } else { dev.name.clone() };
+            let tip = if is_printer {
+                crate::tl!("A printer connected to this computer: the sheet goes to its queue").to_string()
+            } else {
+                format!("{} ({})", dev.description, dev.output.as_str().to_uppercase())
+            };
+            if ui.selectable_label(on, label).on_hover_text(tip).clicked() && (force || !on) {
                 change = Some(("device", json!(dev.name)));
             }
+        }
+        if !printers_shown {
+            ui.separator();
+            ui.label(RichText::new(crate::tl!("No system printers found")).small().color(Tokens::get().text_dim));
+        }
+        if ui.small_button(crate::tl!("Refresh printers")).clicked() {
+            cadcraft_engine::cmd::printers::refresh();
+            ui.ctx().data_mut(|d| d.remove::<(f64, std::sync::Arc<Vec<cadcraft_doc::PlotterConfig>>)>(egui::Id::new("plot_devices")));
         }
     });
     ui.end_row();
@@ -1348,14 +1370,14 @@ mod plot_dialog_tests {
 
     #[test]
     fn a_system_printer_is_a_device_and_the_plot_carries_copies() {
-        use cadcraft_engine::cmd::printers::{PrintJob, Printing, set_printing};
-        fn list() -> Result<Vec<String>, String> {
-            Ok(vec!["Office".into()])
+        use cadcraft_engine::cmd::printers::{PrintFormat, PrintJob, PrinterList, Printing, set_printing};
+        fn list() -> Result<PrinterList, String> {
+            Ok(PrinterList { names: vec!["Office".into()], default: Some("Office".into()) })
         }
         fn print(job: &PrintJob) -> Result<String, String> {
             Ok(format!("{}-1", job.printer))
         }
-        set_printing(Printing { list, print });
+        set_printing(Printing { list, print, format: PrintFormat::Pdf });
         let mut st = state("Model");
         apply_page_change(&mut st.page, "device", &json!("Office"));
         assert_eq!(st.page.device, "Office");
