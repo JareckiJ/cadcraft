@@ -38,6 +38,11 @@ pub struct CmdLine {
     /// The command line's editing rectangle and caret (screen) from the last frame, for the IME's
     /// composition window (see `enable_ime`).
     pub ime_rect: Option<(Rect, Rect)>,
+    /// The command line's IME context generation: a new one each time it starts collecting text,
+    /// as egui asks of an IME owner that (re)gains focus.
+    ime_generation: u64,
+    /// Whether the command line published an IME context last frame.
+    ime_on: bool,
 }
 
 /// The most history lines the command line shows above its bar.
@@ -257,13 +262,23 @@ pub struct KeyPress {
 /// never enables the IME by itself: publishing an IME output does it, with the command line's
 /// rectangle and caret for the composition window. Without this a Windows IME (Pinyin, Japanese,
 /// Korean...) cannot even switch on (#1761).
-fn enable_ime(app: &CadApp, ctx: &egui::Context) {
+fn enable_ime(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.cmd.ime_on {
+        app.cmd.ime_on = true;
+        app.cmd.ime_generation = app.cmd.ime_generation.wrapping_add(1);
+    }
     let (rect, cursor_rect) = app.cmd.ime_rect.unwrap_or_else(|| {
         let r = ctx.content_rect();
         (r, Rect::from_min_size(pos2(r.left() + 30.0, r.bottom() - 34.0), vec2(1.0, 18.0)))
     });
     ctx.output_mut(|o| {
-        o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect, cursor_rect, should_interrupt_composition: false });
+        o.ime = Some(egui::output::IMEOutput::new(
+            egui::Id::unique("cc_cmdline_ime"),
+            app.cmd.ime_generation,
+            egui::IMEPurpose::Normal,
+            rect,
+            cursor_rect,
+        ));
     });
 }
 
@@ -271,6 +286,7 @@ fn enable_ime(app: &CadApp, ctx: &egui::Context) {
 pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     if ctx.egui_wants_keyboard_input() {
         app.cmd.preedit.clear();
+        app.cmd.ime_on = false;
         return;
     }
     let events = ctx.input(|i| i.events.clone());
@@ -283,6 +299,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
     } else {
         // No prompt is collecting text: a composition left over from one cannot belong here.
         app.cmd.preedit.clear();
+        app.cmd.ime_on = false;
     }
     options_still_fit(app);
     for ev in events {
