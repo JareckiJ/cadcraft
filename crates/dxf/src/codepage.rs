@@ -174,6 +174,48 @@ impl BinaryText {
     }
 }
 
+/// How text becomes the bytes of a pre-2007 file's code page (the code pages [`decoder`] knows).
+pub(crate) enum Encoder {
+    Encoding(&'static Encoding),
+    Table(&'static [char; 128]),
+}
+
+/// The encoder for a `$DWGCODEPAGE` value, or `None` for UTF-8 and code pages CADCraft doesn't
+/// know.
+pub(crate) fn encoder(code_page: &str) -> Option<Encoder> {
+    match decoder(code_page)? {
+        Decoder::Utf8 => None,
+        Decoder::Encoding(e) => Some(Encoder::Encoding(e)),
+        Decoder::Table(t) => Some(Encoder::Table(t)),
+    }
+}
+
+impl Encoder {
+    /// Append `c` in this code page to `out`; false, with nothing appended, when the code page
+    /// has no such character, or its bytes read back as another one (Shift-JIS writes `¥` as
+    /// 0x5C, which reads back as a backslash).
+    pub(crate) fn push(&self, c: char, out: &mut Vec<u8>) -> bool {
+        match self {
+            Encoder::Table(t) => match t.iter().position(|&x| x == c).and_then(|i| u8::try_from(i).ok()) {
+                Some(i) => {
+                    out.push(0x80 | i);
+                    true
+                }
+                None => false,
+            },
+            Encoder::Encoding(e) => {
+                let mut buf = [0u8; 4];
+                let (bytes, _, unmappable) = e.encode(c.encode_utf8(&mut buf));
+                if unmappable || e.decode_without_bom_handling(&bytes).0.chars().ne(std::iter::once(c)) {
+                    return false;
+                }
+                out.extend_from_slice(&bytes);
+                true
+            }
+        }
+    }
+}
+
 /// True for an `$ACADVER` of R2007 (AC1021) or later, whose text is UTF-8.
 fn is_utf8_version(acadver: &str) -> bool {
     acadver.trim().strip_prefix("AC").and_then(|n| n.parse::<u32>().ok()).is_some_and(|n| n >= 1021)

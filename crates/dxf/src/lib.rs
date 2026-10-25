@@ -424,6 +424,70 @@ pub fn write_ascii_as(tags: &[Tag], utf8: bool) -> String {
     out
 }
 
+/// Write tags as ASCII DXF bytes, with text as AutoCAD writes it: UTF-8 from 2007 (`utf8`), and
+/// before 2007 in the code page the tags' `$DWGCODEPAGE` names, characters outside it as
+/// `\U+XXXX`. Older readers that don't decode the escapes (the Italian cadastre's DOCFA, CNC and
+/// plotter front ends) then show `è`, not `\U+00E8`. Without a code page CADCraft knows, the text
+/// is pure ASCII with escapes, as [`write_ascii`] writes it.
+pub fn write_ascii_bytes(tags: &[Tag], utf8: bool) -> Vec<u8> {
+    if utf8 {
+        return write_ascii_as(tags, true).into_bytes();
+    }
+    let Some(enc) = header_code_page(tags).and_then(codepage::encoder) else { return write_ascii_as(tags, false).into_bytes() };
+    let mut out = Vec::with_capacity(tags.len() * 16);
+    for t in tags {
+        match &t.value {
+            Value::Str(s) if !s.is_ascii() => {
+                out.extend_from_slice(format!("{:>3}\r\n", t.code).as_bytes());
+                encode_string(s, &enc, &mut out);
+                out.extend_from_slice(b"\r\n");
+            }
+            _ => out.extend_from_slice(write_ascii_as(std::slice::from_ref(t), false).as_bytes()),
+        }
+    }
+    out
+}
+
+/// The `$DWGCODEPAGE` value among the tags (the group 3 after the group 9 that names it).
+fn header_code_page(tags: &[Tag]) -> Option<&str> {
+    let i = tags.iter().position(|t| t.code == 9 && matches!(&t.value, Value::Str(s) if s == "$DWGCODEPAGE"))?;
+    match tags.get(i + 1) {
+        Some(Tag { code: 3, value: Value::Str(s) }) => Some(s.as_str()),
+        _ => None,
+    }
+}
+
+/// A string in a pre-2007 file's code page: as [`escape_unicode`] writes it, but with the
+/// characters the code page has as its bytes. A string whose bytes would also be valid UTF-8 is
+/// escaped instead: the reader takes a file that is valid UTF-8 as UTF-8, so every line with a
+/// code page byte must not be.
+fn encode_string(s: &str, enc: &codepage::Encoder, out: &mut Vec<u8>) {
+    let chars: Vec<char> = s.chars().collect();
+    let mut bytes = Vec::with_capacity(s.len());
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            '\r' | '\n' => bytes.push(b' '),
+            '\\' if matches!(chars.get(i + 1), Some('U' | 'M')) && chars.get(i + 2) == Some(&'+') => bytes.extend_from_slice(b"\\U+005C"),
+            c if c.is_ascii() => bytes.extend_from_slice(c.encode_utf8(&mut [0u8; 4]).as_bytes()),
+            c => {
+                if !enc.push(c, &mut bytes) {
+                    let mut units = [0u16; 2];
+                    for u in c.encode_utf16(&mut units) {
+                        bytes.extend_from_slice(format!("\\U+{u:04X}").as_bytes());
+                    }
+                }
+            }
+        }
+    }
+    if !bytes.is_ascii() && std::str::from_utf8(&bytes).is_ok() {
+        let mut escaped = String::new();
+        escape_unicode(s, false, &mut escaped);
+        out.extend_from_slice(escaped.as_bytes());
+    } else {
+        out.extend_from_slice(&bytes);
+    }
+}
+
 /// Write tags as binary DXF (DXF Reference, "Binary DXF Files", R13+ layout): the sentinel,
 /// then per tag a 2-byte little-endian group code and the value in the binary form of the code's
 /// [`Kind`]: a zero-terminated string, an 8-byte real, a 2-, 4- or 8-byte integer, a 1-byte
@@ -567,6 +631,54 @@ pub fn records(tags: &[Tag]) -> Vec<(String, Vec<Tag>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pre-2007 text is written in the header's code page, as AutoCAD writes it, and reads back.
+    #[test]
+    fn pre_2007_text_is_written_in_the_code_page() {
+        let file = |code_page: &str, text: &str| {
+            vec![
+                Tag::s(0, "SECTION"),
+                Tag::s(2, "HEADER"),
+                Tag::s(9, "$ACADVER"),
+                Tag::s(1, "AC1015"),
+                Tag::s(9, "$DWGCODEPAGE"),
+                Tag::s(3, code_page),
+                Tag::s(0, "ENDSEC"),
+                Tag::s(0, "SECTION"),
+                Tag::s(2, "ENTITIES"),
+                Tag::s(0, "TEXT"),
+                Tag::s(1, text),
+                Tag::s(0, "ENDSEC"),
+                Tag::s(0, "EOF"),
+            ]
+        };
+        let cases: [(&str, &str, &[u8]); 5] = [
+            ("ANSI_1252", "Caffè 20° – ±1", b"Caff\xe8 20\xb0 \x96 \xb11"),
+            ("ANSI_1252", "图 è", b"\\U+56FE \xe8"),
+            ("ANSI_1251", "Київ", b"\xca\xe8\xbf\xe2"),
+            ("DOS850", "è", b"\x8a"),
+            // Bytes that would read as UTF-8 ("Ã©" in Windows-1252 is UTF-8 for "é"): escaped.
+            ("ANSI_1252", "Ã©", b"\\U+00C3\\U+00A9"),
+        ];
+        for (code_page, text, expected) in cases {
+            let tags = file(code_page, text);
+            let bytes = write_ascii_bytes(&tags, false);
+            let line = bytes.split(|&b| b == b'\n').map(<[u8]>::trim_ascii).find(|l| l.starts_with(&expected[..1]) && l.len() == expected.len());
+            assert_eq!(line, Some(expected), "{code_page} {text}");
+            assert_eq!(parse(&bytes).unwrap(), tags, "{code_page} {text} reads back");
+        }
+        // Shift-JIS encodes ¥ as 0x5C, which reads back as a backslash: a character whose bytes
+        // don't decode to it again is escaped.
+        let tags = file("ANSI_932", "¥図");
+        assert_eq!(parse(&write_ascii_bytes(&tags, false)).unwrap(), tags, "¥ survives Shift-JIS");
+        // A literal escape stays literal; no code page CADCraft knows: pure ASCII; 2007+: UTF-8.
+        let tags = file("ANSI_1252", "\\U+00E9 è");
+        assert_eq!(parse(&write_ascii_bytes(&tags, false)).unwrap(), tags);
+        assert_eq!(write_ascii_bytes(&file("NOPE", "è"), false), write_ascii(&file("NOPE", "è")).into_bytes());
+        assert_eq!(write_ascii_bytes(&file("ANSI_1252", "è"), true), write_ascii_as(&file("ANSI_1252", "è"), true).into_bytes());
+        // ASCII text is written exactly as before.
+        assert_eq!(write_ascii_bytes(&file("ANSI_1252", "plain"), false), write_ascii(&file("ANSI_1252", "plain")).into_bytes());
+    }
 
     #[test]
     fn literal_escape_text_roundtrips() {
