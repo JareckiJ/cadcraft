@@ -84,6 +84,19 @@ fn new_drawings_take_the_defaults_and_other_drawings_keep_their_style() {
     assert_ne!(current(&mut a, "DIMDEC"), json!(3));
 }
 
+/// `dimDefaults` leaves even a fresh, untouched drawing as it is: only the profile read at
+/// start-up gives it the defaults.
+#[test]
+fn dim_defaults_leave_the_untouched_first_drawing_alone() {
+    let mut a = app();
+    let before = current(&mut a, "DIMDEC");
+    a.run("options", json!({ "dimDefaults": { "DIMDEC": 7 } })).unwrap();
+    assert_eq!(current(&mut a, "DIMDEC"), before);
+    let mut fresh = app();
+    fresh.session.restore_dim_defaults(serde_json::from_value(json!({ "DIMDEC": 7 })).unwrap());
+    assert_eq!(current(&mut fresh, "DIMDEC"), json!(7), "start-up: the profile's defaults reach the first drawing");
+}
+
 #[test]
 fn refused_values_and_unknown_names_change_nothing() {
     let mut a = app();

@@ -56,10 +56,27 @@ pub(super) fn changed(old: &Map<String, Value>, new: &Map<String, Value>) -> Map
     new.iter().filter(|(k, v)| old.get(*k) != Some(*v)).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
+/// What a JSON document `new` changes: settings (`report` keys) and interface state (`interface`
+/// keys), or the first key that is neither.
+pub(super) fn split_edits(
+    report: &Map<String, Value>,
+    interface: &Map<String, Value>,
+    new: &Map<String, Value>,
+) -> Result<(Map<String, Value>, Map<String, Value>), String> {
+    if let Some(key) = new.keys().find(|k| !report.contains_key(*k) && !interface.contains_key(*k)) {
+        return Err(key.clone());
+    }
+    let mut diff = changed(report, new);
+    diff.retain(|k, _| report.contains_key(k));
+    let mut ui_diff = changed(interface, new);
+    ui_diff.retain(|k, _| interface.contains_key(k));
+    Ok((diff, ui_diff))
+}
+
 /// A text field that commits when it loses focus or on Enter; `Some(text)` on a change.
-fn commit_text(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
+fn commit_text(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32, label: egui::Id) -> Option<String> {
     let mut buf = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
-    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width));
+    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width)).labelled_by(label);
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     }
@@ -123,8 +140,8 @@ pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, 
                 if !needle.is_empty() && !key.to_ascii_lowercase().contains(&needle) {
                     continue;
                 }
-                ui.label(RichText::new(key).monospace());
-                row(ui, key, value, edits);
+                let label = ui.label(RichText::new(key).monospace());
+                row(ui, key, label.id, value, edits);
                 ui.end_row();
             }
             let shown: Vec<_> = interface.iter().filter(|(k, _)| needle.is_empty() || k.to_ascii_lowercase().contains(&needle)).collect();
@@ -133,41 +150,42 @@ pub(super) fn advanced(app: &CadApp, ui: &mut egui::Ui, edits: &mut Map<String, 
                 ui.label(RichText::new(crate::tl!("Panels, toolbars and recent files")).small().color(t.text_dim));
                 ui.end_row();
                 for (key, value) in shown {
-                    ui.label(RichText::new(key).monospace());
-                    row(ui, key, value, ui_edits);
+                    let label = ui.label(RichText::new(key).monospace());
+                    row(ui, key, label.id, value, ui_edits);
                     ui.end_row();
                 }
             }
         });
     });
     ui.add_space(4.0);
-    json_editor(ui, &report, edits);
+    json_editor(ui, &report, &interface, edits, ui_edits);
 }
 
-/// One setting's editor: a check box for a boolean, a number field for a number, else a text field.
-fn row(ui: &mut egui::Ui, key: &str, value: &Value, edits: &mut Map<String, Value>) {
+/// One setting's editor, named by its row's `label` for screen readers: a check box for a
+/// boolean, a number field for a number, else a text field.
+fn row(ui: &mut egui::Ui, key: &str, label: egui::Id, value: &Value, edits: &mut Map<String, Value>) {
     match value {
         Value::Bool(b) => {
             let mut on = *b;
-            if ui.checkbox(&mut on, "").changed() {
+            if ui.checkbox(&mut on, "").labelled_by(label).changed() {
                 edits.insert(key.into(), Value::Bool(on));
             }
         }
         Value::Number(n) if n.is_i64() || n.is_u64() => {
             let mut x = n.as_i64().unwrap_or(0);
-            if ui.add(egui::DragValue::new(&mut x).speed(1.0)).changed() {
+            if ui.add(egui::DragValue::new(&mut x).speed(1.0)).labelled_by(label).changed() {
                 edits.insert(key.into(), Value::from(x));
             }
         }
         Value::Number(n) => {
             let mut x = n.as_f64().unwrap_or(0.0);
-            if ui.add(egui::DragValue::new(&mut x).speed(0.05).max_decimals(6)).changed() {
+            if ui.add(egui::DragValue::new(&mut x).speed(0.05).max_decimals(6)).labelled_by(label).changed() {
                 edits.insert(key.into(), Value::from(x));
             }
         }
         other => {
             let id = egui::Id::unique(("cc_options_advanced_text", key));
-            if let Some(text) = commit_text(ui, id, &compact(other), 290.0) {
+            if let Some(text) = commit_text(ui, id, &compact(other), 290.0, label) {
                 match parse_edit(other, &text) {
                     Ok(v) => {
                         edits.insert(key.into(), v);
@@ -179,13 +197,24 @@ fn row(ui: &mut egui::Ui, key: &str, value: &Value, edits: &mut Map<String, Valu
     }
 }
 
-/// The whole settings document as JSON to edit: Apply sends what changed through `options`.
-fn json_editor(ui: &mut egui::Ui, report: &Map<String, Value>, edits: &mut Map<String, Value>) {
+/// The whole document as JSON to edit, settings and interface state: Apply sends what changed
+/// through `options` (settings) or `ui_edits` (interface state); an unknown key changes nothing.
+fn json_editor(
+    ui: &mut egui::Ui,
+    report: &Map<String, Value>,
+    interface: &Map<String, Value>,
+    edits: &mut Map<String, Value>,
+    ui_edits: &mut Map<String, Value>,
+) {
     let open_id = egui::Id::unique(JSON_OPEN);
     let text_id = egui::Id::unique(JSON_TEXT);
     let open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
     let r = egui::CollapsingHeader::new(crate::tl!("Edit as JSON")).id_salt("options_advanced_json").default_open(open).show(ui, |ui| {
-        let pretty = || serde_json::to_string_pretty(&Value::Object(report.clone())).unwrap_or_default();
+        let pretty = || {
+            let mut all = report.clone();
+            all.extend(interface.clone());
+            serde_json::to_string_pretty(&Value::Object(all)).unwrap_or_default()
+        };
         let mut text = ui.data(|d| d.get_temp::<String>(text_id)).unwrap_or_else(pretty);
         let edit = egui::TextEdit::multiline(&mut text).code_editor().desired_rows(6).desired_width(f32::INFINITY);
         if ui.add(edit).changed() {
@@ -194,15 +223,15 @@ fn json_editor(ui: &mut egui::Ui, report: &Map<String, Value>, edits: &mut Map<S
         ui.horizontal(|ui| {
             if ui.button(crate::tl!("Apply")).clicked() {
                 match serde_json::from_str::<Value>(&text) {
-                    Ok(Value::Object(new)) => {
-                        let diff = changed(report, &new);
-                        if diff.is_empty() {
+                    Ok(Value::Object(new)) => match split_edits(report, interface, &new) {
+                        Ok((diff, ui_diff)) => {
                             set_error(ui, None);
-                        } else {
                             edits.extend(diff);
+                            ui_edits.extend(ui_diff);
+                            ui.data_mut(|d| d.remove::<String>(text_id));
                         }
-                        ui.data_mut(|d| d.remove::<String>(text_id));
-                    }
+                        Err(key) => set_error(ui, Some(format!("{}: {key}", crate::tl!("Unknown setting")))),
+                    },
                     Ok(_) => set_error(ui, Some(crate::tl!("The settings must be a JSON object.").to_string())),
                     Err(e) => set_error(ui, Some(format!("{}: {e}", crate::tl!("Not valid JSON")))),
                 }
@@ -249,5 +278,15 @@ mod tests {
         let new = json!({ "a": 1, "b": "y", "c": null, "d": true }).as_object().cloned().unwrap_or_default();
         assert_eq!(Value::Object(changed(&old, &new)), json!({ "b": "y", "d": true }));
         assert!(changed(&old, &old).is_empty());
+    }
+
+    #[test]
+    fn the_json_document_routes_settings_and_interface_state_and_refuses_unknown_keys() {
+        let map = |v: Value| v.as_object().cloned().unwrap_or_default();
+        let report = map(json!({ "a": 1, "b": "x" }));
+        let interface = map(json!({ "showToolbar": true }));
+        let (settings, ui) = split_edits(&report, &interface, &map(json!({ "a": 2, "b": "x", "showToolbar": false }))).unwrap();
+        assert_eq!((Value::Object(settings), Value::Object(ui)), (json!({ "a": 2 }), json!({ "showToolbar": false })));
+        assert_eq!(split_edits(&report, &interface, &map(json!({ "nope": 1 }))), Err("nope".to_string()));
     }
 }

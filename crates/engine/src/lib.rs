@@ -657,11 +657,16 @@ pub fn apply_dim_defaults(defaults: &serde_json::Map<String, serde_json::Value>,
 }
 
 impl Session {
-    /// Keep `defaults` for new drawings and, when the open drawing is the untouched first one
-    /// (no file, nothing drawn or undoable), give it them too: the startup drawing is made before
-    /// the profile is read.
+    /// Keep `defaults` for new drawings; open drawings keep their styles.
     pub fn set_dim_defaults(&mut self, defaults: serde_json::Map<String, serde_json::Value>) {
         self.dim_defaults = defaults;
+    }
+
+    /// The profile's defaults at start-up: kept for new drawings and, when the open drawing is
+    /// the untouched first one (no file, nothing drawn or undoable), given to it too, since the
+    /// startup drawing is made before the profile is read.
+    pub fn restore_dim_defaults(&mut self, defaults: serde_json::Map<String, serde_json::Value>) {
+        self.set_dim_defaults(defaults);
         if let [only] = self.docs.as_mut_slice()
             && only.path.is_none()
             && only.undo.is_empty()

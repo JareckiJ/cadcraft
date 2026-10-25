@@ -504,7 +504,7 @@ impl CadApp {
         }
         self.apply_file_settings(&c);
         if let Some(defaults) = c.dim_defaults {
-            self.session.set_dim_defaults(defaults);
+            self.session.restore_dim_defaults(defaults);
         }
     }
 

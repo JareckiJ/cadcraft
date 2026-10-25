@@ -59,15 +59,16 @@ fn int(v: &Value) -> i64 {
 }
 
 /// A combo box over `(value, label)` pairs; a pick goes into `dim` under `var`.
-fn choice(ui: &mut egui::Ui, salt: &str, current: i64, items: &[(i64, &str)], var: &str, dim: &mut Map<String, Value>) {
+fn choice(ui: &mut egui::Ui, label: egui::Id, salt: &str, current: i64, items: &[(i64, &str)], var: &str, dim: &mut Map<String, Value>) {
     let shown = items.iter().find(|(v, _)| *v == current).map_or_else(|| current.to_string(), |(_, l)| (*l).to_string());
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).width(220.0).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt(salt).selected_text(shown).width(220.0).show_ui(ui, |ui| {
         for (v, label) in items {
             if ui.selectable_label(*v == current, *label).clicked() && *v != current {
                 dim.insert(var.into(), json!(v));
             }
         }
     });
+    combo.response.labelled_by(label);
 }
 
 /// What a drag field commits: while it is dragged its value lives in egui's temp data under `id`
@@ -92,32 +93,40 @@ fn commit<N: Copy + PartialEq + Send + Sync + 'static>(
 }
 
 /// A decimal number field; an edit goes into `dim` under `var` (see [`commit`]).
-fn number(ui: &mut egui::Ui, current: f64, range: std::ops::RangeInclusive<f64>, speed: f64, var: &str, dim: &mut Map<String, Value>) {
+fn number(
+    ui: &mut egui::Ui,
+    label: egui::Id,
+    current: f64,
+    range: std::ops::RangeInclusive<f64>,
+    speed: f64,
+    var: &str,
+    dim: &mut Map<String, Value>,
+) {
     let id = egui::Id::unique(("cc_options_dim_number", var));
     let held = ui.data(|d| d.get_temp::<f64>(id));
     let mut x = held.unwrap_or(current);
-    let r = ui.add(egui::DragValue::new(&mut x).range(range).speed(speed).max_decimals(6).update_while_editing(false));
+    let r = ui.add(egui::DragValue::new(&mut x).range(range).speed(speed).max_decimals(6).update_while_editing(false)).labelled_by(label);
     if let Some(x) = commit(ui, id, &r, held, x, current) {
         dim.insert(var.into(), json!(x));
     }
 }
 
 /// A whole-number field; an edit goes into `dim` under `var` (see [`commit`]).
-fn whole(ui: &mut egui::Ui, current: i64, range: std::ops::RangeInclusive<i64>, var: &str, dim: &mut Map<String, Value>) {
+fn whole(ui: &mut egui::Ui, label: egui::Id, current: i64, range: std::ops::RangeInclusive<i64>, var: &str, dim: &mut Map<String, Value>) {
     let id = egui::Id::unique(("cc_options_dim_whole", var));
     let held = ui.data(|d| d.get_temp::<i64>(id));
     let mut x = held.unwrap_or(current);
-    let r = ui.add(egui::DragValue::new(&mut x).range(range).update_while_editing(false));
+    let r = ui.add(egui::DragValue::new(&mut x).range(range).update_while_editing(false)).labelled_by(label);
     if let Some(x) = commit(ui, id, &r, held, x, current) {
         dim.insert(var.into(), json!(x));
     }
 }
 
 /// A text field that commits when it loses focus; `Some(text)` on a change.
-fn text_field(ui: &mut egui::Ui, id: &str, current: &str, width: f32) -> Option<String> {
+fn text_field(ui: &mut egui::Ui, label: egui::Id, id: &str, current: &str, width: f32) -> Option<String> {
     let id = egui::Id::unique(("cc_options_dim_text", id));
     let mut buf = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.to_string());
-    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width));
+    let r = ui.add(egui::TextEdit::singleline(&mut buf).desired_width(width)).labelled_by(label);
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     }
@@ -157,29 +166,30 @@ pub(super) fn dimensions(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<Stri
         }
     }
     ui.add_space(4.0);
-    egui::ScrollArea::vertical().id_salt("options_dimensions").max_height(460.0).auto_shrink([false, true]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("options_dimensions").max_height(300.0).auto_shrink([false, true]).show(ui, |ui| {
         super::dialog::grid(ui, "options_dimensions_grid", |ui| {
             let v = |var: &str| value(app, &style, var);
 
-            ui.label(crate::tl!("Linear units"));
-            choice(ui, "dim_lunit", int(&v("DIMLUNIT")), &linear_units(), "DIMLUNIT", &mut dim);
+            let label = ui.label(crate::tl!("Linear units"));
+            choice(ui, label.id, "dim_lunit", int(&v("DIMLUNIT")), &linear_units(), "DIMLUNIT", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Precision (decimal places)"));
-            whole(ui, int(&v("DIMDEC")), 0..=8, "DIMDEC", &mut dim);
+            let label = ui.label(crate::tl!("Precision (decimal places)"));
+            whole(ui, label.id, int(&v("DIMDEC")), 0..=8, "DIMDEC", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Decimal separator"));
+            let label = ui.label(crate::tl!("Decimal separator"));
             let sep = v("DIMDSEP").as_str().unwrap_or(".").to_string();
             let sep = if sep.is_empty() { ".".to_string() } else { sep };
             let shown = separators().iter().find(|(c, _)| *c == sep).map_or_else(|| sep.clone(), |(_, l)| (*l).to_string());
-            egui::ComboBox::from_id_salt("dim_dsep").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("dim_dsep").selected_text(shown).width(220.0).show_ui(ui, |ui| {
                 for (c, label) in separators() {
                     if ui.selectable_label(c == sep, label).clicked() && c != sep {
                         dim.insert("DIMDSEP".into(), json!(c));
                     }
                 }
             });
+            combo.response.labelled_by(label.id);
             ui.end_row();
 
             ui.label(crate::tl!("Zero suppression"));
@@ -194,60 +204,60 @@ pub(super) fn dimensions(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<Stri
             });
             ui.end_row();
 
-            ui.label(crate::tl!("Round off to"));
-            number(ui, v("DIMRND").as_f64().unwrap_or(0.0), 0.0..=1.0e6, 0.01, "DIMRND", &mut dim);
+            let label = ui.label(crate::tl!("Round off to"));
+            number(ui, label.id, v("DIMRND").as_f64().unwrap_or(0.0), 0.0..=1.0e6, 0.01, "DIMRND", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Linear scale factor"));
-            number(ui, v("DIMLFAC").as_f64().unwrap_or(1.0), 1.0e-6..=1.0e6, 0.01, "DIMLFAC", &mut dim);
+            let label = ui.label(crate::tl!("Linear scale factor"));
+            number(ui, label.id, v("DIMLFAC").as_f64().unwrap_or(1.0), 1.0e-6..=1.0e6, 0.01, "DIMLFAC", &mut dim);
             ui.end_row();
 
             let (prefix, suffix) = split_post(v("DIMPOST").as_str().unwrap_or(""));
-            ui.label(crate::tl!("Prefix"));
-            if let Some(new) = text_field(ui, "prefix", &prefix, 120.0) {
+            let label = ui.label(crate::tl!("Prefix"));
+            if let Some(new) = text_field(ui, label.id, "prefix", &prefix, 120.0) {
                 dim.insert("DIMPOST".into(), json!(join_post(&new, &suffix)));
             }
             ui.end_row();
-            ui.label(crate::tl!("Suffix"));
-            if let Some(new) = text_field(ui, "suffix", &suffix, 120.0) {
+            let label = ui.label(crate::tl!("Suffix"));
+            if let Some(new) = text_field(ui, label.id, "suffix", &suffix, 120.0) {
                 dim.insert("DIMPOST".into(), json!(join_post(&prefix, &new)));
             }
             ui.end_row();
 
-            ui.label(crate::tl!("Angular units"));
-            choice(ui, "dim_aunit", int(&v("DIMAUNIT")), &angular_units(), "DIMAUNIT", &mut dim);
+            let label = ui.label(crate::tl!("Angular units"));
+            choice(ui, label.id, "dim_aunit", int(&v("DIMAUNIT")), &angular_units(), "DIMAUNIT", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Angular precision"));
-            whole(ui, int(&v("DIMADEC")), 0..=8, "DIMADEC", &mut dim);
+            let label = ui.label(crate::tl!("Angular precision"));
+            whole(ui, label.id, int(&v("DIMADEC")), 0..=8, "DIMADEC", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Text height"));
-            number(ui, v("DIMTXT").as_f64().unwrap_or(0.18), 1.0e-6..=1.0e6, 0.01, "DIMTXT", &mut dim);
+            let label = ui.label(crate::tl!("Text height"));
+            number(ui, label.id, v("DIMTXT").as_f64().unwrap_or(0.18), 1.0e-6..=1.0e6, 0.01, "DIMTXT", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Text position"));
-            choice(ui, "dim_tad", int(&v("DIMTAD")), &text_positions(), "DIMTAD", &mut dim);
+            let label = ui.label(crate::tl!("Text position"));
+            choice(ui, label.id, "dim_tad", int(&v("DIMTAD")), &text_positions(), "DIMTAD", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Offset from dimension line"));
-            number(ui, v("DIMGAP").as_f64().unwrap_or(0.09), 0.0..=1.0e6, 0.01, "DIMGAP", &mut dim);
+            let label = ui.label(crate::tl!("Offset from dimension line"));
+            number(ui, label.id, v("DIMGAP").as_f64().unwrap_or(0.09), 0.0..=1.0e6, 0.01, "DIMGAP", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Arrow size"));
-            number(ui, v("DIMASZ").as_f64().unwrap_or(0.18), 0.0..=1.0e6, 0.01, "DIMASZ", &mut dim);
+            let label = ui.label(crate::tl!("Arrow size"));
+            number(ui, label.id, v("DIMASZ").as_f64().unwrap_or(0.18), 0.0..=1.0e6, 0.01, "DIMASZ", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Extension line offset"));
-            number(ui, v("DIMEXO").as_f64().unwrap_or(0.0625), 0.0..=1.0e6, 0.01, "DIMEXO", &mut dim);
+            let label = ui.label(crate::tl!("Extension line offset"));
+            number(ui, label.id, v("DIMEXO").as_f64().unwrap_or(0.0625), 0.0..=1.0e6, 0.01, "DIMEXO", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Extension beyond dimension line"));
-            number(ui, v("DIMEXE").as_f64().unwrap_or(0.18), 0.0..=1.0e6, 0.01, "DIMEXE", &mut dim);
+            let label = ui.label(crate::tl!("Extension beyond dimension line"));
+            number(ui, label.id, v("DIMEXE").as_f64().unwrap_or(0.18), 0.0..=1.0e6, 0.01, "DIMEXE", &mut dim);
             ui.end_row();
 
-            ui.label(crate::tl!("Overall scale"));
-            number(ui, v("DIMSCALE").as_f64().unwrap_or(1.0), 0.0..=1.0e6, 0.1, "DIMSCALE", &mut dim);
+            let label = ui.label(crate::tl!("Overall scale"));
+            number(ui, label.id, v("DIMSCALE").as_f64().unwrap_or(1.0), 0.0..=1.0e6, 0.1, "DIMSCALE", &mut dim);
             ui.end_row();
         });
     });
