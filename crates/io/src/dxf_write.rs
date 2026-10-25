@@ -1795,10 +1795,13 @@ pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
 /// version's (MULTILEADER from 2007).
-pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> String {
+pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> (String, Vec<(cadcraft_doc::foreign::ForeignKey, String)>) {
     let mut tags = tags_for(d, Version::R2000, dwg);
+    // The dependency's DXF reader loses BLOCK-marker XDATA before its DWG writer could refuse it:
+    // found here, on the prepared tags, for the caller's loss report.
+    let block_xdata = crate::dxf_raw::block_marker_xdata(&tags);
     bridge_markers(&mut tags);
-    cadcraft_dxf::write_ascii(&tags)
+    (cadcraft_dxf::write_ascii(&tags), block_xdata)
 }
 
 /// Subclass markers the DWG bridge knows by another spelling (it matches them exactly):

@@ -36,6 +36,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
+    write_atomic_with(path, bytes, permissions)
+}
+
+/// [`write_atomic`] with the replacement's permissions given (`None`: the process default), set
+/// when the temporary file is created, so the bytes are never readable more widely.
+pub fn write_atomic_with(path: &Path, bytes: &[u8], permissions: Option<Permissions>) -> io::Result<()> {
     let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let (mut file, tmp) = create_temp(&dir, permissions.as_ref())?;
     let write = (|| {
@@ -82,7 +88,9 @@ fn create_temp(dir: &Path, permissions: Option<&Permissions>) -> io::Result<(Fil
     Err(last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "could not create a unique temporary file")))
 }
 
-fn create_exclusive(path: &Path, permissions: Option<&Permissions>) -> io::Result<File> {
+/// Create `path` only if nothing is there (no symlink is followed), with `permissions` set at
+/// creation on Unix.
+pub(crate) fn create_exclusive(path: &Path, permissions: Option<&Permissions>) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]

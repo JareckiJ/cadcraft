@@ -105,6 +105,171 @@ pub fn write_as() -> Option<WriteAsHook> {
     WRITE_AS.get().copied()
 }
 
+/// What a saved drawing file lacks of the drawing's source (the I/O layer's loss report): how
+/// many records, a one-line summary, and the report as JSON for `<file>.lost.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Loss {
+    pub count: u64,
+    pub summary: String,
+    pub json: String,
+}
+
+/// Write a drawing with [`SaveAs`] options and say what the file lacks of its source. Installed
+/// by hosts whose writer reports it; saves then keep the report beside the file and back up a
+/// source file they overwrite with less than it had.
+pub type WriteReportHook = fn(&Drawing, &str, &SaveAs) -> std::result::Result<(Vec<u8>, Option<Loss>), String>;
+
+static WRITE_REPORT: OnceLock<WriteReportHook> = OnceLock::new();
+
+/// Install the host's [`WriteReportHook`] (once; later calls are ignored).
+pub fn set_write_report(h: WriteReportHook) {
+    let _ = WRITE_REPORT.set(h);
+}
+/// The installed [`WriteReportHook`], if any.
+pub fn write_report() -> Option<WriteReportHook> {
+    WRITE_REPORT.get().copied()
+}
+
+/// The loss report's file beside a saved file.
+pub fn loss_report_path(path: &str) -> String {
+    format!("{path}.lost.json")
+}
+
+/// Before a save that lacks records of the drawing's source overwrites the drawing's own file,
+/// copy that file to `<name>.orig.<ext>` (`<name>.orig-2.<ext>`, … when that exists) so nothing is
+/// gone for good. Not when the file already lacks it all: a report beside it from an earlier save
+/// (`<file>.lost.json`), made for exactly this file (its size and hash match), that lists every
+/// record this save lacks means the file holds nothing more this save would lose. The copy is created
+/// exclusively (an existing name, symlink or not, is skipped, never followed) with the file's own
+/// permissions. Returns the copy's path; nothing is copied when the save isn't lossy, isn't over
+/// the drawing's file, or the file isn't there (or on the web, which has no files).
+pub fn back_up_source(path: &str, source: Option<&str>, loss: Option<&Loss>) -> std::result::Result<Option<String>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let p = std::path::Path::new(path);
+        let same = source.is_some_and(|s| {
+            let a = std::fs::canonicalize(s).unwrap_or_else(|_| std::path::PathBuf::from(s));
+            let b = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            a == b
+        });
+        let Some(loss) = loss else { return Ok(None) };
+        if !same || !p.is_file() {
+            return Ok(None);
+        }
+        let report = std::fs::read_to_string(loss_report_path(path)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        let fresh: Option<Value> = serde_json::from_str(&loss.json).ok();
+        let already = report.filter(|v| v.get("file") == Some(&stamp_json(file_stamp(p))));
+        if let (Some(old), Some(new)) = (&already, &fresh)
+            && lacks_already(old, new)
+        {
+            return Ok(None);
+        }
+        let failed = |e: std::io::Error| format!("backing up {path} before a save that lacks some of its records: {e}");
+        let permissions = std::fs::metadata(p).map_err(failed)?.permissions();
+        let stem = p.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+        let ext = p.extension().map(|x| format!(".{}", x.to_string_lossy())).unwrap_or_default();
+        for n in 1..=999u32 {
+            let name = if n == 1 { format!("{stem}.orig{ext}") } else { format!("{stem}.orig-{n}{ext}") };
+            let copy = p.with_file_name(name);
+            let mut out = match crate::atomic_write::create_exclusive(&copy, Some(&permissions)) {
+                Ok(f) => f,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(failed(e)),
+            };
+            let copied = std::fs::File::open(p).and_then(|mut src| std::io::copy(&mut src, &mut out)).and_then(|_| out.sync_all());
+            if let Err(e) = copied {
+                drop(out);
+                let _ = std::fs::remove_file(&copy);
+                return Err(failed(e));
+            }
+            return Ok(Some(copy.to_string_lossy().to_string()));
+        }
+        Err(format!("{path}: too many backups (.orig) beside it; move them away before saving over it"))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (path, source, loss);
+        Ok(None)
+    }
+}
+
+/// Whether the file an `old` report describes already lacks every record the `new` report holds
+/// (same kind, type and handle): then the save loses nothing that is still in the file. A `new`
+/// report with records it doesn't list (beyond its detail cap) can't be compared and never is.
+#[cfg(not(target_arch = "wasm32"))]
+fn lacks_already(old: &Value, new: &Value) -> bool {
+    let ids = |v: &Value| -> std::collections::HashSet<(String, String, String)> {
+        let field = |r: &Value, k: &str| r.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+        v.get("records")
+            .and_then(Value::as_array)
+            .map(|rs| rs.iter().map(|r| (field(r, "kind"), field(r, "type"), field(r, "handle"))).collect())
+            .unwrap_or_default()
+    };
+    let unlisted = |v: &Value| v.get("unlisted").and_then(Value::as_u64).unwrap_or(0);
+    unlisted(new) == 0 && ids(new).is_subset(&ids(old))
+}
+
+/// A file's size and FNV-1a 64 hash: what binds a loss report to the file it describes.
+#[cfg(not(target_arch = "wasm32"))]
+fn file_stamp(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).ok()?;
+    let (mut size, mut hash) = (0u64, 0xcbf2_9ce4_8422_2325u64);
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            return Some((size, hash));
+        }
+        for b in buf.get(..n).unwrap_or(&[]) {
+            hash = (hash ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        size = size.saturating_add(n as u64);
+    }
+}
+
+/// [`file_stamp`] as the report's `file` field.
+#[cfg(not(target_arch = "wasm32"))]
+fn stamp_json(stamp: Option<(u64, u64)>) -> Value {
+    stamp.map_or(Value::Null, |(bytes, hash)| json!({ "bytes": bytes, "fnv1a64": format!("{hash:016x}") }))
+}
+
+/// Keep `loss` beside the saved file `path` as `<path>.lost.json`, with the file's size and hash
+/// (`file`) so a later save can tell whether the report still describes it, and permissions no
+/// broader than the file's; when the save lacks nothing, a report left there by an earlier save is
+/// removed (it no longer describes the file), and failing to remove it is an error. Returns the report's path. The web has no files
+/// beside a download: nothing is kept there.
+pub fn keep_loss_report(path: &str, loss: Option<&Loss>) -> std::result::Result<Option<String>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let report = loss_report_path(path);
+        match loss {
+            Some(l) => {
+                let file = std::path::Path::new(path);
+                let mut json: Value = serde_json::from_str(&l.json).map_err(|e| format!("{report}: {e}"))?;
+                if let Some(o) = json.as_object_mut() {
+                    o.insert("file".into(), stamp_json(file_stamp(file)));
+                }
+                let text = serde_json::to_string_pretty(&json).map_err(|e| format!("{report}: {e}"))?;
+                let permissions = std::fs::metadata(file).ok().map(|m| m.permissions());
+                crate::atomic_write::write_atomic_with(std::path::Path::new(&report), text.as_bytes(), permissions)
+                    .map_err(|e| format!("{report}: {e}"))?;
+                Ok(Some(report))
+            }
+            // It holds the lost records' own data: a report that can't be removed is an error.
+            None => match std::fs::remove_file(&report) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{report} (no longer up to date) couldn't be removed: {e}")),
+                _ => Ok(None),
+            },
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (path, loss);
+        Ok(None)
+    }
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")
@@ -141,20 +306,25 @@ fn is_dxf(path: &str) -> bool {
 
 /// The drawing written to `path` with `opts`: through [`IoHooks::write`] when no option is set,
 /// else through the [`write_as`] hook.
-fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<u8>> {
+fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<(Vec<u8>, Option<Loss>)> {
     let hooks = io().ok_or_else(|| bad(cmd, "file formats are not available in this build"))?;
     if opts.binary && !is_dxf(path) {
         return Err(bad(cmd, "binary applies to DXF files only"));
     }
     // A drawing file is the drawing outside the Block Editor; an image is what is shown.
     let d: &cadcraft_doc::Drawing = if is_drawing_file(path) { s.state()?.drawing() } else { s.doc()? };
+    if is_drawing_file(path)
+        && let Some(w) = write_report()
+    {
+        return w(d, path, opts).map_err(|e| bad(cmd, e));
+    }
     let r = if *opts == SaveAs::default() {
         (hooks.write)(d, path)
     } else {
         let w = write_as().ok_or_else(|| bad(cmd, "saving at a chosen version or as binary DXF is not available in this build"))?;
         w(d, path, opts)
     };
-    r.map_err(|e| bad(cmd, e))
+    r.map(|b| (b, None)).map_err(|e| bad(cmd, e))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -386,19 +556,42 @@ fn run_closeall(s: &mut Session, _p: &Value) -> Result<Value> {
     ok()
 }
 
-pub(crate) fn save_to(s: &mut Session, path: &str) -> Result<usize> {
+/// What a save wrote: its size, and when the file lacks records of the drawing's source, the loss
+/// with where its report and a backup of the overwritten source went.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Saved {
+    pub bytes: usize,
+    pub loss: Option<Loss>,
+    pub report: Option<String>,
+    pub backup: Option<String>,
+}
+
+/// Save the drawing to `path` keeping its binary DXF choice, as QSAVE does.
+pub(crate) fn save_to(s: &mut Session, path: &str) -> Result<Saved> {
     let opts = SaveAs { version: None, binary: s.state()?.binary_dxf && is_dxf(path) };
     save_as(s, "save", path, &opts)
 }
 
 /// Save to `path` with `opts`. A drawing file then keeps the version and binary choice: the
 /// version goes into the drawing's `$ACADVER`, so later saves (QSAVE) write it again.
-fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usize> {
+fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Saved> {
     if s.doc()?.refedit.is_some() {
         return Err(bad(cmd, "A block reference is being edited in place: finish with REFCLOSE (Save or Discard) before saving."));
     }
-    let bytes = write_bytes(s, cmd, path, opts)?;
-    let n = commit_save(s, path, &bytes, store)?;
+    let (bytes, loss) = write_bytes(s, cmd, path, opts)?;
+    // A save that lacks records of the source never overwrites the source without a copy of it.
+    let source = s.state()?.path.clone();
+    let backup = if is_drawing_file(path) { back_up_source(path, source.as_deref(), loss.as_ref()).map_err(|e| bad(cmd, e))? } else { None };
+    // The report is kept with the file, before the drawing counts as saved: a report that can't be
+    // written fails the save (the file is written, the drawing stays unsaved).
+    let mut report = None;
+    let n = commit_save(s, path, &bytes, |p, b| {
+        store(p, b)?;
+        if is_drawing_file(p) {
+            report = keep_loss_report(p, loss.as_ref()).map_err(|e| bad(cmd, format!("{p} was written, but its loss report wasn't: {e}")))?;
+        }
+        Ok(())
+    })?;
     if is_drawing_file(path) {
         let st = s.state_mut()?;
         st.binary_dxf = opts.binary;
@@ -409,7 +602,7 @@ fn save_as(s: &mut Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<usiz
             st.saved = st.drawing().clone();
         }
     }
-    Ok(n)
+    Ok(Saved { bytes: n, loss, report, backup })
 }
 
 /// Put saved bytes where the user gets them: natively the file at `path` (written atomically); on
@@ -449,29 +642,43 @@ fn commit_save(s: &mut Session, path: &str, bytes: &[u8], store: impl FnOnce(&st
     Ok(bytes.len())
 }
 
-/// The save result; on the web it also names the file the browser downloaded.
-fn saved(path: &str, bytes: usize) -> Value {
-    let mut r = json!({ "path": path, "bytes": bytes });
+/// The save result; on the web it also names the file the browser downloaded. A file that lacks
+/// records of the drawing's source adds `lost` (how many), `lost_summary`, `lost_report` (the
+/// `<file>.lost.json` beside it) and `backup` (the copy of the source it overwrote).
+fn saved(path: &str, info: &Saved) -> Value {
+    let mut r = json!({ "path": path, "bytes": info.bytes });
     if cfg!(target_arch = "wasm32") {
         r["download"] = json!(file_name(path));
+    }
+    if let Some(l) = &info.loss {
+        r["lost"] = json!(l.count);
+        r["lost_summary"] = json!(l.summary);
+    }
+    if let Some(p) = &info.report {
+        r["lost_report"] = json!(p);
+    }
+    if let Some(p) = &info.backup {
+        r["backup"] = json!(p);
     }
     r
 }
 
+/// QSAVE: save to `path`, else to the drawing's own file.
 fn run_save(s: &mut Session, p: &Value) -> Result<Value> {
     let path = match str_param(p, "path") {
         Some(p) => p.to_string(),
         None => s.state()?.path.clone().ok_or_else(|| bad("qsave", "drawing has no file name yet; use saveas {path}"))?,
     };
-    let n = save_to(s, &path)?;
-    Ok(saved(&path, n))
+    let info = save_to(s, &path)?;
+    Ok(saved(&path, &info))
 }
 
+/// SAVEAS: save to `path` with an optional version and binary choice, which the drawing then keeps.
 fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("saveas", "`path` is required"))?.to_string();
     let opts = save_options("saveas", p)?;
-    let n = save_as(s, "saveas", &path, &opts)?;
-    let mut r = saved(&path, n);
+    let info = save_as(s, "saveas", &path, &opts)?;
+    let mut r = saved(&path, &info);
     if is_drawing_file(&path) {
         r["version"] = json!(opts.version.unwrap_or_else(|| drawing_version(s, &path)).year());
         r["binary"] = json!(opts.binary);
@@ -497,15 +704,22 @@ fn run_switch(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
+/// `document.bytes`: the drawing in a format as base64, with what the file lacks in the result (there is no file to keep a report beside).
 fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let fmt = str_param(p, "format").unwrap_or("dxf");
     let opts = save_options("document.bytes", p)?;
     let version = opts.version.unwrap_or_else(|| drawing_version(s, &format!("drawing.{fmt}")));
     let lost = not_saved_as(s.doc()?, version);
-    let bytes = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
+    let (bytes, loss) = write_bytes(s, "document.bytes", &format!("drawing.{fmt}"), &opts)?;
     let mut r = json!({ "data": base64_encode(&bytes), "bytes": bytes.len() });
     if drops_unknown(&format!("drawing.{fmt}")) {
         report_not_saved(s, &mut r, &lost);
+    }
+    // No file to keep a report beside: the caller gets it in the result.
+    if let Some(l) = loss {
+        r["lost"] = json!(l.count);
+        r["lost_summary"] = json!(l.summary);
+        r["lost_report"] = serde_json::from_str(&l.json).unwrap_or(Value::Null);
     }
     Ok(r)
 }
@@ -563,7 +777,8 @@ fn is_drawing_file(path: &str) -> bool {
     matches!(ext.as_str(), "dxf" | "dwg" | "dwt" | "")
 }
 
-/// Say on the command line what the file couldn't keep, and list it in the result's `notSaved`.
+/// Entities a DXF or DWG file doesn't keep: those of object types CADCraft doesn't model
+/// ([`not_saved`]), on the command line and in the result.
 fn report_not_saved(s: &mut Session, r: &mut Value, lost: &std::collections::BTreeMap<String, usize>) {
     let Some(msg) = not_saved_message(lost) else { return };
     s.echo(msg);
@@ -572,7 +787,8 @@ fn report_not_saved(s: &mut Session, r: &mut Value, lost: &std::collections::BTr
     }
 }
 
-/// Save, then report the entities the file couldn't keep (nothing is dropped silently).
+/// Save, then report the entities the file couldn't keep and, when the file lacks records of the
+/// drawing's source, the loss report's summary and where it is (nothing is dropped silently).
 fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> Result<Value>) -> Result<Value> {
     // What the file will hold depends on the version it is saved as (the data store from 2013).
     let path = str_param(p, "path").map(str::to_string).or_else(|| s.state().ok().and_then(|st| st.path.clone())).unwrap_or_default();
@@ -581,6 +797,11 @@ fn save_reporting(s: &mut Session, p: &Value, run: fn(&mut Session, &Value) -> R
     let mut r = run(s, p)?;
     if r.get("path").and_then(Value::as_str).is_some_and(drops_unknown) {
         report_not_saved(s, &mut r, &lost);
+    }
+    if let Some(summary) = r.get("lost_summary").and_then(Value::as_str) {
+        let report = r.get("lost_report").and_then(Value::as_str).map(|p| format!("; each one is listed in {p}")).unwrap_or_default();
+        let backup = r.get("backup").and_then(Value::as_str).map(|p| format!("; the original file is kept as {p}")).unwrap_or_default();
+        s.echo(format!("{summary}{report}{backup}"));
     }
     Ok(r)
 }
@@ -722,6 +943,7 @@ mod tests {
 mod pr193_tests {
     use super::*;
 
+    /// A failed store keeps the unsaved changes; a delivered save clears them.
     #[test]
     fn failed_store_keeps_unsaved_changes_and_delivered_save_clears_them() {
         let mut s = Session::new();
@@ -748,6 +970,6 @@ mod pr193_tests {
         let st = s.state().unwrap();
         assert!(!st.is_dirty());
         assert_eq!((st.path.as_deref(), st.title.as_str()), (Some("a/Owned.dxf"), "Owned.dxf"));
-        assert_eq!(saved("a/Owned.dxf", n)["bytes"], 6);
+        assert_eq!(saved("a/Owned.dxf", &Saved { bytes: n, ..Saved::default() })["bytes"], 6);
     }
 }

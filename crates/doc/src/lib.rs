@@ -87,6 +87,8 @@ pub struct Drawing {
     pub header: Header,
     /// File data CADCraft does not model, written back on save.
     pub foreign: std::sync::Arc<foreign::Foreign>,
+    /// Confirmed incomplete-import context. Shared by undo/committed snapshots; never file data.
+    pub preservation: std::sync::Arc<foreign::PreservationState>,
     pub layers: Vec<Layer>,
     pub linetypes: Vec<Linetype>,
     pub text_styles: Vec<TextStyle>,
@@ -156,10 +158,12 @@ impl Drawing {
         d.header.set_str("DIMSTYLE", "ISO-25");
         d
     }
+    /// An empty drawing with the default tables and no file context.
     fn bare() -> Self {
         Drawing {
             header: Header::default(),
             foreign: std::sync::Arc::default(),
+            preservation: std::sync::Arc::default(),
             layers: vec![Layer::default(), Layer { name: "Defpoints".into(), plot: false, ..Layer::default() }],
             linetypes: vec![
                 Linetype { name: "ByBlock".into(), description: String::new(), pattern: Vec::new() },

@@ -30,3 +30,7 @@ libc = "0.2"
 [dev-dependencies]
 # Real DXF files for the external reference tests (io is a lower layer).
 cadcraft-io = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Original generated FF1 sources, verified before the real I/O hooks import them.
+acadrust = "=0.6.5"

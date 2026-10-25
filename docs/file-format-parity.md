@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (DIMASSOC objects for angular, diametric and radial dimensions) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-24 · **Change:** minor (FF1: other programs' DWG objects carried into same-version DWG saves; saves report what they lack; `cadcraft-cli audit`; estimates unchanged) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -51,12 +51,78 @@ title/header suppression.
 | Web build | — | — | **no** (error: "save as DXF") | no | — |
 
 Everything lost in the DXF read/write paths below is also lost through DWG, plus whatever
-`acadrust`'s own DXF output omits (proxy objects, ACIS data, custom objects: not measured). User
-report #57: a 10 MB DWG failed after about two minutes; limits now stop runaway conversions
-early (#175), but the throughput problem remains. DGN line style components that no line style
-definition uses (leftovers of DGN imports, hundreds of thousands in some drawings) are left out
-on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG ≈ 30% read,
-≈ 15% write.**
+`acadrust`'s own DXF output omits; the bridge now inventories other programs' records and
+confirmed decoder skips before that conversion, so a save reports them (FF1, below) rather than
+dropping them silently. User report #57: a 10 MB DWG failed after about two minutes; limits now
+stop runaway conversions early (#175), but the throughput problem remains. DGN line style
+components that no line style definition uses (leftovers of DGN imports, hundreds of thousands in
+some drawings) are left out on read with a note, so such files no longer exceed the DXF limit
+(#1482). **DWG ≈ 30% read, ≈ 15% write.**
+
+### Preservation and safe-save contract (FF1)
+
+**A save never refuses because the drawing lacks part of its source, and never loses it
+silently.** Every database entry point (CLI `convert` and `run --save`, engine `qsave`/`saveas`,
+`document.bytes`, `io::write_with_report`/`write_framed_report`) writes the file and says what it
+lacks: a loss report naming each record of the source that isn't in the file, with that record's
+own DWG bytes (as read, R2010+ framing with its handle-stream bit count) or DXF groups where they
+were kept, so it can be restored later. The CLI and the editor keep it beside the file as
+`<file>.lost.json` (with the saved file's size and hash, and no wider permissions than the
+file), echo its summary, and copy a file they overwrite with less than it holds to
+`<name>.orig.<ext>` first (created exclusively, with the file's permissions). The copy is skipped
+only when the report beside the file was made for exactly that file (its size and hash match) and
+already names every record this save lacks, compared by kind, type and handle over the whole
+listed set; a save with records beyond the report's detail cap ("more unlisted") is always
+backed up. A save that lacks nothing removes an earlier report, and failing to is an error. The
+editor marks the drawing saved only once both the file and its report are written. A DWG save's list of other
+programs' records comes from the DWG writer's own list of what it left out. `document.bytes` returns the report in its result. (`write`,
+`write_with`, `write_framed` and `write_dxf` return the bytes only; their callers use the
+`_report` forms to see the loss.)
+
+**Other programs' objects go back into a DWG of the source's version** (the carry,
+`crates/dwg/src/carry.rs`). acadrust keeps the exact bytes of objects of classes it doesn't
+know; CADCraft carries whole subtrees of the named object dictionary made of dictionaries,
+those objects, and the dictionaries/XRECORDs they own, keeps their handles, and re-encodes each
+reference out of them (in the handle stream and as the application of their extended data) to
+what has the same role in the written file: a layer, linetype, text/dimension style,
+application or block by name, the named object dictionary, a dictionary by key path, an entity
+by handle, or another carried subtree. The classes section keeps the source's order (type codes
+are positional). The written DWG is read back; a carried record that doesn't come back byte for
+byte makes the save write the file again without them and report them. Not carried (reported
+with their bytes, and why): records of DWG 2000–2007 (R2010+ layout only), subtrees with a
+reference of unknown role or other modelled object types inside, entities of other programs,
+and any save in another version or as DXF.
+
+| Source/content | Verified outcome | Version/coverage boundary |
+|---|---|---|
+| Real Architectural Desktop drawings (four files, 300–301 display objects each in 5 named-object-dictionary subtrees, EED of application ACAD) | Same-version DWG save keeps all of them: re-read gives every record, all handle references resolve to the written file's layer 0 / ByBlock / Standard / ACAD, class positions match; a second edited save keeps them again. DXF or 2013 save: each one reported with its bytes | Local check only (the files are not in the repository); AC1032 |
+| Native custom-class object held by the named object dictionary (synthetic) | Same-version DWG/DWT keeps it, data bits unchanged, owner moved to the new named object dictionary, NOD entry and class position right; DXF and other versions report it with its exact bytes | AC1032 synthetic sources |
+| Display-configuration-like subtrees (synthetic): references to layer 0, ByBlock, Standard, EED application ACAD, a reference into another subtree, an owned dictionary with an XRECORD, one subtree with a reference of unknown role | Three subtrees go back with every reference re-encoded to the written file's records, over two edited save/reopen cycles; the fourth is reported with its bytes and reason; other versions and DXF report all four | AC1032 |
+| Native custom entities | Reported with their bytes by every database save; not carried back yet | AC1032 synthetic sources |
+| Native custom non-entity reactor target | Carried by a same-version DWG save from AC1032; reported with its bytes otherwise | AC1018/AC1021/AC1032 |
+| Native confirmed decoder skips or pruned records | Counted in full in the report (beyond the detail cap as "more unlisted") | Bounded bridge/document diagnostics; no bytes for undecodable records |
+| Native BLOCK-marker XDATA, including raw EED | Reported by every database save; ordinary BLOCK markers unaffected | AC1018/AC1021/AC1032 metadata-only sources |
+| Native DXF custom entities/objects/CLASS | Two edited ASCII/binary DXF saves preserve them (#528); DWG/DWT save leaves them out and reports each with its DXF groups | Export doesn't mark the DXF drawing |
+| Native DXF BLOCK-marker XDATA | DXF keeps it; DWG/DWT reports it | AC1018/AC1021/AC1032 |
+| LAYER, BLOCK_RECORD and STYLE foreign XDATA | Ordered unique values survive two edited DWG/DXF saves | AC1018/AC1021/AC1032 |
+| APPID own XDATA | Custom APPID extras preserved, with/without entity use and case variants; no duplicate records | AC1018/AC1021/AC1032 |
+| Entity/layer colour-book names; persistent reactor to known XRECORD | Survive repeated saves; references resolve after handle remapping | AC1018/AC1021/AC1032 |
+
+**`cadcraft-cli audit FILE [--as dwg|dxf] [--version …] [--report OUT.json]`** saves in memory
+(nothing written) and prints the report's summary plus an independent per-kind count of the
+file and the saved file (entities and objects by type, table records, extended data by
+application), so losses the report doesn't know of show up too. The count leaves out what
+changes nothing: draw order counts spaces drawn out of handle order rather than SORTENTSTABLE
+records, and dictionaries count only non-empty ones that hold more than a draw order table
+(AutoCAD leaves many empty ones on layers, which aren't written back). On real drawings it
+shows what the next FF1 rows are: draw order, dimension associativity CADCraft doesn't model,
+dynamic block purge preventers, unused APPIDs, `POLYLINE` → `LWPOLYLINE`.
+
+Remaining FF1 limits: entities of other programs aren't carried (proxy graphics, Civil 3D/AEC
+entities); records of DWG 2000–2007 aren't carried; private/undecodable table EED and named CMC
+fields outside the tested cases; UCS elevation, MTEXT background colours, layer-only edits to
+unknown entities and foreign data on renamed layers/blocks. The DWG oracles share acadrust's
+codec; open a saved file in AutoCAD (AUDIT) before relying on it.
 
 ## DXF, version by version
 
@@ -90,14 +156,14 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 | WIPEOUT | yes | yes (#147, fixes #79) | |
 | MLINE (+ MLINESTYLE), HELIX, TOLERANCE | yes (#510, #420) | yes | |
 | REGION | other programs' REGIONs (ACIS data) kept as Unknown | our regions are written as closed polylines tagged with CADCraft xdata (#510; ACIS has no public spec) | |
-| 3DSOLID, BODY, SURFACE, MESH, SHAPE, UNDERLAY, OLE2FRAME, LIGHT, CAMERA, SECTION, POINTCLOUD, proxy entities | kept as Unknown (raw tags) | written back as read, with their CLASS records (#528); a proxy entity's class number (group 91) is renumbered to its class's place in the written CLASSES (#1812); **dropped by DWG save** (acadrust) | only their layer follows edits |
+| 3DSOLID, BODY, SURFACE, MESH, SHAPE, UNDERLAY, OLE2FRAME, LIGHT, CAMERA, SECTION, POINTCLOUD, proxy entities | kept as Unknown (raw tags) | written back as read, with their CLASS records (#528); a proxy entity's class number (group 91) is renumbered to its class's place in the written CLASSES (#1812); **not in a DWG save** (acadrust): listed with their DXF groups in the save's loss report (FF1) | only their layer follows edits |
 | Header variables | all read | 36 written | AutoCAD writes about 280 |
 | Tables: LAYER (+ transparency, description), LTYPE, STYLE, DIMSTYLE, BLOCK_RECORD | yes | yes | |
 | Tables: VPORT, VIEW, UCS, APPID | yes | yes: saved viewport configurations (#504), named views, UCSs | UCS elevation lost |
 | Objects: LAYOUT, DICTIONARY, XRECORD, TABLESTYLE, DIMASSOC | yes | yes | |
 | Objects: GROUP, MLINESTYLE, MLEADERSTYLE, IMAGEDEF, SCALE | yes | yes (groups #417, scale list #468) | |
 | Objects: VISUALSTYLE, PLOTSETTINGS, materials, field objects and other unmodelled objects | kept raw (#528) | written back as read; a proxy object (ACAD_PROXY_OBJECT) keeps its class: its group 91 is renumbered to the written CLASSES, which keep the class it names, and one whose number names no class is dropped (#1812) | not editable |
-| Foreign xdata, extension dictionaries, reactors, unmodelled objects, colour books | kept raw (#528); an entity's xdata is part of the entity, so COPY, MIRROR, ARRAY and paste keep it on the copies (EXPLODE pieces don't) | written back, handles remapped, references to deleted objects dropped | through DWG: xdata on table records and blocks, entity colour books and reactors, custom-class objects lost (acadrust) |
+| Foreign xdata, extension dictionaries, reactors, unmodelled objects, colour books | kept raw (#528); an entity's xdata is part of the entity, so COPY, MIRROR, ARRAY and paste keep it on the copies (EXPLODE pieces don't) | written back, handles remapped, references to deleted objects dropped | through DWG: see the [FF1 matrix](#preservation-and-safe-save-contract-ff1) (table-record xdata, colour books and reactors kept; other programs' objects carried into a same-version DWG; the rest reported) |
 | Objects: dynamic block data (ACAD_EVALUATION_GRAPH, BLOCK…PARAMETER, BLOCK…ACTION, grips) | read into a model (`dynblock`, `blocks.dynamic`): parameters, visibility states, value sets, stretch and lookup actions; references: their dynamic block, values and custom properties (`blocks.reference`, Properties ▸ Custom, read-only); kept raw (#528) | written back as read; a changed visibility state is written as AutoCAD writes it (a new anonymous block with its `AcDbBlockRepBTag`, the objects' `AcDbBlockRepETag`, the reference's representation data) | visibility states (and lookups that set only them) can be changed (`blocks.reference.set`, Properties ▸ Custom); distances, positions and the actions they drive not yet; DWG open and save keep it too (checked with an AutoCAD dynamic block) |
 | Handles and owners | entity handles kept; others regenerated | consistent | stable across CADCraft re-saves (#495); other programs' table and object handles renumbered once |
 
@@ -134,12 +200,16 @@ constraints, non-ASCII text, DWG round trips, hostile input). **All inputs are s
 inline strings or our own writer's output. No test opens a file made by another program, and no
 external validator runs in CI (ezdxf's audit was run by hand once, 2026-10-06). The next step is
 a licensed real-file corpus with an open → save → re-open → compare test per file, and checking
-our output in AutoCAD black-box.
+our output in AutoCAD black-box. FF1 adds `crates/io/tests/ff1_preservation.rs`, `ff1_carry.rs`,
+`audit_inventory.rs`, `apps/cadcraft-cli/tests/ff1_preservation.rs` and
+`crates/engine/tests/file_preservation.rs`, over tiny original generated DWG records and literal
+DXF (no binary fixtures).
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | minor | FF1: other programs' DWG objects go back into a same-version DWG (references re-encoded by role, positional classes, read-back check); saves report each record the file lacks with its bytes or DXF groups (`<file>.lost.json`) and back up an overwritten richer file; `cadcraft-cli audit` adds an independent per-kind count |
 | 2026-10-22 | minor | DXF/DWG save: angular, diametric and radial dimensions get standard DIMASSOC objects (one centre reference to the circle for radial/diametric, the definition points for angular), so AutoCAD follows their geometry; the standard objects of those kinds are read back too, without CADCraft's xdata (#1651) |
 | 2026-10-19 | minor | DXF/DWG save: angular dimension block text honors DIMDSEP, including per-dimension overrides (#1646) |
 | 2026-10-19 | minor | A file's own arrowhead blocks with standard names (AutoCAD's `_Dot`, `_DotSmall`), named only by a dimension style, are kept and saved as they were instead of being replaced by CADCraft's solids; PURGE keeps arrowhead blocks dimension styles name |
