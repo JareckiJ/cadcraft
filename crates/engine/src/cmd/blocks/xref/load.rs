@@ -563,7 +563,7 @@ mod tests {
 
         let mut d = Drawing::default();
         d.blocks.insert("SITE".into(), Arc::new(Block::new("SITE")));
-        let mut cx = Ctx { chain: Vec::new(), objects: 0, files: 0, notes: Vec::new() };
+        let mut cx = Ctx { chain: Vec::new(), objects: 0, files: 0, bytes: 0, notes: Vec::new() };
         assert!(import(&mut d, "SITE", &x, &mut cx).is_ok());
 
         let got = d.blocks.get("SITE|*U2").and_then(|b| b.array.clone());
