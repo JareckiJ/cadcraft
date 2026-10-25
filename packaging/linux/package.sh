@@ -103,7 +103,6 @@ fi
 if has appimage; then
   APPDIR="$WORK/CADCraft.AppDir"
   cp -R "$STAGE" "$APPDIR"
-  mv "$APPDIR/usr/share/doc" "$WORK/doc-unused"
   # Keep sctk-adwaita's MIT notice in the AppImage.
   install -Dm644 "$ROOT/NOTICE" "$APPDIR/usr/share/doc/cadcraft/NOTICE"
   ln -s usr/bin/cadcraft "$APPDIR/AppRun"
