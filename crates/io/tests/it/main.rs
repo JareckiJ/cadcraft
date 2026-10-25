@@ -14,6 +14,7 @@ mod dim_block_text;
 mod dim_marks_roundtrip;
 mod dim_text_below;
 mod dimstyle_vars_roundtrip;
+mod dimtfill_roundtrip;
 mod drafting_spacing;
 #[cfg(not(target_arch = "wasm32"))]
 mod dwg_header_vars;
@@ -46,6 +47,8 @@ mod paperview_marker;
 mod passthrough_image_roundtrip;
 mod pdf_followups;
 mod pdf_layers;
+#[path = "../support/pdf_read.rs"]
+mod pdf_read;
 mod plot_layout_scale;
 mod plot_model_png_scale;
 mod plot_styles;
