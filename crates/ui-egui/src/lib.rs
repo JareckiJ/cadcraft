@@ -48,6 +48,7 @@ pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
 pub mod theme;
+pub mod touch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod updates_ui;
 pub mod viewcube;
@@ -235,6 +236,8 @@ pub struct CadApp {
     /// Admitted `ui.screenshot` requests, including completed-but-undrained ones.
     pub(crate) shots: capture::Shots,
     pub synthetic: Vec<egui::Event>,
+    /// The virtual mouse that turns canvas touches into pointer events ([`touch`]).
+    pub touch: touch::TouchMouse,
     /// One synthetic batch has been put into `RawInput` and is waiting for a real `App::ui` call.
     synthetic_injected: bool,
     /// Counts settled UI passes (one per painted frame; never hidden logic-only ticks or
@@ -303,6 +306,7 @@ impl CadApp {
             capture_identity_epoch: 0,
             shots: capture::Shots::default(),
             synthetic: Vec::new(),
+            touch: touch::TouchMouse::default(),
             synthetic_injected: false,
             ui_frames: 0,
             #[cfg(not(target_arch = "wasm32"))]
@@ -625,6 +629,16 @@ impl CadApp {
         capture::request_hidden_paint(self, ctx);
     }
 
+    /// Turn touches that start on the drawing canvas into virtual-mouse pointer events
+    /// ([`touch`]). Touches elsewhere and mouse input pass through.
+    pub fn touch_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let canvas = self.canvas.rect;
+        let now = raw.time.unwrap_or_else(|| now_ms() / 1000.0);
+        let on_canvas =
+            |p: egui::Pos2| canvas.is_some_and(|r| r.contains(p)) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background);
+        self.touch.filter(&mut raw.events, now, canvas, &on_canvas);
+    }
+
     /// Input hook: refresh the raw surface snapshot and release at most one synthetic batch.
     ///
     /// Eframe keeps the unused `RawInput` across hidden logic-only ticks, so a batch already in
@@ -747,7 +761,7 @@ impl CadApp {
                 }
             }
         }
-        if !self.synthetic.is_empty() {
+        if !self.synthetic.is_empty() || self.touch.busy() {
             ctx.request_repaint();
         }
     }
@@ -773,7 +787,11 @@ impl CadApp {
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
             if has_doc {
-                docking::show(self, ui);
+                if cfg!(target_arch = "wasm32") && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("cadcraft-mobile-mode")).unwrap_or(false)) {
+                    docking::show_mobile(self, ui);
+                } else {
+                    docking::show(self, ui);
+                }
             } else {
                 chrome::start_page(self, ui);
             }
