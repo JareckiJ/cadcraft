@@ -496,7 +496,7 @@ pub(crate) fn encoded_len(t: &Tag) -> usize {
 /// and `1070` auto; `1000 INSPECT`, `1070` shape, `1000` label and `1000` rate. Points are
 /// `1010/1020/1030`. A separate `BREAKAUTO` list holds `1040` gap size and `1005` source
 /// handles, including when there are no gaps. The oblique angle is the standard group 52 instead.
-pub(crate) fn marks_xdata(m: &cadcraft_doc::DimMarks) -> Vec<Tag> {
+pub(crate) fn marks_xdata(m: &cadcraft_doc::DimMarks, reserved: usize) -> Vec<Tag> {
     let pt = |v: &mut Vec<Tag>, p: cadcraft_geom::Vec3| v.extend([Tag::f(1010, p.x), Tag::f(1020, p.y), Tag::f(1030, p.z)]);
     let mut v = Vec::new();
     if let Some(j) = m.jog_line {
@@ -517,9 +517,11 @@ pub(crate) fn marks_xdata(m: &cadcraft_doc::DimMarks) -> Vec<Tag> {
         v.extend([Tag::s(1000, "INSPECT"), Tag::i(1070, i64::from(i.shape)), Tag::s(1000, i.label.clone()), Tag::s(1000, i.rate.clone())]);
     }
 
-    // Encoded byte size of other xdata on the entity: application header (1001 CADCRAFT)
-    // plus the MARKS record (1000 MARKS, 1002 {, tags in v, 1002 }) if non-empty.
-    let other_len = encoded_len(&Tag::s(1001, APP))
+    // Encoded byte size of other xdata on the entity: any records already in the CADCRAFT block
+    // (such as arc-length and associativity), the application header (1001 CADCRAFT),
+    // and the MARKS record (1000 MARKS, 1002 {, tags in v, 1002 }) if non-empty.
+    let other_len = reserved
+        + encoded_len(&Tag::s(1001, APP))
         + if v.is_empty() {
             0
         } else {

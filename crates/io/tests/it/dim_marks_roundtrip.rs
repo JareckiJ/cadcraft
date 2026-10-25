@@ -2,7 +2,9 @@
 //! DXF Reference), jogs, breaks and inspection frames as CADCraft xdata. Damaged xdata is
 //! skipped.
 
-use cadcraft_doc::{AutoDimBreak, Common, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Handle, Inspection, JoggedRadius, Space};
+use cadcraft_doc::{
+    AssocSnap, AutoDimBreak, Common, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Drawing, EntityKind, Handle, Inspection, JoggedRadius, Space,
+};
 use cadcraft_geom::Vec3;
 use cadcraft_io::{read_dxf, write_dxf};
 
@@ -162,4 +164,27 @@ fn automatic_break_xdata_is_omitted_when_oversized_or_exceeding_byte_limit() {
     let back3 = read_dxf(text3.as_bytes()).unwrap();
     assert!(marks_of(&back3)[0].auto_break.is_none());
     assert_eq!(marks_of(&back3)[0].breaks.len(), 5);
+
+    // BREAKAUTO alone fits, but BREAKAUTO + ASSOC + app header exceeds 16 KB:
+    // BREAKAUTO is omitted, ASSOC is preserved.
+    let mut d4 = Drawing::new_imperial();
+    let near_limit_objects4: Vec<Handle> = (0x10000..0x107F8).map(Handle).collect();
+    let m4 = DimMarks { auto_break: Some(AutoDimBreak { objects: near_limit_objects4, size: 0.5 }), ..Default::default() };
+    let mut dm4 = dim(DimKind::Linear { rotation: 0.0 }, m4);
+    if let EntityKind::Dimension(dm) = &mut dm4 {
+        dm.assoc = vec![
+            DimAssoc { point: "defpt".into(), handle: Handle(1), snap: AssocSnap::Start },
+            DimAssoc { point: "p13".into(), handle: Handle(2), snap: AssocSnap::End },
+            DimAssoc { point: "p14".into(), handle: Handle(3), snap: AssocSnap::Mid },
+        ];
+    }
+    d4.add(&Space::Model, Common::default(), dm4).unwrap();
+    let text4 = write_dxf(&d4);
+    assert!(!text4.contains("BREAKAUTO"), "assoc xdata consuming budget must omit BREAKAUTO");
+    assert!(text4.contains("ASSOC"), "ASSOC must be preserved even when BREAKAUTO is omitted");
+    let back4 = read_dxf(text4.as_bytes()).unwrap();
+    assert!(marks_of(&back4)[0].auto_break.is_none());
+    if let EntityKind::Dimension(dm) = &back4.model.iter().next().unwrap().kind {
+        assert_eq!(dm.assoc.len(), 3);
+    }
 }
