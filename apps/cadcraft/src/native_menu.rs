@@ -80,7 +80,17 @@ impl NativeMenu {
             submenus.push((title, sub));
         }
         menu.init_for_nsapp();
-        Self { _menu: menu, items, submenus, predefined, language, last_refresh: f64::NEG_INFINITY, recent: app.ui.recent_files.clone(), counter, events }
+        Self {
+            _menu: menu,
+            items,
+            submenus,
+            predefined,
+            language,
+            last_refresh: f64::NEG_INFINITY,
+            recent: app.ui.recent_files.clone(),
+            counter,
+            events,
+        }
     }
 
     /// Rebuild File ▸ Open Recent after a drawing was opened or the list was cleared: the native
