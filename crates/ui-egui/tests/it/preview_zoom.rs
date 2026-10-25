@@ -58,7 +58,7 @@ fn zooming_in_draws_the_part_in_view_at_the_screens_resolution() {
     let over = egui::pos2(450.0, 380.0);
     h.hover_at(over);
     h.run_steps(2);
-    h.event(Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 1000.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move });
+    h.event(Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 1000.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown });
     h.run_steps(12);
     let after = plots();
     assert!(after.len() >= 2, "the part in view is drawn again: {} plots", after.len());
@@ -70,7 +70,7 @@ fn zooming_in_draws_the_part_in_view_at_the_screens_resolution() {
 
     // Zooming back out to the whole sheet needs no further drawing.
     let n = plots().len();
-    h.event(Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, -2000.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move });
+    h.event(Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, -2000.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Unknown });
     h.run_steps(12);
     assert_eq!(plots().len(), n, "the whole sheet is shown from its first image");
 }
