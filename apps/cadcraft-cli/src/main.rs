@@ -226,31 +226,10 @@ fn info(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Write `bytes` to `out` through a uniquely named, exclusively created file in the same folder and rename it over
-/// `out`, so a failed or interrupted write leaves the previous file untouched.
+/// Write `bytes` to `out` through the engine's atomic writer (an exclusively created sibling file
+/// renamed over `out`), so a failed or interrupted write leaves the previous file untouched.
 fn write_atomic(out: &str, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let path = std::path::Path::new(out);
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut attempt = 0;
-    let (tmp, mut file) = loop {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp = path.with_file_name(format!(".{name}.{}.{n}.tmp", std::process::id()));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
-            Ok(f) => break (tmp, f),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => attempt += 1,
-            Err(e) => return Err(e),
-        }
-    };
-    let done = file.write_all(bytes).and_then(|()| file.sync_all()).and_then(|()| {
-        drop(file);
-        std::fs::rename(&tmp, path)
-    });
-    if done.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    done
+    cadcraft_engine::atomic_write::write_atomic(std::path::Path::new(out), bytes)
 }
 
 fn export(s: &Session, out: &str) -> Result<(), String> {
