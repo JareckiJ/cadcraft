@@ -93,7 +93,7 @@ impl NativeMenu {
                 if cmd == "ui.discord" {
                     ctx.open_url(egui::OpenUrl::new_tab("https://discord.gg/artcraft"));
                 } else {
-                    menus::activate(app, &cmd.clone());
+                    menus::activate_native(app, ctx, &cmd.clone());
                 }
                 ctx.request_repaint();
             }
