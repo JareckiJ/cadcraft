@@ -44,6 +44,7 @@ fn snapshot(ui: &UiState) -> Result<Value, String> {
     }
     Ok(json!({
         "docking": ui.docking,
+        "dockingVersion": cadcraft_ui_egui::docking::LAYOUT_VERSION,
         "showToolsets": ui.show_toolsets,
         "showPalettes": ui.show_palettes,
         "showToolbar": ui.show_toolbar,
@@ -80,10 +81,16 @@ fn read(path: &Path) -> Result<Option<UiState>, String> {
         value.get("workspace").filter(|value| value.is_object()).ok_or_else(|| format!("{}: missing workspace object", path.display()))?;
     // Dock schemas can evolve independently of the other saved workspace preferences.
     // Recover only this optional field; runtime UiState deserialization remains strict.
+    // A layout from before the current shape (split frames, saved without `dockingVersion`)
+    // gives way to the default, its hidden panels with it.
     let mut fields = workspace.clone();
-    let docking = fields.as_object_mut().and_then(|fields| fields.remove("docking"));
+    let (docking, version) = match fields.as_object_mut() {
+        Some(fields) => (fields.remove("docking"), fields.remove("dockingVersion")),
+        None => (None, None),
+    };
+    let current = version.and_then(|version| version.as_u64()).is_some_and(|version| version >= u64::from(cadcraft_ui_egui::docking::LAYOUT_VERSION));
     let mut ui: UiState = serde_json::from_value(fields).map_err(|error| format!("{}: invalid workspace: {error}", path.display()))?;
-    if let Some(docking) = docking
+    if let Some(docking) = docking.filter(|_| current)
         && let Ok(docking) = serde_json::from_value::<cadcraft_ui_egui::docking::Workspace>(docking)
         && cadcraft_ui_egui::docking::validate(&docking).is_ok()
     {
@@ -235,31 +242,36 @@ mod tests {
     }
 
     #[test]
-    fn docked_floating_and_hidden_panels_survive_native_workspace_file_reload() {
-        use cadcraft_ui_egui::docking::{Panel, permissions};
+    fn dock_columns_floating_and_hidden_panels_survive_native_workspace_file_reload() {
+        use cadcraft_ui_egui::docking::{LAYOUT_VERSION, Panel, permissions, reveal_panel};
         let directory = temp_dir();
         let path = directory.join("workspace.json");
         let (mut store, _, _) = Workspace::at(Some(path.clone()));
         let mut ui = UiState::default();
         let mut app = cadcraft_ui_egui::CadApp::new(cadcraft_engine::Session::default(), Default::default());
-        app.run("ui.dock", json!({"operation":"float", "panel":"layers", "rect":[120,90,340,410]})).unwrap();
+        app.run("ui.dock", json!({"operation":"move", "panel":"layers", "target":"properties", "zone":"left"})).unwrap();
+        app.run("ui.dock", json!({"operation":"float", "panel":"properties", "rect":[120,90,340,410]})).unwrap();
         ui.docking = app.ui.docking;
         ui.docking.set_visible(Panel::ToolSets, false, None, permissions).unwrap();
         ui.show_toolsets = false;
         store.save_if_changed(&ui).unwrap();
+        let saved: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved["workspace"]["dockingVersion"], json!(LAYOUT_VERSION));
         let (_, reloaded, error) = Workspace::at(Some(path));
         assert!(error.is_none());
         let mut reloaded = reloaded.unwrap();
         assert_eq!(serde_json::to_value(&reloaded.docking).unwrap(), serde_json::to_value(&ui.docking).unwrap());
-        reloaded.docking.set_visible(Panel::ToolSets, true, None, permissions).unwrap();
-        assert!(reloaded.docking.layout.contains(&Panel::ToolSets));
+        assert!(!reloaded.show_toolsets);
+        reveal_panel(&mut reloaded.docking, Panel::ToolSets).unwrap();
+        let tools = reloaded.docking.layout.location(&Panel::ToolSets).unwrap();
+        assert_eq!(serde_json::to_value(&tools.group).unwrap()["column"]["side"], json!("Start"), "{tools:?}");
         assert_eq!(reloaded.docking.layout.floating[0].rect, [120.0, 90.0, 340.0, 410.0]);
         fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
-    fn version_one_docking_file_still_loads() {
-        use cadcraft_ui_egui::docking::{Panel, reveal_panel};
+    fn split_frame_layout_file_loads_as_the_dock_default_with_its_other_settings() {
+        use cadcraft_ui_egui::docking::default_workspace;
         // Written as CADCraft 0.7 writes it: craft-ui's v1 layout with no docking version, a
         // floating window as one `{panels, active, rect}` group, Tool Sets closed.
         let file = r#"{"version":1,"workspace":{
@@ -271,28 +283,18 @@ mod tests {
                     "floating":[{"panels":["layers","externalReferences"],"active":1,"rect":[120.0,90.0,340.0,410.0]}]},
                 "hidden":[["toolSets",{"floating":null,"anchor":"canvas","placement":{"Split":"Left"},
                     "size":{"FixedFirst":220.0},"stack":null,"sibling":["canvas","properties"]}]]},
-            "showToolsets":false,"showPalettes":true,"toolsetTab":"Modeling","historyLines":4}}"#;
+            "showToolsets":false,"showPalettes":true,"showToolbar":false,"toolsetTab":"Modeling","historyLines":4}}"#;
         let directory = temp_dir();
         let path = directory.join("workspace.json");
         fs::write(&path, file).unwrap();
         let (_, restored, error) = Workspace::at(Some(path));
         assert!(error.is_none(), "{error:?}");
-        let mut ui = restored.unwrap();
+        let ui = restored.unwrap();
         assert_eq!(ui.toolset_tab, "Modeling");
-        let docking = &ui.docking;
-        assert_eq!(docking.layout.floating.len(), 1);
-        let window = &docking.layout.floating[0];
-        assert_eq!(window.rect, [120.0, 90.0, 340.0, 410.0]);
-        assert_eq!(serde_json::to_value(&window.root).unwrap(), json!({"Tabs":{"panels":["layers","externalReferences"],"active":1}}));
-        assert_eq!(
-            serde_json::to_value(&docking.layout.root).unwrap()["Split"]["second"],
-            json!({"Stack":{"entries":[{"panel":"properties","open":false,"height":null}]}})
-        );
-        assert!(!docking.layout.contains(&Panel::ToolSets));
-        reveal_panel(&mut ui.docking, Panel::ToolSets).unwrap();
-        let tools = ui.docking.layout.location(&Panel::ToolSets).unwrap();
-        assert_eq!(tools.anchor, Some(Panel::Canvas));
-        assert_eq!(serde_json::to_value((&tools.placement, &tools.size)).unwrap(), json!([{"Split":"Left"}, {"FixedFirst":220.0}]));
+        assert_eq!(ui.history_lines, 4);
+        assert!(!ui.show_toolsets && ui.show_palettes && !ui.show_toolbar);
+        assert_eq!(ui.docking.layout, default_workspace().layout);
+        assert!(ui.docking.hidden.is_empty(), "{:?}", ui.docking.hidden);
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -326,7 +328,8 @@ mod tests {
             json!({"layout":false,"hidden":[]}),
             json!({"layout":{"root":null,"floating":[]},"hidden":[["futurePanel",{}]]}),
         ] {
-            let workspace = json!({"showToolbar":false,"showPalettes":false,"toolsetTab":"Modeling", "collapsedGroups":["Draw"], "historyLines":7,"docking":docking});
+            let workspace = json!({"showToolbar":false,"showPalettes":false,"toolsetTab":"Modeling", "collapsedGroups":["Draw"], "historyLines":7,"docking":docking,
+                "dockingVersion":cadcraft_ui_egui::docking::LAYOUT_VERSION});
             assert!(serde_json::from_value::<UiState>(workspace.clone()).is_err(), "runtime state must stay strict");
             fs::write(&path, serde_json::to_vec(&json!({"version":1,"workspace":workspace})).unwrap()).unwrap();
             let (_, restored, error) = Workspace::at(Some(path.clone()));
