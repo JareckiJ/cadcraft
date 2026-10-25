@@ -79,7 +79,9 @@ impl SaveAsState {
             SaveFormat::Dxf => FileType::Dxf,
             SaveFormat::Dwg => FileType::Dwg,
         };
-        let file_type = from_title.filter(|t| t.versioned()).unwrap_or(default_type);
+        // A drawing from a file keeps its type (a template stays a template); an untitled one,
+        // or one from an image, takes the default save format.
+        let file_type = from_title.filter(|t| t.versioned() || (*t == FileType::Dwt && !untitled)).unwrap_or(default_type);
         let own =
             app.session.doc().ok().and_then(|d| d.header.get("ACADVER").and_then(cadcraft_doc::HVal::as_str).and_then(SaveVersion::for_acadver));
         let version = match (untitled, own) {
@@ -123,9 +125,10 @@ pub fn open(app: &mut CadApp) {
     app.ui.dialog = Some("saveas".into());
 }
 
-/// `path` with the chosen extension when the picker gave none.
+/// `path` with the chosen type's extension: kept when the picker gave it (any case), added
+/// otherwise (`plan.dwg` saved as DXF is `plan.dwg.dxf`), so the type chosen is the type written.
 fn with_extension(path: &str, ext: &str) -> String {
-    let has = std::path::Path::new(path).extension().is_some_and(|e| !e.is_empty());
+    let has = std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case(ext));
     if has { path.to_string() } else { format!("{path}.{ext}") }
 }
 

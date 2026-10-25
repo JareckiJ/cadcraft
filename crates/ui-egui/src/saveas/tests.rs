@@ -38,6 +38,10 @@ fn save_as_opens_the_dialog_with_the_drawings_own_type_and_version() {
     assert_eq!((st.file_type, st.version), (FileType::Dwg, SaveVersion::R2000));
     assert_eq!(st.suggested_name("plan.dwg"), "plan.dwg");
     assert_eq!(st.params("/tmp/plan.dwg"), json!({ "path": "/tmp/plan.dwg", "version": "2000" }));
+    // A template from a file stays a template.
+    app.session.open_drawing(cadcraft_doc::Drawing::new_metric(), "base.dwt", Some("/tmp/base.dwt".into()));
+    open(&mut app);
+    assert_eq!(app.saveas.as_ref().map(|s| s.file_type), Some(FileType::Dwt));
 }
 
 #[test]
@@ -58,6 +62,7 @@ fn choices_settle_and_become_saveas_parameters() {
     assert_eq!(FileType::from_ext(".DWG"), Some(FileType::Dwg));
     assert_eq!(with_extension("/tmp/plan", "dxf"), "/tmp/plan.dxf");
     assert_eq!(with_extension("/tmp/plan.DXF", "dxf"), "/tmp/plan.DXF");
+    assert_eq!(with_extension("/tmp/plan.dwg", "dxf"), "/tmp/plan.dwg.dxf", "the chosen type is the type written");
     assert!(SaveVersion::ALL.iter().all(|v| version_label(*v).starts_with("AutoCAD ")));
 }
 
