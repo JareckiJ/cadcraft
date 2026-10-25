@@ -1194,16 +1194,16 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 }
 
-/// What the Attributes panel shows for attributes that differ between the selected block references.
-const VARIES: &str = "***";
+/// What the Attributes panel shows for attributes that differ between the selected block
+/// references, as the Properties palette does for any property.
+const VARIES: &str = "*VARIES*";
 
 /// The block references the Attributes panel edits: the selected objects, when every one of them
 /// is a block reference that has attributes.
 pub(crate) fn attributes_targets(app: &CadApp) -> Vec<cadcraft_engine::doc::Handle> {
     let sel = app.session.selection();
     let Ok(d) = app.session.doc() else { return Vec::new() };
-    let all = sel.iter().all(|h| matches!(d.entity(*h).map(|e| &e.kind), Some(EntityKind::Insert(i)) if !i.attribs.is_empty()));
-    if all { sel } else { Vec::new() }
+    if sel.iter().all(|h| !cadcraft_engine::attributes(d, *h).is_empty()) { sel } else { Vec::new() }
 }
 
 /// The Attributes panel's targets with the drawing they belong to (its uid), so the same handles in
@@ -1223,63 +1223,73 @@ fn set_attribute(app: &mut CadApp, hs: &[cadcraft_engine::doc::Handle], tag: &st
     let _ = app.run("attedit", json!({ "handles": handles, "values": { tag: value } }));
 }
 
+/// Why the Attributes panel can't edit a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowLock {
+    /// Constant: ATTEDIT leaves it alone.
+    Constant,
+    /// A value with line breaks: a single-line field would join its lines (the Properties palette
+    /// sends it to the Edit Attributes dialog).
+    Multiline,
+    /// The tag is used twice in one block, and ATTEDIT addresses an attribute by its tag.
+    Repeated,
+}
+
 /// One row of the Attributes panel: the tag, the value shared by the selected block references
-/// ([`VARIES`] when they differ) and whether it can be edited.
+/// (`varies` when they differ, then `value` is empty) and why it can't be edited, if it can't.
 struct AttributeRow {
     tag: String,
     value: String,
-    editable: bool,
+    varies: bool,
+    lock: Option<RowLock>,
 }
 
-/// The rows for block references `hs`: the tags of all of them in order of first appearance. A row
-/// is editable when no reference has the tag as a constant or twice (ATTEDIT addresses an
-/// attribute by its tag).
+/// The panel's rows for block references `hs`, from [`cadcraft_engine::attributes`]. One reference:
+/// its attributes in order, a tag used twice shown twice. Several: the tags of all of them in order
+/// of first appearance, locked when any reference has the tag locked.
 fn attribute_rows(d: &cadcraft_engine::doc::Drawing, hs: &[cadcraft_engine::doc::Handle]) -> Vec<AttributeRow> {
-    let inserts: Vec<_> = hs
-        .iter()
-        .filter_map(|h| match d.entity(*h).map(|e| &e.kind) {
-            Some(EntityKind::Insert(i)) => Some(i),
-            _ => None,
-        })
-        .collect();
-    // One reference: its attributes as they are, a tag used twice shown twice.
-    if let [i] = inserts.as_slice() {
-        return i
-            .attribs
+    let per_reference: Vec<Vec<cadcraft_engine::AttributeRow>> = hs.iter().map(|h| cadcraft_engine::attributes(d, *h)).collect();
+    let lock_of = |a: &cadcraft_engine::AttributeRow, repeated: bool| {
+        if !a.editable {
+            Some(RowLock::Constant)
+        } else if a.value.contains('\n') {
+            Some(RowLock::Multiline)
+        } else if repeated {
+            Some(RowLock::Repeated)
+        } else {
+            None
+        }
+    };
+    let repeated = |rows: &[cadcraft_engine::AttributeRow], tag: &str| rows.iter().filter(|r| r.tag.eq_ignore_ascii_case(tag)).count() > 1;
+    if let [rows] = per_reference.as_slice() {
+        return rows
             .iter()
-            .map(|a| {
-                let unique = i.attribs.iter().filter(|o| o.tag.eq_ignore_ascii_case(&a.tag)).count() == 1;
-                AttributeRow { tag: a.tag.clone(), value: a.text.value.clone(), editable: unique && !a.constant }
-            })
+            .map(|a| AttributeRow { tag: a.tag.clone(), value: a.value.clone(), varies: false, lock: lock_of(a, repeated(rows, &a.tag)) })
             .collect();
     }
-    let mut rows: Vec<AttributeRow> = Vec::new();
-    for i in &inserts {
-        for a in &i.attribs {
-            if !rows.iter().any(|r| r.tag.eq_ignore_ascii_case(&a.tag)) {
-                rows.push(AttributeRow { tag: a.tag.clone(), value: String::new(), editable: true });
+    let mut out: Vec<AttributeRow> = Vec::new();
+    for rows in &per_reference {
+        for a in rows {
+            if !out.iter().any(|r| r.tag.eq_ignore_ascii_case(&a.tag)) {
+                out.push(AttributeRow { tag: a.tag.clone(), value: a.value.clone(), varies: false, lock: None });
             }
         }
     }
-    for row in &mut rows {
-        let mut value: Option<&str> = None;
-        let mut varies = false;
-        for i in &inserts {
-            let same: Vec<_> = i.attribs.iter().filter(|a| a.tag.eq_ignore_ascii_case(&row.tag)).collect();
-            if same.len() > 1 || same.iter().any(|a| a.constant) {
-                row.editable = false;
-            }
-            for a in same {
-                match value {
-                    None => value = Some(&a.text.value),
-                    Some(v) if v != a.text.value => varies = true,
+    for row in &mut out {
+        let mut first: Option<&str> = None;
+        for rows in &per_reference {
+            for a in rows.iter().filter(|a| a.tag.eq_ignore_ascii_case(&row.tag)) {
+                row.lock = row.lock.or(lock_of(a, repeated(rows, &a.tag)));
+                match first {
+                    None => first = Some(&a.value),
+                    Some(v) if v != a.value => row.varies = true,
                     Some(_) => {}
                 }
             }
         }
-        row.value = if varies { VARIES.to_string() } else { value.unwrap_or_default().to_string() };
+        row.value = if row.varies { String::new() } else { first.unwrap_or_default().to_string() };
     }
-    rows
+    out
 }
 
 /// The Attributes panel: the selected block reference's attributes as tag / value rows, edited in
@@ -1307,7 +1317,7 @@ pub(crate) fn attributes_section(app: &mut CadApp, ui: &mut egui::Ui) {
         .collect();
     let mut block = match names.first() {
         Some(first) if names.iter().all(|n| n.eq_ignore_ascii_case(first)) => dynamic_name.unwrap_or_else(|| first.to_string()),
-        _ => VARIES.to_string(),
+        _ => crate::i18n::t(VARIES).to_string(),
     };
     if hs.len() > 1 {
         block = format!("{block} (\u{d7}{})", hs.len());
@@ -1316,14 +1326,22 @@ pub(crate) fn attributes_section(app: &mut CadApp, ui: &mut egui::Ui) {
     ui.add_space(4.0);
     prop_row(ui, "Block", |ui| read_only_literal(ui, &block));
     let mut set: Option<(String, String)> = None;
+    let varies = crate::i18n::t(VARIES);
     for row in &rows {
-        prop_row_literal(ui, &row.tag, |ui| {
-            if row.editable {
-                if let Some(v) = edit_field(ui, ui.scope_id().with(("attrib", uid, &hs, &row.tag)), row.value.clone()) {
+        prop_row_literal(ui, &row.tag, |ui| match row.lock {
+            None => {
+                let shown = if row.varies { varies.to_string() } else { row.value.clone() };
+                if let Some(v) = edit_field(ui, ui.scope_id().with(("attrib", uid, &hs, &row.tag)), shown) {
                     set = Some((row.tag.clone(), v));
                 }
-            } else {
-                read_only_literal(ui, &row.value);
+            }
+            Some(lock) => {
+                let shown = if row.varies { varies.to_string() } else { row.value.replace('\n', " ") };
+                value_box(ui, &shown, false, false).on_hover_text(match lock {
+                    RowLock::Constant => crate::tl!("Constant"),
+                    RowLock::Multiline => crate::tl!("Multiline: edit it with Edit Attributes"),
+                    RowLock::Repeated => crate::tl!("Tag used twice in this block"),
+                });
             }
         });
     }
@@ -1475,9 +1493,9 @@ mod tests {
     }
 
     /// Two block references with the same attributes: equal values are shown, different ones as
-    /// `***`; a change goes to both in one undo step.
+    /// `*VARIES*`; a change goes to both in one undo step.
     #[test]
-    fn several_block_references_show_equal_values_and_stars_for_different_ones() {
+    fn several_block_references_show_equal_values_and_varies_for_different_ones() {
         let mut app = app_with_block(&CODICE_REV);
         let (first, second) = (insert_block(&mut app, 5), insert_block(&mut app, 50));
         set_attribute(&mut app, &[second], "REV", "B".into());
@@ -1485,8 +1503,9 @@ mod tests {
 
         assert_eq!(attributes_targets(&app), vec![first, second]);
         let d = app.session.doc().unwrap();
-        let rows: Vec<(String, String)> = attribute_rows(d, &attributes_targets(&app)).into_iter().map(|r| (r.tag, r.value)).collect();
-        assert_eq!(rows, vec![("CODICE".to_string(), "8231".to_string()), ("REV".to_string(), VARIES.to_string())]);
+        let rows: Vec<(String, String, bool)> =
+            attribute_rows(d, &attributes_targets(&app)).into_iter().map(|r| (r.tag, r.value, r.varies)).collect();
+        assert_eq!(rows, vec![("CODICE".to_string(), "8231".to_string(), false), ("REV".to_string(), String::new(), true)]);
         let texts = painted_texts(&mut app, attributes_section);
         assert!(texts.iter().any(|t| t == "8231") && texts.iter().any(|t| t == VARIES), "painted: {texts:?}");
 
@@ -1495,7 +1514,7 @@ mod tests {
         assert_eq!((attribute_value(&app, first, "REV"), attribute_value(&app, second, "REV")), ("C".into(), "C".into()));
         assert_eq!(app.session.state().unwrap().undo.len(), undo_depth + 1, "one undo step for both");
         let d = app.session.doc().unwrap();
-        assert!(attribute_rows(d, &[first, second]).iter().all(|r| r.value != VARIES));
+        assert!(attribute_rows(d, &[first, second]).iter().all(|r| !r.varies));
     }
 
     /// Anything that is not a block reference with attributes in the selection leaves the panel
@@ -1508,5 +1527,35 @@ mod tests {
         app.run("select", json!({ "handles": [ins.hex(), line["handles"][0].clone()] })).unwrap();
         assert!(attributes_targets(&app).is_empty());
         assert_eq!(attributes_key(&app), None);
+    }
+
+    /// Rows follow the Properties palette's rules: a constant attribute and a value with line
+    /// breaks are read-only, and with several references one such value locks the whole row.
+    #[test]
+    fn attribute_rows_lock_constant_and_multiline_values() {
+        let mut app = app_with_block(&[("T", "one"), ("U", "u"), ("M", "m")]);
+        let (first, second) = (insert_block(&mut app, 5), insert_block(&mut app, 50));
+        let doc = app.session.doc_mut().unwrap();
+        doc.modify_entity(second, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.attribs[1].constant = true;
+            }
+        })
+        .unwrap();
+        doc.modify_entity(first, |e| {
+            if let EntityKind::Insert(i) = &mut e.kind {
+                i.attribs[2].text.value = "a\nb".into();
+            }
+        })
+        .unwrap();
+        let d = app.session.doc().unwrap();
+        let locks = |hs: &[cadcraft_engine::doc::Handle]| attribute_rows(d, hs).into_iter().map(|r| (r.tag, r.lock)).collect::<Vec<_>>();
+        assert_eq!(locks(&[first]), [("T".into(), None), ("U".into(), None), ("M".into(), Some(RowLock::Multiline))]);
+        assert_eq!(locks(&[second]), [("T".into(), None), ("U".into(), Some(RowLock::Constant)), ("M".into(), None)]);
+        assert_eq!(
+            locks(&[first, second]),
+            [("T".into(), None), ("U".into(), Some(RowLock::Constant)), ("M".into(), Some(RowLock::Multiline))],
+            "one locked reference locks the row for all"
+        );
     }
 }

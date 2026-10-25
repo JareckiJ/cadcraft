@@ -85,14 +85,13 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     if hs.is_empty() {
         return Err(bad("attedit", "`handle` or `handles` is required"));
     }
-    // Every handle must exist before the first edit, so a bad request changes nothing.
-    if let Some(missing) = hs.iter().find(|h| s.doc().ok().and_then(|d| d.entity(**h)).is_none()) {
-        return Err(bad("attedit", format!("no object has handle {}", missing.hex())));
-    }
     let vals = p.get("values").and_then(Value::as_object).cloned().unwrap_or_default();
     let mut constant: Vec<String> = Vec::new();
     for h in &hs {
-        let Some(EntityKind::Insert(ins)) = s.doc()?.entity(*h).map(|e| &e.kind) else {
+        let Some(entity) = s.doc()?.entity(*h) else {
+            return Err(bad("attedit", format!("no object has handle {}", h.hex())));
+        };
+        let EntityKind::Insert(ins) = &entity.kind else {
             return Err(bad("attedit", format!("{} is not a block reference", h.hex())));
         };
         if super::super::curves::is_locked(s, *h) {
