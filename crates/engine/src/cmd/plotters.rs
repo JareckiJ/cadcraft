@@ -6,7 +6,8 @@
 //! margins. User devices are `*.plotter.json` files ([`cadcraft_doc::PlotterConfig`],
 //! `docs/plotters.md`) in a folder the host provides through [`set_plotter_store`]. Without
 //! one, native builds use the `plotters` folder of the CADCraft settings directory and the web
-//! keeps them for the session.
+//! keeps them for the session. The system's printers come last ([`super::printers`]): a plot to
+//! one hands its PDF to the print queue.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -189,6 +190,7 @@ fn user_devices() -> Vec<PlotterConfig> {
 pub fn devices() -> Vec<PlotterConfig> {
     let mut v = builtins();
     v.extend(user_devices());
+    v.extend(super::printers::printers().iter().map(|n| super::printers::device_for(n)));
     v
 }
 
@@ -209,7 +211,10 @@ pub fn find_device(name: &str) -> Option<PlotterConfig> {
     }
     let st = store();
     let direct = cadcraft_doc::plotter_file_name(n).and_then(|f| PlotterConfig::from_file_text(&(st.read)(&f).ok()?).ok());
-    direct.filter(|c| c.name.eq_ignore_ascii_case(n)).or_else(|| user_devices().into_iter().find(|c| c.name.eq_ignore_ascii_case(n)))
+    direct
+        .filter(|c| c.name.eq_ignore_ascii_case(n))
+        .or_else(|| user_devices().into_iter().find(|c| c.name.eq_ignore_ascii_case(n)))
+        .or_else(|| super::printers::device(n))
 }
 
 /// The paper of `dev` called `name`, also by a standard size's short name (`A3`, `Letter`…).
@@ -302,6 +307,11 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     let output = if cmd == "exportpdf" { PlotOutput::Pdf } else { dev.output };
     o.insert("output".into(), json!(output.as_str()));
     o.insert("resolution".into(), json!(dev.resolution));
+    // A system printer takes PLOT's PDF (EXPORTPDF only writes the file).
+    let printer = cmd == "plot" && dev.description == super::printers::DESCRIPTION && super::printers::is_printer(&dev.name);
+    if printer {
+        o.insert("printer".into(), json!(dev.name));
+    }
     let paper = match str_param(p, "paper") {
         Some(name) => match device_paper(&dev, name) {
             Some(pp) => Some(pp),
@@ -316,6 +326,9 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
     };
     if let Some(pp) = paper {
         o.remove("paper");
+        if printer {
+            o.insert("paperName".into(), json!(pp.name));
+        }
         o.insert("width".into(), json!(pp.width));
         o.insert("height".into(), json!(pp.height));
         o.insert("margins".into(), json!(pp.margins));

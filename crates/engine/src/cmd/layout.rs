@@ -80,7 +80,7 @@ pub fn specs() -> Vec<CommandSpec> {
             .menu(&["File", "Print..."])
             .key("Cmd+P")
             .alias(&["print"])
-            .params("{path? (else returns base64 `data`), layout?: current|\"Model\", paper?, landscape?, fit?: bool, scale?: number | \"1:50\", center?: bool (Model, default true), offset?: [x,y] mm (Model, when center is false; each within ±100000), lineweights?: bool, plotTransparency?: bool (default: the page setup's; PLOTTRANSPARENCYOVERRIDE 0/2 overrides it), plotArea?: extents|display|limits|window (Model) | layout, window?: [[x1,y1],[x2,y2]]} (typed or from the menu: the Plot dialog)")
+            .params("{path? (else returns base64 `data`), device?: plotter or system printer (printers.list; a printer takes the PDF: no path needed, → {printer, job, message}), copies?: 1–99 (printers), layout?: current|\"Model\", paper?, landscape?, fit?: bool, scale?: number | \"1:50\", center?: bool (Model, default true), offset?: [x,y] mm (Model, when center is false; each within ±100000), lineweights?: bool, plotTransparency?: bool (default: the page setup's; PLOTTRANSPARENCYOVERRIDE 0/2 overrides it), plotArea?: extents|display|limits|window (Model) | layout, window?: [[x1,y1],[x2,y2]]} (typed or from the menu: the Plot dialog)")
             .noundo(),
         CommandSpec::new("exportpdf", "Export to PDF...", |s, p| run_plot(s, &super::plotters::plot_options(s, p, "exportpdf")?, "exportpdf"))
             .menu(&["File", "Export to PDF..."])
@@ -95,6 +95,7 @@ pub fn specs() -> Vec<CommandSpec> {
     .into_iter()
     .chain(plotstyle::specs())
     .chain(super::plotters::specs())
+    .chain(super::printers::specs())
     .collect()
 }
 
@@ -819,12 +820,50 @@ fn run_plot(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             None => o.remove("plotTransparency"),
         };
     }
+    let copies = super::printers::copies_param(cmd, p)?;
     let bytes = hook(s.doc()?, &space, &opts).map_err(|e| bad(cmd, e))?;
     let layout = match &sheets {
         Some(names) => names.first().cloned().unwrap_or_default(),
         None => space.tab_name().to_string(),
     };
     let pages = sheets.as_ref().map_or(1, Vec::len);
+    // A system printer takes the PDF; a `path`, if given, gets a copy too.
+    if let Some(printer) = str_param(&opts, "printer").map(str::to_string) {
+        let page = match &space {
+            Space::Paper(n) => s.doc()?.layout(n).map(|l| l.page.clone()).unwrap_or_default(),
+            Space::Model => cadcraft_doc::PageSetup::default(),
+        };
+        let paper = str_param(&opts, "paperName").map_or_else(|| page.paper.clone(), str::to_string);
+        let num = |k: &str, d: f64| opts.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(d);
+        let title = s.state()?.title.clone();
+        let title = format!("{title} – {layout}");
+        let job = super::printers::PrintJob {
+            printer: &printer,
+            pdf: &bytes,
+            paper: &paper,
+            width_mm: num("width", page.width_mm),
+            height_mm: num("height", page.height_mm),
+            landscape: opts.get("landscape").and_then(Value::as_bool).unwrap_or(page.landscape),
+            copies,
+            title: &title,
+        };
+        let id = super::printers::print(&job).map_err(|e| bad(cmd, e))?;
+        let mut r = json!({ "printer": printer, "job": id, "copies": copies, "bytes": bytes.len(), "layout": layout, "pages": pages });
+        let how = if copies > 1 { format!(", {copies} copies") } else { String::new() };
+        let mut message = format!("Printed {layout} on {printer} (job {id}{how})");
+        if let Some(path) = str_param(p, "path") {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let tmp = format!("{path}.cadcraft-tmp");
+                std::fs::write(&tmp, &bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
+                std::fs::rename(&tmp, path).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
+                r["path"] = json!(path);
+                message.push_str(&format!(", saved to {path}"));
+            }
+        }
+        r["message"] = json!(message);
+        return Ok(r);
+    }
     match str_param(p, "path") {
         Some(_path) => {
             #[cfg(not(target_arch = "wasm32"))]
