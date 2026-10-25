@@ -188,10 +188,11 @@ pub fn reference_count(d: &Drawing, name: &str) -> usize {
 /// allowed when building a single palette thumbnail before returning an empty placeholder.
 const MAX_PREVIEW_BUDGET: usize = 8_192;
 
-/// Charge polyline input before bounds traversal clones its vertices, and reserve a conservative
-/// tessellation cost before rendering. Curved segments can emit up to 4097 points at any zoom
-/// (`geom::arc_segments`); wide bands also emit triangles and a centre line. Counting these in
-/// the shared block budget covers nested references and arrays, not just top-level entities.
+/// Charge polyline, wipeout and leader input before bounds traversal clones vertices, and reserve
+/// a conservative tessellation/triangulation cost before rendering. Curved segments can emit up
+/// to 4097 points at any zoom (`geom::arc_segments`); wide bands and wipeouts also emit triangles
+/// and a boundary line. Counting these in the shared block budget covers nested references and
+/// arrays, not just top-level entities.
 fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
     let cost = match kind {
         EntityKind::LwPolyline(p) => {
@@ -231,6 +232,21 @@ fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
             cost
         }
         EntityKind::Polyline3d(p) => 1usize.checked_add(p.points.len().checked_mul(2)?)?,
+        EntityKind::Leader(l) => {
+            if l.vertices.len() > remaining {
+                return None;
+            }
+            let arrow_cost = if l.arrow && l.vertices.len() >= 2 { 8 } else { 0 };
+            let output = l.vertices.len().div_ceil(8).checked_add(arrow_cost)?;
+            1usize.checked_add(l.vertices.len())?.checked_add(output)?
+        }
+        EntityKind::Wipeout(w) => {
+            if w.boundary.len() > remaining {
+                return None;
+            }
+            let output = w.boundary.len().checked_mul(4)?.div_ceil(8);
+            1usize.checked_add(w.boundary.len())?.checked_add(output)?
+        }
         _ => 1,
     };
     (cost <= remaining).then_some(cost)
@@ -316,15 +332,38 @@ fn preview_block_bounds(
             }
             EntityKind::MLeader(ml) => {
                 let mut mb = Bounds2::EMPTY;
-                if let Some(ref ins) = ml.block
-                    && d.block(&ins.block).is_some()
-                {
-                    let (inner, child_cost) = preview_block_bounds(d, &ins.block, depth + 1, budget, memo)?;
-                    total_cost = total_cost.saturating_add(child_cost);
+                if let Some(ref ins) = ml.block {
+                    let copies = (ins.cols.max(1) as usize).saturating_mul(ins.rows.max(1) as usize);
+                    if copies > *budget {
+                        return None;
+                    }
+                    let (inner, child_cost) = if d.block(&ins.block).is_some() {
+                        preview_block_bounds(d, &ins.block, depth + 1, budget, memo)?
+                    } else {
+                        (Bounds2::EMPTY, 0)
+                    };
+                    let extra_copies = copies.saturating_sub(1).saturating_mul(child_cost.saturating_add(1));
+                    *budget = budget.checked_sub(extra_copies)?;
+                    total_cost = total_cost.saturating_add(child_cost).saturating_add(extra_copies);
                     if !inner.is_empty() {
                         let base = d.block(&ins.block).map_or(Vec2::ZERO, |blk| blk.base.xy());
                         let m = ins.transform(base);
-                        mb = Bounds2::from_points(inner.corners().map(|c| m.apply(c)));
+                        let mut b0 = Bounds2::from_points(inner.corners().map(|c| m.apply(c)));
+                        if ins.cols > 1 || ins.rows > 1 {
+                            let off = Vec2::new(
+                                ins.col_spacing * f64::from(ins.cols.saturating_sub(1)),
+                                ins.row_spacing * f64::from(ins.rows.saturating_sub(1)),
+                            )
+                            .rotate(ins.rotation);
+                            b0 = b0.union(&Bounds2::from_points(b0.corners().map(|c| c + off)));
+                        }
+                        mb = b0;
+                    }
+                    if !ins.attribs.is_empty() {
+                        let mut attr_only = ins.clone();
+                        attr_only.block.clear();
+                        let ae = cadcraft_doc::Entity { handle: e.handle, common: e.common.clone(), kind: EntityKind::Insert(attr_only) };
+                        mb = mb.union(&cadcraft_doc::entity_bounds(d, &ae, depth));
                     }
                 }
                 let mut no_blk = ml.clone();
@@ -1292,6 +1331,145 @@ mod tests {
         ));
         d.blocks.insert("Small".into(), Arc::new(block));
         assert!(!super::build(&d, "Small").unwrap().0.prims.is_empty());
+    }
+
+    /// Reject oversized leader and wipeout geometry before bounds traversal and display-list build.
+    #[test]
+    fn oversized_leader_and_wipeout_previews_are_rejected_before_bounds_or_rendering() {
+        use cadcraft_doc::{Block, Drawing, Entity, Handle, Leader, Wipeout};
+        let mut d = Drawing::default();
+
+        let oversized_leader = EntityKind::Leader(Leader {
+            vertices: vec![cadcraft_geom::Vec3::ZERO; super::MAX_PREVIEW_BUDGET + 1],
+            arrow: true,
+            spline: false,
+            style: "STANDARD".into(),
+        });
+        assert!(super::preview_entity_cost(&oversized_leader, super::MAX_PREVIEW_BUDGET).is_none());
+        let mut l_block = Block::new("BigLeader");
+        l_block.entities.push(Entity::new(Handle(1), oversized_leader));
+        d.blocks.insert("BigLeader".into(), Arc::new(l_block));
+
+        let oversized_wipeout = EntityKind::Wipeout(Wipeout { boundary: vec![Vec2::ZERO; super::MAX_PREVIEW_BUDGET + 1] });
+        assert!(super::preview_entity_cost(&oversized_wipeout, super::MAX_PREVIEW_BUDGET).is_none());
+        let mut w_block = Block::new("BigWipeout");
+        w_block.entities.push(Entity::new(Handle(2), oversized_wipeout));
+        d.blocks.insert("BigWipeout".into(), Arc::new(w_block));
+
+        // Wipeout with input + expanded mask and frame exceeding budget
+        let expanding_wipeout = EntityKind::Wipeout(Wipeout { boundary: vec![Vec2::ZERO; 6_000] });
+        assert!(super::preview_entity_cost(&expanding_wipeout, super::MAX_PREVIEW_BUDGET).is_none());
+        let mut ew_block = Block::new("ExpandingWipeout");
+        ew_block.entities.push(Entity::new(Handle(3), expanding_wipeout));
+        d.blocks.insert("ExpandingWipeout".into(), Arc::new(ew_block));
+
+        for name in ["BigLeader", "BigWipeout", "ExpandingWipeout"] {
+            let mut budget = super::MAX_PREVIEW_BUDGET;
+            assert!(super::preview_block_bounds(&d, name, 0, &mut budget, &mut Default::default()).is_none());
+            let (list, bounds) = super::build(&d, name).unwrap();
+            assert!(list.prims.is_empty(), "{name} should emit empty display list");
+            assert!(bounds.is_empty(), "{name} should have empty bounds");
+        }
+
+        // Normal-sized leader and wipeout build visible previews
+        let mut normal_l = Block::new("NormalLeader");
+        normal_l.entities.push(Entity::new(
+            Handle(4),
+            EntityKind::Leader(Leader {
+                vertices: vec![cadcraft_geom::Vec3::ZERO, cadcraft_geom::Vec3::new(10.0, 10.0, 0.0)],
+                arrow: true,
+                spline: false,
+                style: "STANDARD".into(),
+            }),
+        ));
+        d.blocks.insert("NormalLeader".into(), Arc::new(normal_l));
+        let (list, bounds) = super::build(&d, "NormalLeader").unwrap();
+        assert!(!list.prims.is_empty());
+        assert!(!bounds.is_empty());
+
+        let mut normal_w = Block::new("NormalWipeout");
+        normal_w.entities.push(Entity::new(
+            Handle(5),
+            EntityKind::Wipeout(Wipeout { boundary: vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)] }),
+        ));
+        d.blocks.insert("NormalWipeout".into(), Arc::new(normal_w));
+        let (list, bounds) = super::build(&d, "NormalWipeout").unwrap();
+        assert!(!list.prims.is_empty());
+        assert!(!bounds.is_empty());
+    }
+
+    /// Preflight budget must account for array copies of blocks referenced by MLeaders.
+    #[test]
+    fn mleader_array_inserts_are_bounded_by_preflight_budget() {
+        use cadcraft_doc::{Block, Drawing, Entity, Handle, Line, MLeader};
+        let mut d = Drawing::default();
+        let mut target = Block::new("Target");
+        target
+            .entities
+            .push(Entity::new(Handle(1), EntityKind::Line(Line { a: cadcraft_geom::Vec3::ZERO, b: cadcraft_geom::Vec3::new(5.0, 5.0, 0.0) })));
+        d.blocks.insert("Target".into(), Arc::new(target));
+
+        let oversized_mleader = EntityKind::MLeader(MLeader {
+            leaders: vec![vec![cadcraft_geom::Vec3::ZERO, cadcraft_geom::Vec3::new(10.0, 0.0, 0.0)]],
+            landing: cadcraft_geom::Vec3::new(12.0, 0.0, 0.0),
+            dogleg: 2.0,
+            text: None,
+            style: "STANDARD".into(),
+            arrow_size: 1.0,
+            spline: false,
+            block: Some(cadcraft_doc::Insert {
+                block: "Target".into(),
+                insert: cadcraft_geom::Vec3::new(14.0, 0.0, 0.0),
+                scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 100,
+                rows: 100,
+                col_spacing: 10.0,
+                row_spacing: 10.0,
+            }),
+        });
+        let mut big_ml_block = Block::new("BigMLeaderArray");
+        big_ml_block.entities.push(Entity::new(Handle(2), oversized_mleader));
+        d.blocks.insert("BigMLeaderArray".into(), Arc::new(big_ml_block));
+
+        let mut budget = super::MAX_PREVIEW_BUDGET;
+        assert!(super::preview_block_bounds(&d, "BigMLeaderArray", 0, &mut budget, &mut Default::default()).is_none());
+        let (list, bounds) = super::build(&d, "BigMLeaderArray").unwrap();
+        assert!(list.prims.is_empty(), "oversized array insert in MLeader produces placeholder");
+        assert!(bounds.is_empty());
+
+        // Small array within budget produces a non-empty preview with bounds spanning the array
+        let normal_mleader = EntityKind::MLeader(MLeader {
+            leaders: vec![vec![cadcraft_geom::Vec3::ZERO, cadcraft_geom::Vec3::new(10.0, 0.0, 0.0)]],
+            landing: cadcraft_geom::Vec3::new(12.0, 0.0, 0.0),
+            dogleg: 2.0,
+            text: None,
+            style: "STANDARD".into(),
+            arrow_size: 1.0,
+            spline: false,
+            block: Some(cadcraft_doc::Insert {
+                block: "Target".into(),
+                insert: cadcraft_geom::Vec3::new(14.0, 0.0, 0.0),
+                scale: cadcraft_geom::Vec3::new(1.0, 1.0, 1.0),
+                rotation: 0.0,
+                attribs: Vec::new(),
+                cols: 2,
+                rows: 2,
+                col_spacing: 10.0,
+                row_spacing: 10.0,
+            }),
+        });
+        let mut normal_ml_block = Block::new("NormalMLeaderArray");
+        normal_ml_block.entities.push(Entity::new(Handle(3), normal_mleader));
+        d.blocks.insert("NormalMLeaderArray".into(), Arc::new(normal_ml_block));
+
+        let (list, bounds) = super::build(&d, "NormalMLeaderArray").unwrap();
+        assert!(!list.prims.is_empty());
+        assert!(!bounds.is_empty());
+        // The array spacing extends the bounds to at least 14 + 10 = 24 in x and 10 in y
+        assert!(bounds.max.x >= 24.0);
+        assert!(bounds.max.y >= 10.0);
     }
 
     /// Verify block enumeration, reference counting and preview display-list generation.
