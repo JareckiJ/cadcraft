@@ -54,6 +54,8 @@ quick-xml = "0.42"
 
 # ui
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "cdc6713130b2dfe3cdddeb3a9cd71deeb94ed65f", features = ["serde"] }
+# craft-libs#316 (title_bar), not stacked on the craft-ui pin; one rev again once both merge.
+craft-window = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "8177bad411b577f3204deb0a0e074516d76a0b93", features = ["egui"] }
 egui = "0.36"
 egui_kittest = "0.36"
 eframe = { version = "0.36", default-features = false }

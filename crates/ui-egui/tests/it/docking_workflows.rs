@@ -593,12 +593,3 @@ fn group_drag_bar_moves_the_whole_group_into_the_other_dock() {
     assert_eq!(frames(layout), [[Panel::Canvas]]);
     assert_eq!(h.state().session.doc().unwrap(), &document);
 }
-
-#[test]
-fn floating_windows_stay_below_the_macos_title_row() {
-    let mut harness = harness(None, 1280.0, 1.0);
-    harness.state_mut().run("ui.dock", json!({"operation":"float", "panel":"layers", "rect":[400,0,300,380]})).unwrap();
-    harness.run_steps(5);
-    let title = hit(&harness, Hit::Title(Panel::Layers));
-    assert!(title.top() >= 28.0, "a float over the title row would move the app window: {title:?}");
-}

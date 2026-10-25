@@ -39,6 +39,9 @@ rfd = { workspace = true }
 sys-locale = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# `title_bar::sync_movable`: AppKit's title-band drag leaves the window still under the row's
+# controls and under floating panels.
+craft-window = { workspace = true }
 muda = { version = "0.21", default-features = false }
 # View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting: the system's Reduce motion
 # (system_animations.rs). Already in Cargo.lock through muda.

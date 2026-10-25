@@ -561,6 +561,7 @@ dependencies = [
  "cadcraft-ui-egui",
  "chrono",
  "craft-ui",
+ "craft-window",
  "eframe",
  "egui",
  "hidapi",
@@ -728,6 +729,7 @@ dependencies = [
  "cadcraft-render",
  "chrono",
  "craft-ui",
+ "craft-window",
  "egui",
  "egui-wgpu",
  "egui_kittest",
@@ -983,6 +985,17 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "serde",
+]
+
+[[package]]
+name = "craft-window"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=8177bad411b577f3204deb0a0e074516d76a0b93#8177bad411b577f3204deb0a0e074516d76a0b93"
+dependencies = [
+ "egui",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "wayland-client",
 ]
 
 [[package]]

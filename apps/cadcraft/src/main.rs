@@ -39,6 +39,9 @@ struct App {
     workspace_error: Option<String>,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
+    /// The `movable` flag last set on the main window.
+    #[cfg(target_os = "macos")]
+    movable: Option<bool>,
 }
 
 impl App {
@@ -98,6 +101,8 @@ impl eframe::App for App {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.cad.ui(ui);
+        #[cfg(target_os = "macos")]
+        craft_window::title_bar::sync_movable(ui.ctx(), &mut self.movable);
         self.persist_workspace(Some(ui.ctx()));
     }
     /// A normal exit: the workspace is saved, and this run's autosave files are not needed (a
@@ -389,6 +394,8 @@ fn main() -> eframe::Result {
                 workspace_error,
                 #[cfg(target_os = "macos")]
                 native_menu: None,
+                #[cfg(target_os = "macos")]
+                movable: None,
             }))
         }),
     )

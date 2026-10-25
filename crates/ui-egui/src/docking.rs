@@ -339,9 +339,6 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     style.drop_edges = Sides::NONE;
     style.title_bar_docks = false;
     let mut area = DockArea::new(egui::Id::new("cadcraft-docking")).input_blocked(native_input_blocked(app, ui.ctx()));
-    if let Some(bounds) = float_bounds(app.integrated_titlebar, ui.ctx().content_rect()) {
-        area = area.float_bounds(bounds);
-    }
     if let Some(panel) = app.raise_panel.take() {
         area = area.raise_panel(panel);
     }
@@ -385,13 +382,6 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
 /// state covers the frame a modal opens in.
 pub fn native_input_blocked(app: &crate::CadApp, ctx: &egui::Context) -> bool {
     app.shows_modal() || ctx.memory(|memory| memory.top_modal_layer()).is_some()
-}
-
-/// Where floating windows, flyouts and drag ghosts may go: below the macOS title row, whose
-/// drags move the whole app window (AppKit's title band and the row's own StartDrag), so a
-/// window there could not be moved or used. `None` without that row: the whole viewport.
-pub fn float_bounds(integrated_titlebar: bool, viewport: egui::Rect) -> Option<egui::Rect> {
-    integrated_titlebar.then(|| egui::Rect::from_min_max(egui::pos2(viewport.left(), viewport.top() + crate::chrome::MAC_TITLE_BAR), viewport.max))
 }
 
 /// The panels' contents, names, size limits and icons for the dock area.

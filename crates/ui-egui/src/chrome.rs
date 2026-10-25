@@ -44,7 +44,7 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
 /// centred in the standard 28 pt title-bar band at the top of the window; moving them would take
 /// AppKit calls (`unsafe`, which the workspace forbids). So the title row is that band, and what
 /// it holds is centred on the same line as the lights.
-pub(crate) const MAC_TITLE_BAR: f32 = 28.0;
+const MAC_TITLE_BAR: f32 = 28.0;
 /// The traffic lights as AppKit lays them out: button diameter, centre-to-centre pitch and the
 /// first button's left edge (8–10 pt depending on the macOS version; the larger value keeps the
 /// gap after them from shrinking).
@@ -69,6 +69,8 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
     egui::Panel::top("cc_title_toolbar").exact_size(title_h + tb_h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let r = ui.max_rect();
         if title_h > 0.0 {
+            // The empty row moves the window; it goes first so later widgets take their own clicks.
+            craft_window::title_bar::empty_area(ui, Rect::from_min_size(r.min, vec2(r.width(), title_h)));
             let title = match app.session.state() {
                 Ok(st) if !app.ui.start_tab => format!("CADCraft      {}{}", st.title, if st.title.contains('.') { "" } else { ".dwg" }),
                 _ => format!("CADCraft      {}", crate::tl!("Start")),
@@ -78,16 +80,6 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
             let galley = ui.painter().layout_no_wrap(title, egui::FontId::proportional(13.0), t.text_dim);
             let x = title_left(r.left(), r.width(), galley.size().x);
             ui.painter().galley(pos2(x, r.top() + (title_h - galley.size().y) / 2.0), galley, t.text_dim);
-            // Allow dragging the window by the title row.
-            let tr = Rect::from_min_size(r.min, vec2(r.width(), title_h));
-            let resp = ui.interact(tr, ui.id().with("titledrag"), Sense::CLICK | Sense::DRAG);
-            if resp.drag_started() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-            if resp.double_clicked() {
-                let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
-            }
         }
         if tb_h > 0.0 {
             let row = Rect::from_min_size(pos2(r.left(), r.top() + title_h), vec2(r.width(), tb_h));
