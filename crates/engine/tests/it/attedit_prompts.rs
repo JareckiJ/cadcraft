@@ -168,3 +168,15 @@ fn attedit_with_several_handles_edits_each_in_one_undo_step() {
     assert_eq!((value(&s, a, "T"), value(&s, b, "T")), ("one".into(), "two".into()), "one undo restores both");
     assert!(s.execute("attedit", &json!({"handles": [], "values": {"T": "x"}})).is_err(), "no targets is an error");
 }
+
+/// A handle no object has is refused before anything is edited, even when it comes after valid ones.
+#[test]
+fn attedit_with_a_missing_handle_changes_nothing() {
+    let mut s = with_block();
+    let a = handle(&insert(&mut s, 100.0, json!({"t": "one"})));
+    let undo_before = s.state().unwrap().undo.len();
+    let r = s.execute("attedit", &json!({"handles": [a.hex(), "FFFFF"], "values": {"T": "changed"}}));
+    assert!(r.is_err(), "a missing handle is an error: {r:?}");
+    assert_eq!(value(&s, a, "T"), "one", "the valid reference was not edited");
+    assert_eq!(s.state().unwrap().undo.len(), undo_before, "no undo step for a refused request");
+}
