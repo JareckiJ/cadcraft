@@ -300,6 +300,10 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
     } else {
         sync(&mut workspace, app)?;
         apply_command(&mut workspace, params)?;
+        // An opened panel's floating window comes to the front, in its own OS window too.
+        if matches!(params.get("operation").and_then(Value::as_str), Some("open" | "activate")) {
+            app.raise_panel = params.get("panel").and_then(|panel| serde_json::from_value(panel.clone()).ok());
+        }
     }
     publish_visibility(app, &workspace);
     app.ui.docking = workspace;
@@ -337,6 +341,9 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     let mut area = DockArea::new(egui::Id::new("cadcraft-docking")).input_blocked(native_input_blocked(app, ui.ctx()));
     if let Some(bounds) = float_bounds(app.integrated_titlebar, ui.ctx().content_rect()) {
         area = area.float_bounds(bounds);
+    }
+    if let Some(panel) = app.raise_panel.take() {
+        area = area.raise_panel(panel);
     }
     let mut output = area.show_content(ui, &workspace.layout, &style, &mut Panels { app });
     // Keys typed in a floating panel's own OS window run the main window's shortcuts and

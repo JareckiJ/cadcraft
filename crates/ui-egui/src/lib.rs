@@ -230,6 +230,9 @@ pub struct CadApp {
     forwarded_modifiers: Option<egui::Modifiers>,
     /// The main window's own modifiers, put back the frame after forwarded keys went in.
     restore_modifiers: Option<egui::Modifiers>,
+    /// A panel opened from a menu or command, whose floating window comes to the front on the
+    /// next frame (craft-ui's `DockArea::raise_panel`).
+    pub raise_panel: Option<docking::Panel>,
     /// Caps the frame rate when presenting without vsync (see [`gpu::FrameCap`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub frame_cap: Option<gpu::FrameCap>,
@@ -289,6 +292,7 @@ impl CadApp {
             forwarded: Vec::new(),
             forwarded_modifiers: None,
             restore_modifiers: None,
+            raise_panel: None,
             #[cfg(not(target_arch = "wasm32"))]
             frame_cap: None,
             fonts_language: None,
