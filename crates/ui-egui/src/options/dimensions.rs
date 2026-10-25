@@ -157,7 +157,7 @@ pub(super) fn dimensions(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<Stri
         }
     }
     ui.add_space(4.0);
-    egui::ScrollArea::vertical().id_salt("options_dimensions").max_height(300.0).auto_shrink([false, true]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt("options_dimensions").max_height(460.0).auto_shrink([false, true]).show(ui, |ui| {
         super::dialog::grid(ui, "options_dimensions_grid", |ui| {
             let v = |var: &str| value(app, &style, var);
 
