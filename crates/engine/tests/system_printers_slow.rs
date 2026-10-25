@@ -30,4 +30,11 @@ fn an_unknown_device_waits_for_a_hung_listing_only_once() {
     assert!(r.unwrap_err().to_string().contains("unknown plotter `Nope`"));
     // One wait of PRINTERS_WAIT (10 s), not three.
     assert!(took < std::time::Duration::from_secs(15), "{took:?}");
+    // After a wait that ran out, later plots don't wait again while the listings hang.
+    let start = std::time::Instant::now();
+    assert!(s.execute("plot", &json!({ "layout": "Model", "device": "Nope2" })).is_err());
+    assert!(start.elapsed() < std::time::Duration::from_secs(2), "no second wait: {:?}", start.elapsed());
+    let start = std::time::Instant::now();
+    let _ = s.execute("plot", &json!({ "layout": "Model", "device": "None" }));
+    assert!(start.elapsed() < std::time::Duration::from_secs(2), "no device needs no printer list: {:?}", start.elapsed());
 }

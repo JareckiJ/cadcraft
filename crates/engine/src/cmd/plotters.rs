@@ -169,13 +169,19 @@ fn system_printers() -> Vec<PlotterConfig> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let mut c = printer_cache();
-        if c.listing.is_none() && c.at.is_none_or(|at| at.elapsed() >= PRINTERS_TTL) {
-            c.listing = Some(std::time::Instant::now());
+        // A listing that hangs (a driver that never answers) is given up after PRINTERS_WAIT:
+        // a new one may start, and nothing waits for the old one any more.
+        if !c.listing_live() && c.at.is_none_or(|at| at.elapsed() >= PRINTERS_TTL) {
+            let started = std::time::Instant::now();
+            c.listing = Some(started);
             let list = h.list;
             let spawned = std::thread::Builder::new().name("system-printers".into()).spawn(move || {
                 let found: Vec<PlotterConfig> = list().into_iter().filter(|p| p.system && !is_builtin(&p.name)).collect();
                 let mut c = printer_cache();
-                (c.list, c.at, c.listing) = (found, Some(std::time::Instant::now()), None);
+                (c.list, c.at, c.hung) = (found, Some(std::time::Instant::now()), false);
+                if c.listing == Some(started) {
+                    c.listing = None;
+                }
             });
             if spawned.is_err() {
                 c.listing = None;
@@ -200,6 +206,17 @@ struct PrinterCache {
     list: Vec<PlotterConfig>,
     at: Option<std::time::Instant>,
     listing: Option<std::time::Instant>,
+    /// A wait for a listing ran out (a driver that never answers): commands stop waiting until a
+    /// listing finishes again.
+    hung: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PrinterCache {
+    /// Whether a listing is under way and not yet given up (younger than [`PRINTERS_WAIT`]).
+    fn listing_live(&self) -> bool {
+        self.listing.is_some_and(|t| t.elapsed() < PRINTERS_WAIT)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -217,7 +234,10 @@ pub fn refresh_system_printers() -> bool {
         if PRINTERS.get().is_none() {
             return false;
         }
-        printer_cache().at = None;
+        {
+            let mut c = printer_cache();
+            (c.at, c.hung) = (None, false);
+        }
         let _ = system_printers();
         true
     }
@@ -229,7 +249,7 @@ pub fn refresh_system_printers() -> bool {
 pub fn system_printers_pending() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        PRINTERS.get().is_some() && printer_cache().listing.is_some()
+        PRINTERS.get().is_some() && printer_cache().listing_live()
     }
     #[cfg(target_arch = "wasm32")]
     false
@@ -259,9 +279,17 @@ fn wait_for_printers() {
     let _ = system_printers();
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if printer_cache().hung {
+            return;
+        }
         let start = std::time::Instant::now();
         while system_printers_pending() && start.elapsed() < PRINTERS_WAIT {
             std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        // Still not finished (pending or given up): a driver that never answers.
+        let mut c = printer_cache();
+        if c.listing.is_some() && start.elapsed() >= PRINTERS_WAIT.saturating_sub(std::time::Duration::from_millis(100)) {
+            c.hung = true;
         }
     }
 }
@@ -279,7 +307,9 @@ fn listed_devices() -> Vec<PlotterConfig> {
 /// the same name even on the first plot after the app starts. Dialogs never wait.
 fn named_device(name: &str) -> Option<PlotterConfig> {
     let n = name.trim();
-    if !BUILTIN.iter().any(|(b, _, _)| b.eq_ignore_ascii_case(n.strip_suffix(cadcraft_doc::PLOTTER_FILE_EXT).unwrap_or(n))) {
+    // No device ("" or "None", a page setup's usual one) needs no printer list.
+    let none = n.is_empty() || n.eq_ignore_ascii_case("none");
+    if !none && !BUILTIN.iter().any(|(b, _, _)| b.eq_ignore_ascii_case(n.strip_suffix(cadcraft_doc::PLOTTER_FILE_EXT).unwrap_or(n))) {
         wait_for_printers();
     }
     // One wait only: the printers as listed by now (a listing still under way after the wait

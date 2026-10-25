@@ -299,6 +299,8 @@ mod system {
     /// Longest a CUPS command may take: a CUPS that doesn't answer gives no printers instead of
     /// a listing that never ends.
     const CUPS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+    /// Longest `lp` may take to take a job (it carries the whole PDF).
+    const LP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
     /// A CUPS command's output in the C locale (its messages untranslated, so they parse), or
     /// `None` when it fails or takes longer than [`CUPS_TIMEOUT`] (then it is stopped).
@@ -377,14 +379,43 @@ mod system {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("lp: {e}"))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(pdf).map_err(|e| format!("lp: {e}"))?;
+        // The PDF goes in and the answers come out on threads, and `lp` is stopped when it doesn't
+        // finish in time, so a CUPS that stopped answering can't hold PLOT (and the window) up.
+        let writer = child.stdin.take().map(|mut stdin| {
+            let pdf = pdf.to_vec();
+            std::thread::spawn(move || stdin.write_all(&pdf))
+        });
+        let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut s = String::new();
+                if let Some(p) = pipe {
+                    let _ = std::io::Read::read_to_string(&mut std::io::Read::take(p, 64 * 1024), &mut s);
+                }
+                s
+            })
+        };
+        let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+        let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+        let start = std::time::Instant::now();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Err(e) => return Err(format!("lp: {e}")),
+                Ok(None) if start.elapsed() > LP_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("lp did not answer within {} s", LP_TIMEOUT.as_secs()));
+                }
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            }
+        };
+        if let Some(Ok(Err(e))) = writer.map(std::thread::JoinHandle::join) {
+            return Err(format!("lp: {e}"));
         }
-        let out = child.wait_with_output().map_err(|e| format!("lp: {e}"))?;
-        let said = String::from_utf8_lossy(&out.stdout).to_string();
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            return Err(if err.is_empty() { format!("lp failed ({})", out.status) } else { err });
+        let said = out.join().unwrap_or_default();
+        if !status.success() {
+            let err = err.join().unwrap_or_default().trim().to_string();
+            return Err(if err.is_empty() { format!("lp failed ({status})") } else { err });
         }
         Ok(parse_request_id(&said).unwrap_or_else(|| said.trim().to_string()))
     }
