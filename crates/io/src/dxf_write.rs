@@ -1383,7 +1383,7 @@ fn reuse_handles(ents: &mut [Entity], old: &Block, taken: &mut std::collections:
 }
 
 /// Anonymous dimension blocks (`*D1`…) with the rendered geometry, as consumers expect.
-fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
+pub(crate) fn dim_block_entities(d: &Drawing, dm: &Dimension, layer: &str) -> Vec<Entity> {
     // The dimension as drawn: its overrides, DIMSCALE (0 = the drawing's) and text font.
     let style = d.dim_style(&dm.style).cloned().unwrap_or_default().with_overrides(&dm.overrides);
     let g = cadcraft_render::dimension_in(d, dm);

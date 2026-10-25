@@ -22,6 +22,7 @@ pub mod context_menu;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod docfa;
 pub mod docking;
 pub mod hatchdlg;
 mod mtext_editor;
@@ -223,6 +224,8 @@ pub struct CadApp {
     pub status: Option<(String, f64)>,
     /// Drawings being read on worker threads ([`opening`]).
     pub opening: opening::Opening,
+    /// The DOCFA export window's choices while it is open ([`docfa`]).
+    pub docfa: Option<docfa::Export>,
     pub integrated_titlebar: bool,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Fresh surface and identity snapshot (see [`capture`]).
@@ -296,6 +299,7 @@ impl CadApp {
             cmd: cmdline::CmdLine::default(),
             status: None,
             opening: opening::Opening::default(),
+            docfa: None,
             integrated_titlebar: false,
             control_rx: None,
             capture_geometry: None,

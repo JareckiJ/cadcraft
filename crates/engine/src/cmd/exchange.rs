@@ -38,7 +38,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("export", "Export...", run_export)
             .menu(&["File", "Export..."])
             .alias(&["exp"])
-            .params("{path? (else returns base64 `data`), format?: dxf|dwg|svg|png|pdf (default: the path's extension)} → {format, bytes, path? | data}")
+            .params("{path? (else returns base64 `data`), format?: dxf|dwg|svg|png|pdf (default: the path's extension), docfa?: bool (DXF or DWG compatible with the Italian cadastre's DOCFA: a reduced copy at AutoCAD 2000 in metres, see docs/docfa.md), unit?: m|cm|mm (DOCFA: the drawing's unit; default its INSUNITS)} → {format, bytes, path? | data, docfa?, unit?, notes?: what the DOCFA copy converted or left out}")
             .noundo(),
         CommandSpec::new("preview", "Plot Preview", run_preview)
             .menu(&["File", "Plot Preview"])
@@ -107,7 +107,6 @@ pub(super) fn deliver_file(cmd: &str, path: &str, bytes: &[u8], hook: Option<sup
 // ---------- EXPORT ----------
 
 fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
-    let hooks = io().ok_or_else(|| bad("export", "file formats are not available in this build"))?;
     let path = str_param(p, "path");
     let format = match str_param(p, "format") {
         Some(f) => f.trim().trim_start_matches('.').to_ascii_lowercase(),
@@ -116,6 +115,12 @@ fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
     if !EXPORT_FORMATS.contains(&format.as_str()) {
         return Err(bad("export", "`format` must be dxf, dwg, svg, png or pdf (or give a `path` with one of those extensions)"));
     }
+    match p.get("docfa") {
+        None | Some(Value::Null | Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => return export_docfa(s, p, path, &format),
+        Some(_) => return Err(bad("export", "`docfa` must be true or false")),
+    }
+    let hooks = io().ok_or_else(|| bad("export", "file formats are not available in this build"))?;
     let bytes = (hooks.write)(s.doc()?, &format!("export.{format}")).map_err(|e| bad("export", e))?;
     match path {
         Some(path) => {
@@ -124,6 +129,61 @@ fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
         }
         None => Ok(json!({ "data": base64_encode(&bytes), "format": format, "bytes": bytes.len() })),
     }
+}
+
+/// EXPORT `docfa: true`: a DXF or DWG file the Italian cadastre's DOCFA imports, a reduced copy
+/// of the drawing at AutoCAD 2000 in metres (`docs/docfa.md`). The drawing keeps its own file.
+fn export_docfa(s: &mut Session, p: &Value, path: Option<&str>, format: &str) -> Result<Value> {
+    if !matches!(format, "dxf" | "dwg") {
+        return Err(bad("export", "`docfa` writes a DXF or DWG file"));
+    }
+    let hook = super::file::docfa().ok_or_else(|| bad("export", "the DOCFA export is not available in this build"))?;
+    let (unit, scale) = docfa_unit(s.doc()?, p)?;
+    let (bytes, notes) = hook(s.doc()?, &format!("export.{format}"), scale).map_err(|e| bad("export", e))?;
+    let what = format!("{} compatible with DOCFA (AutoCAD 2000; drawing in {unit}, file in metres)", format.to_ascii_uppercase());
+    let mut r = json!({ "format": format, "bytes": bytes.len(), "docfa": true, "version": 2000, "unit": unit, "notes": notes });
+    let mut message = match path {
+        Some(path) => {
+            write_file("export", path, &bytes)?;
+            r["path"] = json!(path);
+            format!("Exported {what} to {path}")
+        }
+        None => {
+            r["data"] = json!(base64_encode(&bytes));
+            format!("Exported {what}")
+        }
+    };
+    for n in &notes {
+        message.push_str("\n  ");
+        message.push_str(n);
+    }
+    r["message"] = json!(message);
+    Ok(r)
+}
+
+/// The drawing's unit for the DOCFA export and its factor to metres: `unit` (m, cm or mm) when
+/// given, else the drawing's `$INSUNITS` (a drawing without one counts as metres).
+fn docfa_unit(d: &Drawing, p: &Value) -> Result<(&'static str, f64)> {
+    let unit = match p.get("unit") {
+        None | Some(Value::Null) => match d.header.i64("INSUNITS", 0) {
+            0 | 6 => "m",
+            5 => "cm",
+            4 => "mm",
+            _ => return Err(bad("export", "the drawing's unit is not m, cm or mm: give `unit`, the unit the drawing is drawn in (m, cm or mm)")),
+        },
+        Some(v) => match v.as_str().map(|u| u.trim().to_ascii_lowercase()).as_deref() {
+            Some("m") => "m",
+            Some("cm") => "cm",
+            Some("mm") => "mm",
+            _ => return Err(bad("export", "`unit` is the unit the drawing is drawn in: m, cm or mm")),
+        },
+    };
+    let scale = match unit {
+        "cm" => 0.01,
+        "mm" => 0.001,
+        _ => 1.0,
+    };
+    Ok((unit, scale))
 }
 
 // ---------- IMPORT ----------
@@ -625,6 +685,45 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let st = s.state().unwrap();
         assert!(st.path.is_none() && st.title == "Drawing1", "the drawing keeps its name");
+    }
+
+    /// A stand-in DOCFA writer: the name and the scale it was given, and one note.
+    fn fake_docfa(d: &Drawing, name: &str, scale: f64) -> std::result::Result<(Vec<u8>, Vec<String>), String> {
+        Ok((format!("{name}:{}:{scale}", d.model.len()).into_bytes(), vec!["1 HATCH left out".into()]))
+    }
+
+    #[test]
+    fn export_for_docfa_takes_the_drawings_unit_to_metres_and_keeps_the_drawing() {
+        super::super::file::set_docfa(fake_docfa);
+        let ours = super::super::file::docfa().is_some_and(|h| h(&Drawing::new_metric(), "t", 1.0).is_ok_and(|(b, _)| b == b"t:0:1"));
+        let mut s = session();
+        assert!(s.execute("export", &json!({ "format": "svg", "docfa": true })).is_err(), "DXF or DWG only");
+        assert!(s.execute("export", &json!({ "format": "dxf", "docfa": "yes" })).is_err());
+        assert!(s.execute("export", &json!({ "format": "dxf", "docfa": true, "unit": "in" })).is_err(), "m, cm or mm");
+        if !ours {
+            return;
+        }
+        // A drawing in millimetres ($INSUNITS 4): ×0.001.
+        s.doc_mut().unwrap().header.set_i64("INSUNITS", 4);
+        let r = s.execute("export", &json!({ "format": "dxf", "docfa": true })).unwrap();
+        assert_eq!(base64_decode(r["data"].as_str().unwrap()).unwrap(), b"export.dxf:2:0.001");
+        assert_eq!((r["unit"].as_str(), r["version"].as_i64(), r["docfa"].as_bool()), (Some("mm"), Some(2000), Some(true)));
+        assert_eq!(r["notes"], json!(["1 HATCH left out"]));
+        let path = temp("plan-docfa.dwg");
+        let ps = path.to_string_lossy().to_string();
+        let r = s.execute("export", &json!({ "path": ps, "docfa": true, "unit": "CM" })).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"export.dwg:2:0.01");
+        let msg = r["message"].as_str().unwrap();
+        assert!(msg.starts_with("Exported DWG compatible with DOCFA") && msg.contains("1 HATCH left out"), "{msg}");
+        let _ = std::fs::remove_file(&path);
+        let st = s.state().unwrap();
+        assert!(st.path.is_none() && st.title == "Drawing1", "the drawing keeps its name");
+        // An imperial drawing (inches) must say its unit.
+        s.doc_mut().unwrap().header.set_i64("INSUNITS", 1);
+        assert!(s.execute("export", &json!({ "format": "dxf", "docfa": true })).is_err());
+        s.doc_mut().unwrap().header.set_i64("INSUNITS", 0);
+        let r = s.execute("export", &json!({ "format": "dxf", "docfa": true })).unwrap();
+        assert_eq!(r["unit"], "m", "a drawing without a unit counts as metres");
     }
 
     fn line(a: (f64, f64), b: (f64, f64)) -> EntityKind {

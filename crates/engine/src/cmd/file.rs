@@ -105,6 +105,21 @@ pub fn write_as() -> Option<WriteAsHook> {
     WRITE_AS.get().copied()
 }
 
+/// Write a drawing as a DXF or DWG file the Italian cadastre's DOCFA imports, its drawing units
+/// multiplied by the scale into metres: the file and what it converted or left out, one sentence
+/// each (`docs/docfa.md`).
+pub type DocfaHook = fn(&Drawing, &str, f64) -> std::result::Result<(Vec<u8>, Vec<String>), String>;
+
+static DOCFA: OnceLock<DocfaHook> = OnceLock::new();
+
+/// Install the host's DOCFA writer (EXPORT `docfa: true`).
+pub fn set_docfa(h: DocfaHook) {
+    let _ = DOCFA.set(h);
+}
+pub fn docfa() -> Option<DocfaHook> {
+    DOCFA.get().copied()
+}
+
 /// The versions a drawing can be saved in, for messages ("2000, 2004, …, 2018").
 fn version_list() -> String {
     Version::ALL.iter().map(|v| v.year()).collect::<Vec<_>>().join(", ")

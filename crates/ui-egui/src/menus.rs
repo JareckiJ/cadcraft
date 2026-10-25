@@ -23,6 +23,8 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.open", "Open...", &[], Some("Cmd+O")),
     ("ui.newtemplate", "New from Template...", &["File", "New from Template..."], None),
     ("ui.saveas", "Save As...", &[], None),
+    ("ui.saveas.docfa.dxf", "Save as DXF compatible with DOCFA...", &["File", "Save as DXF compatible with DOCFA..."], None),
+    ("ui.saveas.docfa.dwg", "Save as DWG compatible with DOCFA...", &["File", "Save as DWG compatible with DOCFA..."], None),
     ("ui.sample", "Open Sample Drawing", &["Help", "Open Sample Drawing"], None),
     ("ui.toggle.toolsets", "Tool Sets", &["Window", "Tool Sets"], Some("Cmd+3")),
     ("ui.panel.properties", "Properties Inspector", &["Window", "Properties Inspector"], Some("Cmd+1")),
@@ -206,6 +208,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
+        "ui.saveas.docfa.dxf" | "ui.saveas.docfa.dwg" if app.session.state().is_ok() => {
+            crate::docfa::open(app, if id.ends_with("dwg") { crate::docfa::Format::Dwg } else { crate::docfa::Format::Dxf });
+            Ok(Value::Null)
+        }
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
         // params, never get here and never open a dialog.

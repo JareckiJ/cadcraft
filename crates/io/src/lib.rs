@@ -5,6 +5,7 @@
 /// What a DXF file holds that CADCraft doesn't model, kept and written back (#528).
 mod dxf_raw;
 
+pub mod docfa;
 mod dxf_ext;
 mod dxf_image;
 mod dxf_mleader;
@@ -104,6 +105,26 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
         e if opts.binary => Err(IoError::Format(format!("binary output is for DXF files, not `{e}`"))),
         _ => write_framed(d, name, None),
     }
+}
+
+/// A DXF or DWG file the Italian cadastre's DOCFA imports: the reduced copy of [`docfa::drawing`]
+/// written at AutoCAD 2000, the newest version DOCFA reads (ASCII DXF). `scale` takes drawing
+/// units to metres. Returns the file and what the copy converted or left out, one sentence each.
+pub fn write_docfa(d: &Drawing, name: &str, scale: f64) -> Result<(Vec<u8>, Vec<String>)> {
+    let version = Version::R2000;
+    let kind = ext(name);
+    if !matches!(kind.as_str(), "dxf" | "" | "dwg") {
+        return Err(IoError::Format(format!("DOCFA imports DXF and DWG files, not `{kind}`")));
+    }
+    let (prepared, report) = docfa::drawing(d, scale);
+    let mut notes = report.lines();
+    let bytes = if kind == "dwg" {
+        notes.push(format!("DOCFA reads the surface polygons of layer {} from DXF files only", docfa::LAYER));
+        cadcraft_dwg::dxf_to_dwg_as(dxf_write::dwg_bridge(&prepared, version).as_bytes(), version.code()).map_err(IoError::Format)?
+    } else {
+        cadcraft_dxf::write_ascii_as(&dxf_write::tags(&prepared, version), version.utf8()).into_bytes()
+    };
+    Ok((bytes, notes))
 }
 
 /// Like [`write`], but image formats (PNG, SVG, PDF) show `window` (a model-space rectangle in

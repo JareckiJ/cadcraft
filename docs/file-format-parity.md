@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (DIMASSOC objects for angular, diametric and radial dimensions) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-25 · **Change:** minor (DXF and DWG compatible with DOCFA, the Italian cadastre) · **Target:** Autodesk AutoCAD 2027
 
 Every format AutoCAD 2027 reads or writes, with CADCraft's support, fidelity and tests. Work
 items are in [gaps.md](gaps.md#file-formats); the weighted score feeds
@@ -108,6 +108,7 @@ on read with a note, so such files no longer exceed the DXF limit (#1482). **DWG
 
 | Format | AutoCAD 2027 | CADCraft | Hours to parity (est.) |
 |---|---|---|---|
+| DXF/DWG for the Italian cadastre's DOCFA | no (users clean the drawing by hand: explode, purge hatches, `SAVEAS` 2000) | File ▸ Save as DXF/DWG compatible with DOCFA, `export {docfa: true, unit}`: a reduced copy at AutoCAD 2000 in metres, no declared unit, colours only on the `DOCFA_POLIGONI` polygons, with checks ([docfa.md](docfa.md)) | — |
 | DWT templates | open, save | NEW/QNEW from `.dwt` and `.dxf` templates, SAVEAS `.dwt` (#552) | 0–1 |
 | DWS standards | open, save, CHECKSTANDARDS | no | 6–10 |
 | PDF output (PLOT, EXPORTPDF) | multi-sheet, layers, searchable text, hyperlinks | vector PDF with lineweights, real text in embedded TrueType subsets, layers (OCG), several sheets per file and hyperlinks (#567, #571); object transparency as PDF alpha when "Plot transparency" is on (the option isn't saved in DXF/DWG: no public plot layout flag) | 1–2 |
@@ -140,6 +141,7 @@ our output in AutoCAD black-box.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-25 | minor | DXF and DWG compatible with DOCFA, the Italian cadastre's program: a reduced copy of the drawing (model space, blocks exploded, no hatches, white continuous layers, colours only on the `DOCFA_POLIGONI` surface polygons, ASCII text) at AutoCAD 2000, scaled to metres and declaring no unit like the Agenzia's own templates, with DOCFA checks ([docfa.md](docfa.md)) |
 | 2026-10-22 | minor | DXF/DWG save: angular, diametric and radial dimensions get standard DIMASSOC objects (one centre reference to the circle for radial/diametric, the definition points for angular), so AutoCAD follows their geometry; the standard objects of those kinds are read back too, without CADCraft's xdata (#1651) |
 | 2026-10-19 | minor | DXF/DWG save: angular dimension block text honors DIMDSEP, including per-dimension overrides (#1646) |
 | 2026-10-19 | minor | A file's own arrowhead blocks with standard names (AutoCAD's `_Dot`, `_DotSmall`), named only by a dimension style, are kept and saved as they were instead of being replaced by CADCraft's solids; PURGE keeps arrowhead blocks dimension styles name |
