@@ -1,0 +1,216 @@
+# Release of this fork's builds: installers and portable archives for Windows, macOS and Linux,
+# unsigned (the upstream release workflow needs the maintainers' signing secrets and a paid
+# macOS runner). It runs the same packaging scripts, on the runners every public repository gets.
+#
+#   git tag v0.13.0-docfa.1 && git push fork v0.13.0-docfa.1     # or run it by hand with a version
+#
+# It makes a DRAFT release with every file and a SHA256SUMS.txt; publish it from the Releases page.
+name: Fork release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, e.g. 0.13.0-docfa.1"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CRAFT_FONTS_REF: 3d9ab3a132ed0eff457e424226a435a901da30d3
+
+jobs:
+  version:
+    timeout-minutes: 10
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      date: ${{ steps.v.outputs.date }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: v
+        name: Resolve version
+        uses: storytold/craft-common-actions/actions/resolve-version@main
+        with:
+          input-version: ${{ inputs.version || github.ref_name }}
+          app-title: CADCraft
+
+  macos:
+    timeout-minutes: 90
+    name: macOS universal
+    needs: [version]
+    runs-on: macos-15
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+      CADCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      CADCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CADCRAFT_BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out craft-fonts
+        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fork-release-macos-universal
+      - name: Apply version
+        run: cargo xtask version set "$VERSION"
+      # No certificate here: the script signs ad hoc and does not notarize.
+      - name: Build and package (DMG, command-line archive)
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: packaging/macos/package.sh --arch universal
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos
+          path: dist/release/*
+          if-no-files-found: error
+
+  windows:
+    timeout-minutes: 90
+    name: Windows ${{ matrix.arch }}
+    needs: [version]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, target: x86_64-pc-windows-msvc }
+          - { arch: x86, target: i686-pc-windows-msvc }
+          - { arch: arm64, target: aarch64-pc-windows-msvc }
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+      CADCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      CADCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CADCRAFT_BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out craft-fonts
+        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fork-release-windows-${{ matrix.arch }}
+      - name: Apply version
+        shell: bash
+        run: cargo xtask version set "$VERSION"
+      - name: Install WiX
+        uses: storytold/craft-common-actions/actions/install-wix@main
+        with:
+          wix-version: "5.0.2"
+      # No certificate here: sign.ps1 warns and leaves the files unsigned.
+      - name: Build and package (MSI, portable zip)
+        shell: pwsh
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux:
+    timeout-minutes: 90
+    name: Linux ${{ matrix.arch }}
+    needs: [version]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, deb: amd64 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm, deb: arm64 }
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      VERSION: ${{ needs.version.outputs.version }}
+      BUILD_DATE: ${{ needs.version.outputs.date }}
+      BUILD_SHA: ${{ github.sha }}
+      CADCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      CADCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      CADCRAFT_BUILD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out craft-fonts
+        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        with:
+          ref: ${{ env.CRAFT_FONTS_REF }}
+      - uses: storytold/craft-common-actions/actions/install-linux-deps@main
+        with:
+          deb-arch: ${{ matrix.deb }}
+          nfpm-version: "2.47.0"
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fork-release-linux-${{ matrix.arch }}
+      - name: Apply version
+        run: cargo xtask version set "$VERSION"
+      - name: Build and package (AppImage, deb, rpm, tar.gz)
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: packaging/linux/package.sh
+      - name: Check the packages
+        run: |
+          dpkg-deb --info dist/release/*.deb || true
+          for appimage in dist/release/*.AppImage; do
+            if [ -f "$appimage" ]; then
+              chmod +x "$appimage"
+              APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --version || true
+            fi
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  release:
+    timeout-minutes: 10
+    name: Draft GitHub Release
+    # A platform that fails leaves the others in the draft; the summary lists what is there.
+    if: "!cancelled() && needs.version.result == 'success'"
+    needs: [version, macos, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: storytold/craft-common-actions/actions/draft-release@main
+        with:
+          version: ${{ needs.version.outputs.version }}
+          app-title: CADCraft
+          prerelease: ${{ needs.version.outputs.prerelease }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
