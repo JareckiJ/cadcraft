@@ -75,7 +75,7 @@ const USAGE: &str = "usage:
   cadcraft-cli store-recover [--store …]     finish or drop interrupted writes, as JSON
                 --store-root is a local/NAS/synced folder; --store-url is the WebDAV
                 collection, e.g. http://ocis.lan:9200/dav/spaces/<id>/
-                (plain http only: LAN, VPN or SSH tunnel; https is refused, see #518).
+                (plain http only: LAN, VPN or SSH tunnel; https is refused, see wordcraft#518).
                 WebDAV auth is Basic (--store-user/--store-password) or an OIDC
                 Bearer token (--store-token, or $CRAFT_DAV_TOKEN for k8s secretKeyRef),
                 never both.

@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-storage"
-version = "0.6.2"
+version = "0.12.0"
 dependencies = [
  "base64",
  "serde",
