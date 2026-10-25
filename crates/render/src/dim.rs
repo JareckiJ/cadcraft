@@ -571,6 +571,8 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
     };
     let mut text_angle = 0.0;
     let mut text_mid = d.text_mid.xy();
+    // DIMARCSYM 1: the arc symbol's half width and how far its top is above the text's middle.
+    let mut arc_over: Option<(f64, f64)> = None;
     // Place an end marker: tick or arrowhead. Returns how far the dimension line stops short.
     let end = |g: &mut DimGeometry, kind: Arrowhead, tip: Vec2, dir: Vec2| -> f64 {
         if ticks {
@@ -994,9 +996,12 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             if st.arc_symbol == 1 {
                 // A small arc over the text.
                 let (tw, tht) = measure(&g.mtext);
-                let (x, y) = (Vec2::from_angle(text_angle), Vec2::from_angle(text_angle).perp());
+                // The symbol turns with the text, a DIMTEDIT Angle included.
+                let a = if d.text_rotation != 0.0 && d.text_rotation.is_finite() { d.text_rotation } else { text_angle };
+                let (x, y) = (Vec2::from_angle(a), Vec2::from_angle(a).perp());
                 let half = (tw / 2.0).max(th / 2.0);
                 let base = text_mid + y * (tht / 2.0 + gap / 2.0);
+                arc_over = Some((half, tht / 2.0 + gap / 2.0 + th * 0.35));
                 let sym: Vec<Vec2> = (0..=12)
                     .map(|i| {
                         let t = f64::from(i) / 6.0 - 1.0;
@@ -1066,6 +1071,19 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             g.text_runs.extend(p.shaped.text.into_iter().map(|t| cadcraft_fonts::TextGlyph { outline: t.outline + base, ..t }));
             g.text.extend(p.shaped.strokes);
             g.text_glyphs.extend(p.shaped.glyphs);
+        }
+    }
+    // DIMGAP below 0: a frame around the text and the arc symbol over it, widened by |DIMGAP| on
+    // every side. A DIMINSPECT frame takes its place.
+    if st.text_gap < 0.0 && !g.mtext.is_empty() && d.marks.inspect.as_ref().is_none_or(|ins| ins.shape >= 2) {
+        let (w, h) = measure(&g.mtext);
+        let (x, y) = (Vec2::from_angle(text_angle), Vec2::from_angle(text_angle).perp());
+        let (hw, top) = arc_over.map_or((w / 2.0, h / 2.0), |(half, peak)| ((w / 2.0).max(half), (h / 2.0).max(peak)));
+        let (hw, top, bottom) = (hw + gap, top + gap, h / 2.0 + gap);
+        let corners: Vec<Vec2> =
+            [(-hw, -bottom), (hw, -bottom), (hw, top), (-hw, top)].into_iter().map(|(px, py)| text_mid + x * px + y * py).collect();
+        for (a, b) in corners.iter().zip(corners.iter().cycle().skip(1)) {
+            g.dim(vec![*a, *b]);
         }
     }
     g.text_pos = text_mid;
@@ -1233,6 +1251,125 @@ mod tests {
         let d2 = lin((0.0, 10.0), (10.0, 10.0), (0.0, 5.0), 0.0);
         let outside2 = dimension_geometry(&d2, &st_with(|s| s.text_above = 2), 1.0);
         assert!(outside2.text_pos.y < 5.0);
+    }
+
+    /// The last four lines of `g` as a frame: four sides, each starting where the one before ends.
+    fn frame_of(g: &DimGeometry) -> Vec<Vec<Vec2>> {
+        let sides: Vec<Vec<Vec2>> = g.lines.iter().rev().take(4).rev().cloned().collect();
+        assert_eq!(sides.len(), 4);
+        for (a, b) in sides.iter().zip(sides.iter().cycle().skip(1)) {
+            assert_eq!(a.len(), 2);
+            assert!(a[1].dist(b[0]) < 1e-9, "{sides:?}");
+        }
+        sides
+    }
+
+    #[test]
+    fn negative_dimgap_draws_a_frame_around_the_text() {
+        let d = lin((0.0, 0.0), (10.0, 0.0), (0.0, 5.0), 0.0);
+        let plain = dimension_geometry(&d, &st_with(|s| s.text_gap = 0.09), 1.0);
+        let framed = dimension_geometry(&d, &st_with(|s| s.text_gap = -0.09), 1.0);
+        // The same text place and dimension line break as DIMGAP 0.09, and four more lines.
+        assert!(framed.text_pos.dist(plain.text_pos) < 1e-12);
+        assert_eq!(framed.lines.len(), plain.lines.len() + 4);
+        assert_eq!(framed.lines_of(LineRole::Dim).count(), plain.lines_of(LineRole::Dim).count() + 4);
+        // The frame is the text box widened by 0.09 on every side, around the text.
+        let frame = bbox(&frame_of(&framed));
+        let l = cadcraft_fonts::layout_mtext_with(&framed.mtext, &MTextParams { attach: 5, ..MTextParams::new(Vec2::ZERO, 0.18) });
+        assert!((frame.width() - (l.bounds.width() + 0.18)).abs() < 1e-9, "{frame:?}");
+        assert!((frame.height() - (l.bounds.height() + 0.18)).abs() < 1e-9, "{frame:?}");
+        let text = bbox(&framed.text);
+        assert!(frame.min.x < text.min.x && text.max.x < frame.max.x && frame.min.y < text.min.y && text.max.y < frame.max.y);
+        assert!((frame.center().dist(framed.text_pos)) < 1e-9, "{frame:?}");
+        // DIMGAP 0 and above: no frame.
+        assert_eq!(dimension_geometry(&d, &st_with(|s| s.text_gap = 0.0), 1.0).lines.len(), plain.lines.len());
+    }
+
+    #[test]
+    fn the_frame_turns_with_the_text() {
+        let d = lin((0.0, 0.0), (0.0, 10.0), (5.0, 0.0), std::f64::consts::FRAC_PI_2);
+        let g = dimension_geometry(
+            &d,
+            &st_with(|s| {
+                s.text_gap = -0.09;
+                s.text_inside_horizontal = false;
+            }),
+            1.0,
+        );
+        assert!((g.text_angle.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{}", g.text_angle);
+        // Two sides along the text, two across it, the long ones along the dimension line.
+        for s in frame_of(&g) {
+            let v = s[1] - s[0];
+            assert!(v.x.abs() < 1e-9 || v.y.abs() < 1e-9, "{v:?}");
+        }
+        let frame = bbox(&frame_of(&g));
+        assert!(frame.height() > frame.width(), "{frame:?}");
+        assert!(bbox(&g.text).max.y < frame.max.y && frame.min.y < bbox(&g.text).min.y);
+    }
+
+    #[test]
+    fn the_frame_takes_in_the_arc_symbol_over_the_text() {
+        let mut d = lin((10.0, 0.0), (0.0, 10.0), (12.0, 0.0), 0.0);
+        d.kind = DimKind::ArcLength;
+        let g = dimension_geometry(
+            &d,
+            &st_with(|s| {
+                s.text_gap = -0.09;
+                s.arc_symbol = 1;
+                s.text_inside_horizontal = true;
+            }),
+            1.0,
+        );
+        let frame = bbox(&frame_of(&g));
+        // The arc symbol is the line drawn just before the frame.
+        let sym = &g.lines[g.lines.len() - 5];
+        assert_eq!(sym.len(), 13);
+        let s = bbox(std::slice::from_ref(sym));
+        assert!((frame.max.y - (s.max.y + 0.09)).abs() < 1e-9, "{frame:?} {s:?}");
+        assert!(frame.min.x < s.min.x && s.max.x < frame.max.x, "{frame:?} {s:?}");
+        let text = bbox(&g.text);
+        assert!(frame.min.y < text.min.y && text.max.y < frame.max.y, "{frame:?} {text:?}");
+    }
+
+    #[test]
+    fn the_arc_symbol_and_the_frame_turn_with_a_text_angle() {
+        let mut d = lin((10.0, 0.0), (0.0, 10.0), (12.0, 0.0), 0.0);
+        d.kind = DimKind::ArcLength;
+        d.text_rotation = 0.5;
+        let g = dimension_geometry(
+            &d,
+            &st_with(|s| {
+                s.text_gap = -0.09;
+                s.arc_symbol = 1;
+            }),
+            1.0,
+        );
+        assert!((g.text_angle - 0.5).abs() < 1e-12);
+        // In the text's own axes, the frame is upright and holds the symbol 0.09 below its top.
+        let (x, y) = (Vec2::from_angle(0.5), Vec2::from_angle(0.5).perp());
+        let local = |pts: &[Vec<Vec2>]| -> Vec<Vec<Vec2>> {
+            pts.iter().map(|l| l.iter().map(|p| Vec2::new((*p - g.text_pos).dot(x), (*p - g.text_pos).dot(y))).collect()).collect()
+        };
+        let frame = bbox(&local(&frame_of(&g)));
+        let sym = bbox(&local(std::slice::from_ref(&g.lines[g.lines.len() - 5])));
+        assert!((frame.max.y - (sym.max.y + 0.09)).abs() < 1e-9, "{frame:?} {sym:?}");
+        assert!(frame.min.x < sym.min.x && sym.max.x < frame.max.x, "{frame:?} {sym:?}");
+        // The symbol's ends sit level in the text's axes.
+        let s = &local(std::slice::from_ref(&g.lines[g.lines.len() - 5]))[0];
+        assert!((s[0].y - s[12].y).abs() < 1e-9, "{s:?}");
+    }
+
+    #[test]
+    fn an_inspection_frame_takes_the_place_of_the_dimgap_frame() {
+        let mut d = lin((0.0, 0.0), (10.0, 0.0), (0.0, 5.0), 0.0);
+        d.marks.inspect = Some(cadcraft_doc::Inspection { shape: 0, label: "A".into(), rate: "50%".into() });
+        let st = |gap: f64| st_with(|s| s.text_gap = gap);
+        let inspected = dimension_geometry(&d, &st(0.09), 1.0).lines.len();
+        assert_eq!(dimension_geometry(&d, &st(-0.09), 1.0).lines.len(), inspected);
+        // Shape none draws no inspection frame, so DIMGAP's frame is drawn.
+        d.marks.inspect = Some(cadcraft_doc::Inspection { shape: 2, label: String::new(), rate: String::new() });
+        let none = dimension_geometry(&d, &st(0.09), 1.0).lines.len();
+        assert_eq!(dimension_geometry(&d, &st(-0.09), 1.0).lines.len(), none + 4);
     }
 
     #[test]
