@@ -73,8 +73,8 @@ pub struct State {
     pub grab_on_click: bool,
     /// Whether the insertion options section is expanded.
     pub show_options: bool,
-    /// Active repeat-placement session: `(block_name, entity_count_before_insert)`.
-    pub repeating: Option<(String, usize)>,
+    /// Whether the currently running `INSERT` was started by this palette with repeat placement enabled.
+    pub repeating: bool,
     /// The new name while renaming the selected block.
     pub rename: Option<String>,
     /// The last message (a refused delete or rename).
@@ -97,7 +97,7 @@ impl Default for State {
             explode: false,
             grab_on_click: true,
             show_options: true,
-            repeating: None,
+            repeating: false,
             rename: None,
             note: None,
         }
@@ -314,6 +314,9 @@ pub fn grab_block(app: &mut CadApp, name: &str, st: &State) {
         let rot = if st.rotation.is_finite() { st.rotation } else { 0.0 };
         let _ = app.session.input(cadcraft_engine::Input::Keyword("Rotate".into()));
         let _ = app.session.input(cadcraft_engine::Input::Text(format!("{rot}")));
+    }
+    if st.repeat {
+        let _ = app.session.input(cadcraft_engine::Input::Keyword("Repeat".into()));
     }
 }
 
@@ -709,18 +712,9 @@ fn body(ui: &mut egui::Ui, d: &Drawing, v: &View, st: &mut State, cache: &mut Pr
     }
 }
 
-/// Total number of entities in model space and paper space layouts.
-/// Count placed instances for repeat-placement tracking: block references to `name`, or total
-/// drawing entities when `explode` is enabled (`*name` inserts raw entities rather than an `Insert`).
-fn placement_count(app: &CadApp, name: &str, explode: bool) -> usize {
-    app.session
-        .doc()
-        .map_or(0, |d| if explode { d.model.len() + d.layouts.iter().map(|l| l.entities.len()).sum::<usize>() } else { reference_count(d, name) })
-}
-
 /// Cancel an in-progress `INSERT` and stop repeat placement.
 fn cancel_pending_insert(app: &mut CadApp, st: &mut State) {
-    st.repeating = None;
+    st.repeating = false;
     if app.session.running.as_ref().is_some_and(|r| r.id == "insert") {
         app.session.cancel();
     }
@@ -737,13 +731,8 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
     match act {
         Some(Act::Grab(n)) => {
             grab_block(app, &n, st);
-            // Only arm repeat-placement when the palette's own INSERT started.
-            if st.repeat && app.session.running.as_ref().is_some_and(|r| r.id == "insert") {
-                let count = placement_count(app, &n, st.explode);
-                st.repeating = Some((n, count));
-            } else {
-                st.repeating = None;
-            }
+            // Only track repeat-placement when the palette's own INSERT started.
+            st.repeating = st.repeat && app.session.running.as_ref().is_some_and(|r| r.id == "insert");
             return true;
         }
         Some(Act::Edit(n)) => {
@@ -804,23 +793,15 @@ fn apply(app: &mut CadApp, st: &mut State, act: Option<Act>, esc_pressed: bool) 
             app.ui.dialog = Some("blocks".into());
         }
         None => {
-            if !st.repeat || esc_pressed {
-                st.repeating = None;
-            } else if app.session.running.as_ref().is_some_and(|r| r.id != "insert") {
-                // Another command took over: the palette's placement is over.
-                st.repeating = None;
-            } else if app.session.running.is_none()
-                && let Some((name, prev_count)) = st.repeating.clone()
-            {
-                // Repeat placement only when the previous INSERT actually added an entity to the
-                // drawing; cancelling with Esc leaves the entity count unchanged and stops repeating.
-                let cur_count = placement_count(app, &name, st.explode);
-                if cur_count > prev_count {
-                    grab_block(app, &name, st);
-                    st.repeating = Some((name, cur_count));
-                } else {
-                    st.repeating = None;
+            if st.repeating {
+                if esc_pressed || app.session.running.as_ref().is_none_or(|r| r.id != "insert") {
+                    // Repeat INSERT ended (cancelled with Esc or replaced by another command).
+                    st.repeating = false;
                     st.repeat = false;
+                } else if !st.repeat {
+                    // Repeat placement was unchecked in the palette while INSERT was waiting for a point.
+                    let _ = app.session.input(cadcraft_engine::Input::Keyword("NoRepeat".into()));
+                    st.repeating = false;
                 }
             }
         }
@@ -1054,16 +1035,16 @@ mod tests {
         // Grab "Pin" with Repeat placement enabled.
         super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);
         assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
-        assert!(st.repeating.is_some());
+        assert!(st.repeating);
 
-        // First click places the first reference; the next frame automatically puts "Pin" back in hand.
+        // First click places the first reference and keeps INSERT running for the next point.
         app.session.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
-        assert!(app.session.running.is_none());
+        assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
         super::apply(&mut app, &mut st, None, false);
         assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
         assert_eq!(super::reference_count(app.session.doc().unwrap(), "Pin"), 1);
 
-        // Second click places the second reference; the next frame puts "Pin" back in hand again.
+        // Second click places the second reference and still keeps INSERT running.
         app.session.input(Input::Point(Vec2::new(20.0, 0.0))).unwrap();
         super::apply(&mut app, &mut st, None, false);
         assert_eq!(app.session.running.as_ref().map(|r| r.id.as_str()), Some("insert"));
@@ -1073,24 +1054,25 @@ mod tests {
         app.session.cancel();
         super::apply(&mut app, &mut st, None, false);
         assert!(app.session.running.is_none());
-        assert!(st.repeating.is_none());
+        assert!(!st.repeating);
         assert!(!st.repeat);
 
-        // Pressing Escape while INSERT is still running (or with Repeat placement checked) cancels both and unchecks repeat.
+        // Pressing Escape while INSERT is still running cancels both and unchecks repeat.
         st.repeat = true;
         super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);
         assert!(app.session.running.is_some());
         super::apply(&mut app, &mut st, None, true);
         assert!(app.session.running.is_none());
-        assert!(st.repeating.is_none());
+        assert!(!st.repeating);
         assert!(!st.repeat);
 
         // Starting another command (e.g. LINE) replaces INSERT and clears repeating so finishing LINE does not re-grab.
         st.repeat = true;
         super::apply(&mut app, &mut st, Some(super::Act::Grab("Pin".into())), false);
-        assert!(st.repeating.is_some());
+        assert!(st.repeating);
         app.session.start("line").unwrap();
         super::apply(&mut app, &mut st, None, false);
-        assert!(st.repeating.is_none());
+        assert!(!st.repeating);
+        assert!(!st.repeat);
     }
 }

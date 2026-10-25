@@ -583,10 +583,14 @@ struct InsertM {
     x_scale: Option<f64>,
     scale: Option<Vec2>,
     rotation: Option<f64>,
+    preset_scale: Option<Vec2>,
+    preset_rotation: Option<f64>,
     attdefs: Vec<(String, String, String)>,
     values: serde_json::Map<String, Value>,
     /// `*name`: insert the block's objects (one uniform scale factor, no attribute values).
     explode: bool,
+    /// Keep prompting for another insertion point after each placement until cancelled.
+    repeat: bool,
     /// The file waiting for the Redefine answer.
     file: Option<insert_file::FileRef>,
 }
@@ -608,6 +612,15 @@ impl InsertM {
             let h = insert_with(s, &n, a, sc, r, self.base, &self.values)?;
             if self.explode {
                 insert_file::explode_insert(s, h)?;
+            }
+            if self.repeat {
+                self.at = None;
+                self.x_scale = None;
+                self.scale = self.preset_scale;
+                self.rotation = self.preset_rotation;
+                self.values.clear();
+                self.stage = InsStage::Point;
+                return Ok(Step::Continue);
             }
             return Ok(Step::Done);
         }
@@ -741,6 +754,8 @@ impl Interactive for InsertM {
                 Input::Keyword(k) if k == "Basepoint" => self.stage = InsStage::BasePoint,
                 Input::Keyword(k) if k == "Scale" => self.stage = InsStage::PresetScale,
                 Input::Keyword(k) if k == "Rotate" => self.stage = InsStage::PresetRotation,
+                Input::Keyword(k) if k == "Repeat" => self.repeat = true,
+                Input::Keyword(k) if k == "NoRepeat" => self.repeat = false,
                 _ => {}
             },
             InsStage::BasePoint => {
@@ -753,10 +768,12 @@ impl Interactive for InsertM {
                 if let Input::Text(t) = &i
                     && let Some((x, y)) = t.split_once(',').filter(|_| !self.explode)
                 {
-                    self.scale = Some(Vec2::new(nonzero(x.trim())?, nonzero(y.trim())?));
+                    let sc = Vec2::new(nonzero(x.trim())?, nonzero(y.trim())?);
+                    self.scale = Some(sc);
                     if self.at.is_some() {
                         return self.advance(s);
                     }
+                    self.preset_scale = Some(sc);
                     self.stage = InsStage::Point;
                     return Ok(Step::Continue);
                 }
@@ -765,19 +782,23 @@ impl Interactive for InsertM {
                     Input::Enter => 1.0,
                     _ => return Ok(Step::Continue),
                 };
-                self.scale = Some(Vec2::new(f, f));
+                let sc = Vec2::new(f, f);
+                self.scale = Some(sc);
                 // Exploded insertion asks its one scale factor after the insertion point.
                 if self.at.is_some() {
                     return self.advance(s);
                 }
+                self.preset_scale = Some(sc);
                 self.stage = InsStage::Point;
             }
             InsStage::PresetRotation => {
-                self.rotation = Some(match i {
+                let rot = match i {
                     Input::Text(t) => s.angle_settings().direction(&t).ok_or_else(|| EngineError::Other("Requires an angle.".into()))?,
                     Input::Enter => 0.0,
                     _ => return Ok(Step::Continue),
-                });
+                };
+                self.rotation = Some(rot);
+                self.preset_rotation = Some(rot);
                 self.stage = InsStage::Point;
             }
             InsStage::XScale => match i {
