@@ -1638,9 +1638,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         }
     }
     // A click on an AutoComplete row beside the cursor starts that command; rows left from a
-    // frame before a command started (from a dialog, say) no longer count.
+    // frame before a command started (from a dialog, say) no longer count, and a dialog, palette
+    // or selection cycling row over the list keeps its click.
     if pressed_primary
         && !picked
+        && inside
+        && !on_menu
         && command_tip_text(app).is_some()
         && let Some(id) = hover_pos.and_then(|h| app.canvas.tip_rows.iter().find(|(r, _)| r.contains(h)).map(|(_, id)| id.clone()))
     {
