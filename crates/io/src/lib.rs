@@ -5,6 +5,7 @@
 /// What a DXF file holds that CADCraft doesn't model, kept and written back (#528).
 mod dxf_raw;
 
+pub mod cups;
 mod dxf_ext;
 mod dxf_image;
 mod dxf_mleader;
@@ -16,6 +17,7 @@ pub mod pdf;
 pub mod plotter;
 pub mod svg;
 mod svg_read;
+pub mod winprint;
 
 /// Multilines and their styles (MLINE, MLINESTYLE).
 mod dxf_mline;
