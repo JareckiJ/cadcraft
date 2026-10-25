@@ -25,12 +25,16 @@ fn default_save_version_applies_to_new_drawings_and_persists() {
     assert!(app.run("ui.saveversion", json!({ "version": "2005" })).is_err());
     assert_eq!(app.run("ui.saveversion", json!({ "version": 2010 })).ok(), Some(json!({ "saveVersion": "2010" })));
 
-    // The Save dialog saves an untitled drawing in the default version …
+    // The Save As dialog offers an untitled drawing's default version, and its Save... runs the
+    // picker and saves in it …
     app.run("ui.saveas", Value::Null).unwrap();
+    assert_eq!(app.ui.dialog.as_deref(), Some("saveas"));
+    assert_eq!(cadcraft_ui_egui::saveas::save(&mut app), Some(true));
     assert_eq!(std::fs::read(picked()).unwrap(), b"2010|false");
-    // … and a drawing that has a file in its own.
+    // … and a drawing that has a file starts from its own version.
     app.run("ui.saveas", Value::Null).unwrap();
-    assert_eq!(std::fs::read(picked()).unwrap(), b"plain");
+    assert_eq!(cadcraft_ui_egui::saveas::save(&mut app), Some(true));
+    assert_eq!(std::fs::read(picked()).unwrap(), b"2010|false");
     let _ = std::fs::remove_file(picked());
 
     // Menu items, preferences (bad values ignored) and resetting the palettes.

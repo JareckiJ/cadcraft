@@ -57,14 +57,18 @@ fn json_file_commands_never_open_pickers() {
     }
     app.cmdline("open {}");
     assert_eq!(picks.get(), 0);
-    // Typed, chosen from the menu or the ui.* shortcut commands: the pickers.
+    // Typed, chosen from the menu or the ui.* shortcut commands: the pickers — Save As first
+    // its dialog (file type, version), QSAVE of an untitled drawing the picker straight away.
     for c in ["open", "saveas", "qsave"] {
         app.start(c);
     }
-    assert_eq!(picks.get(), 3);
+    assert_eq!(picks.get(), 2);
+    assert_eq!(app.ui.dialog.as_deref(), Some("saveas"));
+    app.ui.dialog = None;
     app.run("ui.open", json!({})).unwrap();
     app.run("ui.saveas", json!({})).unwrap();
-    assert_eq!(picks.get(), 5);
+    assert_eq!(picks.get(), 3);
+    assert_eq!(app.ui.dialog.as_deref(), Some("saveas"));
 }
 
 #[test]

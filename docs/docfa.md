@@ -1,6 +1,7 @@
 # DXF and DWG compatible with DOCFA (Italian cadastre)
 
-> **Status:** File ▸ Save as DXF compatible with DOCFA… and …DWG compatible with DOCFA…;
+> **Status:** File ▸ Save As… file types *DXF compatible with DOCFA* and *DWG compatible with
+> DOCFA*, also File ▸ Save as DXF/DWG compatible with DOCFA… and Options ▸ Open and Save ▸ DOCFA;
 > `export {docfa: true, unit}` for scripts, the control channel and MCP. Writer:
 > `crates/io/src/docfa.rs` (`docfa::drawing`, `write_docfa`).
 
@@ -69,9 +70,10 @@ out, and:
 
 ## How to export
 
-- **Desktop:** File ▸ Save as DXF compatible with DOCFA… (or DWG). The window asks for the
-  drawing's unit (it starts from the drawing's insertion units, `$INSUNITS`) and then for the
-  file, named `<drawing>-docfa.dxf` by default.
+- **Desktop:** File ▸ Save As… and the file type *DXF compatible with DOCFA* (or DWG), or
+  directly File ▸ Save as DXF compatible with DOCFA… (or DWG), or Options ▸ Open and Save ▸
+  DOCFA. The dialog asks for the drawing's unit (it starts from the drawing's insertion units,
+  `$INSUNITS`) and then for the file, named `<drawing>-docfa.dxf` by default.
 - **Scripts, control channel, MCP:** `export {"path": "plan-docfa.dxf", "docfa": true, "unit": "cm"}`,
   or a `.dwg` path. Without `unit` the drawing's `$INSUNITS` decides (none counts as metres;
   another unit than m, cm or mm is refused).

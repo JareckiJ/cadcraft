@@ -1374,9 +1374,17 @@
 # DOCFA export (Italian cadastre): File ▸ Save as DXF/DWG compatible with DOCFA.
 	Save as DXF compatible with DOCFA...	Зберегти як DXF, сумісний з DOCFA...
 	Save as DWG compatible with DOCFA...	Зберегти як DWG, сумісний з DOCFA...
-	Save as compatible with DOCFA	Зберегти як сумісний з DOCFA
 	File type	Тип файлу
 	Drawing unit	Одиниця креслення
 	Save...	Зберегти...
 	A reduced copy for DOCFA, in metres (AutoCAD 2000): model space only, blocks exploded, no hatches, ASCII text, colours only on the closed polylines of layer DOCFA_POLIGONI (1–8, the area classes). The drawing keeps its own file.	Спрощена копія для DOCFA, у метрах (AutoCAD 2000): лише простір моделі, блоки розбиті, без штрихувань, текст ASCII, кольори лише на замкнених полілініях шару DOCFA_POLIGONI (1–8, класи площ). Креслення зберігає власний файл.
 	DOCFA reads the surface polygons from DXF files only.	DOCFA читає полігони площ лише з файлів DXF.
+# Save As dialog: file type, version, binary DXF, the DOCFA types.
+	Save As (file picker)	Зберегти як (вибір файлу)
+	Binary DXF	Двійковий DXF
+	DXF compatible with DOCFA	DXF, сумісний з DOCFA
+	DWG compatible with DOCFA	DWG, сумісний з DOCFA
+	An export of the drawing as shown: the drawing keeps its own file.	Експорт креслення як воно показане: креслення зберігає власний файл.
+	DOCFA (Italian cadastre)	DOCFA (італійський кадастр)
+	Save the drawing as a DXF file DOCFA imports	Зберегти креслення як файл DXF, який імпортує DOCFA
+	Save the drawing as a DWG file DOCFA imports	Зберегти креслення як файл DWG, який імпортує DOCFA

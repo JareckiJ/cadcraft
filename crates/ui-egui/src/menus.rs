@@ -23,6 +23,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.open", "Open...", &[], Some("Cmd+O")),
     ("ui.newtemplate", "New from Template...", &["File", "New from Template..."], None),
     ("ui.saveas", "Save As...", &[], None),
+    ("ui.saveas.pick", "Save As (file picker)", &[], None),
     ("ui.saveas.docfa.dxf", "Save as DXF compatible with DOCFA...", &["File", "Save as DXF compatible with DOCFA..."], None),
     ("ui.saveas.docfa.dwg", "Save as DWG compatible with DOCFA...", &["File", "Save as DWG compatible with DOCFA..."], None),
     ("ui.sample", "Open Sample Drawing", &["Help", "Open Sample Drawing"], None),
@@ -199,7 +200,15 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        // Save As from the menu, the tool bar, a shortcut or typed: the Save As dialog (file type,
+        // version, binary DXF) before the host's file picker.
         "ui.saveas" | "saveas" if no_path => {
+            crate::saveas::open(app);
+            Ok(Value::Null)
+        }
+        // The picker alone, in the default format and version: QSAVE of a drawing with no file
+        // yet, and the close prompt's Save, which must finish in this call.
+        "ui.saveas.pick" if no_path => {
             let title = app.session.state().map(|s| s.title.clone()).ok();
             let name = app.ui.save_format.suggested_name(title.as_deref());
             if let Some(p) = app.services.pick_save.as_ref().and_then(|f| f(&name)) {
@@ -207,9 +216,11 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
-        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
+        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas.pick", &Value::Null),
+        // The Save As dialog on a DOCFA file type (File menu, Options > Open and Save).
         "ui.saveas.docfa.dxf" | "ui.saveas.docfa.dwg" if app.session.state().is_ok() => {
-            crate::docfa::open(app, if id.ends_with("dwg") { crate::docfa::Format::Dwg } else { crate::docfa::Format::Dxf });
+            let file_type = if id.ends_with("dwg") { crate::saveas::FileType::DocfaDwg } else { crate::saveas::FileType::DocfaDxf };
+            crate::saveas::open_docfa(app, file_type);
             Ok(Value::Null)
         }
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot

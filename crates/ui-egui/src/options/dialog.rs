@@ -52,7 +52,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
             ui.add_space(4.0);
             let top = ui.cursor().top();
             match tab {
-                "files" => files(app, ui, &mut changes),
+                "files" => files(app, ui, &mut changes, &mut start),
                 "drafting" => drafting(app, ui, &mut changes, &mut start),
                 "selection" => selection(app, ui, &mut changes),
                 "preferences" => preferences(app, ui, &mut changes),
@@ -214,8 +214,8 @@ fn display(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     hint(ui, crate::tl!("Screen magnifiers, screen readers and recorders follow the system cursor."));
 }
 
-/// Files tab: save format and default version, new-drawing units, autosave interval and autosave file location; edits accumulate in `changes`.
-fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
+/// Files tab: save format and default version, the DOCFA exports, new-drawing units, autosave interval and autosave file location; edits accumulate in `changes`.
+fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, start: &mut Option<&'static str>) {
     grid(ui, "options_files", |ui| {
         ui.label(crate::tl!("Save new drawings as"));
         ui.horizontal(|ui| {
@@ -243,6 +243,19 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
         if version != current {
             changes.insert("saveVersion".into(), json!(version.year()));
         }
+        ui.end_row();
+
+        ui.label(crate::tl!("DOCFA (Italian cadastre)"));
+        ui.horizontal(|ui| {
+            if ui.button(crate::tl!("DXF compatible with DOCFA")).on_hover_text(crate::tl!("Save the drawing as a DXF file DOCFA imports")).clicked()
+            {
+                *start = Some("ui.saveas.docfa.dxf");
+            }
+            if ui.button(crate::tl!("DWG compatible with DOCFA")).on_hover_text(crate::tl!("Save the drawing as a DWG file DOCFA imports")).clicked()
+            {
+                *start = Some("ui.saveas.docfa.dwg");
+            }
+        });
         ui.end_row();
 
         ui.label(crate::tl!("Units of new drawings"));
