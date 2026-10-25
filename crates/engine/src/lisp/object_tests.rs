@@ -162,3 +162,47 @@ fn a_dictionary_with_a_default_has_entries() {
       (list (cdr (assoc 0 d)) (> (length names) 0) (not (null (dictsearch e "Normal")))))"#;
     assert_eq!(ok(&mut s, walk), "(\"ACDBDICTIONARYWDFLT\" T T)");
 }
+
+/// Each drawing has its own LISP environment, so `dictnext` and `tblnext` keep a place per
+/// drawing: a second drawing starts at its own first entry.
+#[test]
+fn each_drawing_keeps_its_own_places() {
+    let mut s = session();
+    let layouts = "(setq d (cdr (assoc -1 (dictsearch (namedobjdict) \"ACAD_LAYOUT\"))))";
+    let name = "(defun lastval (code lst / r) (foreach p lst (if (= (car p) code) (setq r (cdr p)))) r)";
+    ok(&mut s, name);
+    ok(&mut s, layouts);
+    assert_eq!(ok(&mut s, "(lastval 1 (dictnext d T))"), "\"Model\"");
+    assert_eq!(ok(&mut s, "(lastval 1 (dictnext d))"), "\"Layout1\"");
+    assert_eq!(ok(&mut s, "(cdr (assoc 2 (tblnext \"LAYER\" T)))"), "\"0\"");
+    s.open_drawing(cadcraft_doc::Drawing::new_imperial(), "second", None);
+    ok(&mut s, name);
+    ok(&mut s, layouts);
+    assert_eq!(ok(&mut s, "(lastval 1 (dictnext d))"), "\"Model\"", "not the first drawing's place");
+    assert_eq!(ok(&mut s, "(cdr (assoc 2 (tblnext \"LAYER\")))"), "\"0\"");
+}
+
+/// A routine that walks a table with `tblnext` and changes the drawing on each step (which
+/// rebuilds the records `tblobjname` reads) visits every record once and ends.
+#[test]
+fn a_tblnext_loop_that_edits_the_drawing_ends() {
+    let mut s = session();
+    for n in ["A", "B", "C"] {
+        s.execute("layer.new", &serde_json::json!({"name": n})).unwrap();
+    }
+    // The layers, walked without changing anything.
+    let plain = ok(
+        &mut s,
+        r#"(progn (setq all nil r (tblnext "LAYER" T)) (while r (setq all (cons (cdr (assoc 2 r)) all) r (tblnext "LAYER"))) (reverse all))"#,
+    );
+    assert!(plain.contains("\"A\"") && plain.contains("\"C\""), "{plain}");
+    let code = r#"(progn
+      (setq names nil steps 0 r (tblnext "LAYER" T))
+      (while (and r (< steps 50))
+        (setq names (cons (cdr (assoc 2 r)) names) steps (1+ steps))
+        (tblobjname "LAYER" (cdr (assoc 2 r)))
+        (entmake '((0 . "LINE") (10 0.0 0.0 0.0) (11 1.0 0.0 0.0)))
+        (setq r (tblnext "LAYER")))
+      (reverse names))"#;
+    assert_eq!(ok(&mut s, code), plain, "each layer once, and the loop ends");
+}
