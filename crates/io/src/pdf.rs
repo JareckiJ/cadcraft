@@ -105,6 +105,9 @@ pub struct PdfOptions {
     /// Plot objects with their transparency (PDF alpha). `None` = the page setup's "Plot
     /// transparency" (off for model space).
     pub plot_transparency: Option<bool>,
+    /// The plot stamp ([`crate::stamp`]): a line of text at the lower-left corner of each
+    /// sheet's printable area.
+    pub stamp: Option<String>,
 }
 
 impl Default for PdfOptions {
@@ -130,6 +133,7 @@ impl Default for PdfOptions {
             hyperlinks: true,
             portrait_media: false,
             plot_transparency: None,
+            stamp: None,
         }
     }
 }
@@ -137,7 +141,7 @@ impl Default for PdfOptions {
 impl PdfOptions {
     /// Parse `{paper?, width?, height?, landscape?, fit?, scale?, center?, offset?: [x,y] mm,
     /// lineweights?, compress?, title?, window?: [[x1, y1], [x2, y2]], margins?: [l, b, r, t] (mm),
-    /// hyperlinks?: bool, plotTransparency?: bool}`.
+    /// hyperlinks?: bool, plotTransparency?: bool, stamp?: text}`.
     pub fn from_json(v: &Value) -> PdfOptions {
         let num = |k: &str| v.get(k).and_then(Value::as_f64).filter(|x| x.is_finite());
         let paper_mm = match (num("width"), num("height")) {
@@ -167,6 +171,7 @@ impl PdfOptions {
             hyperlinks: v.get("hyperlinks").and_then(Value::as_bool).unwrap_or(true),
             portrait_media: v.get("portraitMedia").and_then(Value::as_bool).unwrap_or(false),
             plot_transparency: v.get("plotTransparency").and_then(Value::as_bool),
+            stamp: crate::stamp::stamp_text(v),
         }
     }
 }
@@ -543,7 +548,8 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
     let tolerance = if tol.is_finite() && tol > 0.0 { tol } else { ropts.tolerance };
     // Relative point sizes follow the plotted window (else the extents).
     let view_height = window.map(|w| w.height()).unwrap_or(0.0);
-    let list = cadcraft_render::build_plot(d, space, &cadcraft_render::Options { tolerance, view_height, ..ropts });
+    let ropts = cadcraft_render::Options { tolerance, view_height, ..ropts };
+    let list = cadcraft_render::build_plot(d, space, &ropts);
     let b = window.unwrap_or(list.bounds);
     let s = plot_scale(&b, &sheet, fit, o.scale);
     let map = if fit || matches!(space, Space::Model) {
@@ -555,6 +561,11 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
     // Plot style ends, joins and fill patterns at the plot scale (a layout's are already drawn).
     let mut list = list;
     cadcraft_render::pen::apply(&mut list, map.s * unit_mm);
+    if let Some(text) = &o.stamp {
+        let text = crate::stamp::fill(text, &sheet_name(space), &page.paper, &crate::stamp::scale_label(map.s));
+        let to_world = |p: Vec2| (p - map.to) / map.s + map.from;
+        list.append(crate::stamp::display_list(d, &text, sheet.printable.min, unit_mm, to_world, 1.0 / map.s, &ropts));
+    }
     let media = sheet.size * k;
     let clip_pt = if fit || matches!(space, Space::Model) {
         Bounds2::new(sheet.printable.min * k, sheet.printable.max * k)

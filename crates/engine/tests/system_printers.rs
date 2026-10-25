@@ -128,6 +128,19 @@ fn plot_to_file_and_print_and_refresh_the_printers() {
     assert!(JOBS.lock().unwrap().is_empty(), "nothing printed when the file couldn't be written");
     let _ = std::fs::remove_dir_all(&dir);
 
+    // The plot stamp: the drawing and the device named here, the rest left to the plotter.
+    s.execute("plot", &json!({ "layout": "Model", "device": "Office_T120", "stamp": true })).unwrap();
+    let stamp = JOBS.lock().unwrap().pop().unwrap().4["stamp"].as_str().unwrap().to_string();
+    let title = s.state().unwrap().title.clone();
+    assert_eq!(stamp, format!("{title}, {{layout}}, Office_T120, {{paper}}, {{scale}}"));
+    let r = s.execute("exportpdf", &json!({ "layout": "Model", "stamp": "Checked {device}\u{7}" })).unwrap();
+    let opts: Value = serde_json::from_slice(&cadcraft_engine::cmd::file::base64_decode(r["data"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(opts["stamp"], "Checked CADCraft PDF");
+    let r = s.execute("exportpdf", &json!({ "layout": "Model", "stamp": false })).unwrap();
+    let opts: Value = serde_json::from_slice(&cadcraft_engine::cmd::file::base64_decode(r["data"].as_str().unwrap()).unwrap()).unwrap();
+    assert!(opts.get("stamp").is_none());
+    assert!(s.execute("plot", &json!({ "layout": "Model", "stamp": 5 })).is_err());
+
     let r = s.execute("plottermanager", &json!({ "action": "refresh" })).unwrap();
     assert_eq!(r["printers"], true);
     let list = s.execute("plottermanager", &json!({ "action": "list" })).unwrap();

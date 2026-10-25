@@ -15,6 +15,7 @@ mod dxf_write;
 mod dxf_xref;
 pub mod pdf;
 pub mod plotter;
+pub mod stamp;
 pub mod svg;
 mod svg_read;
 pub mod winprint;

@@ -122,6 +122,14 @@ impl PlotText {
     pub const CLIPPED: u32 = u32::MAX - 1;
 }
 
+impl DisplayList {
+    /// Add what `other` draws (built for the same drawing, in the same coordinates) after what
+    /// this list draws: a plot stamp, say.
+    pub fn append(&mut self, other: DisplayList) {
+        append(self, other);
+    }
+}
+
 impl DPrim {
     /// The colour to draw with on `background`.
     pub fn display_rgb(&self, background: Rgb) -> Rgb {
@@ -585,7 +593,6 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
 }
 
 /// Append `src` to `dst`: its primitives index into `dst`'s vertex and triangle arrays.
-#[cfg(not(target_arch = "wasm32"))]
 fn append(dst: &mut DisplayList, src: DisplayList) {
     let (verts, tris, prims) = (dst.verts.len() as u32, dst.tris.len() as u32, dst.prims.len() as u32);
     // Pens are parallel to the primitives, with missing entries meaning "use object".

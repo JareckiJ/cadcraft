@@ -484,6 +484,16 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         o.remove("printer");
         o.remove("printerPaper");
     }
+    // The plot stamp names the drawing and the device here; the plotter fills in each sheet's
+    // layout, paper and scale.
+    let device_name = dev.as_ref().map_or_else(|| "CADCraft PDF".to_string(), |d| d.name.clone());
+    let text = stamp(s, p, cmd, &device_name)?;
+    if let Some(o) = out.as_object_mut() {
+        o.remove("stamp");
+        if let Some(text) = text {
+            o.insert("stamp".into(), json!(text));
+        }
+    }
     let (Some(dev), Some(o)) = (dev, out.as_object_mut()) else { return Ok(out) };
     o.remove("device");
     let output = if cmd == "exportpdf" { PlotOutput::Pdf } else { dev.output };
@@ -518,6 +528,25 @@ pub(crate) fn plot_options(s: &Session, p: &Value, cmd: &str) -> Result<Value> {
         }
     }
     Ok(out)
+}
+
+/// What PLOT's default plot stamp says: the drawing, the sheet, the device, the paper and the
+/// scale.
+pub const DEFAULT_STAMP: &str = "{drawing}, {layout}, {device}, {paper}, {scale}";
+
+/// The plot stamp of a plot: `stamp: true` stamps [`DEFAULT_STAMP`], a text stamps that text
+/// (with `{drawing}` and `{device}` filled in here, `{layout}`, `{paper}` and `{scale}` by the
+/// plotter for each sheet), `false` or none doesn't stamp.
+fn stamp(s: &Session, p: &Value, cmd: &str, device: &str) -> Result<Option<String>> {
+    let template = match p.get("stamp") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
+        Some(Value::Bool(true)) => DEFAULT_STAMP.to_string(),
+        Some(Value::String(t)) => t.clone(),
+        Some(_) => return Err(bad(cmd, "`stamp` must be true, false or the stamp's text")),
+    };
+    let drawing = s.state()?.title.clone();
+    let text: String = template.replace("{drawing}", &drawing).replace("{device}", device).chars().filter(|c| !c.is_control()).take(300).collect();
+    Ok((!text.trim().is_empty()).then_some(text))
 }
 
 /// Whether a plot draws transparency, as PLOTTRANSPARENCYOVERRIDE decides: 0 never, 2 always,

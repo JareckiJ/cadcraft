@@ -3,7 +3,8 @@
 //!
 //! PDF goes to [`crate::pdf`]. PNG draws the sheet on white paper at the device resolution
 //! (capped at [`MAX_PNG_PIXELS`]), with the plot style table and lineweights as PDF uses them.
-//! SVG shows the sheet of a layout or the model-space extents.
+//! SVG shows the sheet of a layout or the model-space extents. PDF and PNG plots draw the plot
+//! stamp (`stamp`, [`crate::stamp`]); SVG doesn't.
 
 use std::sync::Arc;
 
@@ -120,6 +121,12 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     // Plot style ends, joins and fill patterns at the plot scale, as PDF draws them (a layout's
     // are already drawn).
     cadcraft_render::pen::apply(&mut list, s * sheet.unit_mm);
+    if let Some(text) = &o.stamp {
+        let text = crate::stamp::fill(text, space.tab_name(), &page.paper, &crate::stamp::scale_label(s));
+        let (from, to) = if fit { pdf::placement(space, &b, true, &sheet, &o) } else { (Vec2::ZERO, Vec2::ZERO) };
+        let to_world = |p: Vec2| (p - to) / s + from;
+        list.append(crate::stamp::display_list(d, &text, sheet.printable.min, sheet.unit_mm, to_world, 1.0 / s, &ropts));
+    }
     let view = if fit {
         let (from, to) = pdf::placement(space, &b, true, &sheet, &o);
         // The world point at the image centre, mapped through the same paper origin as PDF.
