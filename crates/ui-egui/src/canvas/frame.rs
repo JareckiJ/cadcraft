@@ -32,6 +32,8 @@ pub(super) struct Frame {
     pub(super) dbl_middle: bool,
     pub(super) dbl_primary: bool,
     pub(super) inside: bool,
+    /// The pointer is over a menu the canvas paints itself ([`over_canvas_menu`]).
+    pub(super) on_menu: bool,
     pub(super) raw_world: Option<Vec2>,
     pub(super) selecting: bool,
 }
@@ -45,7 +47,7 @@ impl Frame {
         // draws the others.
         let tiles = tile_rects(app, full);
         let rect = tiles.iter().find(|(_, tile)| tile.active).map_or(full, |(r, _)| *r);
-        let resp = ui.interact(full, ui.id().with("canvas"), Sense::click_and_drag());
+        let resp = ui.interact(full, ui.scope_id().with("canvas"), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         app.canvas.rect = Some(rect);
         app.session.viewport_px = (f64::from(rect.width()).max(1.0), f64::from(rect.height()).max(1.0));
@@ -72,7 +74,17 @@ impl Frame {
                 i.pointer.button_double_clicked(egui::PointerButton::Primary),
             )
         });
-        let inside = hover_pos.is_some_and(|p| rect.contains(p)) && resp.hovered();
+        // The drawing area alone: a menu popup's frame (between its items and its border), a tooltip
+        // or a floating palette lives on a layer above the canvas, where `hovered()` alone still
+        // counts the canvas. Over those the OS cursor stays visible and the crosshair stays put, as
+        // over the menu bar (#1701).
+        let inside = hover_pos.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()) && resp.hovered());
+        // The menus the canvas paints itself (selection cycling's rows, Dynamic Input's options) are
+        // menus too, but they share the canvas's layer: `layer_id_at` reports the drawing under them,
+        // so only their rectangles tell them apart from it ([`over_canvas_menu`]). They are excluded
+        // from the cursor contract in `paint::cursor`, though not from the canvas's input: a click on
+        // a row is taken by the row.
+        let on_menu = hover_pos.is_some_and(|p| over_canvas_menu(app, p));
         // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
         // previews that read `Session::ctrl_down` always see the current state. The engine
         // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
@@ -100,6 +112,7 @@ impl Frame {
             dbl_middle,
             dbl_primary,
             inside,
+            on_menu,
             raw_world: None,
             selecting: false,
         })

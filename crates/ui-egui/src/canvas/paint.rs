@@ -4,10 +4,14 @@
 use super::frame::Frame;
 use super::*;
 
+/// The grey surround of a paper-space sheet.
+const SURROUND: Color32 = Color32::from_rgb(0x50, 0x57, 0x63);
+
 /// The background (paper sheet, or wash and grid), the display list, the active viewport's
 /// contents and highlights, constraint bars and grips. Returns the paper sheet (`None` in model
-/// space) and the background colour the overlays are drawn against.
-pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Option<cadcraft_render::Sheet>, Rgb) {
+/// space), the background colour the overlays are drawn against, and the sheet's screen rectangle
+/// (`None` in model space).
+pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Option<cadcraft_render::Sheet>, Rgb, Option<Rect>) {
     let Frame { t, rect, scale, xf, xf_paper, hover_pos, .. } = *frame;
     let painter = frame.painter.clone();
     let (tiles, active_vp, active_clip) = (&frame.tiles, &frame.active_vp, &frame.active_clip);
@@ -21,10 +25,10 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
     }));
     ensure_list(app, &xf_paper, &views, ui.ctx());
     let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
-    let bg = match sheet {
+    let (bg, paper_rect) = match sheet {
         Some(sh) => {
             // Paper space: grey surround, the sheet with a shadow, the printable area dashed.
-            painter.rect_filled(rect, 0.0, Color32::from_rgb(0x50, 0x57, 0x63));
+            painter.rect_filled(rect, 0.0, SURROUND);
             let a = xf_paper.to_screen(Vec2::new(0.0, sh.size.y));
             let b = xf_paper.to_screen(Vec2::new(sh.size.x, 0.0));
             let paper = Rect::from_two_pos(a, b);
@@ -36,12 +40,12 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
             );
             let pts = [pa.left_top(), pa.right_top(), pa.right_bottom(), pa.left_bottom(), pa.left_top()];
             painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, Color32::from_gray(150)), 4.0, 4.0));
-            Rgb(t.paper.r(), t.paper.g(), t.paper.b())
+            (Rgb(t.paper.r(), t.paper.g(), t.paper.b()), Some(paper))
         }
         None => {
             blockedit::wash(app, &painter, rect);
             draw_grid(app, &painter, &xf);
-            Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b())
+            (Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b()), None)
         }
     };
     let sel = app.session.selection();
@@ -173,10 +177,12 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
         let gs = app.session.settings.gripsize as f32;
         for h in sel.iter().take(200) {
             if let Some(e) = st.doc.entity(*h) {
-                for (gi, g) in e.kind.grips().into_iter().enumerate() {
+                let grips = e.kind.grips();
+                let count = grips.len();
+                for (gi, g) in grips.into_iter().enumerate() {
                     let sp = xf.to_screen(g);
                     if rect.contains(sp) {
-                        let r = Rect::from_center_size(sp, vec2(gs * 2.0, gs * 2.0));
+                        let r = grip_rect(&e.kind, count, gi, sp, gs);
                         let hot = app.canvas.hot_grips.contains(&(*h, gi));
                         let warm = !hot && hover_pos.is_some_and(|hp| r.expand(2.0).contains(hp));
                         painter.rect_filled(
@@ -197,7 +203,7 @@ pub(super) fn drawing(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) -> (Op
         }
         crate::dyngrips::draw(app, &painter, &xf, rect, hover_pos);
     }
-    (sheet, bg)
+    (sheet, bg, paper_rect)
 }
 
 /// The active command's rubber band, the pending selection window, tracking paths and the snap
@@ -272,28 +278,34 @@ pub(super) fn overlays(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, sheet
 }
 
 /// The crosshair (or the system cursor) and the Dynamic Input tooltip.
-pub(super) fn cursor(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame) {
-    let Frame { rect, hover_pos, inside, selecting, .. } = *frame;
+///
+/// `paper_rect` is the paper-space sheet's screen rectangle (`None` in model space).
+pub(super) fn cursor(app: &mut CadApp, ui: &mut egui::Ui, frame: &Frame, paper_rect: Option<Rect>) {
+    let Frame { t, rect, hover_pos, inside, on_menu, selecting, .. } = *frame;
     let painter = frame.painter.clone();
     // Crosshair cursor.
-    if inside {
+    if inside && !on_menu {
         // Hide the OS cursor under the drawn crosshair, unless assistive tech needs it (#39).
         ui.ctx().set_cursor_icon(if app.ui.system_cursor { egui::CursorIcon::Crosshair } else { egui::CursorIcon::None });
         if let Some(hp) = hover_pos {
-            draw_crosshair(app, &painter, rect, hp, selecting);
+            // Use the painted sheet even in MSPACE, where the editing transform follows a
+            // model viewport. The whole cursor takes one colour from its centre.
+            let ink = paper_rect.map_or(t.crosshair, |paper| crate::theme::crosshair_color(if paper.contains(hp) { t.paper } else { SURROUND }));
+            draw_crosshair(app, &painter, rect, hp, selecting, ink);
             if app.canvas.cycle_badge && app.canvas.cycle.is_none() {
                 cycle_badge(&painter, hp);
             }
         }
-        if app.session.settings.dynmode
-            && let Some(hp) = hover_pos
-        {
-            // A stretched grip shows its dimensions instead of the pointer boxes; a prompt asking
-            // for a distance shows its one field and keeps the prompt and its options.
-            let fields = crate::grip_dyn::draw(app, &painter);
-            if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
-                dynamic_input(app, &painter, hp, fields);
-            }
+    }
+    if inside
+        && app.session.settings.dynmode
+        && let Some(hp) = hover_pos
+    {
+        // A stretched grip shows its dimensions instead of the pointer boxes; a prompt asking for
+        // a distance shows its one field and keeps the prompt and its options.
+        let fields = crate::grip_dyn::draw(app, &painter);
+        if !fields || app.session.current_prompt().is_some_and(|p| p.distance) {
+            dynamic_input(app, &painter, hp, fields);
         }
     }
     // Over the crosshair, so the row under the pointer reads clearly.

@@ -218,6 +218,12 @@ mod highlight_stability_tests;
 
 /// The drawing area, one frame: set up the view and read the input, navigate, handle clicks,
 /// then paint the drawing, the overlays and the cursor.
+///
+/// It also owns the cursor-visibility contract: the OS cursor is hidden only while the pointer is
+/// over the drawing area *and* the canvas is the topmost layer under it, so the drawn crosshair
+/// replaces the pointer over the drawing alone. A menu bar, an open menu (including its frame, not
+/// just its items), a tooltip or a floating palette above the canvas keeps the normal OS cursor
+/// visible (#1701), and so do the menus painted on the canvas itself (see [`over_canvas_menu`]).
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let Some(mut frame) = Frame::setup(app, ui) else { return };
     if navigate(app, ui, &mut frame).is_break() {
@@ -227,9 +233,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     if clicks(app, ui, &mut frame).is_break() {
         return;
     }
-    let (sheet, bg) = paint::drawing(app, ui, &frame);
+    let (sheet, bg, paper_rect) = paint::drawing(app, ui, &frame);
     paint::overlays(app, ui, &frame, sheet, bg);
-    paint::cursor(app, ui, &frame);
+    paint::cursor(app, ui, &frame, paper_rect);
     // No continuous repaint while hovering: input events repaint by themselves. Repainting every
     // frame kept a vsync swapchain's queue full (every frame waited behind queued ones) and would
     // spin the CPU with the low-latency present mode (`gpu::surface_config`).

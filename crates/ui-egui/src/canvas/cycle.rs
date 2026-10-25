@@ -91,6 +91,15 @@ pub(super) fn shift_space_cycle(app: &mut CadApp, ui: &egui::Ui, hover: Option<P
 }
 
 /// Selection cycling's badge beside the cursor: two overlapping squares, objects overlap here.
+/// Whether `p` lies on a menu the canvas paints itself — the selection cycling list's rows or the
+/// Dynamic Input options menu's rows. They are menus, so the OS cursor stays visible over them, but
+/// they share the canvas's layer: `layer_id_at` reports the drawing, and only their rectangles can
+/// tell them apart from it (#1701).
+pub(super) fn over_canvas_menu(app: &CadApp, p: Pos2) -> bool {
+    app.canvas.cycle.as_ref().is_some_and(|c| c.rows.iter().any(|r| r.expand(2.0).contains(p)))
+        || app.cmd.option_rows.iter().any(|(r, _)| r.expand(2.0).contains(p))
+}
+
 pub(super) fn cycle_badge(p: &egui::Painter, at: Pos2) {
     let t = Tokens::get();
     for off in [vec2(14.0, -22.0), vec2(19.0, -17.0)] {

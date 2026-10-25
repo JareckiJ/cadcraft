@@ -69,11 +69,18 @@ pub(super) fn grip_menu(app: &mut CadApp, resp: &egui::Response) {
     }
 }
 
+/// Polyline segment midpoint grips are rectangular; vertex grips remain square.
+pub(super) fn grip_rect(kind: &cadcraft_doc::EntityKind, count: usize, index: usize, center: Pos2, size: f32) -> Rect {
+    // The grip list interleaves vertices and available segment midpoints, then any remaining vertices.
+    let midpoint = matches!(kind, cadcraft_doc::EntityKind::LwPolyline(p) if index % 2 == 1 && index / 2 < count.saturating_sub(p.vertices.len()));
+    Rect::from_center_size(center, vec2(size * 2.0, if midpoint { size } else { size * 2.0 }))
+}
+
 /// The grip of a selected object under the cursor, if any: (object, grip index).
 pub(super) fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Handle, usize)> {
     let hp = hover?;
     let st = app.session.state().ok()?;
-    let gs = app.session.settings.gripsize as f32 + 3.0;
+    let gs = app.session.settings.gripsize as f32;
     let sel = app.session.selection();
     if !app.session.shows_grips(sel.len()) {
         return None;
@@ -83,9 +90,11 @@ pub(super) fn grip_at(app: &CadApp, xf: &Xf, hover: Option<Pos2>) -> Option<(Han
         if st.doc.layer(&e.common.layer).is_some_and(|l| l.locked) {
             continue;
         }
-        for (i, g) in e.kind.grips().into_iter().enumerate() {
+        let grips = e.kind.grips();
+        let count = grips.len();
+        for (i, g) in grips.into_iter().enumerate() {
             let sp = xf.to_screen(g);
-            if (sp.x - hp.x).abs() <= gs && (sp.y - hp.y).abs() <= gs {
+            if grip_rect(&e.kind, count, i, sp, gs).expand(3.0).contains(hp) {
                 return Some((*h, i));
             }
         }
