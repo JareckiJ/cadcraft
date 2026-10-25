@@ -150,12 +150,12 @@ impl PreviewCache {
 
 /// Egui temporary data id storing the [`State`] of the Blocks palette.
 fn state_id() -> egui::Id {
-    egui::Id::new("cc_block_manager")
+    egui::Id::unique("cc_block_manager")
 }
 
 /// Egui temporary data id storing the [`PreviewCache`] of visible blocks.
 fn cache_id() -> egui::Id {
-    egui::Id::new("cc_block_manager_previews")
+    egui::Id::unique("cc_block_manager_previews")
 }
 
 /// How many block previews are currently loaded in memory for `ctx`.
@@ -1012,7 +1012,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut act = None;
     if let Ok(doc) = app.session.state().map(|s| Arc::clone(&s.doc)) {
         egui::Window::new(crate::tl!("Blocks"))
-            .id(egui::Id::new("Blocks"))
+            .id(egui::Id::unique("Blocks"))
             .open(open)
             .default_size(vec2(640.0, 480.0))
             .min_size(vec2(420.0, 320.0))
