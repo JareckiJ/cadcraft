@@ -445,24 +445,13 @@ pub fn handle(app: &mut CadApp, ctx: &egui::Context, req: &ControlRequest) -> Ou
             app.synthetic.push(egui::Event::Text(s("text").unwrap_or("").to_string()));
             ok(Value::Null)
         }
-        "ui.set" => {
-            let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
-            if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
-                for (k, v) in src {
-                    o.insert(k.clone(), v.clone());
-                }
-            }
-            match serde_json::from_value::<crate::UiState>(cur) {
-                Ok(u) => {
-                    if let Err(error) = crate::docking::validate(&u.docking) {
-                        return err(error);
-                    }
-                    app.ui = u;
-                    ok(serde_json::to_value(&app.ui).unwrap_or_default())
-                }
+        "ui.set" => match p.as_object() {
+            Some(src) => match app.set_ui_state(src) {
+                Ok(()) => ok(serde_json::to_value(&app.ui).unwrap_or_default()),
                 Err(e) => err(e),
-            }
-        }
+            },
+            None => ok(serde_json::to_value(&app.ui).unwrap_or_default()),
+        },
         "ui.resize" => {
             let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w as f32, h as f32)));
