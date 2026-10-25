@@ -192,7 +192,8 @@ pub(crate) fn encoder(code_page: &str) -> Option<Encoder> {
 
 impl Encoder {
     /// Append `c` in this code page to `out`; false, with nothing appended, when the code page
-    /// has no such character.
+    /// has no such character, or its bytes read back as another one (Shift-JIS writes `¥` as
+    /// 0x5C, which reads back as a backslash).
     pub(crate) fn push(&self, c: char, out: &mut Vec<u8>) -> bool {
         match self {
             Encoder::Table(t) => match t.iter().position(|&x| x == c).and_then(|i| u8::try_from(i).ok()) {
@@ -205,7 +206,7 @@ impl Encoder {
             Encoder::Encoding(e) => {
                 let mut buf = [0u8; 4];
                 let (bytes, _, unmappable) = e.encode(c.encode_utf8(&mut buf));
-                if unmappable {
+                if unmappable || e.decode_without_bom_handling(&bytes).0.chars().ne(std::iter::once(c)) {
                     return false;
                 }
                 out.extend_from_slice(&bytes);

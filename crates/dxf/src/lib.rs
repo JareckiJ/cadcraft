@@ -667,6 +667,10 @@ mod tests {
             assert_eq!(line, Some(expected), "{code_page} {text}");
             assert_eq!(parse(&bytes).unwrap(), tags, "{code_page} {text} reads back");
         }
+        // Shift-JIS encodes ¥ as 0x5C, which reads back as a backslash: a character whose bytes
+        // don't decode to it again is escaped.
+        let tags = file("ANSI_932", "¥図");
+        assert_eq!(parse(&write_ascii_bytes(&tags, false)).unwrap(), tags, "¥ survives Shift-JIS");
         // A literal escape stays literal; no code page CADCraft knows: pure ASCII; 2007+: UTF-8.
         let tags = file("ANSI_1252", "\\U+00E9 è");
         assert_eq!(parse(&write_ascii_bytes(&tags, false)).unwrap(), tags);
