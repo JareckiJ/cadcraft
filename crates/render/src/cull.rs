@@ -54,19 +54,27 @@ const MAX_BLOCKS: usize = 512;
 /// missing when measured).
 type Nested = Vec<(String, Option<Arc<Block>>)>;
 
-/// (definition, layer-visibility key, the definitions it reaches, bounds of each entity in draw
-/// order).
+/// (definition, drawing key, the definitions it reaches, bounds of each entity in draw order).
 type Entry = (Arc<Block>, u64, Nested, Arc<Vec<Bounds2>>);
 
 static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
 
-/// Which layers are on and thawed: nested block contents on hidden layers take no room, so the
-/// bounds depend on it.
-fn layer_key(d: &Drawing) -> u64 {
+/// The drawing-wide inputs block entity bounds read besides the definitions: which layers are on
+/// and thawed (nested block contents on hidden layers take no room), and the dimension styles, text
+/// style heights and DIMSCALE that size a dimension's room for text and arrows and a tolerance
+/// frame.
+fn drawing_key(d: &Drawing) -> u64 {
     let mut h = DefaultHasher::new();
     for l in &d.layers {
         (l.name.as_str(), l.on, l.frozen).hash(&mut h);
     }
+    for st in &d.dim_styles {
+        (st.name.as_str(), st.scale.to_bits(), st.text_height.to_bits(), st.text_gap.to_bits(), st.text_style.as_str()).hash(&mut h);
+    }
+    for t in &d.text_styles {
+        (t.name.as_str(), t.height.to_bits()).hash(&mut h);
+    }
+    d.header.f64("DIMSCALE", 1.0).to_bits().hash(&mut h);
     h.finish()
 }
 
@@ -76,7 +84,8 @@ fn nested(d: &Drawing, blk: &Block) -> Nested {
     let mut out: Nested = Vec::new();
     let mut todo: Vec<Arc<Block>> = Vec::new();
     let visit = |name: &str, out: &mut Nested, todo: &mut Vec<Arc<Block>>| {
-        if out.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)) {
+        // Exact names: `d.block` prefers an exact match, so `A` and `a` can be two definitions.
+        if out.iter().any(|(n, _)| n == name) {
             return;
         }
         let def = d.block(name).cloned();
@@ -120,10 +129,10 @@ fn unchanged(d: &Drawing, nested: &Nested) -> bool {
 }
 
 /// The bounds of every entity of `blk` (block coordinates, draw order), measured once per block
-/// definition, layer state and set of nested definitions. The cache holds the definitions
+/// definition, drawing key ([`drawing_key`]) and set of nested definitions. The cache holds the definitions
 /// themselves, so an edited block, or an edited block nested in it, is measured again.
 fn block_bounds(d: &Drawing, blk: &Arc<Block>) -> Arc<Vec<Bounds2>> {
-    let key = layer_key(d);
+    let key = drawing_key(d);
     if let Ok(cache) = CACHE.lock()
         && let Some((_, _, _, b)) = cache.iter().find(|(blk2, k, n, _)| *k == key && Arc::ptr_eq(blk2, blk) && unchanged(d, n))
     {
