@@ -2456,17 +2456,23 @@ fn command_tip(app: &mut CadApp, p: &egui::Painter, at: Pos2, hover: Pos2) {
     let t = Tokens::get();
     let font = crate::theme::small();
     let galley = p.layout_no_wrap(typed, font.clone(), t.text);
-    let r = tooltip_frame(p, at, galley.size() + vec2(12.0, 8.0));
+    let tip = galley.size() + vec2(12.0, 8.0);
+    let rows: Vec<_> = sug.iter().map(|s| p.layout_no_wrap(s.display.clone(), font.clone(), t.text)).collect();
+    let row_h = rows.iter().map(|g| g.size().y).fold(12.0, f32::max) + 6.0;
+    let w = rows.iter().map(|g| g.size().x).fold(tip.x, f32::max) + 16.0;
+    let list_h = if rows.is_empty() { 0.0 } else { row_h * rows.len() as f32 + 6.0 };
+    // Tip and list together stay inside the drawing, so what is typed is never clipped away.
+    let area = p.clip_rect();
+    let r = Rect::from_min_size(fit_tip(at, vec2(w.max(tip.x), tip.y + list_h), tip.y, area), tip);
+    p.rect_filled(r, 3.0, t.cmd_bg);
+    p.rect_stroke(r, 3.0, Stroke::new(1.0, t.cmd_border), egui::StrokeKind::Inside);
     let caret = r.min.x + 6.0 + galley.size().x + 1.0;
     p.galley(r.min + vec2(6.0, 4.0), galley, t.text);
     p.line_segment([pos2(caret, r.top() + 4.0), pos2(caret, r.bottom() - 4.0)], Stroke::new(1.0, t.text));
-    if sug.is_empty() {
+    if rows.is_empty() {
         return;
     }
-    let rows: Vec<_> = sug.iter().map(|s| p.layout_no_wrap(s.display.clone(), font.clone(), t.text)).collect();
-    let row_h = rows.iter().map(|g| g.size().y).fold(12.0, f32::max) + 6.0;
-    let w = rows.iter().map(|g| g.size().x).fold(r.width(), f32::max) + 16.0;
-    let m = Rect::from_min_size(pos2(r.left(), r.bottom() + 2.0), vec2(w, row_h * rows.len() as f32 + 4.0));
+    let m = Rect::from_min_size(pos2(r.left(), r.bottom() + 2.0), vec2(w, list_h - 2.0));
     p.rect_filled(m, 3.0, t.cmd_bg);
     p.rect_stroke(m, 3.0, Stroke::new(1.0, t.cmd_border), egui::StrokeKind::Inside);
     for (i, (g, s)) in rows.into_iter().zip(&sug).enumerate() {
@@ -2477,8 +2483,25 @@ fn command_tip(app: &mut CadApp, p: &egui::Painter, at: Pos2, hover: Pos2) {
             p.rect_filled(row, 2.0, t.list_row);
         }
         p.galley(pos2(row.left() + 6.0, row.center().y - g.size().y / 2.0), g, t.text);
-        app.canvas.tip_rows.push((row, s.id.clone()));
+        // Only the visible part of a row takes clicks.
+        let seen = row.intersect(area);
+        if seen.is_positive() {
+            app.canvas.tip_rows.push((seen, s.id.clone()));
+        }
     }
+}
+
+/// The top-left corner of the command tip with its list (`size`, the tip `tip_h` tall on top),
+/// placed like the other tooltips (right of and above the cursor `at`) and moved to stay inside
+/// `area`: to the cursor's left near the right edge, down or up near the top and bottom.
+fn fit_tip(at: Pos2, size: egui::Vec2, tip_h: f32, area: Rect) -> Pos2 {
+    let mut x = at.x + 18.0;
+    if x + size.x > area.right() {
+        x = at.x - 18.0 - size.x;
+    }
+    let x = x.min(area.right() - size.x).max(area.left());
+    let y = (at.y - tip_h - 14.0).min(area.bottom() - size.y).max(area.top());
+    pos2(x, y)
 }
 
 /// The drawing's length units: (LUNITS, LUPREC).
@@ -2828,6 +2851,13 @@ pub(crate) mod tests {
         app.cmd.buffer.clear();
         assert_eq!(typing_anchor(&mut app, Some(pos2(300.0, 200.0))), None);
         app.cmd.buffer = "l".into();
+        // The tip and its list stay inside the drawing near its edges.
+        let area = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+        let size = vec2(120.0, 100.0);
+        assert_eq!(fit_tip(pos2(400.0, 300.0), size, 20.0, area), pos2(418.0, 266.0));
+        assert_eq!(fit_tip(pos2(780.0, 300.0), size, 20.0, area), pos2(642.0, 266.0));
+        assert_eq!(fit_tip(pos2(400.0, 5.0), size, 20.0, area), pos2(418.0, 0.0));
+        assert_eq!(fit_tip(pos2(400.0, 590.0), size, 20.0, area), pos2(418.0, 500.0));
         // DYNPROMPT off: the typed text stays on the command line.
         app.session.settings.dynprompt = false;
         assert!(command_tip_text(&app).is_none());
