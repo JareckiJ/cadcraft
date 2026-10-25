@@ -706,32 +706,22 @@ fn history(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect, bar: Rect) {
     }
 
     if resp.clicked()
-        && resp.interact_pointer_pos().is_some_and(|p| {
-            bar.contains(p) && !on_toggle(p)
-        })
-        && ui.ctx().data(|d| {
-            d.get_temp::<bool>(
-                egui::Id::new("cadcraft-mobile-mode")
-            ).unwrap_or(false)
-        })
+        && resp.interact_pointer_pos().is_some_and(|p| bar.contains(p) && !on_toggle(p))
+        && ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-mode")).unwrap_or(false))
     {
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::JsCast as _;
 
-            if let Some(document) =
-                web_sys::window().and_then(|w| w.document())
-            {
-                if let Ok(event) =
-                    web_sys::Event::new("cadcraft-mobile-focus-input")
-                {
+            if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+                if let Ok(event) = web_sys::Event::new("cadcraft-mobile-focus-input") {
                     let _ = document.dispatch_event(&event);
                 }
             }
         }
     }
 
-if resp.clicked() && resp.interact_pointer_pos().is_some_and(on_toggle) {
+    if resp.clicked() && resp.interact_pointer_pos().is_some_and(on_toggle) {
         let _ = app.run("ui.toggle.history", serde_json::json!({}));
     }
     crate::shortcut_menus::attach(app, &resp, crate::shortcut_menus::command_line_entries);

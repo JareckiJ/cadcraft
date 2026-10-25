@@ -1461,16 +1461,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Keep the existing egui pinch-to-zoom handling above unchanged.
     #[cfg(target_arch = "wasm32")]
     if let Some(touch) = ui.input(|i| i.multi_touch()) {
-        if rect.contains(touch.center_pos)
-            && touch.translation_delta != egui::Vec2::ZERO
-        {
+        if rect.contains(touch.center_pos) && touch.translation_delta != egui::Vec2::ZERO {
             if let Ok(st) = app.session.state_mut() {
                 let v = st.view();
                 st.set_view_quiet(cadcraft_engine::View {
-                    center: v.center - Vec2::new(
-                        f64::from(touch.translation_delta.x) / scale,
-                        -f64::from(touch.translation_delta.y) / scale,
-                    ),
+                    center: v.center - Vec2::new(f64::from(touch.translation_delta.x) / scale, -f64::from(touch.translation_delta.y) / scale),
                     height: v.height,
                 });
             }
@@ -1482,25 +1477,17 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // In mobile Pan Mode, one-finger primary dragging navigates
     // the viewport instead of selecting or placing CAD entities.
     #[cfg(target_arch = "wasm32")]
-    let mobile_pan = ui.ctx().data(|d| {
-        d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-pan-enabled"))
-            .unwrap_or(false)
-    });
+    let mobile_pan = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("cadcraft-mobile-pan-enabled")).unwrap_or(false));
     #[cfg(not(target_arch = "wasm32"))]
     let mobile_pan = false;
 
     if mobile_pan {
         let delta = ui.input(|i| i.pointer.delta());
-        if resp.dragged_by(egui::PointerButton::Primary)
-            && delta != egui::Vec2::ZERO
-        {
+        if resp.dragged_by(egui::PointerButton::Primary) && delta != egui::Vec2::ZERO {
             if let Ok(st) = app.session.state_mut() {
                 let v = st.view();
                 st.set_view_quiet(cadcraft_engine::View {
-                    center: v.center - Vec2::new(
-                        f64::from(delta.x) / scale,
-                        -f64::from(delta.y) / scale,
-                    ),
+                    center: v.center - Vec2::new(f64::from(delta.x) / scale, -f64::from(delta.y) / scale),
                     height: v.height,
                 });
             }
