@@ -78,13 +78,14 @@ pub fn is_ui_command(id: &str) -> bool {
     UI_COMMANDS.iter().any(|c| c.0 == id)
 }
 
-/// Run a UI-only command. `None` if `id` isn't one.
-pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
-    crate::i18n::with_language(app.language(), || run_ui_command_inner(app, id, params))
+/// Run a UI command. `interactive` permits typed/menu INSERT to open the palette;
+/// programmatic INSERT is left to the engine. `None` if `id` is not handled here.
+pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value, interactive: bool) -> Option<Result<Value, String>> {
+    crate::i18n::with_language(app.language(), || run_ui_command_inner(app, id, params, interactive))
 }
 
 /// Route a UI command by `id`, returning `None` when `id` is an engine command instead.
-fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value, interactive: bool) -> Option<Result<Value, String>> {
     if let Some(result) = crate::spacemouse::route(app, id, params) {
         return Some(result);
     }
@@ -108,8 +109,8 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         return Some(crate::palettes::quickcalc::toggle(app));
     }
     // The Blocks button and INSERT typed or from a menu open the Block Manager (as AutoCAD's
-    // INSERT opens its Blocks palette); -INSERT and calls with parameters run the command.
-    if id == "ui.dialog.blocks" || (matches!(id, "insert" | "i" | "ddinsert") && params.is_null()) {
+    // INSERT opens its Blocks palette); -INSERT and programmatic calls run the engine command.
+    if id == "ui.dialog.blocks" || (interactive && matches!(id, "insert" | "i" | "ddinsert") && params.is_null()) {
         return Some(crate::blockmgr::open(app));
     }
     // Explicit opens remain idempotent; typed QUICKCALC with JSON parameters uses the engine's CAL alias.
@@ -209,7 +210,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
-        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
+        "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => {
+            return run_ui_command(app, "ui.saveas", &Value::Null, interactive);
+        }
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
         // params, never get here and never open a dialog.

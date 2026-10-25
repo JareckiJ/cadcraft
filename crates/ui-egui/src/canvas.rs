@@ -137,6 +137,8 @@ pub struct CanvasState {
     hover_cycle: Option<(Pos2, Vec<Handle>, usize)>,
     /// What the cycling list and the Shift+Space highlight were made for (see [`CycleKey`]).
     cycle_key: Option<CycleKey>,
+    /// The current primary-button gesture started on a canvas-painted menu.
+    menu_press: bool,
 }
 
 /// The command, prompt, drawing (and its revision) and view that the objects under the cursor
@@ -1400,6 +1402,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // from the cursor contract below, though not from the canvas's input: a click on a row is
     // taken by the row.
     let on_menu = hover_pos.is_some_and(|p| over_canvas_menu(app, p));
+    // A command can close the menu on the press frame. Keep ownership through release;
+    // the next press on bare canvas starts a fresh gesture.
+    if ui.ctx().current_pass_index() == 0 && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        app.canvas.menu_press = on_menu;
+    }
+    let menu_click = on_menu || app.canvas.menu_press;
     // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
     // previews that read `Session::ctrl_down` always see the current state. The engine
     // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
@@ -1557,7 +1565,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && app.session.pending_window.is_none()
         && !app.session.realtime_zoom_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
-    if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
+    if point_prompt && inside && !menu_click && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
                 .iter()
@@ -1569,7 +1577,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         });
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
-            for pos in earlier.iter().filter(|p| rect.contains(**p)) {
+            for pos in earlier {
+                if !rect.contains(*pos) || over_canvas_menu(app, *pos) || ui.ctx().layer_id_at(*pos) != Some(ui.layer_id()) {
+                    continue;
+                }
                 let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
                 let result = match app.canvas.snap {
                     Some(hit) => app.session.input_snapped(hit),
@@ -1655,8 +1666,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.cycle_key = Some(key);
     }
     let cycled = pressed_primary && !middle_down && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
-    // Clicks.
+    // A menu can disappear when a command starts or its prompt changes in this frame.
+    // Its previously painted rows still own the click; never pass it through as a point.
     if inside
+        && !menu_click
         && pressed_primary
         && !middle_down
         && !cycled

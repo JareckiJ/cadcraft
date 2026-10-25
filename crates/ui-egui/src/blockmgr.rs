@@ -117,6 +117,8 @@ struct Preview {
 pub struct PreviewCache {
     key: (u64, u64),
     entries: HashMap<String, Preview>,
+    names: Option<Arc<Vec<String>>>,
+    references: Option<(String, usize)>,
 }
 
 /// Maximum number of uncached visible block previews built in a single UI frame so scrolling a
@@ -129,6 +131,8 @@ impl PreviewCache {
         if self.key != (uid, revision) {
             self.key = (uid, revision);
             self.entries.clear();
+            self.names = None;
+            self.references = None;
         }
     }
 
@@ -166,7 +170,7 @@ pub fn cached_preview_count(ctx: &egui::Context) -> usize {
 /// The named blocks a user works with: not the generated (`*D12`) ones nor layout blocks.
 pub fn names(d: &Drawing) -> Vec<String> {
     let mut v: Vec<String> = d.blocks.keys().filter(|k| !k.starts_with('*')).cloned().collect();
-    v.sort_by_key(|n| n.to_lowercase());
+    v.sort_by_cached_key(|n| n.to_lowercase());
     v
 }
 
@@ -203,6 +207,11 @@ fn preview_entity_cost(kind: &EntityKind, remaining: usize) -> Option<usize> {
             let output = points.checked_mul(if wide { 8 } else { 1 })?.div_ceil(8);
             1usize.checked_add(p.vertices.len())?.checked_add(output)?
         }
+        // Hatch rendering clones/tessellates boundaries and generates fills/patterns before
+        // returning output. Its renderer limits exceed the thumbnail budget. Until that path
+        // accepts this budget, reject hatches before even computing bounds, including nested
+        // blocks. A placeholder preserves insertion/editing without automatic expensive work.
+        EntityKind::Hatch(_) => return None,
         EntityKind::Polyline3d(p) => 1usize.checked_add(p.points.len().checked_mul(2)?)?,
         _ => 1,
     };
@@ -316,7 +325,7 @@ fn preview_block_bounds(
 }
 
 /// Build the preview of block `name`: its objects as they draw, and their extents.
-/// Preflights entity expansion and polyline geometry before bounds calculation or rendering.
+/// Preflights entity expansion and polyline geometry, and rejects hatch previews before bounds or rendering.
 /// The final output check also limits retained preview size; it is not an allocation guard for
 /// other entity kinds. An exhausted budget produces an empty placeholder, never a partial block.
 fn build(d: &Drawing, name: &str) -> Option<(cadcraft_render::DisplayList, Bounds2)> {
@@ -476,20 +485,19 @@ enum Act {
 
 /// The data the Block Manager shows this frame.
 struct View {
-    uid: u64,
-    revision: u64,
-    all: Vec<String>,
+    all: Arc<Vec<String>>,
     selected: Option<String>,
     info: Option<(usize, usize, cadcraft_geom::Vec3, bool, String, Option<String>)>,
     can_write: bool,
 }
 
 /// Gather the block list, selected block metadata and write capability for this frame.
-fn view(app: &CadApp, st: &mut State) -> Option<View> {
+fn view(app: &CadApp, st: &mut State, cache: &mut PreviewCache) -> Option<View> {
     let sess = app.session.state().ok()?;
     let d = &sess.doc;
-    let all = names(d);
-    if st.selected.as_ref().is_some_and(|s| !all.iter().any(|n| n == s)) {
+    cache.sync_revision(sess.uid, sess.revision);
+    let all = Arc::clone(cache.names.get_or_insert_with(|| Arc::new(names(d))));
+    if st.selected.as_ref().is_some_and(|s| !d.blocks.contains_key(s)) {
         st.selected = None;
         st.rename = None;
     }
@@ -499,9 +507,13 @@ fn view(app: &CadApp, st: &mut State) -> Option<View> {
     let selected = st.selected.clone();
     let info = selected.as_deref().and_then(|n| {
         let b = d.block(n)?;
-        Some((b.entities.len(), reference_count(d, n), b.base, b.annotative, b.description.clone(), b.xref_path.clone()))
+        if cache.references.as_ref().is_none_or(|(name, _)| name != n) {
+            cache.references = Some((n.to_string(), reference_count(d, n)));
+        }
+        let refs = cache.references.as_ref().map_or(0, |(_, count)| *count);
+        Some((b.entities.len(), refs, b.base, b.annotative, b.description.clone(), b.xref_path.clone()))
     });
-    Some(View { uid: sess.uid, revision: sess.revision, all, selected, info, can_write: app.services.pick_save.is_some() })
+    Some(View { all, selected, info, can_write: app.services.pick_save.is_some() })
 }
 
 /// Render a single block tile/row according to `st.view_mode`, updating `visible` and `cache`
@@ -986,8 +998,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
     let mut cache = ctx.data(|d| d.get_temp::<PreviewCache>(cache_id())).unwrap_or_default();
-    let Some(v) = view(app, &mut st) else { return };
-    cache.sync_revision(v.uid, v.revision);
+    let Some(v) = view(app, &mut st, &mut cache) else { return };
     let mut act = None;
     if let Ok(doc) = app.session.state().map(|s| Arc::clone(&s.doc)) {
         egui::ScrollArea::vertical().id_salt("dock-blocks").auto_shrink([false, false]).show(ui, |ui| {
@@ -1007,8 +1018,7 @@ pub fn panel(app: &mut CadApp, ui: &mut egui::Ui) {
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let mut st = ctx.data(|d| d.get_temp::<State>(state_id())).unwrap_or_default();
     let mut cache = ctx.data(|d| d.get_temp::<PreviewCache>(cache_id())).unwrap_or_default();
-    let Some(v) = view(app, &mut st) else { return };
-    cache.sync_revision(v.uid, v.revision);
+    let Some(v) = view(app, &mut st, &mut cache) else { return };
     let mut act = None;
     if let Ok(doc) = app.session.state().map(|s| Arc::clone(&s.doc)) {
         egui::Window::new(crate::tl!("Blocks"))
@@ -1048,6 +1058,92 @@ mod tests {
 
     use super::{Preview, PreviewCache, State, ViewMode, grab_block};
     use crate::{CadApp, Services};
+
+    /// Programmatic INSERT (including aliases and missing parameters) never opens a palette.
+    #[test]
+    fn insert_dispatch_distinguishes_programmatic_and_interactive_calls() {
+        for id in ["insert", "i", "ddinsert"] {
+            let mut app = CadApp::new(Session::new(), Services::default());
+            app.ui.blocks_window = true;
+            for params in [serde_json::Value::Null, json!({})] {
+                assert!(app.run(id, params).is_err());
+                assert!(app.ui.dialog.is_none());
+                assert!(!app.ui.docking.layout.contains(&crate::docking::Panel::Blocks));
+            }
+            app.start(id);
+            assert_eq!(app.ui.dialog.as_deref(), Some("blocks"));
+            app.ui.dialog = None;
+            assert!(app.cmdline(id).is_none());
+            assert_eq!(app.ui.dialog.as_deref(), Some("blocks"));
+            app.ui.dialog = None;
+            assert!(app.cmdline(&format!("{id} {{}}")).is_some());
+            assert!(app.ui.dialog.is_none());
+        }
+        let mut app = CadApp::new(Session::new(), Services::default());
+        app.ui.blocks_window = true;
+        app.run("ui.dialog.blocks", serde_json::Value::Null).unwrap();
+        assert_eq!(app.ui.dialog.as_deref(), Some("blocks"));
+    }
+
+    /// Reuse unchanged data; refresh counts after selection, edits, undo and drawing switches.
+    #[test]
+    fn metadata_cache_follows_revision_selection_and_drawing() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        for name in ["Bolt", "Pin"] {
+            let c = app.session.execute("circle", &json!({"center": [0, 0], "radius": 2})).unwrap();
+            app.session.execute("block", &json!({"name": name, "base": [0, 0], "handles": [c["handle"]], "keep": "delete"})).unwrap();
+        }
+        let mut st = State::default();
+        let mut cache = PreviewCache::default();
+        let first = super::view(&app, &mut st, &mut cache).unwrap();
+        let again = super::view(&app, &mut st, &mut cache).unwrap();
+        assert!(Arc::ptr_eq(&first.all, &again.all));
+        assert_eq!(first.info.unwrap().1, 0);
+        app.run("insert", json!({"name": "Bolt", "at": [5, 5]})).unwrap();
+        let edited = super::view(&app, &mut st, &mut cache).unwrap();
+        assert!(!Arc::ptr_eq(&first.all, &edited.all));
+        assert_eq!(edited.info.unwrap().1, 1);
+        st.selected = Some("Pin".into());
+        let other = super::view(&app, &mut st, &mut cache).unwrap();
+        assert!(Arc::ptr_eq(&edited.all, &other.all));
+        assert_eq!(other.info.unwrap().1, 0);
+        st.selected = Some("Bolt".into());
+        assert_eq!(super::view(&app, &mut st, &mut cache).unwrap().info.unwrap().1, 1);
+        app.session.undo().unwrap();
+        assert_eq!(super::view(&app, &mut st, &mut cache).unwrap().info.unwrap().1, 0);
+        app.session.new_drawing(true);
+        let empty = super::view(&app, &mut st, &mut cache).unwrap();
+        assert!(empty.all.is_empty());
+        assert!(empty.selected.is_none());
+        assert!(cache.references.is_none());
+    }
+
+    /// Reject automatic hatch work before bounds/tessellation, even through nested references.
+    #[test]
+    fn hatch_previews_use_placeholders_before_expensive_processing() {
+        use cadcraft_doc::{Block, Drawing, Entity, Handle, Hatch, HatchLoop};
+        let mut d = Drawing::default();
+        let mut hatch: Hatch = serde_json::from_value(json!({"pattern": "SOLID", "solid": true, "loops": []})).unwrap();
+        hatch.loops.push(HatchLoop {
+            vertices: vec![cadcraft_geom::PolyVertex::new(Vec2::ZERO); super::MAX_PREVIEW_BUDGET + 1],
+            outer: true,
+            sources: Vec::new(),
+        });
+        let kind = EntityKind::Hatch(hatch);
+        assert!(super::preview_entity_cost(&kind, super::MAX_PREVIEW_BUDGET).is_none());
+        let mut block = Block::new("Hatched");
+        block.entities.push(Entity::new(Handle(1), kind));
+        d.blocks.insert("Hatched".into(), Arc::new(block));
+        let mut nested = Block::new("NestedHatch");
+        let insert = serde_json::from_value(json!({"block": "Hatched", "insert": [0,0,0], "scale": [1,1,1], "rotation": 0, "attribs": []})).unwrap();
+        nested.entities.push(Entity::new(Handle(2), EntityKind::Insert(insert)));
+        d.blocks.insert("NestedHatch".into(), Arc::new(nested));
+        for name in ["Hatched", "NestedHatch"] {
+            let (list, bounds) = super::build(&d, name).unwrap();
+            assert!(list.prims.is_empty());
+            assert!(bounds.is_empty());
+        }
+    }
 
     /// Escape in a filter, dialog or unrelated command must preserve the user's preference.
     #[test]
