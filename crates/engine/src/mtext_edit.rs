@@ -135,13 +135,11 @@ impl Formatted {
                     let code = chars.get(i + 1).copied();
                     i += 2;
                     match code {
-                        None => {}
-                        Some('P') => {
-                            if f.paras.len() < MAX_PARAS {
-                                f.push_char('\n', &cur);
-                                f.paras.push(props.clone());
-                            }
+                        Some('P') if f.paras.len() < MAX_PARAS => {
+                            f.push_char('\n', &cur);
+                            f.paras.push(props.clone());
                         }
+                        None | Some('P') => {}
                         Some(c @ ('\\' | '{' | '}')) => f.push_char(c, &cur),
                         Some('L') => cur.underline = true,
                         Some('l') => cur.underline = false,
