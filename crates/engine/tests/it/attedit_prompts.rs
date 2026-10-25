@@ -110,6 +110,8 @@ fn attribute_tags_match_in_any_case_and_unknown_tags_are_reported() {
     assert_eq!(r, json!({"changed": 1}));
 }
 
+/// ATTEDIT with several handles writes the values into each reference, reports the tags none of them has,
+/// is one undo step, and refuses an empty list.
 #[test]
 fn attedit_takes_a_selected_block_reference_at_once() {
     let mut s = with_block();
