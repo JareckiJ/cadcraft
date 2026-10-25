@@ -229,12 +229,12 @@ fn follow_selection(workspace: &mut Workspace, app: &crate::CadApp, ui: &egui::U
     let last = ui.data(|d| d.get_temp::<Option<(u64, cadcraft_engine::doc::Handle)>>(id)).flatten();
     if target == last {
         if target.is_none() && workspace.layout.contains(&Panel::Attributes) {
-            let _ = workspace.set_visible(Panel::Attributes, false);
+            let _ = set_visible(workspace, Panel::Attributes, false);
         }
         return;
     }
     ui.data_mut(|d| d.insert_temp(id, target));
-    let _ = if target.is_some() { workspace.reveal_panel(Panel::Attributes) } else { workspace.set_visible(Panel::Attributes, false) };
+    let _ = set_visible(workspace, Panel::Attributes, target.is_some());
 }
 
 /// Validate and repair the stored workspace, sync it with the app, and render the dock panels; a failed restore falls back to the default layout with a status message.
@@ -363,14 +363,14 @@ mod tests {
     #[test]
     fn attributes_panel_follows_the_selection_and_respects_a_manual_close() {
         let (mut app, handle) = app_with_block_reference();
-        let (ctx, mut workspace) = (egui::Context::default(), Workspace::default());
+        let (ctx, mut workspace) = (egui::Context::default(), default_workspace());
 
         app.run("select", json!({ "handles": [handle.clone()] })).unwrap();
         frame(&mut app, &ctx, &mut workspace);
         assert!(workspace.layout.contains(&Panel::Attributes), "selecting the block opens the panel");
 
         // Closed by hand: it stays closed while the same block stays selected.
-        workspace.set_visible(Panel::Attributes, false).unwrap();
+        set_visible(&mut workspace, Panel::Attributes, false).unwrap();
         frame(&mut app, &ctx, &mut workspace);
         assert!(!workspace.layout.contains(&Panel::Attributes));
 
@@ -391,8 +391,8 @@ mod tests {
     #[test]
     fn a_restored_attributes_panel_with_nothing_to_show_is_closed() {
         let (mut app, _) = app_with_block_reference();
-        let (ctx, mut workspace) = (egui::Context::default(), Workspace::default());
-        workspace.reveal_panel(Panel::Attributes).unwrap();
+        let (ctx, mut workspace) = (egui::Context::default(), default_workspace());
+        reveal_panel(&mut workspace, Panel::Attributes).unwrap();
         assert!(workspace.layout.contains(&Panel::Attributes));
         frame(&mut app, &ctx, &mut workspace);
         assert!(!workspace.layout.contains(&Panel::Attributes));
