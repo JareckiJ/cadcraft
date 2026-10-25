@@ -22,6 +22,9 @@ pub fn format_distance(v: f64, lunits: i64, luprec: i64) -> String {
             let rounded = (v.abs() * scale).round() / scale;
             let a = if rounded.is_finite() { rounded } else { v.abs() };
             let ft = (a / 12.0).floor();
+            if ft >= I64_SAFE_MAX {
+                return format!("{:.*}", prec, v);
+            }
             let inch = a - ft * 12.0;
             format!("{}{}'-{:.*}\"", if neg { "-" } else { "" }, ft as i64, prec, inch)
         }
@@ -136,9 +139,13 @@ pub fn format_angle(a: f64, aunits: i64, auprec: i64) -> String {
     }
 }
 
-/// `v` (in `[0, full)`), or 0 when it rounds at `prec` decimals to the same value as a full turn.
+/// `v` (in `[0, full)`), or 0 when it rounds at `prec` decimals to the printed full-turn value (only when that value is exact).
 fn wrap_full_turn(v: f64, full: f64, prec: usize) -> f64 {
-    if format!("{v:.prec$}") == format!("{full:.prec$}") { 0.0 } else { v }
+    let full_text = format!("{full:.prec$}");
+    // A full turn that cannot be printed exactly (2π) only wraps when `v` is numerically that value.
+    let exact = full_text.parse::<f64>().is_ok_and(|f| f == full);
+    let reached = exact || full - v < 1e-6;
+    if reached && format!("{v:.prec$}") == full_text { 0.0 } else { v }
 }
 
 /// Parse a distance typed by the user: decimal, `1'6"`, `1'-6 1/2"`, `6 1/2`, `3/4`, `1e3`.
@@ -371,6 +378,12 @@ mod tests {
     }
 
     #[test]
+    fn engineering_huge_distance_falls_back_to_decimal() {
+        assert_eq!(format_distance(1e30, 3, 2), format!("{:.2}", 1e30));
+        assert_eq!(format_distance(-1e300, 3, 8), format!("{:.8}", -1e300));
+    }
+
+    #[test]
     fn mixed_distance_needs_a_positive_fraction_after_the_whole_number() {
         assert_eq!(parse_distance("6 1/2"), Some(6.5));
         assert_eq!(parse_distance("5 5"), None);
@@ -520,5 +533,12 @@ mod tests {
         assert_eq!(format_angle(angle, 4, 2), "S 73d42' E");
         assert_eq!(format_angle(angle, 4, 0), "S 74d E");
         assert_eq!(format_angle(angle, 4, 6), "S 73d41'51.00\" E");
+    }
+
+    #[test]
+    fn angle_radians_low_precision_not_wrapped() {
+        assert_eq!(format_angle(6.2, 3, 0), "6r");
+        assert_eq!(format_angle(6.26, 3, 1), "6.3r");
+        assert_eq!(format_angle(0.0, 3, 1), "0.0r");
     }
 }
