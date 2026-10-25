@@ -223,10 +223,10 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
         ui.label(crate::tl!("Default save version"));
         let current = crate::SaveVersion::parse(&app.ui.save_version).unwrap_or_default();
         let mut version = current;
-        egui::ComboBox::from_id_salt("options_save_version").selected_text(version.year()).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("options_save_version").width(230.0).selected_text(crate::saveas::version_label(version)).show_ui(ui, |ui| {
             // R12 is a reduced copy of a drawing: a choice per file (Save As), never the default.
             for v in crate::SaveVersion::LOSSLESS {
-                ui.selectable_value(&mut version, v, v.year());
+                ui.selectable_value(&mut version, v, crate::saveas::version_label(v));
             }
         });
         if version != current {
@@ -274,6 +274,7 @@ fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     hint(ui, crate::tl!("New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE)."));
     hint(ui, crate::tl!("A drawing opened from a file keeps that file's format."));
     hint(ui, crate::tl!("Drawings with no file yet are saved in the default version. 0 minutes turns automatic save off."));
+    hint(ui, crate::tl!("DXF and DWG 2000 open in DOCFA. For a file ready to import choose File > Save As and tick the DOCFA profile."));
 }
 
 fn drafting(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>, start: &mut Option<&'static str>) {

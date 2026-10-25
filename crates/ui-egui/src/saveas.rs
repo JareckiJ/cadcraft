@@ -124,8 +124,9 @@ impl SaveAsState {
     pub fn params(&self, path: &str) -> Value {
         let mut p = json!({ "path": path });
         if let Some(o) = p.as_object_mut() {
-            if self.docfa && self.file_type == FileType::Dxf {
+            if self.docfa && self.docfa_file() {
                 o.insert("docfa".into(), json!(true));
+                o.insert("version".into(), json!(self.version.year()));
                 o.insert("unit".into(), json!(self.unit.as_str()));
             } else if self.file_type.versioned() {
                 o.insert("version".into(), json!(self.version.year()));
@@ -137,31 +138,53 @@ impl SaveAsState {
         p
     }
 
+    /// Whether the chosen file type can take the DOCFA profile (DXF and DWG).
+    fn docfa_file(&self) -> bool {
+        matches!(self.file_type, FileType::Dxf | FileType::Dwg)
+    }
+
+    /// The versions the file type can be saved in with the current choices: with the DOCFA
+    /// profile R12 (DXF only), 2000 and 2004; otherwise every one the format has.
+    pub fn versions(&self) -> Vec<SaveVersion> {
+        SaveVersion::ALL
+            .into_iter()
+            .filter(|v| *v != SaveVersion::R12 || self.file_type == FileType::Dxf)
+            .filter(|v| !self.docfa || cadcraft_io_docfa_versions().contains(v))
+            .collect()
+    }
+
     /// The file name the picker suggests: the drawing's name with the chosen extension (a DOCFA
     /// export is named apart, beside the drawing).
     pub fn suggested_name(&self, title: &str) -> String {
         let stem = std::path::Path::new(title).file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty());
         let stem = stem.unwrap_or_else(|| "Drawing".into());
-        if self.docfa && self.file_type == FileType::Dxf { format!("{stem}-docfa.dxf") } else { format!("{stem}.{}", self.file_type.ext()) }
+        if self.docfa && self.docfa_file() { format!("{stem}-docfa.{}", self.file_type.ext()) } else { format!("{stem}.{}", self.file_type.ext()) }
     }
 
-    /// Choices that don't go together are settled: R12 and the DOCFA profile are DXF, DWG has
-    /// no R12, binary DXF is 2000 or later.
+    /// Choices that don't go together are settled: the DOCFA profile is for DXF and DWG at R12
+    /// (DXF only), 2000 or 2004, DWG has no R12, binary DXF is 2000 or later and not for DOCFA.
     fn settle(&mut self) {
-        if self.file_type != FileType::Dxf {
+        if !self.docfa_file() {
             self.docfa = false;
+        }
+        if self.file_type != FileType::Dxf {
             self.binary = false;
         }
-        if self.docfa {
-            self.version = SaveVersion::R12;
+        if self.docfa && !self.versions().contains(&self.version) {
+            self.version = if self.file_type == FileType::Dxf { SaveVersion::R12 } else { SaveVersion::R2000 };
         }
         if self.file_type != FileType::Dxf && self.version == SaveVersion::R12 {
             self.version = SaveVersion::R2000;
         }
-        if !self.version.lossless() {
+        if !self.version.lossless() || self.docfa {
             self.binary = false;
         }
     }
+}
+
+/// The versions the DOCFA profile writes (R12, 2000, 2004).
+fn cadcraft_io_docfa_versions() -> [SaveVersion; 3] {
+    cadcraft_engine::cmd::file::DOCFA_VERSIONS
 }
 
 /// Open the dialog for the active drawing.
@@ -229,15 +252,11 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 ui.end_row();
                 if st.file_type.versioned() {
                     ui.label(crate::tl!("Version"));
-                    ui.add_enabled_ui(!st.docfa, |ui| {
-                        egui::ComboBox::from_id_salt("saveas_version").selected_text(version_label(st.version)).width(220.0).show_ui(ui, |ui| {
-                            for v in SaveVersion::ALL {
-                                if v == SaveVersion::R12 && st.file_type != FileType::Dxf {
-                                    continue;
-                                }
-                                ui.selectable_value(&mut st.version, v, version_label(v));
-                            }
-                        });
+                    let versions = st.versions();
+                    egui::ComboBox::from_id_salt("saveas_version").selected_text(version_label(st.version)).width(260.0).show_ui(ui, |ui| {
+                        for v in versions {
+                            ui.selectable_value(&mut st.version, v, version_label(v));
+                        }
                     });
                     ui.end_row();
                 }
@@ -245,9 +264,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     ui.label("");
                     ui.add_enabled_ui(st.version.lossless() && !st.docfa, |ui| ui.checkbox(&mut st.binary, crate::tl!("Binary DXF")));
                     ui.end_row();
+                }
+                if st.docfa_file() {
                     ui.label("");
-                    ui.checkbox(&mut st.docfa, crate::tl!("DOCFA profile (Italian cadastre)"))
-                        .on_hover_text(crate::tl!("R12 DXF as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file."));
+                    ui.checkbox(&mut st.docfa, crate::tl!("DOCFA profile (Italian cadastre)")).on_hover_text(crate::tl!(
+                        "DXF or DWG as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file."
+                    ));
                     ui.end_row();
                     if st.docfa {
                         ui.label(crate::tl!("Drawing unit"));
@@ -261,13 +283,29 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                 }
             });
             st.settle();
-            if st.file_type.versioned() && st.version == SaveVersion::R12 {
-                let note = if st.docfa {
-                    crate::tl!("An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class.")
-                } else {
-                    crate::tl!("R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text.")
-                };
-                ui.add(egui::Label::new(RichText::new(note).color(t.text_dim)).wrap());
+            if st.docfa {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(crate::tl!(
+                            "An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class."
+                        ))
+                        .color(t.text_dim),
+                    )
+                    .wrap(),
+                );
+                if st.file_type == FileType::Dwg {
+                    ui.add(egui::Label::new(RichText::new(crate::tl!("DWG has no polygon layer for DOCFA: it computes the surfaces inside DOCFA.")).color(t.text_dim)).wrap());
+                }
+            } else if st.file_type.versioned() && st.version == SaveVersion::R12 {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(crate::tl!(
+                            "R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text."
+                        ))
+                        .color(t.text_dim),
+                    )
+                    .wrap(),
+                );
             }
             ui.separator();
             ui.horizontal(|ui| {
@@ -291,11 +329,14 @@ fn save_from_dialog(app: &mut CadApp) -> bool {
     save(app) != Some(false)
 }
 
-fn version_label(v: SaveVersion) -> String {
-    match v {
+/// A version's label; the ones DOCFA reads say so.
+pub fn version_label(v: SaveVersion) -> String {
+    let docfa = cadcraft_io_docfa_versions().contains(&v) && v != SaveVersion::R2004;
+    let name = match v {
         SaveVersion::R12 => format!("R12 ({})", crate::tl!("AutoCAD Release 12")),
         other => other.year().to_string(),
-    }
+    };
+    if docfa { format!("{name} · {}", crate::tl!("DOCFA compatible")) } else { name }
 }
 
 #[cfg(test)]
@@ -349,8 +390,25 @@ mod tests {
         st.settle();
         assert_eq!(st.version, SaveVersion::R12, "DOCFA is R12");
         assert!(!st.binary, "R12 is ASCII");
-        assert_eq!(st.params("/tmp/plan-docfa.dxf"), json!({ "path": "/tmp/plan-docfa.dxf", "docfa": true, "unit": "mm" }));
+        assert_eq!(st.params("/tmp/plan-docfa.dxf"), json!({ "path": "/tmp/plan-docfa.dxf", "docfa": true, "version": "R12", "unit": "mm" }));
         assert_eq!(st.suggested_name("Plan.dwg"), "Plan-docfa.dxf");
+        // DOCFA reads DXF and DWG 2000 too; 2018 is outside the profile.
+        st.version = SaveVersion::R2000;
+        st.settle();
+        assert_eq!((st.version, st.params("a.dxf")["version"].as_str()), (SaveVersion::R2000, Some("2000")));
+        st.version = SaveVersion::R2018;
+        st.settle();
+        assert_eq!(st.version, SaveVersion::R12, "DXF falls back to R12");
+        st.file_type = FileType::Dwg;
+        st.settle();
+        assert!(st.docfa && st.version == SaveVersion::R2000, "DWG falls back to 2000: {st:?}");
+        assert_eq!(st.versions(), vec![SaveVersion::R2000, SaveVersion::R2004]);
+        assert_eq!(st.params("/tmp/plan-docfa.dwg"), json!({ "path": "/tmp/plan-docfa.dwg", "docfa": true, "version": "2000", "unit": "mm" }));
+        assert_eq!(st.suggested_name("Plan.dwg"), "Plan-docfa.dwg");
+        // Not for images or templates.
+        st.file_type = FileType::Pdf;
+        st.settle();
+        assert!(!st.docfa);
         // R12 plain, then DWG: DWG has no R12.
         let mut st = SaveAsState { file_type: FileType::Dxf, version: SaveVersion::R12, binary: false, docfa: false, unit: Unit::M };
         assert_eq!(st.params("a.dxf"), json!({ "path": "a.dxf", "version": "R12" }));

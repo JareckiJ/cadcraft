@@ -174,16 +174,25 @@ pub(crate) fn save_options(cmd: &str, p: &Value) -> Result<SaveAs> {
         }
         scale = Some(k);
     }
-    if docfa && version.is_some_and(|v| v != Version::R12) {
-        return Err(bad(cmd, "the DOCFA profile is an R12 DXF file: leave `version` out or set it to R12"));
+    if docfa && !DOCFA_VERSIONS.contains(&version.unwrap_or(Version::R12)) {
+        return Err(bad(cmd, "the DOCFA profile writes R12 (DXF), 2000 or 2004 files: leave `version` out or set it to one of those"));
     }
     if (docfa || scale.is_some()) && binary {
-        return Err(bad(cmd, "R12 DXF (DOCFA, scale) is ASCII only: `binary` does not apply"));
+        return Err(bad(cmd, "R12 DXF and the DOCFA profile are ASCII only: `binary` does not apply"));
     }
     if scale.is_some() && !docfa && version != Some(Version::R12) {
         return Err(bad(cmd, "`scale` and `unit` apply to R12 DXF: set `version` to R12 or `docfa` to true"));
     }
-    Ok(SaveAs { version: if docfa { Some(Version::R12) } else { version }, binary, docfa, scale })
+    Ok(SaveAs { version, binary, docfa, scale })
+}
+
+/// The versions the DOCFA profile writes: R12 DXF, and DXF or DWG 2000 and 2004.
+pub const DOCFA_VERSIONS: [Version; 3] = [Version::R12, Version::R2000, Version::R2004];
+
+/// The version a DOCFA export to `path` is written in: the one asked for, else R12 for DXF and
+/// 2000 for DWG (R12 has no DWG).
+fn docfa_version(path: &str, opts: &SaveAs) -> Version {
+    opts.version.unwrap_or(if is_dxf(path) { Version::R12 } else { Version::R2000 })
 }
 
 /// Whether `path` names a DXF file (or has no extension, which saves as DXF).
@@ -234,7 +243,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("saveas", "Save As...", run_saveas_reporting)
             .menu(&["File", "Save As..."])
             .key("Cmd+Shift+S")
-            .params("{path, version?: R12|2000|2004|2007|2010|2013|2018, binary?: bool, docfa?: bool (R12 DXF for the Italian cadastre's DOCFA: an export, the drawing keeps its name), scale?: number | unit?: m|cm|mm (R12: drawing units to metres)} → {path, bytes, version, binary, notes?: what an R12 file converts or leaves out}")
+            .params("{path, version?: R12|2000|2004|2007|2010|2013|2018, binary?: bool, docfa?: bool (the Italian cadastre's DOCFA profile, R12 DXF by default, or DXF/DWG 2000 or 2004 with `version`: an export, the drawing keeps its name), scale?: number | unit?: m|cm|mm (R12: drawing units to metres)} → {path, bytes, version, binary, notes?: what an R12 file converts or leaves out}")
             .noundo(),
         CommandSpec::new("document.switch", "Switch Drawing", run_switch).params("{index}").enabled(always).noundo(),
         CommandSpec::new("document.bytes", "Drawing as bytes", run_bytes)
@@ -543,7 +552,7 @@ fn run_saveas(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, notes) = save_as(s, "saveas", &path, &opts)?;
     let mut r = saved(&path, n);
     if is_drawing_file(&path) {
-        let version = opts.version.unwrap_or_else(|| drawing_version(s, &path));
+        let version = if opts.docfa { docfa_version(&path, &opts) } else { opts.version.unwrap_or_else(|| drawing_version(s, &path)) };
         r["version"] = json!(version.year());
         r["binary"] = json!(opts.binary);
         if opts.docfa {
@@ -562,9 +571,10 @@ fn report_notes(s: &mut Session, r: &mut Value, path: &str, opts: &SaveAs, notes
         return;
     }
     let what = if opts.docfa {
-        "Exported for DOCFA (R12 DXF, a reduced copy; the drawing keeps its own file)"
+        let kind = if is_dxf(path) { "DXF" } else { "DWG" };
+        format!("Exported for DOCFA ({kind} {}, a reduced copy; the drawing keeps its own file)", docfa_version(path, opts).year())
     } else {
-        "Saved as R12 DXF, a reduced copy of the drawing"
+        "Saved as R12 DXF, a reduced copy of the drawing".to_string()
     };
     let msg = if notes.is_empty() { format!("{what}: {path}") } else { format!("{what}: {}", notes.join("; ")) };
     s.echo(msg);
@@ -734,6 +744,19 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_docfa_profile_takes_r12_2000_and_2004_for_dxf_and_dwg() {
+        use super::{Version, docfa_version, save_options};
+        let o = save_options("saveas", &json!({ "docfa": true, "unit": "mm" })).unwrap();
+        assert!(o.docfa && o.version.is_none() && o.scale == Some(0.001));
+        assert_eq!((docfa_version("a.dxf", &o), docfa_version("a.dwg", &o)), (Version::R12, Version::R2000), "R12 for DXF, 2000 for DWG by default");
+        for (v, ok) in [("R12", true), ("2000", true), ("2004", true), ("2007", false), ("2018", false)] {
+            assert_eq!(save_options("saveas", &json!({ "docfa": true, "version": v })).is_ok(), ok, "{v}");
+        }
+        assert!(save_options("saveas", &json!({ "docfa": true, "version": "2000", "binary": true })).is_err(), "ASCII only");
+        assert_eq!(docfa_version("a.dwg", &save_options("saveas", &json!({ "docfa": true, "version": "2004" })).unwrap()), Version::R2004);
+    }
     use serde_json::json;
 
     use crate::Session;

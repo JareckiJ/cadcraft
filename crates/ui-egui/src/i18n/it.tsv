@@ -1377,10 +1377,13 @@ menu	Modify	Edita
 	Drawing unit	Unità del disegno
 	Binary DXF	DXF binario
 	DOCFA profile (Italian cadastre)	Profilo DOCFA (catasto italiano)
-	R12 DXF as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF R12 come lo importa DOCFA: solo spazio modello, riferimenti a blocco esplosi, senza tratteggi, colori solo sui poligoni del layer DOCFA_POLIGONI, testo ASCII, in metri. Il disegno mantiene il proprio file.
 	An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class.	Un'esportazione per DOCFA: una copia ridotta del disegno, che mantiene il proprio file. Le polilinee chiuse sul layer DOCFA_POLIGONI sono i poligoni delle superfici; il loro colore (1–8) è la classe di ambiente.
 	R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text.	R12 è una copia ridotta del disegno: curve, tratteggi, testo multilinea, quote e layout diventano linee, polilinee e testo.
 	AutoCAD Release 12	AutoCAD Release 12
 	Save...	Salva...
 	Save As (file picker)	Salva con nome (selettore file)
 	System Printers	Stampanti di sistema
+	DXF or DWG as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF o DWG come lo importa DOCFA: solo spazio modello, riferimenti a blocco esplosi, senza tratteggi, colori solo sui poligoni del layer DOCFA_POLIGONI, testo ASCII, in metri. Il disegno mantiene il proprio file.
+	DOCFA compatible	compatibile con DOCFA
+	DWG has no polygon layer for DOCFA: it computes the surfaces inside DOCFA.	Il DWG non ha il layer dei poligoni per DOCFA: le superfici le calcola DOCFA stesso.
+	DXF and DWG 2000 open in DOCFA. For a file ready to import choose File > Save As and tick the DOCFA profile.	DXF e DWG 2000 si aprono in DOCFA. Per un file pronto all'importazione scegliere File > Salva con nome e attivare il profilo DOCFA.

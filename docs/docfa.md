@@ -9,13 +9,29 @@ DXF** (`$ACADVER` AC1009) best, and chokes on what later versions added. CADCraf
 format from a *reduced copy* of the drawing, with a **DOCFA profile** that applies what the DOCFA
 guides and practitioners ask for.
 
+## Which file to write
+
+DOCFA's own guides ask for **R12 DXF**; practitioners also report that **DXF 2000 or 2004** and
+**DWG 2000** work, with one difference: a DWG has no layer of surface polygons, so DOCFA computes
+the surfaces inside the program. The Save As dialog and the DOCFA profile therefore offer:
+
+| File | Versions | Polygon layer |
+|---|---|---|
+| DXF | R12 (recommended), 2000, 2004 | yes (`DOCFA_POLIGONI`) |
+| DWG | 2000, 2004 | no |
+
+R12 is written by CADCraft's R12 writer; 2000 and 2004 are the drawing the profile makes (the same
+reduction, then the normal DXF/DWG writers), so they keep exact arcs and polyline widths.
+
 ## How to export
 
-- **Desktop:** File ▸ Save As… (Ctrl+Shift+S / ⇧⌘S) ▸ file type *Drawing (DXF)* ▸ tick **DOCFA
-  profile (Italian cadastre)** ▸ pick the drawing's unit (m, cm, mm) ▸ Save…. The suggested name is
+- **Desktop:** File ▸ Save As… (Ctrl+Shift+S / ⇧⌘S) ▸ file type *Drawing (DXF)* or *Drawing (DWG)* ▸ tick
+  **DOCFA profile (Italian cadastre)** ▸ pick the version (R12, 2000 or 2004: the ones DOCFA reads
+  are marked) and the drawing's unit (m, cm, mm) ▸ Save…. The suggested name is
   `<drawing>-docfa.dxf`. The export does not rename the drawing: keep saving the drawing itself
   as DXF/DWG 2018 and export for DOCFA when a sheet is ready.
 - **Command line / scripts / MCP:** `saveas {"path": "plan-docfa.dxf", "docfa": true, "unit": "cm"}`
+  (R12 DXF; add `"version": "2000"` for DXF 2000, or name a `.dwg` for DWG 2000)
   or `export {"path": "plan-docfa.dxf", "docfa": true, "unit": "cm"}`. `scale` takes a number
   instead of `unit` (drawing units × scale = metres). The result's `notes` and the command line
   say what was converted or left out.

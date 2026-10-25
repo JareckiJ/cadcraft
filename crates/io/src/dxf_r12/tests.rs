@@ -491,3 +491,74 @@ fn a_table_lands_at_its_insertion_point() {
         assert!(back.model.iter().any(|e| matches!(&e.kind, EntityKind::Text(t) if t.value == "B")), "docfa={docfa}");
     }
 }
+
+/// The DOCFA profile at 2000 and 2004 writes a normal DXF of the profile's drawing: no blocks, no
+/// hatches, white continuous layers, colours only on the DOCFA_POLIGONI polygons, text in ASCII,
+/// everything in metres.
+#[test]
+fn docfa_profile_at_2000_is_a_dxf_of_the_prepared_drawing() {
+    let mut d = sample();
+    d.layers.push(Layer { name: "DocFa_Poligoni".into(), color: Color::Index(3), ..Layer::default() });
+    d.add(&Space::Model, common("DocFa_Poligoni"), lwpoly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)], true)).unwrap();
+    d.add(&Space::Model, Common { color: Color::Index(1), ..common("0") }, EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(1.0, 1.0, 0.0) }))
+        .unwrap();
+    for (version, code) in [(cadcraft_dxf::Version::R2000, "AC1015"), (cadcraft_dxf::Version::R2004, "AC1018")] {
+        let o = SaveOptions { version: Some(version), docfa: true, scale: Some(0.01), ..SaveOptions::default() };
+        let bytes = write_with(&d, "plan.dxf", &o).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert_eq!(header(&text, "$ACADVER").as_deref(), Some(code));
+        let back = read(&bytes, "plan.dxf").unwrap();
+        assert_eq!(save_version(&back), version);
+        assert!(
+            back.blocks.values().all(|b| b.anonymous || b.name.starts_with('*')),
+            "no block definitions: {:?}",
+            back.blocks.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            !back
+                .model
+                .iter()
+                .any(|e| matches!(e.kind, EntityKind::Insert(_) | EntityKind::Hatch(_) | EntityKind::MText(_) | EntityKind::Ellipse(_)))
+        );
+        assert!(back.layers.iter().all(|l| l.color == Color::Index(7) && l.linetype.eq_ignore_ascii_case("Continuous") && l.on && !l.frozen));
+        // The polygon keeps its layer's colour (3); the red line carries none.
+        let poly =
+            back.model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_)) && e.common.layer.eq_ignore_ascii_case("DocFa_Poligoni")).unwrap();
+        assert_eq!(poly.common.color, Color::Index(3), "{version}");
+        let line = back.model.iter().find(|e| matches!(&e.kind, EntityKind::Line(l) if (l.b.x - 0.01).abs() < 1e-9)).unwrap();
+        assert_eq!(line.common.color, Color::ByLayer, "only the polygons are coloured");
+        let ext = back.extents(&Space::Model);
+        assert!(ext.max.x < 1.0, "scaled to metres: {ext:?}");
+        assert_eq!(back.header.i64("INSUNITS", 0), 6);
+        assert!(text.is_ascii() && !text.contains("\\U+"), "text is transliterated");
+    }
+    // 2018 is outside the profile; binary DXF too.
+    let bad = SaveOptions { version: Some(cadcraft_dxf::Version::R2018), docfa: true, ..SaveOptions::default() };
+    assert!(write_with(&d, "plan.dxf", &bad).is_err() && write_with(&d, "plan.dwg", &bad).is_err());
+    let binary = SaveOptions { version: Some(cadcraft_dxf::Version::R2000), docfa: true, binary: true, ..SaveOptions::default() };
+    assert!(write_with(&d, "plan.dxf", &binary).is_err());
+    // The notes say the same as for R12, and for DWG that the polygons are made inside DOCFA.
+    let notes = crate::save_notes(&d, "plan.dwg", &SaveOptions { docfa: true, ..SaveOptions::default() });
+    assert!(notes.iter().any(|n| n.contains("computes the surfaces inside DOCFA")), "{notes:?}");
+    assert!(notes.iter().any(|n| n.contains("INSERT exploded")), "{notes:?}");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn docfa_profile_writes_a_dwg_2000_by_default() {
+    let mut d = sample();
+    d.layers.push(Layer { name: "DOCFA_POLIGONI".into(), ..Layer::default() });
+    d.add(&Space::Model, common("DOCFA_POLIGONI"), lwpoly(&[(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)], true)).unwrap();
+    let dwg = write_with(&d, "plan.dwg", &SaveOptions { docfa: true, ..SaveOptions::default() }).unwrap();
+    assert_eq!(cadcraft_dwg::version(&dwg).as_deref(), Some("AC1015"), "DWG 2000 unless another is asked for");
+    let back = read(&dwg, "plan.dwg").unwrap();
+    assert_eq!(save_version(&back), cadcraft_dxf::Version::R2000);
+    assert!(!back.model.iter().any(|e| matches!(e.kind, EntityKind::Insert(_) | EntityKind::Hatch(_))));
+    assert!(back.model.iter().any(|e| matches!(e.kind, EntityKind::LwPolyline(_)) && e.common.layer.eq_ignore_ascii_case("DOCFA_POLIGONI")));
+    let dwg =
+        write_with(&d, "plan.dwg", &SaveOptions { docfa: true, version: Some(cadcraft_dxf::Version::R2004), ..SaveOptions::default() }).unwrap();
+    assert_eq!(cadcraft_dwg::version(&dwg).as_deref(), Some("AC1018"));
+    // R12 has no DWG.
+    let r12 = SaveOptions { docfa: true, version: Some(cadcraft_dxf::Version::R12), ..SaveOptions::default() };
+    assert!(write_with(&d, "plan.dwg", &r12).is_err());
+}

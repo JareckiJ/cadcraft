@@ -1376,10 +1376,13 @@
 	Drawing unit	Одиниця креслення
 	Binary DXF	Двійковий DXF
 	DOCFA profile (Italian cadastre)	Профіль DOCFA (італійський кадастр)
-	R12 DXF as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF R12 так, як його імпортує DOCFA: лише простір моделі, посилання на блоки розбиті, без штрихувань, кольори лише на полігонах шару DOCFA_POLIGONI, текст ASCII, у метрах. Креслення зберігає власний файл.
 	An export for DOCFA: a reduced copy of the drawing, which keeps its own file. Closed polylines on layer DOCFA_POLIGONI are the surface polygons; their colour (1–8) is the area class.	Експорт для DOCFA: спрощена копія креслення, яке зберігає власний файл. Замкнені полілінії на шарі DOCFA_POLIGONI — полігони площ; їхній колір (1–8) — клас площі.
 	R12 is a reduced copy of the drawing: curves, hatches, multiline text, dimensions and layouts become lines, polylines and text.	R12 — спрощена копія креслення: криві, штрихування, багаторядковий текст, розміри та аркуші стають лініями, полілініями та текстом.
 	AutoCAD Release 12	AutoCAD Release 12
 	Save...	Зберегти...
 	Save As (file picker)	Зберегти як (вибір файлу)
 	System Printers	Системні принтери
+	DXF or DWG as DOCFA imports it: model space only, block references exploded, no hatches, colours only on the DOCFA_POLIGONI polygons, ASCII text, in metres. The drawing keeps its own file.	DXF або DWG так, як його імпортує DOCFA: лише простір моделі, посилання на блоки розбиті, без штрихувань, кольори лише на полігонах шару DOCFA_POLIGONI, текст ASCII, у метрах. Креслення зберігає власний файл.
+	DOCFA compatible	сумісно з DOCFA
+	DWG has no polygon layer for DOCFA: it computes the surfaces inside DOCFA.	DWG не має шару полігонів для DOCFA: площі DOCFA обчислює сам.
+	DXF and DWG 2000 open in DOCFA. For a file ready to import choose File > Save As and tick the DOCFA profile.	DXF і DWG 2000 відкриваються в DOCFA. Для готового до імпорту файлу виберіть Файл > Зберегти як і позначте профіль DOCFA.

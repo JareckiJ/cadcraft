@@ -135,8 +135,16 @@ fn run_export(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let r12 = opts.docfa || opts.version == Some(super::file::Version::R12);
     if r12 {
-        let what = if opts.docfa { "Exported for DOCFA (R12 DXF, a reduced copy)" } else { "Exported as R12 DXF, a reduced copy of the drawing" };
-        s.echo(if notes.is_empty() { what.to_string() } else { format!("{what}: {}", notes.join("; ")) });
+        let what = if opts.docfa {
+            format!(
+                "Exported for DOCFA ({} {}, a reduced copy)",
+                format.to_ascii_uppercase(),
+                opts.version.unwrap_or(if format == "dwg" { super::file::Version::R2000 } else { super::file::Version::R12 }).year()
+            )
+        } else {
+            "Exported as R12 DXF, a reduced copy of the drawing".to_string()
+        };
+        s.echo(if notes.is_empty() { what } else { format!("{what}: {}", notes.join("; ")) });
     }
     let mut r = match path {
         Some(path) => {

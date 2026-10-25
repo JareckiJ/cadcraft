@@ -49,17 +49,45 @@ impl SaveOptions {
     pub fn r12(&self) -> dxf_r12::R12Options {
         dxf_r12::R12Options { docfa: self.docfa, scale: self.scale.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(1.0) }
     }
-    /// The version the drawing is written in with these options: R12 for the DOCFA profile.
+    /// The version the drawing is written in with these options: the one asked for, else the
+    /// drawing's own; for the DOCFA profile R12 unless another is asked for (it takes R12, 2000
+    /// and 2004).
     pub fn version_for(&self, d: &Drawing) -> Version {
-        if self.docfa { Version::R12 } else { self.version.unwrap_or_else(|| save_version(d)) }
+        if self.docfa { self.version.unwrap_or(Version::R12) } else { self.version.unwrap_or_else(|| save_version(d)) }
+    }
+    /// The version of a DWG written with these options: for the DOCFA profile 2000 unless 2004
+    /// is asked for (R12 has no DWG here); otherwise the one asked for, else the drawing's own
+    /// but at least 2004 (R2000 DWG has no true colours).
+    fn dwg_version(&self, d: &Drawing) -> Version {
+        if self.docfa {
+            return self.version.filter(|v| *v != Version::R12).unwrap_or(Version::R2000);
+        }
+        self.version.unwrap_or_else(|| save_version(d).max(Version::R2004))
     }
 }
 
+/// The versions the DOCFA profile writes: R12 DXF (the format DOCFA's own guides ask for), and
+/// DXF or DWG 2000 and 2004 (which its importer reads too, without the polygon layer for DWG).
+pub const DOCFA_VERSIONS: [Version; 3] = [Version::R12, Version::R2000, Version::R2004];
+
+/// Whether the DOCFA profile can write `version` (`None`: its default).
+pub fn docfa_accepts(version: Option<Version>) -> bool {
+    version.is_none_or(|v| DOCFA_VERSIONS.contains(&v))
+}
+
 /// What writing `d` with `opts` leaves out or converts, one sentence each; empty when the file
-/// keeps the whole drawing (every version from 2000 on, and every DWG).
+/// keeps the whole drawing (every version from 2000 on, and every DWG, without the DOCFA profile).
 pub fn save_notes(d: &Drawing, name: &str, opts: &SaveOptions) -> Vec<String> {
-    match ext(name).as_str() {
+    let kind = ext(name);
+    match kind.as_str() {
         "dxf" | "" if opts.version_for(d) == Version::R12 => dxf_r12::notes(d, &opts.r12()),
+        "dxf" | "" | "dwg" if opts.docfa => {
+            let mut notes = dxf_r12::docfa_drawing(d, &opts.r12()).1.lines();
+            if kind == "dwg" {
+                notes.push("DWG carries no layer of surface polygons for DOCFA: it computes the surfaces inside DOCFA".into());
+            }
+            notes
+        }
         _ => Vec::new(),
     }
 }
@@ -111,11 +139,11 @@ pub fn write(d: &Drawing, name: &str) -> Result<Vec<u8>> {
 /// Like [`write`], with the DXF/DWG version and binary DXF chosen by `opts`. Binary applies to
 /// DXF only; asking for it with another format is an error.
 pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>> {
-    if opts.docfa && opts.version.is_some_and(|v| v != Version::R12) {
-        return Err(IoError::Format("the DOCFA profile is an R12 DXF file: choose version R12 or none".into()));
+    if opts.docfa && !docfa_accepts(opts.version) {
+        return Err(IoError::Format("the DOCFA profile writes R12, 2000 or 2004 files: choose one of those versions".into()));
     }
-    if opts.docfa && ext(name).as_str() != "dxf" && !ext(name).is_empty() {
-        return Err(IoError::Format("the DOCFA profile is for DXF files".into()));
+    if opts.docfa && !matches!(ext(name).as_str(), "dxf" | "" | "dwg") {
+        return Err(IoError::Format("the DOCFA profile is for DXF and DWG files".into()));
     }
     let version = opts.version_for(d);
     match ext(name).as_str() {
@@ -126,6 +154,22 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
                 return Err(IoError::Format("R12 DXF is written as ASCII only; choose 2000 or later for binary DXF".into()));
             }
             Ok(dxf_r12::write(d, &opts.r12()).into_bytes())
+        }
+        // DOCFA at 2000 or 2004: the profile's drawing, written by the normal DXF writer.
+        "dxf" | "" if opts.docfa => {
+            if opts.binary {
+                return Err(IoError::Format("the DOCFA profile is written as ASCII only".into()));
+            }
+            let (prepared, _) = dxf_r12::docfa_drawing(d, &opts.r12());
+            Ok(cadcraft_dxf::write_ascii_as(&dxf_write::tags(&prepared, version), version.utf8()).into_bytes())
+        }
+        "dwg" if opts.docfa && opts.version == Some(Version::R12) => {
+            Err(IoError::Format("R12 DWG is not available; the DOCFA profile writes DWG 2000 or 2004".into()))
+        }
+        "dwg" if opts.docfa => {
+            let version = opts.dwg_version(d);
+            let (prepared, _) = dxf_r12::docfa_drawing(d, &opts.r12());
+            cadcraft_dwg::dxf_to_dwg_as(dxf_write::dwg_bridge(&prepared, version).as_bytes(), version.code()).map_err(IoError::Format)
         }
         "dxf" | "" => {
             let tags = dxf_write::tags(d, version);

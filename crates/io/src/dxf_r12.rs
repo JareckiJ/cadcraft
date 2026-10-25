@@ -106,6 +106,93 @@ fn build(d: &Drawing, o: &R12Options) -> (Vec<cadcraft_dxf::Tag>, Report) {
     (emit(d, o, &file), report)
 }
 
+/// The drawing the DOCFA profile makes of `d` for the formats that keep a drawing (DXF and DWG
+/// 2000 and later), and what that did to it: the same reduction as the R12 file (model space
+/// only, block references exploded, no hatches, images or wipeouts, nothing on a layer that is
+/// off or frozen, text in ASCII, everything scaled to metres by `o.scale`), then every layer
+/// white and continuous and only the polygons of [`DOCFA_LAYER`] coloured. The normal writers
+/// write it as they write any drawing, so the file is a DXF or DWG DOCFA can import.
+pub fn docfa_drawing(d: &Drawing, o: &R12Options) -> (Drawing, Report) {
+    let committed = d.committed();
+    let o = R12Options { docfa: true, scale: if o.scale.is_finite() && o.scale > 0.0 { o.scale } else { 1.0 } };
+    let (file, report) = convert_drawing(&committed, &o);
+    let mut out = committed.into_owned();
+    out.model = EntityStore::new();
+    out.blocks.clear();
+    out.groups.clear();
+    out.constraints.clear();
+    out.views.clear();
+    out.ucss.clear();
+    out.layer_states.clear();
+    out.hidden_objects.clear();
+    out.read_notes.clear();
+    out.refedit = None;
+    out.foreign = Default::default();
+    for l in &mut out.layouts {
+        l.entities = EntityStore::new();
+        l.view = None;
+    }
+    // Every layer white and continuous; what was on a hidden layer is gone, so nothing hides.
+    for l in &mut out.layers {
+        l.color = Color::Index(7);
+        l.linetype = "Continuous".into();
+        l.on = true;
+        l.frozen = false;
+        l.transparency = 0;
+    }
+    for st in &mut out.text_styles {
+        st.height *= o.scale;
+    }
+    let h = &mut out.header;
+    h.set("INSBASE", HVal::Point(Vec3::ZERO));
+    h.set_i64("LUNITS", 2);
+    h.set_i64("LUPREC", 2);
+    // Metres: the file's unit once scaled (INSUNITS 6).
+    h.set_i64("INSUNITS", 6);
+    h.set_f64("LTSCALE", 1.0);
+    h.set_f64("TEXTSIZE", h.f64("TEXTSIZE", 0.2) * o.scale);
+    for f in file.ents {
+        let common = Common {
+            layer: f.layer,
+            color: match f.color {
+                None => Color::ByLayer,
+                Some(0) => Color::ByBlock,
+                Some(n) => Color::Index(u8::try_from(n).unwrap_or(7)),
+            },
+            linetype: f.linetype.unwrap_or_else(|| "ByLayer".into()),
+            ..Common::default()
+        };
+        let kind = match f.geo {
+            Geo::Line(a, b) => EntityKind::Line(Line { a, b }),
+            Geo::Point(p) => EntityKind::Point(Point { p, angle: 0.0 }),
+            Geo::Circle(center, radius) => EntityKind::Circle(Circle { center, radius }),
+            Geo::Arc(center, radius, start, end) => EntityKind::Arc(Arc { center, radius, start, end }),
+            Geo::Poly { verts, closed, three_d: true, .. } => {
+                EntityKind::Polyline3d(Polyline3d { points: verts.iter().map(|v| v.0).collect(), closed })
+            }
+            Geo::Poly { verts, closed, width, .. } => EntityKind::LwPolyline(LwPolyline {
+                elevation: verts.first().map_or(0.0, |v| v.0.z),
+                vertices: verts
+                    .iter()
+                    .map(|(p, bulge, sw, ew)| cadcraft_geom::PolyVertex { p: p.xy(), bulge: *bulge, start_width: *sw, end_width: *ew })
+                    .collect(),
+                closed,
+                const_width: width,
+                plinegen: false,
+            }),
+            Geo::Text(t) => EntityKind::Text(*t),
+            Geo::Solid(corners) => EntityKind::Solid(Solid { corners }),
+            Geo::Trace(corners) => EntityKind::Trace(Solid { corners }),
+            Geo::Face(corners, hidden_edges) => EntityKind::Face3d(Face3d { corners, hidden_edges }),
+            // Block references are exploded in the profile; none is left.
+            Geo::Insert(_) | Geo::AttDef(_) => continue,
+        };
+        // A drawing that can't take an object (a full store) loses it, as the R12 file does.
+        let _ = out.add(&Space::Model, common, kind);
+    }
+    (out, report)
+}
+
 // ---------------------------------------------------------------------------------------------
 // The reduced drawing
 // ---------------------------------------------------------------------------------------------
