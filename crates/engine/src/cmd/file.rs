@@ -369,9 +369,12 @@ fn run_open(s: &mut Session, p: &Value) -> Result<Value> {
 /// WHOHAS: who has a drawing open, from its lock file ([`crate::drawlock`]): the current
 /// drawing's, or the file `path`.
 fn run_whohas(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = match str_param(p, "path") {
-        Some(p) => p.to_string(),
-        None => s.state()?.path.clone().ok_or_else(|| bad("whohas", "the drawing has no file yet; pass `path`"))?,
+    // Left out (or null): the current drawing's file; anything but text is an error, not the
+    // current drawing asked about by mistake.
+    let path = match p.get("path") {
+        None | Some(Value::Null) => s.state()?.path.clone().ok_or_else(|| bad("whohas", "the drawing has no file yet; pass `path`"))?,
+        Some(Value::String(path)) => path.clone(),
+        Some(_) => return Err(bad("whohas", "`path` must be a file path")),
     };
     #[cfg(not(target_arch = "wasm32"))]
     let holder = crate::drawlock::holder(std::path::Path::new(&path));

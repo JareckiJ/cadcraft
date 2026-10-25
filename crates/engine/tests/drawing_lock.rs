@@ -49,6 +49,8 @@ fn a_second_app_is_told_who_has_the_drawing_and_the_lock_follows_the_first() {
     assert_eq!(holder(&file).map(|h| h.instance), Some("1-a".to_string()));
     // WHOHAS names the holder.
     let mut b = b;
+    // A `path` that isn't a file path is refused, not taken as the current drawing.
+    assert!(b.execute("whohas", &json!({ "path": 7 })).is_err());
     let r = b.execute("whohas", &json!({})).unwrap();
     assert_eq!(r["holder"]["instance"], "1-a");
 
