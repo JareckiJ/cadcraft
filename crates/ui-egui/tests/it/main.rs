@@ -7,6 +7,7 @@ mod control_cmdline_key;
 mod control_methods;
 mod dialog_dispatch;
 mod docking_workflows;
+mod drafting_dynamic_input;
 mod drafting_polar_increment;
 mod drafting_spacing;
 mod file_tab_titles;

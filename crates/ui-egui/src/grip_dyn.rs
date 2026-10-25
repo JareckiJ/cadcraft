@@ -33,8 +33,11 @@ pub struct GripDyn {
 }
 
 /// The base of the prompt on show when it asks for a distance from it (a circle's radius, a
-/// polyline arc's): its one field is that distance.
+/// polyline arc's): its one field is that distance (dimension input).
 fn distance_base(app: &CadApp) -> Option<Vec2> {
+    if !app.session.settings.dyn_dimension() {
+        return None;
+    }
     crate::cmdline::dyn_frame(app).and_then(|_| app.session.current_prompt()).filter(|p| p.distance).and_then(|p| p.base)
 }
 

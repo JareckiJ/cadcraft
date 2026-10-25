@@ -27,6 +27,7 @@ pub const PROFILE_VARS: &[&str] = &[
     "DYNMODE",
     "DYNPIFORMAT",
     "DYNPICOORDS",
+    "DYNPIVIS",
     "DYNPROMPT",
     "DYNDIGRIP",
     "DYNDIVIS",
@@ -107,9 +108,13 @@ pub fn apply(s: &mut Session, values: &Value) -> Result<()> {
 /// skipped (an old or hand-edited profile never stops the app from starting).
 pub fn restore(s: &mut Session, saved: &Value) {
     let Some(obj) = saved.as_object() else { return };
+    // Profiles saved before DYNMODE took its bits (no DYNPIVIS yet) stored 1 for "on": both inputs.
+    let old_dynmode = !obj.contains_key("DYNPIVIS");
+    let both = json!(3);
     for (name, v) in obj.iter().take(MAX_ENTRIES) {
         if is_profile_var(name) {
             let before = s.settings.clone();
+            let v = if old_dynmode && name.eq_ignore_ascii_case("DYNMODE") && v.as_i64() == Some(1) { &both } else { v };
             if crate::sysvars::set(s, name, v).is_err() {
                 s.settings = before;
             }
@@ -132,6 +137,8 @@ pub fn reset(s: &mut Session) {
     st.gridmode = d.gridmode;
     st.gridmajor = d.gridmajor;
     st.dynmode = d.dynmode;
+    st.dyninput = d.dyninput;
+    st.dynpivis = d.dynpivis;
     st.dynpi_cartesian = d.dynpi_cartesian;
     st.dynpi_absolute = d.dynpi_absolute;
     st.osnaphatch = d.osnaphatch;
@@ -190,5 +197,42 @@ mod tests {
         let mut b = Session::new();
         restore(&mut b, &saved);
         assert_eq!(profile(&b), saved);
+    }
+
+    #[test]
+    fn dynmode_keeps_pointer_and_dimension_input_apart() {
+        let mut s = Session::new();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(3)));
+        apply(&mut s, &json!({"DYNMODE": 2})).unwrap();
+        assert!(!s.settings.dyn_pointer() && s.settings.dyn_dimension());
+        // F12 turns it off and back on to the same inputs; DYNMODE reads negative meanwhile.
+        s.execute("dynmode", &Value::Null).unwrap();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(-2)));
+        assert!(!s.settings.dyn_dimension());
+        s.execute("dynmode", &Value::Null).unwrap();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(2)));
+        // Both off: F12 turns both on.
+        apply(&mut s, &json!({"DYNMODE": 0})).unwrap();
+        s.execute("dynmode", &Value::Null).unwrap();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(3)));
+        // `false`/`true` switch it like F12.
+        apply(&mut s, &json!({"DYNMODE": 1})).unwrap();
+        apply(&mut s, &json!({"DYNMODE": false})).unwrap();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(-1)));
+        apply(&mut s, &json!({"DYNMODE": true})).unwrap();
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(1)));
+        assert!(apply(&mut s, &json!({"DYNMODE": 4})).is_err());
+        assert!(apply(&mut s, &json!({"DYNPIVIS": 3})).is_err());
+    }
+
+    #[test]
+    fn a_profile_saved_before_dynmode_bits_keeps_both_inputs() {
+        // Saved when DYNMODE was on/off: 1 meant on.
+        let mut s = Session::new();
+        restore(&mut s, &json!({"DYNMODE": 1}));
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(3)));
+        // Saved with DYNPIVIS: 1 is pointer input only.
+        restore(&mut s, &json!({"DYNMODE": 1, "DYNPIVIS": 1}));
+        assert_eq!(crate::sysvars::get(&s, "DYNMODE"), Some(json!(1)));
     }
 }

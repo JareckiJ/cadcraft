@@ -33,6 +33,7 @@ const SESSION_VARS: &[&str] = &[
     "DYNMODE",
     "DYNPIFORMAT",
     "DYNPICOORDS",
+    "DYNPIVIS",
     "DYNPROMPT",
     "LWDISPLAY",
     "PLOTTRANSPARENCYOVERRIDE",
@@ -102,7 +103,12 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
         "GRIDMAJOR" => json!(st.gridmajor),
         "DYNDIGRIP" => json!(st.dyndigrip),
         "DYNDIVIS" => json!(st.dyndivis),
-        "DYNMODE" => json!(i32::from(st.dynmode)),
+        // 1 pointer input, 2 dimension input, 3 both; negative while F12 has turned it off.
+        "DYNMODE" => {
+            let d = i32::from(st.dyninput);
+            json!(if st.dynmode { d } else { -d })
+        }
+        "DYNPIVIS" => json!(st.dynpivis),
         "DYNPIFORMAT" => json!(i32::from(st.dynpi_cartesian)),
         "DYNPICOORDS" => json!(i32::from(st.dynpi_absolute)),
         "DYNPROMPT" => json!(i32::from(st.dynprompt)),
@@ -313,7 +319,19 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
         "GRIDMAJOR" => st.gridmajor = as_f64(v).ok_or_else(bad)?.clamp(1.0, 100.0) as u32,
         "DYNDIGRIP" => st.dyndigrip = as_i(v).filter(|i| (0..=31).contains(i)).and_then(|i| u32::try_from(i).ok()).ok_or_else(bad)?,
         "DYNDIVIS" => st.dyndivis = as_i(v).filter(|i| (0..=2).contains(i)).and_then(|i| u8::try_from(i).ok()).ok_or_else(bad)?,
-        "DYNMODE" => st.dynmode = as_bool(v).ok_or_else(bad)?,
+        // `true`/`false` turn Dynamic Input on and off as F12 does, keeping what it shows.
+        "DYNMODE" if v.is_boolean() => {
+            st.dynmode = v.as_bool() == Some(true);
+            if st.dynmode && st.dyninput == 0 {
+                st.dyninput = 3;
+            }
+        }
+        "DYNMODE" => {
+            let i = as_i(v).filter(|i| (-3..=3).contains(i)).ok_or_else(bad)?;
+            st.dynmode = i > 0;
+            st.dyninput = u8::try_from(i.unsigned_abs()).map_err(|_| bad())?;
+        }
+        "DYNPIVIS" => st.dynpivis = small(v, 2).ok_or_else(bad)?,
         "DYNPIFORMAT" => st.dynpi_cartesian = as_bool(v).ok_or_else(bad)?,
         "DYNPICOORDS" => st.dynpi_absolute = as_bool(v).ok_or_else(bad)?,
         "DYNPROMPT" => st.dynprompt = as_bool(v).ok_or_else(bad)?,
