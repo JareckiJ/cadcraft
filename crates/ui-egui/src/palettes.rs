@@ -1194,30 +1194,92 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 }
 
-/// The block reference the Attributes panel edits: the one selected object, when it has attributes.
-pub(crate) fn attributes_target(app: &CadApp) -> Option<cadcraft_engine::doc::Handle> {
+/// What the Attributes panel shows for attributes that differ between the selected block references.
+const VARIES: &str = "***";
+
+/// The block references the Attributes panel edits: the selected objects, when every one of them
+/// is a block reference that has attributes.
+pub(crate) fn attributes_targets(app: &CadApp) -> Vec<cadcraft_engine::doc::Handle> {
     let sel = app.session.selection();
-    if sel.len() != 1 {
+    let Ok(d) = app.session.doc() else { return Vec::new() };
+    let all = sel.iter().all(|h| matches!(d.entity(*h).map(|e| &e.kind), Some(EntityKind::Insert(i)) if !i.attribs.is_empty()));
+    if all { sel } else { Vec::new() }
+}
+
+/// The Attributes panel's targets with the drawing they belong to (its uid), so the same handles in
+/// another open drawing are told apart.
+pub(crate) fn attributes_key(app: &CadApp) -> Option<(u64, Vec<cadcraft_engine::doc::Handle>)> {
+    let hs = attributes_targets(app);
+    if hs.is_empty() {
         return None;
     }
-    let h = *sel.first()?;
-    match &app.session.doc().ok()?.entity(h)?.kind {
-        EntityKind::Insert(i) if !i.attribs.is_empty() => Some(h),
-        _ => None,
+    Some((app.session.state().ok()?.uid, hs))
+}
+
+/// Set attribute `tag` of the block references `hs` to `value` through ATTEDIT, which changes only
+/// the attributes of those references, in one undo step like any other edit.
+fn set_attribute(app: &mut CadApp, hs: &[cadcraft_engine::doc::Handle], tag: &str, value: String) {
+    let handles: Vec<String> = hs.iter().map(|h| h.hex()).collect();
+    let _ = app.run("attedit", json!({ "handles": handles, "values": { tag: value } }));
+}
+
+/// One row of the Attributes panel: the tag, the value shared by the selected block references
+/// ([`VARIES`] when they differ) and whether it can be edited.
+struct AttributeRow {
+    tag: String,
+    value: String,
+    editable: bool,
+}
+
+/// The rows for block references `hs`: the tags of all of them in order of first appearance. A row
+/// is editable when no reference has the tag as a constant or twice (ATTEDIT addresses an
+/// attribute by its tag).
+fn attribute_rows(d: &cadcraft_engine::doc::Drawing, hs: &[cadcraft_engine::doc::Handle]) -> Vec<AttributeRow> {
+    let inserts: Vec<_> = hs
+        .iter()
+        .filter_map(|h| match d.entity(*h).map(|e| &e.kind) {
+            Some(EntityKind::Insert(i)) => Some(i),
+            _ => None,
+        })
+        .collect();
+    // One reference: its attributes as they are, a tag used twice shown twice.
+    if let [i] = inserts.as_slice() {
+        return i
+            .attribs
+            .iter()
+            .map(|a| {
+                let unique = i.attribs.iter().filter(|o| o.tag.eq_ignore_ascii_case(&a.tag)).count() == 1;
+                AttributeRow { tag: a.tag.clone(), value: a.text.value.clone(), editable: unique && !a.constant }
+            })
+            .collect();
     }
-}
-
-/// The Attributes panel's target with the drawing it belongs to (its uid), so the same handle in
-/// another open drawing is told apart.
-pub(crate) fn attributes_key(app: &CadApp) -> Option<(u64, cadcraft_engine::doc::Handle)> {
-    let h = attributes_target(app)?;
-    Some((app.session.state().ok()?.uid, h))
-}
-
-/// Set attribute `tag` of block reference `h` to `value` through ATTEDIT, which changes only the
-/// attributes of that reference and goes through undo like any other edit.
-fn set_attribute(app: &mut CadApp, h: cadcraft_engine::doc::Handle, tag: &str, value: String) {
-    let _ = app.run("attedit", json!({ "handle": h.hex(), "values": { tag: value } }));
+    let mut rows: Vec<AttributeRow> = Vec::new();
+    for i in &inserts {
+        for a in &i.attribs {
+            if !rows.iter().any(|r| r.tag.eq_ignore_ascii_case(&a.tag)) {
+                rows.push(AttributeRow { tag: a.tag.clone(), value: String::new(), editable: true });
+            }
+        }
+    }
+    for row in &mut rows {
+        let mut value: Option<&str> = None;
+        let mut varies = false;
+        for i in &inserts {
+            let same: Vec<_> = i.attribs.iter().filter(|a| a.tag.eq_ignore_ascii_case(&row.tag)).collect();
+            if same.len() > 1 || same.iter().any(|a| a.constant) {
+                row.editable = false;
+            }
+            for a in same {
+                match value {
+                    None => value = Some(&a.text.value),
+                    Some(v) if v != a.text.value => varies = true,
+                    Some(_) => {}
+                }
+            }
+        }
+        row.value = if varies { VARIES.to_string() } else { value.unwrap_or_default().to_string() };
+    }
+    rows
 }
 
 /// The Attributes panel: the selected block reference's attributes as tag / value rows, edited in
@@ -1225,40 +1287,48 @@ fn set_attribute(app: &mut CadApp, h: cadcraft_engine::doc::Handle, tag: &str, v
 /// stays read-only too, because ATTEDIT addresses an attribute by its tag. Block names, tags and
 /// values come from the drawing, so they are shown as they are, never translated.
 pub(crate) fn attributes_section(app: &mut CadApp, ui: &mut egui::Ui) {
-    let Some((uid, h)) = attributes_key(app) else {
+    let Some((uid, hs)) = attributes_key(app) else {
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| ui.colored_label(Tokens::get().text_dim, crate::tl!("Select a block reference that has attributes.")));
         return;
     };
     // A dynamic block reference shows its dynamic block's name, as Properties does.
-    let dynamic_name = custom_properties(ui, app, h).map(|(name, _)| name);
+    let dynamic_name = match hs.as_slice() {
+        [h] => custom_properties(ui, app, *h).map(|(name, _)| name),
+        _ => None,
+    };
     let Ok(d) = app.session.doc() else { return };
-    let Some(EntityKind::Insert(i)) = d.entity(h).map(|e| &e.kind) else { return };
-    let block = dynamic_name.unwrap_or_else(|| i.block.clone());
-    let rows: Vec<(String, String, bool)> = i
-        .attribs
+    let names: Vec<&str> = hs
         .iter()
-        .map(|a| {
-            let unique = i.attribs.iter().filter(|o| o.tag.eq_ignore_ascii_case(&a.tag)).count() == 1;
-            (a.tag.clone(), a.text.value.clone(), unique && !a.constant)
+        .filter_map(|h| match d.entity(*h).map(|e| &e.kind) {
+            Some(EntityKind::Insert(i)) => Some(i.block.as_str()),
+            _ => None,
         })
         .collect();
+    let mut block = match names.first() {
+        Some(first) if names.iter().all(|n| n.eq_ignore_ascii_case(first)) => dynamic_name.unwrap_or_else(|| first.to_string()),
+        _ => VARIES.to_string(),
+    };
+    if hs.len() > 1 {
+        block = format!("{block} (\u{d7}{})", hs.len());
+    }
+    let rows = attribute_rows(d, &hs);
     ui.add_space(4.0);
     prop_row(ui, "Block", |ui| read_only_literal(ui, &block));
     let mut set: Option<(String, String)> = None;
-    for (tag, value, editable) in &rows {
-        prop_row_literal(ui, tag, |ui| {
-            if *editable {
-                if let Some(v) = edit_field(ui, ui.scope_id().with(("attrib", uid, h, tag)), value.clone()) {
-                    set = Some((tag.clone(), v));
+    for row in &rows {
+        prop_row_literal(ui, &row.tag, |ui| {
+            if row.editable {
+                if let Some(v) = edit_field(ui, ui.scope_id().with(("attrib", uid, &hs, &row.tag)), row.value.clone()) {
+                    set = Some((row.tag.clone(), v));
                 }
             } else {
-                read_only_literal(ui, value);
+                read_only_literal(ui, &row.value);
             }
         });
     }
     if let Some((tag, value)) = set {
-        set_attribute(app, h, &tag, value);
+        set_attribute(app, &hs, &tag, value);
     }
 }
 
@@ -1364,7 +1434,7 @@ mod tests {
     fn editing_an_attribute_changes_only_the_selected_block_reference() {
         let mut app = app_with_block(&CODICE_REV);
         let (first, second) = (insert_block(&mut app, 5), insert_block(&mut app, 50));
-        set_attribute(&mut app, first, "REV", "B".into());
+        set_attribute(&mut app, &[first], "REV", "B".into());
         assert_eq!(attribute_value(&app, first, "REV"), "B");
         assert_eq!(attribute_value(&app, first, "CODICE"), "8231");
         assert_eq!(attribute_value(&app, second, "REV"), "A");
@@ -1391,8 +1461,8 @@ mod tests {
         let ins = insert_block(&mut app, 5);
         app.run("select", json!({ "handles": [ins.hex()] })).unwrap();
 
-        assert_eq!(attributes_target(&app), Some(ins));
-        assert_eq!(attributes_key(&app).map(|(_, h)| h), Some(ins));
+        assert_eq!(attributes_targets(&app), vec![ins]);
+        assert_eq!(attributes_key(&app).map(|(_, h)| h), Some(vec![ins]));
         let texts = painted_texts(&mut app, attributes_section);
         for want in ["CODICE", "REV"] {
             assert!(texts.iter().any(|t| t == want), "the panel shows `{want}`; painted: {texts:?}");
@@ -1400,7 +1470,43 @@ mod tests {
 
         // Anything else selected, or nothing, leaves the panel with just its hint.
         app.run("select", json!({ "handles": [] })).unwrap();
-        assert_eq!(attributes_target(&app), None);
+        assert!(attributes_targets(&app).is_empty());
         assert!(!painted_texts(&mut app, attributes_section).iter().any(|t| t == "CODICE"));
+    }
+
+    /// Two block references with the same attributes: equal values are shown, different ones as
+    /// `***`; a change goes to both in one undo step.
+    #[test]
+    fn several_block_references_show_equal_values_and_stars_for_different_ones() {
+        let mut app = app_with_block(&CODICE_REV);
+        let (first, second) = (insert_block(&mut app, 5), insert_block(&mut app, 50));
+        set_attribute(&mut app, &[second], "REV", "B".into());
+        app.run("select", json!({ "handles": [first.hex(), second.hex()] })).unwrap();
+
+        assert_eq!(attributes_targets(&app), vec![first, second]);
+        let d = app.session.doc().unwrap();
+        let rows: Vec<(String, String)> = attribute_rows(d, &attributes_targets(&app)).into_iter().map(|r| (r.tag, r.value)).collect();
+        assert_eq!(rows, vec![("CODICE".to_string(), "8231".to_string()), ("REV".to_string(), VARIES.to_string())]);
+        let texts = painted_texts(&mut app, attributes_section);
+        assert!(texts.iter().any(|t| t == "8231") && texts.iter().any(|t| t == VARIES), "painted: {texts:?}");
+
+        let undo_depth = app.session.state().unwrap().undo.len();
+        set_attribute(&mut app, &[first, second], "REV", "C".into());
+        assert_eq!((attribute_value(&app, first, "REV"), attribute_value(&app, second, "REV")), ("C".into(), "C".into()));
+        assert_eq!(app.session.state().unwrap().undo.len(), undo_depth + 1, "one undo step for both");
+        let d = app.session.doc().unwrap();
+        assert!(attribute_rows(d, &[first, second]).iter().all(|r| r.value != VARIES));
+    }
+
+    /// Anything that is not a block reference with attributes in the selection leaves the panel
+    /// empty, rather than editing some of the selection.
+    #[test]
+    fn a_mixed_selection_has_no_attributes_panel() {
+        let mut app = app_with_block(&CODICE_REV);
+        let ins = insert_block(&mut app, 5);
+        let line = app.run("line", json!({ "points": [[0, 20], [10, 20]] })).unwrap();
+        app.run("select", json!({ "handles": [ins.hex(), line["handles"][0].clone()] })).unwrap();
+        assert!(attributes_targets(&app).is_empty());
+        assert_eq!(attributes_key(&app), None);
     }
 }

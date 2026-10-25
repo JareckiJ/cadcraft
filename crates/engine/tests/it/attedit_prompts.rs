@@ -153,3 +153,16 @@ fn attedit_leaves_constant_attributes_and_locked_references_alone() {
     assert!(e.contains("locked"), "{e}");
     assert_eq!(value(&s, h, "T"), "one");
 }
+
+#[test]
+fn attedit_with_several_handles_edits_each_in_one_undo_step() {
+    let mut s = with_block();
+    let (a, b) = (handle(&insert(&mut s, 100.0, json!({"t": "one"}))), handle(&insert(&mut s, 200.0, json!({"t": "two"}))));
+    let r = s.execute("attedit", &json!({"handles": [a.hex(), b.hex()], "values": {"T": "same", "nope": "x"}})).unwrap();
+    assert_eq!(r["changed"], 2);
+    assert_eq!(r["unknownTags"], json!(["nope"]));
+    assert_eq!((value(&s, a, "T"), value(&s, b, "T")), ("same".into(), "same".into()));
+    s.execute("undo", &json!({})).unwrap();
+    assert_eq!((value(&s, a, "T"), value(&s, b, "T")), ("one".into(), "two".into()), "one undo restores both");
+    assert!(s.execute("attedit", &json!({"handles": [], "values": {"T": "x"}})).is_err(), "no targets is an error");
+}

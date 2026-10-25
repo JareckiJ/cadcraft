@@ -226,15 +226,16 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
 fn follow_selection(workspace: &mut Workspace, app: &crate::CadApp, ui: &egui::Ui) {
     let id = egui::Id::unique("attributes-panel-target");
     let target = if app.ui.show_palettes { crate::palettes::attributes_key(app) } else { None };
-    let last = ui.data(|d| d.get_temp::<Option<(u64, cadcraft_engine::doc::Handle)>>(id)).flatten();
+    let last = ui.data(|d| d.get_temp::<Option<(u64, Vec<cadcraft_engine::doc::Handle>)>>(id)).flatten();
     if target == last {
         if target.is_none() && workspace.layout.contains(&Panel::Attributes) {
             let _ = set_visible(workspace, Panel::Attributes, false);
         }
         return;
     }
+    let shown = target.is_some();
     ui.data_mut(|d| d.insert_temp(id, target));
-    let _ = set_visible(workspace, Panel::Attributes, target.is_some());
+    let _ = set_visible(workspace, Panel::Attributes, shown);
 }
 
 /// Validate and repair the stored workspace, sync it with the app, and render the dock panels; a failed restore falls back to the default layout with a status message.
