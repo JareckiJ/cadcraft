@@ -118,13 +118,12 @@ numbers):
 | Layouts & plotting | Paper-space layouts, viewports (scale, lock, per-viewport layer freeze), MSPACE/PSPACE through viewports, page setups, PLOT and EXPORTPDF |
 | Parametric | Geometric and dimensional constraints, AUTOCONSTRAIN, PARAMETERS with expressions, conflict detection; constraints re-solve after every edit |
 | Grips | Hot grips with Space to cycle Stretch, Move, Rotate, Scale and Mirror |
-| Interface languages | English, Ukrainian (Українська), Brazilian Portuguese (Português (Brasil)), German (Deutsch), Spanish (Español), Czech (Čeština), Russian (Русский), French (Français), Simplified Chinese (简体中文, with an installed CJK font), Italian (Italiano), Korean (한국어, with an installed Hangul font), Swedish (Svenska), Arabic (العربية, with an installed Arabic font), Hungarian (Magyar) and Turkish (Türkçe), live switching and a remembered Auto/system-language choice; [details](docs/localization.md) |
+| Interface languages | English, Ukrainian (Українська), Brazilian Portuguese (Português (Brasil)), German (Deutsch), Spanish (Español), Czech (Čeština), Russian (Русский), French (Français), Simplified Chinese (简体中文, with an installed CJK font), Italian (Italiano), Korean (한국어, with an installed Hangul font), Swedish (Svenska), Arabic (العربية, with an installed Arabic font), Hungarian (Magyar), Turkish (Türkçe) and Polish (Polski), live switching and a remembered Auto/system-language choice; [details](docs/localization.md) |
 | Automation | MCP server, JSON control channel, `cadcraft-cli` (info, convert, run, commands, mcp) |
 
 ## Quick start
 
-Desktop and web UI builds require Rust 1.95 or later. The core workspace's declared minimum
-remains Rust 1.90.
+CADCraft requires Rust 1.95 or later.
 
 ```sh
 git clone https://github.com/storytold/cadcraft
@@ -141,7 +140,7 @@ offset 0.25                     then pick the circle and a side
 zoom e                          zoom to extents
 ```
 
-The web build: `cd apps/cadcraft-web && trunk serve` (needs [trunk](https://trunkrs.dev)).
+The web build: `cd apps/cadcraft-web && trunk serve` (needs [trunk](https://github.com/trunk-rs/trunk)).
 
 ### Fonts
 
@@ -219,6 +218,10 @@ cadcraft-cli convert drawing.dxf drawing.svg
 cadcraft-cli convert drawing.dwg detail.png --window 0,0,20000,15000
 cadcraft-cli run drawing.dwg --cmd 'zoom {"mode":"window","p1":[0,0],"p2":[20000,15000]}' --export detail.png
 cadcraft-cli run drawing.dwg --cmd 'select {"window":[[0,0],[20000,15000]]}' --cmd 'zoom {"mode":"object"}' --export sel.png
+
+# Act on what an earlier --cmd made: {last} is the last handle it returned.
+cadcraft-cli run --metric --cmd 'layout.set {"name":"Layout1"}' \
+  --cmd 'mview {"p1":[20,20],"p2":[200,150]}' --cmd 'viewport.set {"handle":"{last}","scale":1}'
 ```
 
 How image exports (PNG 2400×1600, SVG, PDF) are framed: `convert` fits the model-space extents.
