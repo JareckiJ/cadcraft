@@ -81,6 +81,7 @@ fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     sources.into_iter().filter(|s| !s.is_empty() && !catalog.contains_key(&("", *s))).map(str::to_string).collect()
 }
 
+/// The `tl!` and `tf!` literals of the checked UI files that `language`'s catalog lacks.
 fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
     let catalog = catalog(language).unwrap();
     let sources = [
@@ -104,6 +105,7 @@ fn missing_marked_ui_literals(language: &str) -> BTreeSet<String> {
         include_str!("../quick.rs"),
         include_str!("../vpscale.rs"),
         include_str!("../options/dialog.rs"),
+        include_str!("../managers.rs"),
     ];
     let mut missing = BTreeSet::new();
     for source in sources {
