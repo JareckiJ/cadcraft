@@ -583,9 +583,12 @@ dependencies = [
  "rfd",
  "serde_json",
  "sys-locale",
+ "wayland-client",
  "windows",
  "winit",
  "winresource",
+ "x11-dl",
+ "xkbcommon-dl",
  "zbus",
 ]
 
