@@ -193,7 +193,6 @@ fn close(s: &mut Session, save: bool) -> Result<Value> {
     let name = st.block_editor().unwrap_or_default().to_string();
     let saved = save && st.block_unsaved();
     s.state_mut()?.close_block_editor(save)?;
-    s.drop_block_hatch_boundary_set();
     if saved {
         s.echo(format!("Block \"{name}\" saved."));
     }

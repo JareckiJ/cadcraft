@@ -222,6 +222,11 @@ pub trait Interactive: Send {
     fn begin(&mut self, _s: &mut Session) -> Result<Step> {
         Ok(Step::Continue)
     }
+    /// Esc: `true` when a step inside the command took it and the command goes on (HATCH's
+    /// boundary set choice gives up that choice only); `false` cancels the command.
+    fn cancel(&mut self, _s: &mut Session) -> bool {
+        false
+    }
     /// Rubber-band geometry for the cursor position.
     fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
         Vec::new()

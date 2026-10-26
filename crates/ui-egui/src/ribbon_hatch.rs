@@ -224,7 +224,7 @@ impl Shown {
     /// HATCHEDIT on the selected hatches with `p`; in Hatch Creation, the HP* variables.
     fn edit(&self, mut p: Value) -> Action {
         if self.create {
-            return create_vars(&p, &self.hatch);
+            return create_vars(&p);
         }
         if let Some(o) = p.as_object_mut() {
             o.insert("handles".into(), json!(self.ids));
@@ -238,7 +238,7 @@ impl Shown {
     /// PROPERTIES.SET on the selected hatches with `p`; in Hatch Creation, the HP* variables.
     fn set(&self, mut p: Value) -> Action {
         if self.create {
-            return create_vars(&p, &self.hatch);
+            return create_vars(&p);
         }
         if let Some(o) = p.as_object_mut() {
             o.insert("handles".into(), json!(self.ids));
@@ -252,22 +252,12 @@ impl Shown {
 }
 
 /// Hatch Creation: an edit of the tab (HATCHEDIT / PROPERTIES.SET parameters) as the HP*
-/// system variables it sets. `current` is the hatch being made as the tab shows it: a change of
-/// type remembers its pattern or gradient, and turning back to "pattern" or "gradient" takes the
-/// last one a hatch had (as HATCHEDIT does).
-fn create_vars(p: &Value, current: &Hatch) -> Action {
+/// system variables it sets. A change of type is HATCH.TYPE, which remembers the hatch being
+/// made and turns back to the last pattern or gradient a hatch had (as HATCHEDIT does).
+fn create_vars(p: &Value) -> Action {
     let mut vars: Vec<(&'static str, Value)> = Vec::new();
     let s = |v: &Value| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
     let retype = p.get("type").and_then(Value::as_str).map(str::to_string);
-    let current = current.clone();
-    if let Some(t) = &retype {
-        match t.as_str() {
-            "solid" => vars.push(("HPNAME", json!("SOLID"))),
-            "user" => vars.push(("HPNAME", json!(cadcraft_doc::USER_PATTERN))),
-            // "pattern" and "gradient": from the session's memory, once `current` is in it.
-            _ => {}
-        }
-    }
     if let Some(v) = p.get("pattern") {
         vars.push(("HPNAME", json!(s(v))));
     }
@@ -320,25 +310,10 @@ fn create_vars(p: &Value, current: &Hatch) -> Action {
         vars.push(("HPSEPARATE", json!(i64::from(v))));
     }
     Action::Do(Box::new(move |app: &mut CadApp| {
-        if let Some(t) = &retype {
-            app.session.remember_hatch(&current);
-            match t.as_str() {
-                "pattern" => {
-                    let name = app.session.hatch_last_pattern().map_or("ANSI31", |(n, _)| n).to_string();
-                    vars.insert(0, ("HPNAME", json!(name)));
-                }
-                "gradient" => {
-                    let g = app.session.hatch_last_gradient().cloned();
-                    let name = g.as_ref().and_then(|g| patterns::tile_of_gradient(&g.name)).unwrap_or("GR_LINEAR");
-                    vars.insert(0, ("HPNAME", json!(name)));
-                    if let Some(g) = g {
-                        vars.insert(1, ("GFCLR1", json!(color_param(g.color1))));
-                        vars.insert(2, ("GFCLR2", json!(color_param(g.color2))));
-                        vars.insert(3, ("GFANG", json!(g.angle.to_degrees())));
-                    }
-                }
-                _ => {}
-            }
+        if let Some(t) = &retype
+            && let Err(e) = app.run("hatch.type", json!({ "type": t }))
+        {
+            app.session.echo(e);
         }
         for (name, value) in vars {
             if let Err(e) = app.run("setvar", json!({ "name": name, "value": value })) {
@@ -1268,8 +1243,7 @@ mod tests {
         app.run("new", json!({})).unwrap();
         app.run("setvar", json!({ "name": "HPNAME", "value": "ANSI37" })).unwrap();
         let step = |app: &mut CadApp, p: Value| {
-            let current = shown_create(app).unwrap().hatch;
-            if let Action::Do(f) = create_vars(&p, &current) {
+            if let Action::Do(f) = create_vars(&p) {
                 f(app);
             }
         };

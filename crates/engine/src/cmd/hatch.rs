@@ -53,6 +53,10 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{handles}: selects those hatches (the Ribbon then shows the Hatch Editor); interactively, select a hatch")
             .noundo()
             .interactive(|_| Ok(Box::new(PickHatchM))),
+        CommandSpec::new("hatch.type", "Hatch Type", run_hatch_type)
+            .params("{type: \"pattern\"|\"gradient\"|\"solid\"|\"user\"}: the Hatch Creation settings turn to that type (HPNAME; GFCLR1, GFCLR2, GFANG for a gradient). The current pattern or gradient is remembered first, and \"pattern\" or \"gradient\" takes the last one a hatch had (ANSI31, LINEAR when none)")
+            .enabled(has_doc)
+            .transparent(),
         CommandSpec::new("hatchboundaryset", "Boundary Set", run_boundary_set)
             .params("{handles?: [hex] (the new boundary set, in use), clear?: true (Use Current Viewport: the set is kept aside), reuse?: true (use the kept set again)}")
             .noundo()
@@ -71,6 +75,18 @@ pub fn specs() -> Vec<CommandSpec> {
 pub struct TypeMemory {
     pub(crate) pattern: Option<(String, Vec<cadcraft_doc::library::PatternLine>)>,
     pub(crate) gradient: Option<cadcraft_doc::Gradient>,
+}
+
+impl TypeMemory {
+    /// Remember `h`'s pattern (with its lines) when it is a pattern, or its gradient with its
+    /// settings when it is a gradient; solid and user-defined hatches leave both as they are.
+    pub(crate) fn remember(&mut self, h: &Hatch) {
+        if let Some(g) = &h.gradient {
+            self.gradient = Some(g.clone());
+        } else if !h.solid && !h.is_user() && !h.pattern.trim().is_empty() {
+            self.pattern = Some((h.pattern.clone(), h.pattern_lines.clone()));
+        }
+    }
 }
 
 /// The tolerance curves are flattened with for boundary tracing, in a space with extents `ext`.
@@ -355,6 +371,9 @@ struct HatchSettings {
     annotative: bool,
     /// HPDRAWORDER: 0 none, 1 back, 2 front, 3 behind the boundary, 4 in front of it.
     draw_order: i64,
+    /// The lines of the last pattern a hatch had, when it is `pattern` and CADCraft doesn't define
+    /// it (a drawing's own pattern): a hatch turned back to "pattern" keeps its definition.
+    remembered_lines: Option<Vec<cadcraft_doc::library::PatternLine>>,
 }
 
 /// A Hatch Creation setting held as text (HPCOLOR, HPLAYER…): "." or empty is "use current".
@@ -402,7 +421,9 @@ impl HatchSettings {
             centered: bool_or(p, "centered", true),
         });
         let hp_int = |name: &str, default: i64| s.doc().map_or(default, |d| d.header.i64(name, default));
+        let remembered_lines = s.hatch_last_pattern().filter(|(n, l)| n.eq_ignore_ascii_case(&pattern) && !l.is_empty()).map(|(_, l)| l.to_vec());
         HatchSettings {
+            remembered_lines,
             pattern,
             scale: f64_or(p, "scale", hdr.1).max(1e-9),
             angle: p.get("angle").and_then(Value::as_f64).map(f64::to_radians).unwrap_or(hdr.2),
@@ -451,7 +472,11 @@ impl HatchSettings {
             pattern_lines: if self.pattern.eq_ignore_ascii_case(cadcraft_doc::USER_PATTERN) {
                 edit::user_lines(self.double)
             } else {
-                patfile::lines_for(&self.pattern)
+                let lines = patfile::lines_for(&self.pattern);
+                match &self.remembered_lines {
+                    Some(own) if lines.is_empty() => own.clone(),
+                    _ => lines,
+                }
             },
         })
     }
@@ -738,6 +763,48 @@ fn current_viewport_message(s: &Session) -> String {
     }
 }
 
+/// A colour as a Hatch Creation setting takes it (HPCOLOR, GFCLR1…): an index, or `r,g,b`.
+fn hp_color(c: Color) -> String {
+    match c {
+        Color::True(rgb) => format!("{},{},{}", rgb.0, rgb.1, rgb.2),
+        other => other.to_aci().to_string(),
+    }
+}
+
+/// HATCH.TYPE: the Hatch Creation tab's Type list. The hatch being made (as the HP* settings
+/// describe it) is remembered, then the settings take the asked type, with the last pattern or
+/// gradient a hatch had for "pattern" and "gradient".
+fn run_hatch_type(s: &mut Session, p: &Value) -> Result<Value> {
+    let t = str_param(p, "type").map(str::to_ascii_lowercase).ok_or_else(|| bad("hatch.type", "`type` is required"))?;
+    let gradient_cmd = s.running.as_ref().is_some_and(|r| r.id == "gradient");
+    if let EntityKind::Hatch(current) = HatchSettings::from(s, &Value::Null, gradient_cmd).hatch(Vec::new()) {
+        s.remember_hatch(&current);
+    }
+    let vars: Vec<(&str, Value)> = match t.as_str() {
+        "solid" => vec![("HPNAME", json!("SOLID"))],
+        "user" => vec![("HPNAME", json!(cadcraft_doc::USER_PATTERN))],
+        "pattern" => vec![("HPNAME", json!(s.hatch_last_pattern().map_or("ANSI31", |(n, _)| n)))],
+        "gradient" => {
+            let g = s.hatch_last_gradient().cloned();
+            let tile = g.as_ref().and_then(|g| GRADIENT_TILES.iter().find(|(_, n)| n.eq_ignore_ascii_case(&g.name))).map_or("GR_LINEAR", |(t, _)| *t);
+            let mut v = vec![("HPNAME", json!(tile))];
+            if let Some(g) = g {
+                v.push(("GFCLR1", json!(hp_color(g.color1))));
+                v.push(("GFCLR2", json!(hp_color(g.color2))));
+                v.push(("GFANG", json!(g.angle.to_degrees())));
+            }
+            v
+        }
+        _ => return Err(bad("hatch.type", "`type` is \"pattern\", \"gradient\", \"solid\" or \"user\"")),
+    };
+    for (name, value) in &vars {
+        crate::sysvars::set(s, name, value)?;
+    }
+    s.touch();
+    let name = s.doc().map(|d| d.header.str("HPNAME", "")).unwrap_or_default();
+    Ok(json!({ "type": t, "pattern": name }))
+}
+
 /// HATCHBOUNDARYSET: the objects pick points look at (Hatch Editor > Boundaries > Select New
 /// Boundary Set); `clear` is Use Current Viewport (the set is kept aside), `reuse` takes the kept
 /// set again.
@@ -762,6 +829,13 @@ fn run_boundary_set(s: &mut Session, p: &Value) -> Result<Value> {
 
 const KEYWORDS: Accept = Accept { point: false, number: false, text: false, select: false, enter: true };
 
+/// Close Hatch Creation: ends HATCH and makes the hatch, as Enter does at the boundary prompt.
+const CLOSE: &str = "Close";
+
+/// What the Hatch Creation tab's buttons send to HATCH (not offered at its prompts).
+const BUTTON_KEYWORDS: [&str; 8] =
+    ["picK internal point", "Select objects", "Remove boundaries", "Origin", "Inherit properties", "use Current viewport", "new boundary Set", CLOSE];
+
 /// Choosing a boundary set (Hatch Creation > Select New Boundary Set, HATCHBOUNDARYSET typed):
 /// with a set already chosen, in use or kept, "Current boundary set: N object(s)." then "Do you
 /// want a new boundary set? [Yes/No] <No>", where No uses it again; then objects are selected, as
@@ -772,6 +846,12 @@ pub(crate) struct BoundaryAsk {
 }
 
 impl BoundaryAsk {
+    /// The choice is given up (Esc, or a Hatch Creation button): the set there was stays, the
+    /// objects picked for the new one are forgotten.
+    pub(crate) fn give_up(&self, s: &mut Session) {
+        s.pending_window = None;
+        s.set_selection(Vec::new());
+    }
     pub(crate) fn new(s: &Session) -> Self {
         BoundaryAsk { question: s.hatch_boundary_set_kept().is_some(), sel: machines::SelectPhase::default() }
     }
@@ -794,7 +874,6 @@ impl BoundaryAsk {
     pub(crate) fn input(&mut self, s: &mut Session, i: &Input) -> Result<bool> {
         if self.question {
             let new = match i {
-                Input::Cancel => return Ok(true),
                 Input::Enter => false,
                 Input::Keyword(k) | Input::Text(k) => match self.prompt(s).match_keyword(k).as_deref() {
                     Some("Yes") => true,
@@ -813,10 +892,6 @@ impl BoundaryAsk {
             if let Some(n) = s.use_kept_hatch_boundary_set() {
                 s.echo(format!("Boundary set: {n} object(s)."));
             }
-            return Ok(true);
-        }
-        if matches!(i, Input::Cancel) {
-            s.set_selection(Vec::new());
             return Ok(true);
         }
         match self.sel.feed(s, i)? {
@@ -852,6 +927,10 @@ impl Interactive for BoundarySetM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         Ok(if self.0.input(s, &i)? { Step::Done } else { Step::Continue })
+    }
+    fn cancel(&mut self, s: &mut Session) -> bool {
+        self.0.give_up(s);
+        false
     }
 }
 
@@ -1106,12 +1185,33 @@ impl Interactive for HatchM {
             "sEparate",
         ]))
     }
-    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        if let Some(b) = self.boundary.as_mut() {
-            if b.input(s, &i)? {
-                self.boundary = None;
+    fn cancel(&mut self, s: &mut Session) -> bool {
+        // Esc while choosing a boundary set gives up that choice only.
+        match self.boundary.take() {
+            Some(b) => {
+                b.give_up(s);
+                true
             }
-            return Ok(Step::Continue);
+            None => false,
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let button = matches!(&i, Input::Keyword(k) if BUTTON_KEYWORDS.contains(&k.as_str()));
+        if let Some(b) = self.boundary.as_mut() {
+            if !button {
+                if b.input(s, &i)? {
+                    self.boundary = None;
+                }
+                return Ok(Step::Continue);
+            }
+            // A Hatch Creation button gives up the boundary set choice, as Esc does, then
+            // does what it does.
+            b.give_up(s);
+            self.boundary = None;
+        }
+        if matches!(&i, Input::Keyword(k) if k == CLOSE) {
+            self.asking = None;
+            return self.finish(s);
         }
         if let Some(a) = self.asking.take() {
             match &i {

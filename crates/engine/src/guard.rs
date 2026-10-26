@@ -66,6 +66,10 @@ impl Interactive for Guarded {
     fn begin(&mut self, s: &mut Session) -> Result<Step> {
         catch_unwind(AssertUnwindSafe(|| self.inner.begin(s))).unwrap_or_else(|p| Err(self.internal(&*p)))
     }
+    fn cancel(&mut self, s: &mut Session) -> bool {
+        // A broken or panicking machine lets Esc cancel the command.
+        self.broken.get().is_none() && catch_unwind(AssertUnwindSafe(|| self.inner.cancel(s))).unwrap_or(false)
+    }
     fn preview(&self, s: &Session, cursor: Vec2) -> Vec<EntityKind> {
         if self.broken.get().is_some() {
             return Vec::new();

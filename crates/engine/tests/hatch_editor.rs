@@ -435,3 +435,123 @@ fn hatchboundaryset_typed_offers_the_set_it_has() {
     s.execute("hatchboundaryset", &json!({ "clear": true })).unwrap();
     assert_eq!(s.execute("hatchboundaryset", &json!({ "reuse": true })).unwrap()["objects"], json!(2));
 }
+
+/// Esc while choosing a boundary set gives up that choice only: HATCH goes on with the points
+/// already picked, the set there was stays, and the objects picked for the new one are not left
+/// selected. A second Esc cancels HATCH.
+#[test]
+fn esc_while_choosing_a_boundary_set_gives_up_the_choice_only() {
+    let mut s = Session::new();
+    let a = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    let b = rect(&mut s, [30.0, 0.0], [50.0, 20.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [a] })).unwrap();
+    s.start("hatch").unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    s.input(Input::Keyword("Yes".into())).unwrap();
+    s.input(Input::Pick(vec![hx(&b)])).unwrap();
+    assert!(!s.selection().is_empty(), "the picked object shows selected while choosing");
+    s.cancel();
+    assert!(s.running.is_some(), "HATCH goes on");
+    assert!(s.current_prompt().unwrap().message.contains("Pick internal point"));
+    assert!(s.selection().is_empty());
+    assert_eq!(s.hatch_boundary_set(), Some(&[hx(&a)][..]), "the set there was stays");
+    // Enter makes the hatch from the point picked before Esc.
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none());
+    assert!(s.doc().unwrap().model.iter().any(|e| matches!(e.kind, EntityKind::Hatch(_))));
+
+    // A second Esc cancels HATCH.
+    s.start("hatch").unwrap();
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    s.cancel();
+    assert!(s.running.is_some());
+    s.cancel();
+    assert!(s.running.is_none());
+
+    // HATCHBOUNDARYSET typed: Esc ends it without leaving the picked objects selected.
+    s.start("hatchboundaryset").unwrap();
+    s.input(Input::Keyword("Yes".into())).unwrap();
+    s.input(Input::Pick(vec![hx(&b)])).unwrap();
+    s.cancel();
+    assert!(s.running.is_none());
+    assert!(s.selection().is_empty());
+    assert_eq!(s.hatch_boundary_set(), Some(&[hx(&a)][..]));
+}
+
+/// A Hatch Creation button while a boundary set is being chosen gives up the choice, as Esc does,
+/// then does what it does: Close makes the hatch at once, Pick Points picks points again.
+#[test]
+fn a_hatch_creation_button_gives_up_the_boundary_set_choice_then_acts() {
+    let mut s = Session::new();
+    let a = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    s.start("hatch").unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 5.0))).unwrap();
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    s.input(Input::Pick(vec![hx(&a)])).unwrap();
+    s.input(Input::Keyword("picK internal point".into())).unwrap();
+    assert!(s.current_prompt().unwrap().message.contains("Pick internal point"));
+    assert!(s.selection().is_empty());
+    assert_eq!(s.hatch_boundary_set(), None, "no set was chosen");
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    s.input(Input::Pick(vec![hx(&a)])).unwrap();
+    s.input(Input::Keyword("Close".into())).unwrap();
+    assert!(s.running.is_none(), "one Close ends HATCH");
+    assert_eq!(s.doc().unwrap().model.iter().filter(|e| matches!(e.kind, EntityKind::Hatch(_))).count(), 1);
+    assert_eq!(s.hatch_boundary_set(), None);
+}
+
+/// The Block Editor's boundary set stays with the editor of its drawing: through BSAVEAS, and
+/// apart from another drawing's Block Editor.
+#[test]
+fn the_block_editor_boundary_set_survives_bsaveas_and_stays_with_its_drawing() {
+    let mut s = Session::new();
+    let inner = rect(&mut s, [0.0, 0.0], [10.0, 10.0]);
+    s.execute("block", &json!({ "name": "Box", "base": [0, 0], "handles": [inner] })).unwrap();
+    s.execute("bedit", &json!({ "name": "Box" })).unwrap();
+    let square = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_))).unwrap().handle;
+    s.execute("hatchboundaryset", &json!({ "handles": [square.hex()] })).unwrap();
+    s.execute("bsaveas", &json!({ "name": "Box2" })).unwrap();
+    assert_eq!(s.hatch_boundary_set(), Some(&[square][..]), "kept through BSAVEAS");
+
+    // Another drawing's Block Editor has its own set; closing it leaves the first one's.
+    let first = s.active;
+    s.execute("new", &json!({})).unwrap();
+    let other = rect(&mut s, [0.0, 0.0], [5.0, 5.0]);
+    s.execute("block", &json!({ "name": "Tile", "base": [0, 0], "handles": [other] })).unwrap();
+    s.execute("bedit", &json!({ "name": "Tile" })).unwrap();
+    assert_eq!(s.hatch_boundary_set(), None);
+    let tile = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_))).unwrap().handle;
+    s.execute("hatchboundaryset", &json!({ "handles": [tile.hex()] })).unwrap();
+    s.execute("bclose", &json!({ "save": false })).unwrap();
+    s.active = first;
+    assert_eq!(s.hatch_boundary_set(), Some(&[square][..]), "the first drawing's editor keeps its set");
+}
+
+/// HATCH.TYPE (the Hatch Creation tab's Type list) remembers the pattern or gradient being made
+/// and turns back to the last one, with a drawing's own pattern keeping its lines.
+#[test]
+fn hatch_type_turns_back_to_the_last_pattern_with_its_lines() {
+    let mut s = Session::new();
+    rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    s.execute("setvar", &json!({ "name": "HPNAME", "value": "ANSI37" })).unwrap();
+    s.execute("hatch.type", &json!({ "type": "solid" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.str("HPNAME", ""), "SOLID");
+    s.execute("hatch.type", &json!({ "type": "pattern" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.str("HPNAME", ""), "ANSI37");
+    assert!(s.execute("hatch.type", &json!({ "type": "dots" })).is_err());
+
+    // A drawing's own pattern (not defined by CADCraft), remembered from a hatch that had it.
+    let own = cadcraft_engine::doc::library::PatternLine { angle: 30.0, origin: (0.0, 0.0), delta: (0.0, 0.7), dashes: vec![0.5, -0.25] };
+    let first = handle(&s.execute("hatch", &json!({ "points": [[2, 2]], "pattern": "ANSI31" })).unwrap());
+    let mut h = hatch(&s, &first);
+    h.pattern = "MYPAT".into();
+    h.pattern_lines = vec![own.clone()];
+    // Being solid, the hatch being made doesn't replace it in the memory.
+    s.execute("setvar", &json!({ "name": "HPNAME", "value": "SOLID" })).unwrap();
+    s.remember_hatch(&h);
+    s.execute("hatch.type", &json!({ "type": "pattern" })).unwrap();
+    assert_eq!(s.doc().unwrap().header.str("HPNAME", ""), "MYPAT");
+    let made = handle(&s.execute("hatch", &json!({ "points": [[2, 2]] })).unwrap());
+    assert_eq!(hatch(&s, &made).pattern_lines, vec![own], "drawn with its own lines, not ANSI31");
+}

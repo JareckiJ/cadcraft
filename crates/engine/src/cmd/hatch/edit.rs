@@ -184,8 +184,8 @@ fn make_user(h: &mut Hatch, double: bool) {
 
 /// Type, pattern, scale (or spacing) and angle (degrees) from the parameters. `default_pattern`
 /// is the pattern (name and lines) a hatch turned to "pattern" from another type takes: the last
-/// pattern a hatch had ([`Session::hatch_last_pattern`]).
-fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &(String, Vec<PatternLine>)) {
+/// pattern a hatch had ([`Session::hatch_last_pattern`]), else ANSI31.
+fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: Option<&(String, Vec<PatternLine>)>) {
     match kind {
         Some(Kind::Solid) => {
             h.pattern = "SOLID".into();
@@ -194,10 +194,18 @@ fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &(S
             h.pattern_lines.clear();
         }
         Some(Kind::Pattern) if h.solid || h.gradient.is_some() || h.pattern.eq_ignore_ascii_case(USER) => {
-            h.pattern.clone_from(&default_pattern.0);
+            match default_pattern {
+                Some((name, lines)) => {
+                    h.pattern.clone_from(name);
+                    h.pattern_lines.clone_from(lines);
+                }
+                None => {
+                    h.pattern = "ANSI31".into();
+                    h.pattern_lines.clear();
+                }
+            }
             h.solid = false;
             h.gradient = None;
-            h.pattern_lines.clone_from(&default_pattern.1);
         }
         Some(Kind::User) if !h.pattern.eq_ignore_ascii_case(USER) => make_user(h, false),
         // Gradient: the `gradient` edit (default LINEAR when none is given) does it.
@@ -532,9 +540,10 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
     let inherit_origin = bool_or(p, "inheritOrigin", false);
     // What a hatch turned to another type takes: the last pattern or gradient a hatch had (the
     // edited ones' own count, see below), else ANSI31 and the default gradient.
-    let mut default_pattern = s.hatch_last_pattern().map_or_else(|| ("ANSI31".to_string(), Vec::new()), |(n, l)| (n.to_string(), l.to_vec()));
-    let mut last_gradient = s.hatch_last_gradient().cloned();
-    let mut remembered: Vec<Hatch> = Vec::new();
+    // `memory` gives the defaults (the edited hatches' types before the edit count); `last` is
+    // what the session remembers afterwards (each hatch's type before and after, in order).
+    let mut memory = s.hatch_type_memory().clone();
+    let mut last = memory.clone();
     if grad.is_some() && str_param(p, "pattern").map(|v| v.trim().to_ascii_uppercase()).is_some_and(|v| !v.is_empty() && v != "SOLID") {
         return Err(bad("hatchedit", "give `pattern` or `gradient`, not both"));
     }
@@ -585,17 +594,13 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // The hatch's pattern or gradient before the edit is remembered, so turning it to
         // solid and back gives it again.
-        if let Some(g) = &h.gradient {
-            last_gradient = Some(g.clone());
-        } else if !h.solid && !h.is_user() && !h.pattern.trim().is_empty() {
-            default_pattern = (h.pattern.clone(), h.pattern_lines.clone());
-        }
-        remembered.push(h.clone());
-        properties(&mut h, p, kind, &default_pattern);
+        memory.remember(&h);
+        last.remember(&h);
+        properties(&mut h, p, kind, memory.pattern.as_ref());
         if let Some(g) = &grad {
-            g.apply(&mut h, last_gradient.as_ref());
+            g.apply(&mut h, memory.gradient.as_ref());
         }
-        remembered.push(h.clone());
+        last.remember(&h);
         if let Some(b) = background {
             h.background = b;
         }
@@ -659,9 +664,7 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     // Each hatch's type before and after the edit, in order: the last pattern and gradient.
-    for h in &remembered {
-        s.remember_hatch(h);
-    }
+    s.set_hatch_type_memory(last);
     // Store as Default Origin: new hatches start from this origin (HPORIGIN, HPORIGINMODE).
     if bool_or(p, "storeOrigin", false)
         && let Some(EntityKind::Hatch(h)) = hs.first().and_then(|x| s.doc().ok()?.entity(*x)).map(|e| e.kind.clone())

@@ -294,10 +294,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::ribbon_hatch::keyword(app, k);
             Ok(Value::Null)
         }
+        // Close ends HATCH and makes the hatch, even while a boundary set is being chosen.
         "ui.hatchcreate.close" => {
-            if let Err(e) = app.session.input(cadcraft_engine::Input::Enter) {
-                app.session.echo(e.to_string());
-            }
+            crate::ribbon_hatch::keyword(app, "Close");
             Ok(Value::Null)
         }
         "ui.toggle.filetabs" => {

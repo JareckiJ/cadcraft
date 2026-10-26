@@ -334,10 +334,11 @@ fn hatch_rows(
 pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
     let sid = egui::Id::unique("qp_state");
     let sel = app.session.selection();
-    if sel.is_empty() {
-        app.qp_forced = false;
+    // Asked-for Quick Properties last while the selection is the one they were asked for.
+    if app.qp_forced.as_ref().is_some_and(|f| *f != sel) {
+        app.qp_forced = None;
     }
-    let active = (app.session.settings.qpmode || app.qp_forced)
+    let active = (app.session.settings.qpmode || app.qp_forced.is_some())
         && !sel.is_empty()
         && app.session.running.is_none()
         && !app.ui.start_tab
@@ -515,12 +516,15 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
         let _ = app.run("properties.set", json!({ "handles": ids, k: v }));
     }
     if let Some(mut p) = hatch_edit {
-        p["handles"] = json!(ids);
+        if let Some(o) = p.as_object_mut() {
+            o.insert("handles".into(), json!(ids));
+        }
         if let Err(e) = app.run("hatchedit", p) {
             app.session.echo(e);
         }
     }
     if close {
+        app.qp_forced = None;
         let _ = app.run("qpmode", json!({ "on": false }));
     }
 }

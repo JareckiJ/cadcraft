@@ -198,13 +198,15 @@ fn set_header(s: &mut Session, name: &str, kind: Kind, v: &Value, bad: impl Fn(S
             s.doc_mut()?.header.set_f64(name, cadcraft_geom::norm_angle(a));
         }
         Kind::Pattern => {
-            // The library's patterns, a loaded .pat file's, user-defined lines (_USER) and the
-            // Hatch Creation tab's gradient tiles (GR_LINEAR…).
+            // The library's patterns, a loaded .pat file's, user-defined lines (_USER), the
+            // Hatch Creation tab's gradient tiles (GR_LINEAR…) and the last pattern a hatch had
+            // (a drawing's own: its lines are remembered with it).
             let p = v.as_str().map(|t| t.trim().to_ascii_uppercase()).filter(|p| {
                 cadcraft_doc::library::pattern(p).is_some()
                     || p == cadcraft_doc::USER_PATTERN
                     || crate::cmd::hatch::GRADIENT_TILES.iter().any(|(t, _)| t == p)
                     || crate::cmd::hatch::is_user_pattern(p)
+                    || s.hatch_last_pattern().is_some_and(|(n, _)| n.eq_ignore_ascii_case(p))
             });
             let p = p.ok_or_else(|| bad("a hatch pattern name".into()))?;
             s.doc_mut()?.header.set_str(name, &p);

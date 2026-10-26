@@ -262,7 +262,7 @@ fn quick_properties_of_a_hatch_list_its_rows_and_edit_it() {
     // The Properties palette has its own Linetype row.
     let linetypes = h.query_all_by_label("Linetype").count();
     // As a double-click on the hatch with the Ribbon does.
-    h.state_mut().qp_forced = true;
+    h.state_mut().force_quick_properties();
     h.run_steps(3);
     for label in ["Pattern name", "Annotative", "Associative", "Background color"] {
         assert!(h.query_all_by_label(label).next().is_some(), "{label} shown");
@@ -277,4 +277,34 @@ fn quick_properties_of_a_hatch_list_its_rows_and_edit_it() {
     let d = h.state().session.doc().unwrap();
     let cadcraft_engine::doc::EntityKind::Hatch(x) = &d.entity(hatch).unwrap().kind else { panic!() };
     assert!(!x.associative);
+}
+
+/// Quick Properties asked for (as double-clicking a hatch with the Ribbon does) last while the
+/// selection stays the same, and their Close button closes them although QPMODE is already off.
+#[test]
+fn asked_for_quick_properties_follow_the_selection_and_close() {
+    let (mut h, hatch, rect) = harness(false);
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    h.state_mut().force_quick_properties();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Pattern name").next().is_some(), "shown for the hatch");
+    // Another object added: QPMODE (off) decides again.
+    h.state_mut().session.set_selection(vec![hatch, rect]);
+    h.run_steps(3);
+    assert!(h.state().qp_forced.is_none());
+    assert!(h.query_all_by_label("Pattern name").next().is_none());
+
+    // Close closes them.
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    h.state_mut().force_quick_properties();
+    h.run_steps(3);
+    // The palette's own Close (the Ribbon has a Close button of its own).
+    let closes: Vec<_> = h.get_all_by_label("Close").collect();
+    closes.last().unwrap().click();
+    h.run_steps(3);
+    assert_eq!(h.state().session.selection(), vec![hatch], "the hatch stays selected");
+    assert!(h.state().qp_forced.is_none());
+    assert!(h.query_all_by_label("Pattern name").next().is_none());
 }

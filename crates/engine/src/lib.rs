@@ -147,6 +147,9 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// The boundary set hatches use here ([`Session::hatch_boundary_set`]); in the Block Editor,
+    /// the editor's own (the drawing's waits with it, [`blockedit::BlockEdit::host`]).
+    pub hatch_boundary: Option<BoundarySet>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -173,6 +176,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            hatch_boundary: None,
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -643,15 +647,12 @@ impl Default for MLeaderOptions {
     }
 }
 
-/// A boundary set and where it belongs: the drawing (`DocState::uid`), the block when it was
-/// chosen in the Block Editor, and whether pick points use it (`false`: Use Current Viewport, the
-/// set kept for later).
+/// A drawing's boundary set (HATCHBOUNDARYSET) and whether pick points use it (`false`: Use
+/// Current Viewport, the set kept for later). The Block Editor has its own, which goes with it.
 #[derive(Clone, Debug)]
-struct BoundarySet {
-    uid: u64,
-    block: Option<String>,
-    handles: Vec<Handle>,
-    active: bool,
+pub struct BoundarySet {
+    pub handles: Vec<Handle>,
+    pub active: bool,
 }
 
 /// The editor session: open drawings, settings, the running command and the command log.
@@ -722,11 +723,6 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
-    /// The Hatch Editor's boundary set (HATCHBOUNDARYSET): see [`Session::hatch_boundary_set`].
-    hatch_boundary_set: Option<BoundarySet>,
-    /// The boundary set chosen in the Block Editor: the editor's objects are numbered apart from
-    /// the drawing's, so each keeps its own set.
-    hatch_boundary_set_block: Option<BoundarySet>,
     /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
     pub hatch_store_origin: bool,
     /// The last pattern and the last gradient a hatch had: what a hatch turned back to "pattern"
@@ -782,8 +778,6 @@ impl Session {
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
-            hatch_boundary_set: None,
-            hatch_boundary_set_block: None,
             hatch_store_origin: false,
             hatch_memory: cmd::hatch::TypeMemory::default(),
         }
@@ -844,41 +838,27 @@ impl Session {
         }
     }
 
-    /// The boundary set of the current drawing (of the block edited, in the Block Editor), in use
-    /// or kept. A set chosen in another drawing doesn't apply (handles are numbered per drawing).
-    fn boundary_slot(&self) -> Option<&BoundarySet> {
-        let st = self.state().ok()?;
-        let slot = match st.block_editor() {
-            Some(_) => self.hatch_boundary_set_block.as_ref(),
-            None => self.hatch_boundary_set.as_ref(),
-        };
-        slot.filter(|b| b.uid == st.uid && b.block.as_deref().map(str::to_ascii_uppercase) == st.block_editor().map(str::to_ascii_uppercase))
-    }
-
     /// The current drawing's boundary set (HATCHBOUNDARYSET): the only objects pick points look
     /// at; `None` uses everything visible in the current viewport ("Use Current Viewport", a set
     /// chosen earlier then being kept, see [`Session::hatch_boundary_set_kept`]). In the Block
-    /// Editor, the set chosen there for the block edited: the drawing's set waits for BCLOSE.
+    /// Editor, the set chosen there: the drawing's set waits for BCLOSE.
     pub fn hatch_boundary_set(&self) -> Option<&[Handle]> {
-        self.boundary_slot().filter(|b| b.active).map(|b| b.handles.as_slice())
+        self.state().ok()?.hatch_boundary.as_ref().filter(|b| b.active).map(|b| b.handles.as_slice())
     }
 
     /// The current drawing's boundary set, in use or kept aside by Use Current Viewport.
     pub fn hatch_boundary_set_kept(&self) -> Option<&[Handle]> {
-        self.boundary_slot().map(|b| b.handles.as_slice())
+        self.state().ok()?.hatch_boundary.as_ref().map(|b| b.handles.as_slice())
     }
 
     /// Make `set` the current drawing's boundary set (the Block Editor's while it is open), in
     /// use; `None` is Use Current Viewport: the set is kept aside, not forgotten.
     pub fn set_hatch_boundary_set(&mut self, set: Option<Vec<Handle>>) {
-        let Ok(st) = self.state() else { return };
-        let (uid, block) = (st.uid, st.block_editor().map(str::to_string));
-        let editor = block.is_some();
-        let slot = if editor { &mut self.hatch_boundary_set_block } else { &mut self.hatch_boundary_set };
+        let Ok(st) = self.state_mut() else { return };
         match set {
-            Some(handles) => *slot = Some(BoundarySet { uid, block, handles, active: true }),
+            Some(handles) => st.hatch_boundary = Some(BoundarySet { handles, active: true }),
             None => {
-                if let Some(b) = slot.as_mut().filter(|b| b.uid == uid) {
+                if let Some(b) = st.hatch_boundary.as_mut() {
                     b.active = false;
                 }
             }
@@ -887,22 +867,25 @@ impl Session {
 
     /// Use the kept boundary set again; its size, or `None` when there is none.
     pub fn use_kept_hatch_boundary_set(&mut self) -> Option<usize> {
-        let n = self.hatch_boundary_set_kept()?.len();
-        let editor = self.state().ok()?.block_editor().is_some();
-        let slot = if editor { &mut self.hatch_boundary_set_block } else { &mut self.hatch_boundary_set };
-        slot.as_mut()?.active = true;
-        Some(n)
+        let b = self.state_mut().ok()?.hatch_boundary.as_mut()?;
+        b.active = true;
+        Some(b.handles.len())
     }
 
     /// Remember `h`'s pattern (with its lines) when it is a pattern, or its gradient with its
     /// settings when it is a gradient, so a hatch turned back to that type takes it again.
     /// Solid and user-defined hatches leave both as they are.
     pub fn remember_hatch(&mut self, h: &cadcraft_doc::Hatch) {
-        if let Some(g) = &h.gradient {
-            self.hatch_memory.gradient = Some(g.clone());
-        } else if !h.solid && !h.is_user() && !h.pattern.trim().is_empty() {
-            self.hatch_memory.pattern = Some((h.pattern.clone(), h.pattern_lines.clone()));
-        }
+        self.hatch_memory.remember(h);
+    }
+
+    /// The last pattern and gradient hatches had ([`Session::remember_hatch`]).
+    pub(crate) fn hatch_type_memory(&self) -> &cmd::hatch::TypeMemory {
+        &self.hatch_memory
+    }
+
+    pub(crate) fn set_hatch_type_memory(&mut self, memory: cmd::hatch::TypeMemory) {
+        self.hatch_memory = memory;
     }
 
     /// The last pattern a hatch had (name and the lines it brings), if any.
@@ -913,11 +896,6 @@ impl Session {
     /// The last gradient a hatch had, with its colours, angle and centring, if any.
     pub fn hatch_last_gradient(&self) -> Option<&cadcraft_doc::Gradient> {
         self.hatch_memory.gradient.as_ref()
-    }
-
-    /// The Block Editor closed: its boundary set goes with it.
-    pub(crate) fn drop_block_hatch_boundary_set(&mut self) {
-        self.hatch_boundary_set_block = None;
     }
 
     pub fn state(&self) -> Result<&DocState> {
@@ -1363,7 +1341,15 @@ impl Session {
         let base = if matches!(input, Some(Input::Point(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
         let Some(mut run) = self.running.take() else { return Ok(()) };
         let step = match input {
-            Some(Input::Cancel) => Ok(Step::Cancel),
+            // A step inside the command may take Esc and let the command go on.
+            Some(Input::Cancel) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run.machine.cancel(self))) {
+                Ok(true) => {
+                    self.echo("*Cancel*");
+                    Ok(Step::Continue)
+                }
+                Ok(false) => Ok(Step::Cancel),
+                Err(_) => Err(EngineError::Internal(run.id.clone(), "panic".into())),
+            },
             Some(i) => {
                 if let Input::Point(p) = &i {
                     self.last_point = *p;

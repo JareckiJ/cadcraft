@@ -1557,7 +1557,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.set_selection(vec![h]);
         if app.ui.show_ribbon {
             // With the Ribbon, Quick Properties opens beside the Hatch Editor tab.
-            app.qp_forced = true;
+            app.force_quick_properties();
         } else {
             // No Ribbon (Mac layout): the Hatch Edit dialog is the only editor.
             crate::hatchdlg::open_edit(app);
@@ -3035,7 +3035,7 @@ mod hatch_pick_tests {
         frame(&mut app, Vec::new(), 0.4);
         // The hatch alone selected (so the Hatch Editor tab shows) and Quick Properties forced on.
         assert_eq!(app.session.selection().iter().map(|h| h.hex()).collect::<Vec<_>>(), vec![hx]);
-        assert!(app.qp_forced);
+        assert!(app.qp_forced.is_some());
         assert_eq!(app.ui.dialog, None);
         assert!(app.session.running.is_none());
     }
