@@ -82,8 +82,7 @@ fn same_polyline(
     s: &mut Session,
     h: Handle,
     pl: &LwPolyline,
-    p1: Vec2,
-    p2: Vec2,
+    (p1, p2): (Vec2, Vec2),
     r: f64,
     chamfer: Option<ChamferDistances>,
     trim: bool,
@@ -365,7 +364,7 @@ pub(crate) fn fillet_pline(
         return Err(other("The object is on a locked layer."));
     }
     let made = match (&e1.kind, &e2.kind) {
-        (EntityKind::LwPolyline(pl), _) if h1 == h2 => same_polyline(s, h1, pl, p1, p2, r, chamfer, trim)?,
+        (EntityKind::LwPolyline(pl), _) if h1 == h2 => same_polyline(s, h1, pl, (p1, p2), r, chamfer, trim)?,
         // The first polyline picked keeps the result.
         (EntityKind::LwPolyline(pl), k) if matches!(k, EntityKind::Line(_) | EntityKind::LwPolyline(_)) => {
             polyline_and_other(s, (h1, pl, p1), (h2, k, p2), true, r, chamfer, trim)?
