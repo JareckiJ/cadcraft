@@ -873,10 +873,31 @@ fn run_parameters(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(row) = cs::parameter_table(&d).into_iter().find(|r| r.error.is_some()) {
             return Err(EngineError::Other(format!("`{name}` is used by `{}`", row.name)));
         }
+        super::modeling::validate(&d)?;
         *s.doc_mut()? = d;
     } else if let (Some(old), Some(to)) = (str_param(p, "name"), str_param(p, "rename")) {
         let mut d = s.doc()?.clone();
         cs::rename_parameter(&mut d, old.trim(), to.trim()).map_err(err)?;
+        for feature in &mut d.parametric.extrusions {
+            feature.depth = cs::expr::rename(&feature.depth, old.trim(), to.trim());
+        }
+        if let Some(part) = &mut d.part {
+            for sketch in &mut part.sketches {
+                if sketch.width_name() == old.trim() {
+                    sketch.width_parameter = to.trim().into();
+                }
+                if sketch.height_name() == old.trim() {
+                    sketch.height_parameter = to.trim().into();
+                }
+            }
+            for feature in &mut part.features {
+                feature.depth = cs::expr::rename(&feature.depth, old.trim(), to.trim());
+            }
+            for plane in &mut part.planes {
+                plane.offset = cs::expr::rename(&plane.offset, old.trim(), to.trim());
+            }
+        }
+        super::modeling::validate(&d)?;
         *s.doc_mut()? = d;
     } else if let Some(name) = str_param(p, "name") {
         let expr = match (str_param(p, "expr"), p.get("value").and_then(Value::as_f64)) {
@@ -891,6 +912,7 @@ fn run_parameters(s: &mut Session, p: &Value) -> Result<Value> {
         {
             q.description = desc.to_string();
         }
+        super::modeling::validate(&d)?;
         *s.doc_mut()? = d;
     }
     let rows = cs::parameter_table(s.doc()?);

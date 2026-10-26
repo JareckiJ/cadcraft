@@ -543,6 +543,17 @@ fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>
     });
     hint(ui, crate::tl!("An array that would create more objects than this is refused."));
     ui.add_space(6.0);
+    ui.strong("3D orbit");
+    let mut horizontal = app.options.orbit_reverse_horizontal;
+    let mut vertical = app.options.orbit_reverse_vertical;
+    if ui.checkbox(&mut horizontal, "Reverse horizontal orbit").changed() {
+        changes.insert("orbitReverseHorizontal".into(), json!(horizontal));
+    }
+    if ui.checkbox(&mut vertical, "Reverse vertical orbit").changed() {
+        changes.insert("orbitReverseVertical".into(), json!(vertical));
+    }
+    hint(ui, "Middle-drag orbits; Shift+middle-drag pans.");
+    ui.add_space(6.0);
     let mut timed = app.options.time_sensitive_right_click;
     if ui.checkbox(&mut timed, crate::tl!("Time-sensitive right-click: a quick click is Enter, holding opens the menu")).changed() {
         changes.insert("timeSensitiveRightClick".into(), json!(timed));

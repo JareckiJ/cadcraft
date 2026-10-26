@@ -72,6 +72,8 @@ pub struct UiOptions {
     pub time_sensitive_right_click: bool,
     /// The size of every menu, palette, dialog and the command line (1: the system's own).
     pub interface_scale: f32,
+    pub orbit_reverse_horizontal: bool,
+    pub orbit_reverse_vertical: bool,
 }
 
 impl Default for UiOptions {
@@ -83,6 +85,8 @@ impl Default for UiOptions {
             selection_color: None,
             time_sensitive_right_click: true,
             interface_scale: 1.0,
+            orbit_reverse_horizontal: true,
+            orbit_reverse_vertical: false,
         }
     }
 }
@@ -149,6 +153,8 @@ struct UiChanges {
     savefilepath: Option<String>,
     time_sensitive_right_click: Option<bool>,
     interface_scale: Option<f32>,
+    orbit_reverse_horizontal: Option<bool>,
+    orbit_reverse_vertical: Option<bool>,
 }
 
 fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
@@ -162,6 +168,8 @@ fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
 fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
     let text = || v.as_str().ok_or_else(|| format!("{key} must be text"));
     match key {
+        "orbitReverseHorizontal" => c.orbit_reverse_horizontal = Some(v.as_bool().ok_or("orbitReverseHorizontal must be true or false")?),
+        "orbitReverseVertical" => c.orbit_reverse_vertical = Some(v.as_bool().ok_or("orbitReverseVertical must be true or false")?),
         "theme" => c.theme = Some(ThemePref::parse(text()?).ok_or("theme must be system, light or dark")?),
         "animations" => c.animations = Some(AnimationPref::parse(text()?).ok_or("animations must be system, on or off")?),
         "interfaceLanguage" => {
@@ -212,6 +220,8 @@ fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
 fn ui_json(app: &CadApp) -> Map<String, Value> {
     let o = &app.options;
     let mut m = Map::new();
+    m.insert("orbitReverseHorizontal".into(), json!(o.orbit_reverse_horizontal));
+    m.insert("orbitReverseVertical".into(), json!(o.orbit_reverse_vertical));
     m.insert("theme".into(), json!(app.ui.theme.as_str()));
     m.insert("animations".into(), json!(app.ui.animations.as_str()));
     m.insert("interfaceLanguage".into(), json!(app.ui.interface_language.code()));
@@ -288,6 +298,12 @@ fn run_json(app: &mut CadApp, params: &Value) -> Result<Value, String> {
     if let Some(n) = ui.interface_scale {
         app.options.interface_scale = n;
     }
+    if let Some(b) = ui.orbit_reverse_horizontal {
+        app.options.orbit_reverse_horizontal = b;
+    }
+    if let Some(b) = ui.orbit_reverse_vertical {
+        app.options.orbit_reverse_vertical = b;
+    }
     if let Some(v) = ui.save_version {
         app.ui.save_version = v.year().to_string();
     }
@@ -325,6 +341,8 @@ impl CadApp {
             "version": 1,
             "sysvars": cadcraft_engine::cmd::options::profile(&self.session),
             "systemCursor": self.ui.system_cursor,
+            "orbitReverseHorizontal": self.options.orbit_reverse_horizontal,
+            "orbitReverseVertical": self.options.orbit_reverse_vertical,
             "modelBackground": color_json(self.options.model_background),
             "paperBackground": color_json(self.options.paper_background),
             "selectionColor": color_json(self.options.selection_color),
@@ -346,9 +364,17 @@ impl CadApp {
             cadcraft_engine::cmd::options::restore(&mut self.session, vars);
         }
         let mut c = UiChanges::default();
-        for key in
-            ["systemCursor", "modelBackground", "paperBackground", "selectionColor", "snapMarkerSize", "timeSensitiveRightClick", "interfaceScale"]
-        {
+        for key in [
+            "systemCursor",
+            "modelBackground",
+            "paperBackground",
+            "selectionColor",
+            "snapMarkerSize",
+            "timeSensitiveRightClick",
+            "interfaceScale",
+            "orbitReverseHorizontal",
+            "orbitReverseVertical",
+        ] {
             if let Some(value) = v.get(key) {
                 let _ = parse_ui(key, value, &mut c);
             }
@@ -372,6 +398,12 @@ impl CadApp {
         if let Some(b) = c.time_sensitive_right_click {
             self.options.time_sensitive_right_click = b;
         }
+        if let Some(b) = c.orbit_reverse_horizontal {
+            self.options.orbit_reverse_horizontal = b;
+        }
+        if let Some(b) = c.orbit_reverse_vertical {
+            self.options.orbit_reverse_vertical = b;
+        }
         if let Some(n) = c.interface_scale {
             self.options.interface_scale = n;
         }
@@ -390,5 +422,19 @@ mod tests {
         for bad in ["#+f+0+0", "", "#fff", "#gggggg", "#12345678", "#ééé", "#1234567"] {
             assert_eq!(parse_hex(bad), None, "{bad}");
         }
+    }
+    #[test]
+    fn orbit_direction_preferences_validate_and_survive_profile_restore() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        assert!(app.options.orbit_reverse_horizontal);
+        assert!(!app.options.orbit_reverse_vertical);
+        app.run("options", json!({"orbitReverseHorizontal":false,"orbitReverseVertical":true})).unwrap();
+        let saved = app.profile_json();
+        let mut restored = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        restored.load_profile(&saved);
+        assert!(!restored.options.orbit_reverse_horizontal);
+        assert!(restored.options.orbit_reverse_vertical);
+        assert!(restored.run("options", json!({"orbitReverseHorizontal":"bad","orbitReverseVertical":false})).is_err());
+        assert!(restored.options.orbit_reverse_vertical);
     }
 }

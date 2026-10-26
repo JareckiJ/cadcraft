@@ -238,11 +238,12 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     // Panels arrange in a split tree around the drawing; floating title bars only move windows.
     style.new_dock_zones = false;
     style.title_bar_docks = false;
+    let part_document = crate::part_editor::is_part(app);
     let output = DockArea::new(egui::Id::unique("cadcraft-docking")).show_with_limits(
         ui,
         &workspace.layout,
         &style,
-        |panel| crate::i18n::t(panel.label()).into(),
+        |panel| crate::i18n::t(if part_document && *panel == Panel::Layers { "Model Tree / Layers" } else { panel.label() }).into(),
         permissions,
         panel_limits,
         |ui, panel| match panel {
@@ -253,10 +254,17 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::ToolSets => crate::palettes::toolsets(app, ui),
             Panel::QuickCalc => crate::palettes::quickcalc::show(app, ui),
             Panel::Layers => {
-                egui::ScrollArea::vertical()
-                    .id_salt("dock-layers")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| crate::palettes::layers_section(app, ui));
+                if crate::part_editor::is_part(app) {
+                    egui::ScrollArea::vertical()
+                        .id_salt("dock-model-tree")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| crate::part_editor::tree(app, ui));
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("dock-layers")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| crate::palettes::layers_section(app, ui));
+                }
             }
             Panel::Properties => {
                 egui::ScrollArea::vertical().id_salt("dock-properties").auto_shrink([false, false]).show(ui, |ui| {

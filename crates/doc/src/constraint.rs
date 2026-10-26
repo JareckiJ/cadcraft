@@ -225,4 +225,14 @@ impl Default for ParametricSettings {
 pub struct Parametric {
     pub parameters: Vec<Parameter>,
     pub settings: ParametricSettings,
+    /// Experimental rectangular sketch extrusions. Persisted with the constraint payload.
+    pub extrusions: Vec<SketchExtrusion>,
+}
+
+/// A feature references source sketch geometry, rather than a frozen display mesh.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SketchExtrusion {
+    pub sketch: Handle,
+    pub depth: String,
 }

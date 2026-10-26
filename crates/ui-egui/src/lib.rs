@@ -40,10 +40,12 @@ pub mod layers;
 pub mod managers;
 pub mod menus;
 pub mod modal;
+mod modeling;
 pub mod opening;
 pub mod options;
 pub mod palettes;
 pub mod parametric;
+mod part_editor;
 pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
@@ -207,6 +209,7 @@ pub struct Services {
 }
 
 pub struct CadApp {
+    pub(crate) part_editor: part_editor::State,
     pub system_languages: Vec<String>,
     /// Whether the operating system shows animations, as the host reads it; `None` when the OS
     /// states nothing or the host cannot ask ([`animation`]).
@@ -285,6 +288,7 @@ impl CadApp {
     /// Construct `CadApp` from a session and services with default UI state, options, canvas and command line; no control channel, capture geometry or pending shots are installed.
     pub fn new(session: Session, services: Services) -> Self {
         CadApp {
+            part_editor: part_editor::State::default(),
             system_languages: Vec::new(),
             system_animations: None,
             session,

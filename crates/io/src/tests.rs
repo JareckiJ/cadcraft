@@ -1276,6 +1276,7 @@ fn parametric_sample(d: &mut Drawing) -> (Vec<Constraint>, Parametric) {
     // would look like DXF `\U+` escapes, and non-ASCII text.
     let long = format!("  {}  \\U+0041 \\\\ \"quoted\" Ünïcødé ✓ {}  ", "word ".repeat(80), "x".repeat(300));
     let parametric = Parametric {
+        extrusions: Vec::new(),
         parameters: vec![
             Parameter { name: "width".into(), expr: "12.5".into(), description: long },
             Parameter { name: "h".into(), expr: "width*0.4".into(), description: String::new() },

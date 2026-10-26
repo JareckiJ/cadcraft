@@ -174,6 +174,9 @@ impl BlockEdit {
 impl DocState {
     /// The drawing as a file saves it: outside the Block Editor's changes while it is open.
     pub fn drawing(&self) -> &Arc<Drawing> {
+        if let Some(edit) = &self.part_edit {
+            return &edit.host.doc;
+        }
         match &self.block_edit {
             Some(be) => &be.host.doc,
             None => &self.doc,
@@ -181,6 +184,9 @@ impl DocState {
     }
     /// [`DocState::drawing`], to change it (a save's file version).
     pub fn drawing_arc_mut(&mut self) -> &mut Arc<Drawing> {
+        if let Some(edit) = &mut self.part_edit {
+            return &mut edit.host.doc;
+        }
         match &mut self.block_edit {
             Some(be) => &mut be.host.doc,
             None => &mut self.doc,
@@ -196,8 +202,11 @@ impl DocState {
     }
     /// The drawing to keep for recovery (autosave): with the Block Editor's unsaved changes in the
     /// block, so a crash doesn't lose them. An error when the editor's changes can't be put in the
-    /// block (it would contain itself): the host drawing alone would lose them.
+    /// block or part: the host drawing alone would lose them.
     pub fn recovery_drawing(&self) -> Result<Arc<Drawing>> {
+        if let Some(edit) = &self.part_edit {
+            return edit.compose(&self.doc).map(|(d, _)| Arc::new(d));
+        }
         match &self.block_edit {
             Some(be) if self.block_unsaved() => be.compose(&self.doc, &be.name).map(Arc::new),
             Some(be) => Ok(be.host.doc.clone()),

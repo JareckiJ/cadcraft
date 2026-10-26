@@ -70,7 +70,17 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
         let r = ui.max_rect();
         if title_h > 0.0 {
             let title = match app.session.state() {
-                Ok(st) if !app.ui.start_tab => format!("CADCraft      {}{}", st.title, if st.title.contains('.') { "" } else { ".dwg" }),
+                Ok(st) if !app.ui.start_tab => format!(
+                    "CADCraft      {}{}",
+                    st.title,
+                    if st.title.contains('.') {
+                        ""
+                    } else if st.doc.part.is_some() {
+                        ".cadcraft"
+                    } else {
+                        ".dwg"
+                    }
+                ),
                 _ => format!("CADCraft      {}", crate::tl!("Start")),
             };
             // Centred on the traffic lights' centre line (the row's middle): with the system font
@@ -301,6 +311,19 @@ fn visible_tabs(widths: &[f32], active: Option<usize>, room: f32) -> std::ops::R
 /// Status bar: layout tabs follow the left-hand layout actions, independent of palette docking.
 /// Coordinates and drafting toggles remain on the right.
 pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
+    let part_space = crate::part_editor::is_part(app);
+    if crate::part_editor::is_part(app) && !crate::part_editor::drafting(app) {
+        let units = crate::part_editor::document(app).and_then(|d| d.part.as_ref()).map_or("", |p| p.units.as_str()).to_owned();
+        egui::Panel::bottom("cc_status").exact_size(26.0).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let _ = ui.selectable_label(true, "3D Model Space");
+                ui.label(format!("3D Part · {units}"));
+                ui.separator();
+                ui.label("Middle-drag to orbit / Shift+middle-drag to pan / Wheel to zoom");
+            });
+        });
+        return;
+    }
     let t = Tokens::get();
     egui::Panel::bottom("cc_status").exact_size(26.0).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let r = ui.max_rect();
@@ -389,12 +412,14 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             cadcraft_doc::Space::Model => "Model".to_string(),
             cadcraft_doc::Space::Paper(n) => n.clone(),
         });
-        if let Ok(st) = app.session.state() {
+        if !part_space && let Ok(st) = app.session.state() {
             let mut ls: Vec<_> = st.doc.layouts.iter().collect();
             ls.sort_by_key(|l| l.tab_order);
             tabs.extend(ls.iter().map(|l| l.name.clone()));
         }
-        let shown_name = |i: usize, name: &str| if i == 0 { crate::tl!("Model").to_string() } else { name.to_string() };
+        let shown_name = |i: usize, name: &str| {
+            if i == 0 { if part_space { "3D Model Space".into() } else { crate::tl!("Model").to_string() } } else { name.to_string() }
+        };
         let limit = (coord_right - STATUS_READOUT_MIN).max(x);
         let labels: Vec<_> =
             tabs.iter().enumerate().map(|(i, n)| elided(&p, &shown_name(i, n), crate::theme::body(), t.text, LAYOUT_TAB_TEXT)).collect();
@@ -431,9 +456,11 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
             if resp.clicked() {
                 switch = Some(name.clone());
             }
-            crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
+            if !part_space {
+                crate::shortcut_menus::attach(app, &resp, |app| crate::shortcut_menus::layout_tab_entries(app, name));
+            }
             x += w + 2.0;
-            if i == 0 {
+            if i == 0 && !part_space {
                 let pr = Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(16.0, 16.0));
                 let presp = ui.interact(pr, ui.scope_id().with("layout_plus"), Sense::click());
                 icons::paint(&p, pr.shrink(2.0), Icon::Plus, false);
