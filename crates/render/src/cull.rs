@@ -37,14 +37,59 @@ pub(crate) fn entity_reaches(d: &Drawing, e: &Entity, window: &Bounds2) -> bool 
     reaches(&entity_bounds(d, e, 0), window)
 }
 
-/// The block entities of `blk`, drawn with `xf` (block coordinates to the space being built),
-/// that can reach `window`: `None` builds them all (`xf` cannot be inverted); otherwise one flag
-/// per entity, in draw order. The window is brought into block coordinates as the box around
-/// its corners, so a rotated or skewed reference keeps everything that may show.
-pub(crate) fn block_entities(d: &Drawing, blk: &Arc<Block>, xf: &Mat3, window: &Bounds2) -> Option<Vec<bool>> {
-    let inv = xf.inverse()?;
-    let local = Bounds2::from_points(window.corners().map(|p| inv.apply(p)));
-    Some(block_bounds(d, blk).iter().map(|b| reaches(b, &local)).collect())
+/// The measured entity bounds of one block definition, looked up once per block reference and
+/// asked about each of its copies.
+pub(crate) struct BlockReach(Measured);
+
+/// Which entities of one copy of a block can reach the window.
+pub(crate) enum CopyReach {
+    /// Build them all (the copy's transform cannot be inverted).
+    All,
+    /// None of them: the copy lies wholly outside the window.
+    Nothing,
+    /// One flag per entity, in draw order.
+    Some(Vec<bool>),
+}
+
+/// The entity bounds of `blk`, to cull its copies with [`BlockReach::copy`].
+pub(crate) fn block_reach(d: &Drawing, blk: &Arc<Block>) -> BlockReach {
+    BlockReach(block_bounds(d, blk))
+}
+
+impl BlockReach {
+    /// The entities of the copy drawn with `xf` (block coordinates to the space being built) that
+    /// can reach `window`. The window is brought into block coordinates as the box around its
+    /// corners, so a rotated or skewed reference keeps everything that may show. A copy whose
+    /// definition has finite bounds wholly outside the window is ruled out without looking at
+    /// each entity.
+    pub(crate) fn copy(&self, xf: &Mat3, window: &Bounds2) -> CopyReach {
+        let Some(inv) = xf.inverse() else { return CopyReach::All };
+        let local = Bounds2::from_points(window.corners().map(|p| inv.apply(p)));
+        if self.0.extent.is_some_and(|x| !x.intersects(&local)) {
+            return CopyReach::Nothing;
+        }
+        CopyReach::Some(self.0.bounds.iter().map(|b| reaches(b, &local)).collect())
+    }
+}
+
+/// A block definition's entity bounds (block coordinates, draw order) and the box around them
+/// all: `None` when one has no measurable bounds (an infinite line, a ray), or the block is
+/// empty, so that the box alone never rules a copy out.
+#[derive(Clone)]
+struct Measured {
+    bounds: Arc<Vec<Bounds2>>,
+    extent: Option<Bounds2>,
+}
+
+impl Measured {
+    fn new(bounds: Vec<Bounds2>) -> Self {
+        let extent = if bounds.is_empty() || bounds.iter().any(Bounds2::is_empty) {
+            None
+        } else {
+            Some(bounds.iter().fold(Bounds2::EMPTY, |a, b| a.union(b)))
+        };
+        Measured { bounds: Arc::new(bounds), extent }
+    }
 }
 
 /// Block definitions whose entity bounds are kept (the oldest is dropped past it).
@@ -54,8 +99,8 @@ const MAX_BLOCKS: usize = 512;
 /// missing when measured).
 type Nested = Vec<(String, Option<Arc<Block>>)>;
 
-/// (definition, drawing key, the definitions it reaches, bounds of each entity in draw order).
-type Entry = (Arc<Block>, u64, Nested, Arc<Vec<Bounds2>>);
+/// (definition, drawing key, the definitions it reaches, its measured bounds).
+type Entry = (Arc<Block>, u64, Nested, Measured);
 
 static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
 
@@ -131,14 +176,14 @@ fn unchanged(d: &Drawing, nested: &Nested) -> bool {
 /// The bounds of every entity of `blk` (block coordinates, draw order), measured once per block
 /// definition, drawing key ([`drawing_key`]) and set of nested definitions. The cache holds the definitions
 /// themselves, so an edited block, or an edited block nested in it, is measured again.
-fn block_bounds(d: &Drawing, blk: &Arc<Block>) -> Arc<Vec<Bounds2>> {
+fn block_bounds(d: &Drawing, blk: &Arc<Block>) -> Measured {
     let key = drawing_key(d);
     if let Ok(cache) = CACHE.lock()
         && let Some((_, _, _, b)) = cache.iter().find(|(blk2, k, n, _)| *k == key && Arc::ptr_eq(blk2, blk) && unchanged(d, n))
     {
         return b.clone();
     }
-    let bounds: Arc<Vec<Bounds2>> = Arc::new(blk.entities.iter().map(|e| entity_bounds(d, e, 1)).collect());
+    let bounds = Measured::new(blk.entities.iter().map(|e| entity_bounds(d, e, 1)).collect());
     let deps = nested(d, blk);
     if let Ok(mut cache) = CACHE.lock() {
         cache.retain(|(blk2, k, _, _)| !(*k == key && Arc::ptr_eq(blk2, blk)));
@@ -148,4 +193,49 @@ fn block_bounds(d: &Drawing, blk: &Arc<Block>) -> Arc<Vec<Bounds2>> {
         cache.push((blk.clone(), key, deps, bounds.clone()));
     }
     bounds
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cadcraft_doc::{Handle, Line, RayLine};
+    use cadcraft_geom::{Vec2, Vec3};
+
+    fn block(name: &str, kinds: Vec<EntityKind>) -> Arc<Block> {
+        let mut blk = Block::new(name);
+        for (i, k) in kinds.into_iter().enumerate() {
+            blk.entities.push(Entity::new(Handle(i as u64 + 1), k));
+        }
+        Arc::new(blk)
+    }
+
+    fn line(a: (f64, f64), b: (f64, f64)) -> EntityKind {
+        EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })
+    }
+
+    #[test]
+    fn a_copy_outside_the_window_is_ruled_out_whole() {
+        let d = Drawing::new_imperial();
+        let window = Bounds2::from_points([Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)]);
+        let blk = block("CullAggregate", vec![line((0.0, 0.0), (1.0, 0.0)), line((0.0, 5.0), (1.0, 5.0))]);
+        let reach = block_reach(&d, &blk);
+        assert!(matches!(reach.copy(&Mat3::translate(Vec2::new(100.0, 0.0)), &window), CopyReach::Nothing));
+        // A copy straddling the window edge is looked at entity by entity.
+        match reach.copy(&Mat3::translate(Vec2::new(9.5, 6.0)), &window) {
+            CopyReach::Some(s) => assert_eq!(s, vec![true, false]),
+            _ => panic!("a copy meeting the window keeps its per-entity flags"),
+        }
+    }
+
+    #[test]
+    fn a_block_with_an_unbounded_entity_is_never_ruled_out_whole() {
+        let d = Drawing::new_imperial();
+        let window = Bounds2::from_points([Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)]);
+        let xline = EntityKind::XLine(RayLine { base: Vec3::new(0.0, 0.0, 0.0), dir: Vec3::new(0.0, 1.0, 0.0) });
+        let blk = block("CullUnbounded", vec![line((0.0, 0.0), (1.0, 0.0)), xline]);
+        match block_reach(&d, &blk).copy(&Mat3::translate(Vec2::new(100.0, 0.0)), &window) {
+            CopyReach::Some(s) => assert_eq!(s, vec![false, true]),
+            _ => panic!("the xline may cross the window"),
+        }
+    }
 }
