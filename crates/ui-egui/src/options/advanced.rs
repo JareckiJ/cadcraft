@@ -89,6 +89,8 @@ fn commit_text(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32, label
     None
 }
 
+/// Show `text` above the All settings rows until the next edit (`None` clears it): a refused value
+/// or JSON document says why.
 fn set_error(ui: &egui::Ui, text: Option<String>) {
     let id = egui::Id::unique(ERROR);
     ui.data_mut(|d| {
@@ -254,6 +256,8 @@ mod tests {
 
     use super::*;
 
+    /// A text field's edit becomes the same kind of JSON value as the setting it edits (bool,
+    /// number, list), or an error the tab shows.
     #[test]
     fn edited_text_is_read_as_the_kind_of_value_it_replaces() {
         assert_eq!(parse_edit(&json!("dark"), "light"), Ok(json!("light")));
@@ -272,6 +276,7 @@ mod tests {
         assert_eq!(parse_edit(&Value::Null, "12"), Ok(json!(12)));
     }
 
+    /// Apply sends only what changed, so an unedited document re-sets nothing.
     #[test]
     fn only_the_settings_that_differ_are_sent() {
         let old = json!({ "a": 1, "b": "x", "c": null }).as_object().cloned().unwrap_or_default();
@@ -280,6 +285,8 @@ mod tests {
         assert!(changed(&old, &old).is_empty());
     }
 
+    /// Settings go to `options`, interface keys to `set_ui_state`, and a key that is neither
+    /// changes nothing.
     #[test]
     fn the_json_document_routes_settings_and_interface_state_and_refuses_unknown_keys() {
         let map = |v: Value| v.as_object().cloned().unwrap_or_default();

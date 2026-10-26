@@ -6,11 +6,14 @@ use cadcraft_engine::Session;
 use cadcraft_ui_egui::{CadApp, Services};
 use serde_json::json;
 
+/// An app with the startup drawing and no file dialogs.
 fn app() -> CadApp {
     CadApp::new(Session::new(), Services::default())
 }
 
+/// Every text shape painted in a frame, one per line, to check what the tab shows.
 fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
+    /// Append the text of `shape` and of the shapes it groups.
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
             egui::Shape::Text(s) => {
@@ -26,6 +29,7 @@ fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
     text
 }
 
+/// Run two frames of the app and return the text they painted.
 fn render(app: &mut CadApp) -> String {
     let ctx = egui::Context::default();
     let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
@@ -39,6 +43,8 @@ fn render(app: &mut CadApp) -> String {
     text
 }
 
+/// QNEWTEMPLATE, FONTALT and FONTFALLBACK are reported, set (GETVAR sees them), refused when
+/// malformed, shown in the tab, kept by the profile and cleared by Reset.
 #[test]
 fn the_files_settings_are_reported_set_kept_and_reset() {
     let mut a = app();

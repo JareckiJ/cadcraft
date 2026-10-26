@@ -114,10 +114,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, name: &str, open: &mut bool
     }
 }
 
+/// A two-column grid of caption and control, spaced as every Options tab lays out its rows.
 pub(super) fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id).num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, add);
 }
 
+/// A small dimmed line under a tab's rows explaining them.
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).small().color(Tokens::get().text_dim));
 }
@@ -579,6 +581,8 @@ fn preferences(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>
     hint(ui, crate::tl!("Turned off, a right-click while a command runs always opens the shortcut menu."));
 }
 
+/// Profiles tab: where the preferences are kept, Reset to Defaults and Copy as JSON; edits
+/// accumulate in `changes`.
 fn profiles(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     ui.label(crate::tl!(
         "CADCraft keeps these preferences, object snap modes and drafting toggles for your user account and restores them when it starts."

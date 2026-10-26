@@ -22,6 +22,8 @@ fn commit_text(ui: &mut egui::Ui, salt: &str, current: &str, label: egui::Id) ->
     None
 }
 
+/// Files tab: the default template and the font substitutes, edited as text and sent when a field
+/// loses focus.
 pub(super) fn locations(ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     super::dialog::grid(ui, "options_locations", |ui| {
         let rows = [

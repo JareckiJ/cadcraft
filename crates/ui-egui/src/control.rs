@@ -285,6 +285,8 @@ fn key_from(name: &str) -> Option<egui::Key> {
     })
 }
 
+/// Run one control-channel request against the app and its frame: the `ui.*`, `app.*`, `cmdline.*`
+/// and `engine.*` methods listed in `METHODS`.
 pub fn handle(app: &mut CadApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let p = &req.params;
     let s = |k: &str| p.get(k).and_then(Value::as_str);

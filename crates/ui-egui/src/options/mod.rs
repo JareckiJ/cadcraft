@@ -203,6 +203,8 @@ fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
     }
 }
 
+/// Read one interface key of the OPTIONS JSON form into `c`: `Ok(true)` when it is one, `Ok(false)`
+/// for a key that belongs to the engine, an error for a bad value.
 fn parse_ui(key: &str, v: &Value, c: &mut UiChanges) -> Result<bool, String> {
     let text = || v.as_str().ok_or_else(|| format!("{key} must be text"));
     match key {

@@ -6,11 +6,14 @@ use cadcraft_engine::Session;
 use cadcraft_ui_egui::{CadApp, Services};
 use serde_json::{Value, json};
 
+/// An app with the startup drawing and no file dialogs.
 fn app() -> CadApp {
     CadApp::new(Session::new(), Services::default())
 }
 
+/// Every text shape painted in a frame, one per line, to check what a tab shows.
 fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
+    /// Append the text of `shape` and of the shapes it groups.
     fn collect(shape: &egui::Shape, text: &mut String) {
         match shape {
             egui::Shape::Text(s) => {
@@ -26,6 +29,7 @@ fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
     text
 }
 
+/// Run two frames of the app and return the text they painted.
 fn render(app: &mut CadApp, ctx: &egui::Context) -> String {
     let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() };
     let mut text = String::new();
@@ -45,6 +49,7 @@ fn current(a: &mut CadApp, var: &str) -> Value {
     r["variables"][var].clone()
 }
 
+/// `dimStyle` changes the open drawing's current style, and the JSON form reports it back.
 #[test]
 fn dim_style_sets_the_current_style_and_is_reported() {
     let mut a = app();
@@ -60,6 +65,7 @@ fn dim_style_sets_the_current_style_and_is_reported() {
     assert_eq!(r["dimDefaults"], json!({ "DIMDEC": 2, "DIMDSEP": ",", "DIMZIN": 12 }));
 }
 
+/// Defaults reach drawings made later, never drawings already open.
 #[test]
 fn new_drawings_take_the_defaults_and_other_drawings_keep_their_style() {
     let mut a = app();
@@ -97,6 +103,8 @@ fn dim_defaults_leave_the_untouched_first_drawing_alone() {
     assert_eq!(current(&mut fresh, "DIMDEC"), json!(7), "start-up: the profile's defaults reach the first drawing");
 }
 
+/// A value the dimension style refuses, or a name it doesn't have, is an error and leaves both the
+/// style and the defaults as they were.
 #[test]
 fn refused_values_and_unknown_names_change_nothing() {
     let mut a = app();
@@ -116,6 +124,8 @@ fn refused_values_and_unknown_names_change_nothing() {
     assert_eq!(after["dimDefaults"], json!({}));
 }
 
+/// The defaults survive a restart through the profile, the startup drawing included, and Reset to
+/// Defaults drops them.
 #[test]
 fn the_profile_keeps_the_defaults_and_reset_forgets_them() {
     let mut a = app();
@@ -136,6 +146,7 @@ fn the_profile_keeps_the_defaults_and_reset_forgets_them() {
     assert!(b.session.dim_defaults.is_empty());
 }
 
+/// Both new tabs draw their rows without a drawing error.
 #[test]
 fn the_dimensions_and_all_settings_tabs_render() {
     let mut a = app();
@@ -155,6 +166,8 @@ fn the_dimensions_and_all_settings_tabs_render() {
     }
 }
 
+/// The interface state is listed with the settings, and `set_ui_state` refuses a value of the wrong
+/// kind without changing anything.
 #[test]
 fn the_all_settings_tab_lists_the_interface_state_and_set_ui_state_checks_it() {
     let mut a = app();
@@ -178,6 +191,7 @@ fn the_all_settings_tab_lists_the_interface_state_and_set_ui_state_checks_it() {
 
 /// Where the text `label` is painted (its galley's top left), if anywhere.
 fn text_pos(shapes: &[egui::epaint::ClippedShape], want: &dyn Fn(&str) -> bool) -> Vec<egui::Pos2> {
+    /// Append where `shape`, or a shape it groups, paints text that `want` accepts.
     fn collect(shape: &egui::Shape, want: &dyn Fn(&str) -> bool, out: &mut Vec<egui::Pos2>) {
         match shape {
             egui::Shape::Text(s) if want(s.galley.text()) => out.push(s.pos),
@@ -190,6 +204,8 @@ fn text_pos(shapes: &[egui::epaint::ClippedShape], want: &dyn Fn(&str) -> bool) 
     out
 }
 
+/// Dragging a number over several frames sends nothing until release, then one `dimstyle` run: one
+/// undo step.
 #[test]
 fn dragging_a_dimension_value_is_one_undo_step() {
     let mut a = app();

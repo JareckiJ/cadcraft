@@ -54,6 +54,8 @@ fn value(app: &CadApp, style: &Map<String, Value>, var: &str) -> Value {
     built_in.get_mut(field).map(Value::take).unwrap_or(Value::Null)
 }
 
+/// A dimension variable as a whole number, a real one rounded (styles read from files may store
+/// them as reals).
 fn int(v: &Value) -> i64 {
     v.as_i64().or_else(|| v.as_f64().map(|f| f.round() as i64)).unwrap_or(0)
 }
@@ -153,6 +155,8 @@ pub(super) fn join_post(prefix: &str, suffix: &str) -> String {
     if prefix.is_empty() && suffix.is_empty() { String::new() } else { format!("{prefix}<>{suffix}") }
 }
 
+/// Dimensions tab: the current dimension style's number format, text and arrow sizes; edits go into
+/// `changes` as one `dimStyle` change.
 pub(super) fn dimensions(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     let t = Tokens::get();
     let style = super::current_dim_style(app);
@@ -281,6 +285,8 @@ pub(super) fn dimensions(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<Stri
 mod tests {
     use super::*;
 
+    /// Prefix and suffix are DIMPOST's text around `<>`; splitting and joining it gives the same
+    /// template back.
     #[test]
     fn prefix_and_suffix_round_trip_through_the_post_template() {
         assert_eq!(split_post("<> mm"), (String::new(), " mm".to_string()));

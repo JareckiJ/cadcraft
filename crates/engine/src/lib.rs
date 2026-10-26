@@ -629,6 +629,8 @@ pub enum LeaderType {
 }
 
 impl Default for MLeaderOptions {
+    /// Multileaders as MLEADER draws them by default: arrowhead first, two points, a landing and
+    /// text content.
     fn default() -> Self {
         MLeaderOptions {
             order: LeaderOrder::Arrowhead,
