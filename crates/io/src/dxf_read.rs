@@ -1236,6 +1236,7 @@ fn parse_entities(
     table_cells_left: &mut usize,
     seen_handles: &mut HashSet<Handle>,
     reserved_handles: &HashSet<Handle>,
+    source_handles_win: bool,
 ) -> Vec<(Option<String>, bool, Entity)> {
     let mut out = Vec::new();
     let mut i = 0;
@@ -1283,7 +1284,10 @@ fn parse_entities(
             let h = match handle {
                 Some(h) => {
                     d.bump_handseed(h);
-                    if !reserved_handles.contains(&h) && seen_handles.insert(h) { h } else { fresh_entity_handle(d, seen_handles, reserved_handles) }
+                    // A file's own handle wins when it is the first copy on a source list that
+                    // keeps them (ENTITIES); block copies yield to the reserved top-level ones.
+                    let kept = if source_handles_win { seen_handles.insert(h) } else { !reserved_handles.contains(&h) && seen_handles.insert(h) };
+                    if kept { h } else { fresh_entity_handle(d, seen_handles, reserved_handles) }
                 }
                 None => fresh_entity_handle(d, seen_handles, reserved_handles),
             };
@@ -1752,9 +1756,9 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
     let mut blocks: Vec<BlockDef> = Vec::new();
     let mut layout_objs: Vec<LayoutDef> = Vec::new();
     let mut entities = Vec::new();
-    let mut seen_block_handles = HashSet::new();
-    let mut seen_entity_handles = HashSet::new();
-    let no_reserved_handles = HashSet::new();
+    // One set for every list: a generated handle must be unique across blocks and ENTITIES
+    // (a *MODEL_SPACE block and an ENTITIES record both land in the model space).
+    let mut seen_handles = HashSet::new();
     // Model/paper-space handles retain priority if an in-memory drawing or damaged DXF also
     // assigns one to a block entity. This preserves top-level references while letting block
     // handles be repaired before their deferred fixups are recorded.
@@ -1782,15 +1786,9 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
         match s.name.as_str() {
             "HEADER" => header(&s.tags, &mut d),
             "TABLES" => tables(&s.tags, &mut d, &mut rx),
-            "BLOCKS" => blocks.extend(read_blocks(
-                &s.tags,
-                &mut d,
-                &mut rx,
-                &mut table_cells_left,
-                &mut skipped,
-                &mut seen_block_handles,
-                &reserved_entity_handles,
-            )),
+            "BLOCKS" => {
+                blocks.extend(read_blocks(&s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped, &mut seen_handles, &reserved_entity_handles))
+            }
             // A damaged file may split its entities over several ENTITIES sections (#865).
             "ENTITIES" => {
                 let mut n = 0;
@@ -1800,8 +1798,9 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize) -> Result<Drawing> {
                     &mut rx,
                     &mut n,
                     &mut table_cells_left,
-                    &mut seen_entity_handles,
-                    &no_reserved_handles,
+                    &mut seen_handles,
+                    &reserved_entity_handles,
+                    true,
                 ));
                 count_skipped(&mut skipped, "ENTITIES", n);
             }
@@ -1865,7 +1864,7 @@ fn read_blocks(
                 j += 1;
             }
             let body = recs.get(i + 1..j).unwrap_or(&[]);
-            let ents = parse_entities(body, d, rx, &mut n, table_cells_left, seen_handles, reserved_handles);
+            let ents = parse_entities(body, d, rx, &mut n, table_cells_left, seen_handles, reserved_handles, false);
             blocks.push((name, base, description, ents, xref));
             i = j + 1;
         } else {
