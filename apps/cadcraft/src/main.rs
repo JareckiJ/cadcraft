@@ -283,6 +283,14 @@ fn use_x11(display: bool, setting: Option<&std::ffi::OsStr>, x11_libraries_load:
     display && setting.is_some_and(|v| v == "1") && x11_libraries_load()
 }
 
+/// Whether winit runs through X11: forced (`use_x11`), or as winit chooses for itself, X11 unless
+/// `WAYLAND_DISPLAY` or `WAYLAND_SOCKET` is set and not empty (an X11-only session).
+#[cfg(all(unix, not(target_os = "macos")))]
+fn runs_on_x11(forced: bool, wayland_display: Option<&std::ffi::OsStr>, wayland_socket: Option<&std::ffi::OsStr>) -> bool {
+    let set = |v: Option<&std::ffi::OsStr>| v.is_some_and(|v| !v.is_empty());
+    forced || !(set(wayland_display) || set(wayland_socket))
+}
+
 /// Parse CLI options (`--control`, `--sample`, files, `--version`), install logging and I/O hooks, build the services and app, and run eframe.
 fn main() -> eframe::Result {
     // First, so every start-up record is captured; see `logging`.
@@ -371,11 +379,9 @@ fn main() -> eframe::Result {
     // included, leaves it off. The X11 libraries are only recommended by the packages, so without
     // them the setting is ignored rather than failing.
     #[cfg(all(unix, not(target_os = "macos")))]
-    let x11 = use_x11(std::env::var_os("DISPLAY").is_some(), std::env::var_os("CADCRAFT_X11").as_deref(), x11_libraries_load);
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    let x11 = false;
+    let force_x11 = use_x11(std::env::var_os("DISPLAY").is_some(), std::env::var_os("CADCRAFT_X11").as_deref(), x11_libraries_load);
     #[cfg(all(unix, not(target_os = "macos")))]
-    if x11 {
+    if force_x11 {
         options.event_loop_builder = Some(Box::new(|b| {
             use winit::platform::x11::EventLoopBuilderExtX11;
             b.with_x11();
@@ -384,7 +390,12 @@ fn main() -> eframe::Result {
     // Read before the window opens: it decides the window's frame (Use system title bar).
     let (workspace, restored, workspace_error) = workspace::Workspace::load();
     // GNOME on Wayland leaves the window frame to the app (decorations.rs): a title row carries the
-    // window buttons instead, unless Options ▸ Display ▸ Use system title bar is on.
+    // window buttons instead, unless Options ▸ Display ▸ Use system title bar is on. On X11, forced
+    // or the only display, the window manager draws it.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let x11 = runs_on_x11(force_x11, std::env::var_os("WAYLAND_DISPLAY").as_deref(), std::env::var_os("WAYLAND_SOCKET").as_deref());
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let x11 = false;
     let window_controls = decorations::app_drawn(x11);
     let app_frame = window_controls.is_some() && !restored.as_ref().is_some_and(|ui| ui.system_title_bar);
     if app_frame {
@@ -499,6 +510,21 @@ mod tests {
         assert!(!use_x11(true, Some(OsStr::new("1")), || false), "missing X11 libraries: native Wayland, no crash");
         let loaded = x11_libraries_load();
         assert_eq!(use_x11(true, Some(OsStr::new("1")), || loaded), loaded);
+    }
+
+    /// On an X11-only session winit picks X11 without `CADCRAFT_X11`, so `CADCRAFT_TITLEBAR=app`
+    /// drew the app's window buttons there too; X11 keeps the window manager's frame.
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn x11_as_winit_chooses_it() {
+        use super::runs_on_x11;
+        use std::ffi::OsStr;
+        let some = |v| Some(OsStr::new(v));
+        assert!(runs_on_x11(false, None, None), "an X11-only session");
+        assert!(runs_on_x11(false, some(""), some("")), "empty variables count as unset");
+        assert!(!runs_on_x11(false, some("wayland-0"), None));
+        assert!(!runs_on_x11(false, some(""), some("3")), "WAYLAND_SOCKET alone");
+        assert!(runs_on_x11(true, some("wayland-0"), None), "CADCRAFT_X11=1 through XWayland");
     }
 
     #[test]
