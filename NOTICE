@@ -35,7 +35,7 @@ Pinned licence text: https://github.com/storytold/craft-libs/blob/9f89fe8f6d72ab
 The UI's egui-icons.ttf subset and emoji-icon-font.ttf fallback are provided by epaint_default_fonts
 and registered through egui's default font definitions. They derive from emoji-icon-font by
 John Slegers, under the MIT License. The subset and full face share the following upstream notice.
-Source: https://github.com/storytold/egui/tree/ba04bd7de66afaba82fd44aa235aa1d060559ee7/crates/epaint_default_fonts/fonts
+Source: https://github.com/storytold/egui/tree/69750b71a97dc4672e2fbb70863b838e6795c910/crates/epaint_default_fonts/fonts
 Original: https://github.com/jslegers/emoji-icon-font
 The following text is reproduced verbatim from emoji-icon-font-mit-license.txt:
 

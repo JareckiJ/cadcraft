@@ -339,7 +339,8 @@ fn main() -> eframe::Result {
     }
     // winit has no file drag-and-drop on Wayland (only on X11), so dropping files from the file
     // manager showed a "no" cursor. Run through XWayland when it's there; CADCRAFT_WAYLAND=1
-    // keeps the native Wayland backend.
+    // keeps the native Wayland backend. Under XWayland GNOME draws the window frame; only a native
+    // Wayland window draws winit's own caption buttons (Adwaita style, storytold/egui#3).
     #[cfg(all(unix, not(target_os = "macos")))]
     if std::env::var_os("DISPLAY").is_some() && std::env::var_os("CADCRAFT_WAYLAND").is_none() {
         options.event_loop_builder = Some(Box::new(|b| {

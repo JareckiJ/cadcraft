@@ -119,7 +119,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Entry |
 |---|---|
-| 2026-10-26 | Windows reopen at their last size, or maximized, at any interface size (such as 150%), and Restore after a maximized restart returns to the last normal size. On GNOME Wayland, where the compositor draws no frame, windows get standard minimize, maximize and close buttons. Shared change: storytold/egui#3; checked on Linux only. |
+| 2026-10-26 | Windows reopen at their last size, or maximized, at any interface size (such as 150%), and Restore after a maximized restart returns to the last normal size. On GNOME Wayland, where the compositor draws no frame, a native Wayland window (`CADCRAFT_WAYLAND=1`; by default CADCraft opens through XWayland, where GNOME draws the frame) gets standard minimize, maximize and close buttons. Shared change: storytold/egui#3; checked on Linux only. |
 | 2026-10-21 | DXF save keeps each proxy object's and proxy entity's class: its class number (group 91) is renumbered to the rewritten CLASSES instead of naming another class, so AutoCAD's visual styles in an R14 file no longer come back as SCALE or MLEADERSTYLE (#1812) |
 | 2026-10-14 | HATCHEDIT adds boundaries from internal points or closed objects and removes selected loops in the dialog, command line and JSON command; associative links and undo are covered by tests. |
 | 2026-10-12 | TRIM: a pick after a closed polyline's last cut keeps only the complementary run instead of an extra circuit of the outline (#726) |
@@ -137,7 +137,7 @@ Ranked; detail and the full beta checklist in [docs/roadmap.md](docs/roadmap.md)
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-26 | trivial | Progress log: windows reopen at their last size or maximized at any interface size; standard caption buttons on GNOME Wayland (storytold/egui#3) |
+| 2026-10-26 | trivial | Progress log: windows reopen at their last size or maximized at any interface size; standard caption buttons on native GNOME Wayland windows, `CADCRAFT_WAYLAND=1` (storytold/egui#3) |
 | 2026-10-21 | trivial | Progress log: proxy objects keep their class through a save (#1812) |
 | 2026-10-14 | minor | Progress log: HATCHEDIT boundary add/remove |
 | 2026-10-12 | trivial | Progress log: closed-polyline TRIM (#726) |
