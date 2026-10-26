@@ -18,8 +18,10 @@ pub struct CmdLine {
     typed_since_selection: bool,
     pub history: Vec<String>,
     pub history_pos: Option<usize>,
-    /// The AutoComplete row Enter takes (Up/Down move it; typing puts it back on the first).
+    /// The AutoComplete row Enter takes (Up/Down/Tab move it; typing puts it back on the first).
     pub suggestion: usize,
+    /// Backspace erased the completion shown after the typed name; Up, Down or Tab show it again.
+    pub completion_hidden: bool,
     /// What was typed at command prompts (not command names), oldest first: the in-command
     /// shortcut menu's Recent Input.
     pub recent_input: Vec<String>,
@@ -104,9 +106,43 @@ fn tab(app: &mut CadApp) {
     {
         // Both values typed: Tab locks the second one as well.
         app.cmd.locked_second = Some(app.cmd.buffer.clone());
+    } else if suggesting(app) {
+        // Tab moves down the AutoComplete list as Down does.
+        step_suggestion(app, 1);
     } else if let Some(s) = suggestions(&app.cmd.buffer).first() {
         app.cmd.buffer = s.id.clone();
     }
+}
+
+/// How many rows the AutoComplete list offers for `typed`.
+pub fn suggestions_count(typed: &str) -> usize {
+    suggestions(typed).len()
+}
+
+/// Moves the chosen AutoComplete row by `delta`, wrapping from the last row to the first and back,
+/// and shows its completion again.
+fn step_suggestion(app: &mut CadApp, delta: isize) {
+    let n = suggestions(&app.cmd.buffer).len();
+    if n == 0 {
+        return;
+    }
+    let cur = app.cmd.suggestion.min(n - 1);
+    app.cmd.suggestion = if delta < 0 { cur.checked_sub(1).unwrap_or(n - 1) } else { (cur + 1) % n };
+    app.cmd.completion_hidden = false;
+}
+
+/// The rest of the chosen AutoComplete row's name after what was typed (`CO` + `PY`), shown
+/// selected on the command line; `None` when nothing is offered or Backspace erased it.
+pub fn completion(app: &CadApp) -> Option<String> {
+    if app.cmd.completion_hidden || !app.cmd.preedit.is_empty() || !suggesting(app) {
+        return None;
+    }
+    let typed = app.cmd.buffer.as_str();
+    let sug = suggestions(typed);
+    let s = sug.get(app.cmd.suggestion).or(sug.first())?;
+    let head = s.id.get(..typed.len())?;
+    let rest = s.id.get(typed.len()..)?;
+    (head.eq_ignore_ascii_case(typed) && !rest.is_empty()).then(|| rest.to_string())
 }
 
 /// An AutoComplete suggestion for the command line.
@@ -346,6 +382,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     app.cmd.preedit.clear();
                     app.cmd.buffer.push_str(&t);
                     app.cmd.suggestion = 0;
+                    app.cmd.completion_hidden = false;
                     // Editing a recalled command leaves the history: AutoComplete applies again.
                     app.cmd.history_pos = None;
                 }
@@ -365,6 +402,7 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                 Key::Enter => submit(app),
                 Key::Escape => {
                     app.cmd.buffer.clear();
+                    app.cmd.completion_hidden = false;
                     app.cmd.preedit.clear();
                     app.session.cancel();
                 }
@@ -380,19 +418,18 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     );
                     if erase {
                         let _ = app.run("erase.selection", serde_json::json!({}));
+                    } else if completion(app).is_some() {
+                        // The completion goes first; the chosen row stays chosen.
+                        app.cmd.completion_hidden = true;
                     } else {
                         app.cmd.buffer.pop();
                         app.cmd.suggestion = 0;
                         app.cmd.history_pos = None;
+                        app.cmd.completion_hidden = true;
                     }
                 }
-                Key::ArrowUp if !modifiers.any() && suggesting(app) => {
-                    app.cmd.suggestion = app.cmd.suggestion.saturating_sub(1);
-                }
-                Key::ArrowDown if !modifiers.any() && suggesting(app) => {
-                    let n = suggestions(&app.cmd.buffer).len();
-                    app.cmd.suggestion = (app.cmd.suggestion + 1).min(n.saturating_sub(1));
-                }
+                Key::ArrowUp if !modifiers.any() && suggesting(app) => step_suggestion(app, -1),
+                Key::ArrowDown if !modifiers.any() && suggesting(app) => step_suggestion(app, 1),
                 Key::ArrowUp if !modifiers.any() => {
                     if !app.cmd.history.is_empty() {
                         let n = app.cmd.history.len();
@@ -446,6 +483,7 @@ pub fn submit(app: &mut CadApp) {
     complete_command(app);
     let text = std::mem::take(&mut app.cmd.buffer);
     app.cmd.suggestion = 0;
+    app.cmd.completion_hidden = false;
     app.cmd.locked_second = None;
     app.cmd.history_pos = None;
     if !text.trim().is_empty() && !app.session.prompting() {
@@ -596,6 +634,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let gw = g.size().x;
     p.galley(pos2(x, bar.center().y - g.size().y / 2.0), g, t.text);
     let mut caret_x = x + gw;
+    // The chosen AutoComplete row's completion follows the typed name, selected.
+    if let Some(rest) = completion(app) {
+        let g = p.layout_no_wrap(rest, font.clone(), t.text);
+        let r = Rect::from_min_size(pos2(caret_x, bar.top() + 4.0), vec2(g.size().x, h - 8.0));
+        p.rect_filled(r, 0.0, t.select_bg);
+        p.galley(pos2(caret_x, bar.center().y - g.size().y / 2.0), g, t.text);
+    }
     // The IME's composition text sits after the buffer (underlined) until it is committed.
     if !app.cmd.preedit.is_empty() {
         let pg = p.layout_no_wrap(app.cmd.preedit.clone(), font, t.text);
@@ -961,10 +1006,19 @@ mod autocomplete_tests {
     }
 
     #[test]
-    fn tab_autocompletes_alias_to_resolved_command() {
+    fn tab_moves_down_the_autocomplete_list_and_wraps() {
         let mut app = CadApp::new(cadcraft_engine::Session::empty(), crate::Services::default());
         app.cmd.buffer = "rec".to_string();
+        assert_eq!(completion(&app).as_deref(), Some("TANG"));
+        // Tab moves down the list as Down does, back to the first row after the last.
+        let n = suggestions("rec").len();
+        assert!(n > 1);
         tab(&mut app);
-        assert_eq!(app.cmd.buffer, "RECTANG");
+        assert_eq!(app.cmd.buffer, "rec");
+        assert_eq!(app.cmd.suggestion, 1);
+        for _ in 1..n {
+            tab(&mut app);
+        }
+        assert_eq!(app.cmd.suggestion, 0);
     }
 }
