@@ -1737,7 +1737,8 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 (def, _) => {
                     let c = a.props.over(&def.map(|d| d.common.clone()).unwrap_or_else(by_block));
                     let (ink, lw, _, _, shown, layer_t, fade) = resolve_common(&sub_ctx(ctx, e, Mat3::IDENTITY), &c, b.plotting);
-                    let t = if b.opts.transparency { transparency(c.transparency, layer_t, reference) } else { 0 };
+                    // ByBlock takes the reference's own transparency, not its locked-layer fade.
+                    let t = if b.opts.transparency { transparency(c.transparency, layer_t, own) } else { 0 };
                     let t = if b.opts.on_screen { t.max(fade) } else { t };
                     (ink, lw, shown, t)
                 }
