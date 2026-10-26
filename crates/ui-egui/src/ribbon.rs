@@ -145,6 +145,40 @@ const CONTINUES: &[Cmd] = &[c("dimcontinue", "Continue", Icon::DimContinue), c("
 
 pub(crate) const NONE: &[Cmd] = &[];
 
+/// The constraint panels, on the Parametric tab and the Block Editor's.
+pub(crate) const GEOMETRIC: PanelDef = PanelDef {
+    title: "Geometric",
+    cells: &[
+        Cell::Big(c("autoconstrain", "Auto Constrain", Icon::Constraint), NONE),
+        Cell::Icons(&[
+            c("gccoincident", "Coincident", Icon::Coincident),
+            c("gcparallel", "Parallel", Icon::Parallel),
+            c("gcperpendicular", "Perpendicular", Icon::Perpendicular),
+        ]),
+        Cell::Icons(&[
+            c("gchorizontal", "Horizontal", Icon::Horizontal),
+            c("gcvertical", "Vertical", Icon::Vertical),
+            c("gctangent", "Tangent", Icon::Tangent),
+        ]),
+        Cell::Icons(&[c("gcconcentric", "Concentric", Icon::Concentric), c("gcequal", "Equal", Icon::Equal), c("gcfix", "Fix", Icon::Fix)]),
+        Cell::Small(&[
+            (n("constraintbar", "Show/Hide"), NONE),
+            (n("constraintbar.showall", "Show All"), NONE),
+            (n("constraintbar.hideall", "Hide All"), NONE),
+        ]),
+    ],
+    more: NONE,
+};
+pub(crate) const DIMENSIONAL: PanelDef = PanelDef {
+    title: "Dimensional",
+    cells: &[
+        Cell::Small(&[(n("dclinear", "Linear"), NONE), (n("dcaligned", "Aligned"), NONE), (n("dcangular", "Angular"), NONE)]),
+        Cell::Small(&[(n("dcradius", "Radius"), NONE), (n("dcdiameter", "Diameter"), NONE), (n("dcconvert", "Convert"), NONE)]),
+        Cell::Small(&[(n("dcdisplay", "Show/Hide"), NONE), (n("dcdisplay.showall", "Show All"), NONE), (n("dcdisplay.hideall", "Hide All"), NONE)]),
+    ],
+    more: NONE,
+};
+
 pub const TABS: &[TabDef] = &[
     TabDef {
         id: "home",
@@ -470,46 +504,8 @@ pub const TABS: &[TabDef] = &[
         id: "parametric",
         title: "Parametric",
         panels: &[
-            PanelDef {
-                title: "Geometric",
-                cells: &[
-                    Cell::Big(c("autoconstrain", "Auto Constrain", Icon::Constraint), NONE),
-                    Cell::Icons(&[
-                        c("gccoincident", "Coincident", Icon::Coincident),
-                        c("gcparallel", "Parallel", Icon::Parallel),
-                        c("gcperpendicular", "Perpendicular", Icon::Perpendicular),
-                    ]),
-                    Cell::Icons(&[
-                        c("gchorizontal", "Horizontal", Icon::Horizontal),
-                        c("gcvertical", "Vertical", Icon::Vertical),
-                        c("gctangent", "Tangent", Icon::Tangent),
-                    ]),
-                    Cell::Icons(&[
-                        c("gcconcentric", "Concentric", Icon::Concentric),
-                        c("gcequal", "Equal", Icon::Equal),
-                        c("gcfix", "Fix", Icon::Fix),
-                    ]),
-                    Cell::Small(&[
-                        (n("constraintbar", "Show/Hide"), NONE),
-                        (n("constraintbar.showall", "Show All"), NONE),
-                        (n("constraintbar.hideall", "Hide All"), NONE),
-                    ]),
-                ],
-                more: NONE,
-            },
-            PanelDef {
-                title: "Dimensional",
-                cells: &[
-                    Cell::Small(&[(n("dclinear", "Linear"), NONE), (n("dcaligned", "Aligned"), NONE), (n("dcangular", "Angular"), NONE)]),
-                    Cell::Small(&[(n("dcradius", "Radius"), NONE), (n("dcdiameter", "Diameter"), NONE), (n("dcconvert", "Convert"), NONE)]),
-                    Cell::Small(&[
-                        (n("dcdisplay", "Show/Hide"), NONE),
-                        (n("dcdisplay.showall", "Show All"), NONE),
-                        (n("dcdisplay.hideall", "Hide All"), NONE),
-                    ]),
-                ],
-                more: NONE,
-            },
+            GEOMETRIC,
+            DIMENSIONAL,
             PanelDef {
                 title: "Manage",
                 cells: &[Cell::Big(n("delconstraint", "Delete Constraints"), NONE), Cell::Big(n("ui.dialog.parameters", "Parameters Manager"), NONE)],
@@ -1110,11 +1106,18 @@ pub(crate) struct Contextual {
 /// The contextual tabs, in the order they are drawn after the other tabs. Every one that shows
 /// gets its tab at once: a Block Editor tab goes before the hatch tabs, so selecting a hatch (or
 /// running HATCH) in the Block Editor shows both, the hatch tab active.
-pub(crate) const CONTEXTUAL: &[Contextual] = &[Contextual {
-    tab: crate::ribbon_hatch::tab,
-    ids: &[(crate::ribbon_hatch::TAB_ID, crate::ribbon_hatch::TAB_TITLE), (crate::ribbon_hatch::CREATE_ID, crate::ribbon_hatch::CREATE_TITLE)],
-    body: crate::ribbon_hatch::body,
-}];
+pub(crate) const CONTEXTUAL: &[Contextual] = &[
+    Contextual {
+        tab: crate::ribbon_bedit::tab,
+        ids: &[(crate::ribbon_bedit::TAB_ID, crate::ribbon_bedit::TAB_TITLE)],
+        body: crate::ribbon_bedit::body,
+    },
+    Contextual {
+        tab: crate::ribbon_hatch::tab,
+        ids: &[(crate::ribbon_hatch::TAB_ID, crate::ribbon_hatch::TAB_TITLE), (crate::ribbon_hatch::CREATE_ID, crate::ribbon_hatch::CREATE_TITLE)],
+        body: crate::ribbon_hatch::body,
+    },
+];
 
 /// The contextual tabs shown now, in drawing order, with their providers. They open by
 /// themselves, as Windows CAD ribbons do: `UiState::ribbon_tab` moves to a tab when it appears

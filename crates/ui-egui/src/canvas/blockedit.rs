@@ -27,7 +27,7 @@ pub(super) fn wash(app: &CadApp, p: &egui::Painter, rect: Rect) {
     }
 }
 
-/// The base point marker and the Block Editor bar (over the drawing).
+/// The base point marker and the Block Editor bar (over the drawing; not with the Ribbon).
 pub(super) fn paint(app: &mut CadApp, ctx: &egui::Context, p: &egui::Painter, xf: &Xf, rect: Rect) {
     let Some((name, unsaved)) = editing(app) else { return };
     let t = Tokens::get();
@@ -38,6 +38,10 @@ pub(super) fn paint(app: &mut CadApp, ctx: &egui::Context, p: &egui::Painter, xf
         p.circle_stroke(o, 6.0, st);
         p.line_segment([o - vec2(12.0, 0.0), o + vec2(12.0, 0.0)], st);
         p.line_segment([o - vec2(0.0, 12.0), o + vec2(0.0, 12.0)], st);
+    }
+    // The Ribbon's Block Editor tab holds these buttons when the Ribbon shows.
+    if app.ui.show_ribbon {
+        return;
     }
     let mut action: Option<(&str, bool)> = None;
     egui::Area::new(id()).order(egui::Order::Foreground).pivot(egui::Align2::CENTER_TOP).fixed_pos(rect.center_top() + vec2(0.0, 8.0)).show(

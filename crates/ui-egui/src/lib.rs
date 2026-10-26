@@ -48,6 +48,7 @@ pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
 pub mod ribbon;
+pub mod ribbon_bedit;
 pub mod ribbon_hatch;
 pub mod shortcut_menus;
 pub mod theme;
