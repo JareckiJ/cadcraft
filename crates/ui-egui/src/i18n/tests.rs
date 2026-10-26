@@ -59,6 +59,8 @@ fn translation_gaps() {
     }
 }
 
+/// The command labels, menu headings, tool names and object snap names that `language`'s catalog
+/// has no row for.
 fn missing_commands_menus_tools_and_snap_labels(language: &str) -> Vec<String> {
     let catalog = catalog(language).unwrap();
     let mut sources = BTreeSet::new();

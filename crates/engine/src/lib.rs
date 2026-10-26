@@ -575,6 +575,7 @@ pub struct LastUsed {
 }
 
 impl Default for LastUsed {
+    /// Nothing used yet: every command starts from AutoCAD's own defaults.
     fn default() -> Self {
         LastUsed {
             hatch_select: false,

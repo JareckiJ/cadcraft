@@ -273,6 +273,8 @@ pub fn inspect(app: &CadApp, ctx: &egui::Context) -> Value {
     })
 }
 
+/// The key a `ui.key` request names: egui's own key names, plus the common aliases (`return`,
+/// `esc`, …).
 fn key_from(name: &str) -> Option<egui::Key> {
     egui::Key::from_name(name).or(match name.to_ascii_lowercase().as_str() {
         "enter" | "return" => Some(egui::Key::Enter),

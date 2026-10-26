@@ -195,6 +195,7 @@ struct UiChanges {
     font_fallback: Option<String>,
 }
 
+/// A colour setting of the JSON form: `"#rrggbb"`, or null for the theme's own.
 fn color_param(key: &str, v: &Value) -> Result<Option<Color32>, String> {
     match v {
         Value::Null => Ok(None),
