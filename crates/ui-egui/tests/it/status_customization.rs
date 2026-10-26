@@ -8,6 +8,7 @@ use cadcraft_ui_egui::{CadApp, Services};
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
+use serde_json::json;
 
 fn harness() -> Harness<'static, CadApp> {
     let mut session = Session::empty();
@@ -121,4 +122,22 @@ fn status_visibility_survives_palette_reset() {
     h.state_mut().run("ui.status.reset", serde_json::json!({})).unwrap();
     h.run_steps(4);
     assert!(h.query_by_label("Grid (F7)").is_some());
+}
+/// The generic control route must reject an invalid list before changing any UI field.
+#[test]
+fn ui_set_rejects_invalid_status_items_atomically() {
+    use cadcraft_ui_egui::control::{ControlRequest, Outcome, handle};
+    let mut app = CadApp::new(Session::default(), Services::default());
+    let ctx = egui::Context::default();
+    let (request, _) = ControlRequest::new("ui.set", json!({"hiddenStatusItems":["grid"]}));
+    assert!(matches!(handle(&mut app, &ctx, &request), Outcome::Done(v) if v["ok"] == true));
+    let before = serde_json::to_value(&app.ui).unwrap();
+    for invalid in [json!(["grid", "grid"]), json!(["unknown"]), json!(vec!["grid"; 19]), json!("grid")] {
+        let (request, _) = ControlRequest::new("ui.set", json!({"hiddenStatusItems":invalid,"showToolbar":!app.ui.show_toolbar}));
+        assert!(matches!(handle(&mut app, &ctx, &request), Outcome::Done(v) if v["ok"] == false));
+        assert_eq!(serde_json::to_value(&app.ui).unwrap(), before);
+    }
+    let mut restored = CadApp::new(Session::default(), Services::default());
+    restored.load_prefs(&app.prefs_json());
+    assert_eq!(restored.ui.hidden_status_items, ["grid"]);
 }

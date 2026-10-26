@@ -220,6 +220,7 @@ these runtime checks are separate from the WASM compilation gate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-26 | patch | Reject invalid status visibility through ui.set before changing any UI state; regression covers duplicates, unknown identifiers, oversized lists and malformed values (CC-037 review follow-up) |
 | 2026-10-26 | patch | Keep right-click status customization open for consecutive toggles and preserve hidden status items through Reset Palettes (CC-037 review corrections) |
 | 2026-10-26 | minor | Status item visibility, persistent application preferences, recovery command and command-isolation regressions (CC-037); no ribbon dependency |
 | 2026-10-22 | minor | Polyline segment midpoint grips use rectangles, distinct from square vertex grips, with matching hover and pick bounds (#1950) |
