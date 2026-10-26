@@ -1376,3 +1376,7 @@ menu	Modify	Modifikace
 	Metric (millimetres)	Metrické (milimetry)
 	New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE).	Příkaz Nový i první výkres po spuštění používají tyto jednotky, pokud není nastavena výchozí šablona (QNEWTEMPLATE).
 	Units of new drawings	Jednotky nových výkresů
+	Check for Updates…	Zkontrolovat aktualizace…
+	CADCraft is up to date.	CADCraft je aktuální.
+	Could not check for updates.	Aktualizace se nepodařilo zkontrolovat.
+	Font	Písmo
