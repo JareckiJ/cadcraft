@@ -236,6 +236,28 @@ fn the_hatch_editor_also_opens_in_the_block_editor() {
     h.run_steps(3);
     assert_eq!(h.state().ui.ribbon_tab, ribbon_hatch::TAB_ID);
     assert!(h.query_by_label("Close Hatch Editor").is_some());
+    // In the Block Editor the hatch tab also closes the Block Editor, from its right end.
+    // (The floating Block Editor bar has a Close Block Editor button too: take the Ribbon's, on
+    // the hatch tab's row.)
+    let hatch_close = h.get_by_label("Close Hatch Editor").rect();
+    let block_close = h
+        .query_all_by_label("Close Block Editor")
+        .find(|n| (n.rect().center().y - hatch_close.center().y).abs() < 20.0)
+        .expect("a Close Block Editor button in the hatch tab");
+    assert!(block_close.rect().left() > hatch_close.right(), "{:?} right of {hatch_close:?}", block_close.rect());
+    block_close.click();
+    h.run_steps(4);
+    assert!(h.state().session.state().unwrap().block_editor().is_none(), "BCLOSE ran");
+    assert_eq!(h.state().ui.ribbon_tab, "annotate", "the tab shown before comes back");
+}
+
+#[test]
+fn outside_the_block_editor_the_hatch_tabs_have_no_close_block_editor() {
+    let (mut h, hatch, _) = harness(false);
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    assert!(h.query_by_label("Close Hatch Editor").is_some());
+    assert!(h.query_by_label("Close Block Editor").is_none());
 }
 
 #[test]

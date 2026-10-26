@@ -22,10 +22,10 @@ pub struct Cmd {
     pub icon: Option<Icon>,
 }
 
-const fn c(id: &'static str, label: &'static str, icon: Icon) -> Cmd {
+pub(crate) const fn c(id: &'static str, label: &'static str, icon: Icon) -> Cmd {
     Cmd { id, label, icon: Some(icon) }
 }
-const fn n(id: &'static str, label: &'static str) -> Cmd {
+pub(crate) const fn n(id: &'static str, label: &'static str) -> Cmd {
     Cmd { id, label, icon: None }
 }
 
@@ -143,7 +143,7 @@ const VPORT_CONFIGS: &[Cmd] =
 const EXPORTS: &[Cmd] = &[n("exportpdf", "PDF"), n("exportdwf", "DWF"), n("exportdwfx", "DWFx"), n("export", "Other Formats")];
 const CONTINUES: &[Cmd] = &[c("dimcontinue", "Continue", Icon::DimContinue), c("dimbaseline", "Baseline", Icon::DimBaseline)];
 
-const NONE: &[Cmd] = &[];
+pub(crate) const NONE: &[Cmd] = &[];
 
 pub const TABS: &[TabDef] = &[
     TabDef {
@@ -1035,6 +1035,134 @@ fn panel_commands(panel: &PanelDef) -> Vec<Cmd> {
     v
 }
 
+/// A tab's panels in `body`, those that don't fit collapsing from the right; `tab` keeps their
+/// widget ids apart from other tabs'.
+pub(crate) fn panels(app: &CadApp, ui: &mut egui::Ui, body: Rect, tab: &'static str, panels: &[PanelDef], out: &mut Option<Action>) {
+    let t = Tokens::get();
+    let full: Vec<f32> = panels.iter().map(|p| panel_width(ui, p)).collect();
+    let collapsed: Vec<f32> = panels.iter().map(|p| collapsed_width(ui, p)).collect();
+    let expanded = fit(&full, &collapsed, body.width() - 12.0);
+    let mut x = body.left() + 6.0;
+    for (i, panel) in panels.iter().enumerate() {
+        let open = expanded.get(i).copied().unwrap_or(true);
+        let w = if open { full.get(i).copied().unwrap_or(0.0) } else { collapsed.get(i).copied().unwrap_or(0.0) };
+        let pr = Rect::from_min_size(pos2(x, body.top() + 2.0), vec2(w, BODY + TITLE));
+        if open {
+            let mut cx = pr.left() + PAD;
+            for cell in panel.cells {
+                let cw = cell_width(ui, cell);
+                draw_cell(ui, app, cell, Rect::from_min_size(pos2(cx, pr.top()), vec2(cw, BODY)), out);
+                cx += cw;
+            }
+            // Title row (with the expander when the panel has more commands).
+            let title_r = Rect::from_min_max(pos2(pr.left(), pr.bottom() - TITLE), pr.max);
+            let label = crate::i18n::ribbon(panel.title);
+            if panel.more.is_empty() {
+                ui.painter().text(title_r.center(), Align2::CENTER_CENTER, label, font(), t.text_dim);
+            } else {
+                let resp = ui.interact(title_r, ui.scope_id().with(("rb_more", tab, panel.title)), Sense::click());
+                hover_fill(ui, title_r, &resp);
+                let tw = text_w(ui, panel.title);
+                ui.painter().text(pos2(title_r.center().x - 6.0, title_r.center().y), Align2::CENTER_CENTER, label, font(), t.text_dim);
+                icons::paint(
+                    ui.painter(),
+                    Rect::from_center_size(pos2(title_r.center().x + tw / 2.0 + 2.0, title_r.center().y), vec2(8.0, 8.0)),
+                    Icon::ChevronDown,
+                    false,
+                );
+                icons::describe_control(ui, &resp, panel.title, None, false);
+                egui::Popup::menu(&resp).show(|ui| variant_menu(ui, panel.more, out));
+            }
+        } else {
+            let resp = ui.interact(pr, ui.scope_id().with(("rb_collapsed", tab, panel.title)), Sense::click());
+            hover_fill(ui, pr, &resp);
+            let first = panel_commands(panel).into_iter().next();
+            if let Some(cmd) = &first {
+                paint_icon(
+                    ui.painter(),
+                    Rect::from_center_size(pos2(pr.center().x, pr.top() + 6.0 + BIG_ICON / 2.0), vec2(BIG_ICON, BIG_ICON)),
+                    cmd,
+                    false,
+                );
+            }
+            ui.painter().text(pos2(pr.center().x, pr.top() + BIG_ICON + 14.0), Align2::CENTER_TOP, crate::i18n::ribbon(panel.title), font(), t.text);
+            icons::paint(ui.painter(), Rect::from_center_size(pos2(pr.center().x, pr.bottom() - 10.0), vec2(9.0, 9.0)), Icon::ChevronDown, false);
+            icons::describe_control(ui, &resp, panel.title, None, false);
+            let cmds = panel_commands(panel);
+            egui::Popup::menu(&resp).show(|ui| variant_menu(ui, &cmds, out));
+        }
+        x += w;
+        // Panel separator.
+        ui.painter().vline(x, (pr.top() + 4.0)..=(pr.bottom() - 4.0), Stroke::new(1.0, t.border));
+        x += 1.0;
+    }
+}
+
+/// A contextual tab: shown while `tab` names it, drawn after the other tabs, with its own panels.
+pub(crate) struct Contextual {
+    /// The tab's id (as `UiState::ribbon_tab` holds it while shown), or `None` while it is hidden.
+    pub tab: fn(&CadApp) -> Option<&'static str>,
+    /// Every id `tab` can name, with its English title.
+    pub ids: &'static [(&'static str, &'static str)],
+    pub body: fn(&mut CadApp, &mut egui::Ui, Rect, &mut Option<Action>),
+}
+
+/// The contextual tabs, in the order they are drawn after the other tabs. Every one that shows
+/// gets its tab at once: a Block Editor tab goes before the hatch tabs, so selecting a hatch (or
+/// running HATCH) in the Block Editor shows both, the hatch tab active.
+pub(crate) const CONTEXTUAL: &[Contextual] = &[Contextual {
+    tab: crate::ribbon_hatch::tab,
+    ids: &[(crate::ribbon_hatch::TAB_ID, crate::ribbon_hatch::TAB_TITLE), (crate::ribbon_hatch::CREATE_ID, crate::ribbon_hatch::CREATE_TITLE)],
+    body: crate::ribbon_hatch::body,
+}];
+
+/// The contextual tabs shown now, in drawing order, with their providers. They open by
+/// themselves, as Windows CAD ribbons do: `UiState::ribbon_tab` moves to a tab when it appears
+/// (the last one to appear wins), to the remaining contextual tab when the active one goes, and
+/// back to the tab shown before once no contextual tab is left.
+fn context(app: &mut CadApp, ctx: &egui::Context) -> Vec<(&'static str, &'static Contextual)> {
+    context_in(app, ctx, CONTEXTUAL)
+}
+
+/// [`context`] over `providers`.
+fn context_in(app: &mut CadApp, ctx: &egui::Context, providers: &'static [Contextual]) -> Vec<(&'static str, &'static Contextual)> {
+    let is_contextual = |id: &str| providers.iter().any(|c| c.ids.iter().any(|(i, _)| *i == id));
+    let shown: Vec<(&'static str, &'static Contextual)> = providers.iter().filter_map(|c| (c.tab)(app).map(|id| (id, c))).collect();
+    let was_id = egui::Id::unique("rb_context");
+    let was: Vec<String> = ctx.data(|d| d.get_temp(was_id)).unwrap_or_default();
+    if was.is_empty() && !shown.is_empty() && !is_contextual(&app.ui.ribbon_tab) {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("rb_context_before"), app.ui.ribbon_tab.clone()));
+    }
+    // A tab that appears becomes the active one (a Ribbon the user reduced to its tabs stays so:
+    // the tab opens in the tab row). A provider moving from one of its tabs to another (Hatch
+    // Creation to Hatch Editor) moves the active tab only if it was on the one that went.
+    for &(id, provider) in &shown {
+        if was.iter().any(|w| w == id) {
+            continue;
+        }
+        match provider.ids.iter().find(|(i, _)| was.iter().any(|w| w == i)) {
+            Some((sibling, _)) if app.ui.ribbon_tab != *sibling => {}
+            _ => app.ui.ribbon_tab = id.to_string(),
+        }
+    }
+    let gone = was.iter().any(|w| !shown.iter().any(|(id, _)| id == w));
+    if is_contextual(&app.ui.ribbon_tab) && !shown.iter().any(|(id, _)| *id == app.ui.ribbon_tab) {
+        app.ui.ribbon_tab = match shown.last() {
+            Some((id, _)) => id.to_string(),
+            None => ctx.data(|d| d.get_temp(egui::Id::unique("rb_context_before"))).unwrap_or_else(|| "home".to_string()),
+        };
+    }
+    if gone {
+        // A slide-out of a tab that went away closes with it.
+        ctx.data_mut(|d| d.remove::<String>(egui::Id::unique("rb_open_panel")));
+    }
+    let now: Vec<String> = shown.iter().map(|(id, _)| id.to_string()).collect();
+    if now != was {
+        ctx.data_mut(|d| d.insert_temp(was_id, now));
+    }
+    shown
+}
+
 /// The ribbon (tab row and the active tab's panels).
 pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -1042,12 +1170,12 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
     let mut out: Option<Action> = None;
     egui::Panel::top("cc_ribbon").exact_size(h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let r = ui.max_rect();
-        // Tabs, then the contextual tab of the selection (Hatch Editor), which opens by itself.
+        // Tabs, then the contextual tabs (Hatch Editor, Hatch Creation…), which open by themselves.
         let mut x = r.left() + 8.0;
-        let context = crate::ribbon_hatch::context(app, ui.ctx());
-        let active = match context {
-            Some(c) if app.ui.ribbon_tab == c => c,
-            _ => TABS.iter().find(|tab| tab.id == app.ui.ribbon_tab).map_or("home", |tab| tab.id),
+        let shown = context(app, ui.ctx());
+        let active = match shown.iter().find(|(id, _)| app.ui.ribbon_tab == *id) {
+            Some((id, _)) => *id,
+            None => TABS.iter().find(|tab| tab.id == app.ui.ribbon_tab).map_or("home", |tab| tab.id),
         };
         for tab in TABS {
             let label = tab_label(tab.title);
@@ -1069,8 +1197,9 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
             }
             x += w + 2.0;
         }
-        if let Some(id) = context {
-            let label = tab_label(crate::ribbon_hatch::title(id));
+        for &(id, provider) in &shown {
+            let title = provider.ids.iter().find(|(i, _)| *i == id).map_or(id, |(_, title)| *title);
+            let label = tab_label(title);
             let w = ui.painter().layout_no_wrap(label.clone(), crate::theme::body(), t.text).size().x + 18.0;
             let tr = Rect::from_min_size(pos2(x + 4.0, r.top() + 1.0), vec2(w, TAB_ROW - 1.0));
             let resp = ui.interact(tr, ui.scope_id().with(("rb_tab", id)), Sense::click());
@@ -1079,12 +1208,13 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
             let fill = if is_active { t.accent } else { t.accent.gamma_multiply(if resp.hovered() { 0.75 } else { 0.55 }) };
             ui.painter().rect_filled(tr, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, fill);
             ui.painter().text(tr.center(), Align2::CENTER_CENTER, label, crate::theme::body(), Color32::WHITE);
-            icons::describe_control(ui, &resp, crate::ribbon_hatch::title(id), Some(is_active), true);
+            icons::describe_control(ui, &resp, title, Some(is_active), true);
             if resp.double_clicked() {
                 out = Some(Action::ToggleMinimized);
             } else if resp.clicked() {
                 out = Some(Action::Tab(id));
             }
+            x += w + 6.0;
         }
         if app.ui.ribbon_minimized {
             return;
@@ -1093,74 +1223,12 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
         let body = Rect::from_min_max(pos2(r.left(), r.top() + TAB_ROW), r.max);
         ui.painter().rect_filled(body, 0.0, t.panel);
         ui.painter().hline(body.x_range(), body.bottom() - 0.5, Stroke::new(1.0, t.border));
-        if context == Some(active) {
-            crate::ribbon_hatch::body(app, ui, body, &mut out);
+        if let Some((_, provider)) = shown.iter().find(|(id, _)| *id == active) {
+            (provider.body)(app, ui, body, &mut out);
             return;
         }
         let Some(tab) = TABS.iter().find(|tab| tab.id == active) else { return };
-        let full: Vec<f32> = tab.panels.iter().map(|p| panel_width(ui, p)).collect();
-        let collapsed: Vec<f32> = tab.panels.iter().map(|p| collapsed_width(ui, p)).collect();
-        let expanded = fit(&full, &collapsed, body.width() - 12.0);
-        let mut x = body.left() + 6.0;
-        for (i, panel) in tab.panels.iter().enumerate() {
-            let open = expanded.get(i).copied().unwrap_or(true);
-            let w = if open { full.get(i).copied().unwrap_or(0.0) } else { collapsed.get(i).copied().unwrap_or(0.0) };
-            let pr = Rect::from_min_size(pos2(x, body.top() + 2.0), vec2(w, BODY + TITLE));
-            if open {
-                let mut cx = pr.left() + PAD;
-                for cell in panel.cells {
-                    let cw = cell_width(ui, cell);
-                    draw_cell(ui, app, cell, Rect::from_min_size(pos2(cx, pr.top()), vec2(cw, BODY)), &mut out);
-                    cx += cw;
-                }
-                // Title row (with the expander when the panel has more commands).
-                let title_r = Rect::from_min_max(pos2(pr.left(), pr.bottom() - TITLE), pr.max);
-                let label = crate::i18n::ribbon(panel.title);
-                if panel.more.is_empty() {
-                    ui.painter().text(title_r.center(), Align2::CENTER_CENTER, label, font(), t.text_dim);
-                } else {
-                    let resp = ui.interact(title_r, ui.scope_id().with(("rb_more", tab.id, panel.title)), Sense::click());
-                    hover_fill(ui, title_r, &resp);
-                    let tw = text_w(ui, panel.title);
-                    ui.painter().text(pos2(title_r.center().x - 6.0, title_r.center().y), Align2::CENTER_CENTER, label, font(), t.text_dim);
-                    icons::paint(
-                        ui.painter(),
-                        Rect::from_center_size(pos2(title_r.center().x + tw / 2.0 + 2.0, title_r.center().y), vec2(8.0, 8.0)),
-                        Icon::ChevronDown,
-                        false,
-                    );
-                    icons::describe_control(ui, &resp, panel.title, None, false);
-                    egui::Popup::menu(&resp).show(|ui| variant_menu(ui, panel.more, &mut out));
-                }
-            } else {
-                let resp = ui.interact(pr, ui.scope_id().with(("rb_collapsed", tab.id, panel.title)), Sense::click());
-                hover_fill(ui, pr, &resp);
-                let first = panel_commands(panel).into_iter().next();
-                if let Some(cmd) = &first {
-                    paint_icon(
-                        ui.painter(),
-                        Rect::from_center_size(pos2(pr.center().x, pr.top() + 6.0 + BIG_ICON / 2.0), vec2(BIG_ICON, BIG_ICON)),
-                        cmd,
-                        false,
-                    );
-                }
-                ui.painter().text(
-                    pos2(pr.center().x, pr.top() + BIG_ICON + 14.0),
-                    Align2::CENTER_TOP,
-                    crate::i18n::ribbon(panel.title),
-                    font(),
-                    t.text,
-                );
-                icons::paint(ui.painter(), Rect::from_center_size(pos2(pr.center().x, pr.bottom() - 10.0), vec2(9.0, 9.0)), Icon::ChevronDown, false);
-                icons::describe_control(ui, &resp, panel.title, None, false);
-                let cmds = panel_commands(panel);
-                egui::Popup::menu(&resp).show(|ui| variant_menu(ui, &cmds, &mut out));
-            }
-            x += w;
-            // Panel separator.
-            ui.painter().vline(x, (pr.top() + 4.0)..=(pr.bottom() - 4.0), Stroke::new(1.0, t.border));
-            x += 1.0;
-        }
+        panels(app, ui, body, tab.id, tab.panels, &mut out);
     });
     match out {
         Some(Action::Start(id)) => app.start(id),
@@ -1204,6 +1272,88 @@ pub fn apply_mac_layout(app: &mut CadApp) {
 
 #[cfg(test)]
 mod tests {
+    use super::{Contextual, context_in};
+    use crate::{CadApp, Services, ribbon_hatch};
+    use serde_json::json;
+
+    fn block_editor_tab(app: &CadApp) -> Option<&'static str> {
+        app.session.state().ok()?.block_editor().map(|_| "blockeditor")
+    }
+    fn no_body(_: &mut CadApp, _: &mut egui::Ui, _: egui::Rect, _: &mut Option<super::Action>) {}
+
+    /// A Block Editor provider before the hatch tabs, as a Block Editor tab plugs in.
+    const BOTH: &[Contextual] = &[
+        Contextual { tab: block_editor_tab, ids: &[("blockeditor", "Block Editor")], body: no_body },
+        Contextual {
+            tab: ribbon_hatch::tab,
+            ids: &[(ribbon_hatch::TAB_ID, ribbon_hatch::TAB_TITLE), (ribbon_hatch::CREATE_ID, ribbon_hatch::CREATE_TITLE)],
+            body: no_body,
+        },
+    ];
+
+    fn shown(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static str> {
+        context_in(app, ctx, BOTH).into_iter().map(|(id, _)| id).collect()
+    }
+
+    #[test]
+    fn contextual_tabs_show_together_and_hand_the_active_tab_back() {
+        let ctx = egui::Context::default();
+        let mut app = CadApp::new(cadcraft_engine::Session::default(), Services::default());
+        app.run("new", json!({})).unwrap();
+        let r = app.run("rectang", json!({ "p1": [0, 0], "p2": [20, 10] })).unwrap();
+        app.run("block", json!({ "name": "Tile", "base": [0, 0], "handles": [r["handle"]] })).unwrap();
+        app.ui.ribbon_tab = "annotate".into();
+        assert!(shown(&mut app, &ctx).is_empty());
+        // The Block Editor opens its tab.
+        app.run("bedit", json!({ "name": "Tile" })).unwrap();
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor"]);
+        assert_eq!(app.ui.ribbon_tab, "blockeditor");
+        // A hatch selected in it: both tabs, the Block Editor's first, the hatch tab active.
+        let r = app.run("rectang", json!({ "p1": [30, 0], "p2": [40, 10] })).unwrap();
+        let h = app.run("hatch", json!({ "handles": [r["handle"]], "pattern": "SOLID" })).unwrap();
+        let hatch = cadcraft_doc::Handle::parse_hex(h["handle"].as_str().unwrap()).unwrap();
+        app.session.set_selection(vec![hatch]);
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor", ribbon_hatch::TAB_ID]);
+        assert_eq!(app.ui.ribbon_tab, ribbon_hatch::TAB_ID);
+        // The user may pick the Block Editor's tab; the hatch tab stays shown beside it.
+        app.ui.ribbon_tab = "blockeditor".into();
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor", ribbon_hatch::TAB_ID]);
+        assert_eq!(app.ui.ribbon_tab, "blockeditor");
+        // Deselected: the hatch tab goes, the Block Editor's stays active.
+        app.ui.ribbon_tab = ribbon_hatch::TAB_ID.into();
+        app.session.set_selection(Vec::new());
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor"]);
+        assert_eq!(app.ui.ribbon_tab, "blockeditor");
+        // HATCH in the Block Editor: Hatch Creation joins and is active; Esc gives the Block
+        // Editor's tab back.
+        app.session.start("hatch").unwrap();
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor", ribbon_hatch::CREATE_ID]);
+        assert_eq!(app.ui.ribbon_tab, ribbon_hatch::CREATE_ID);
+        app.session.cancel();
+        assert_eq!(shown(&mut app, &ctx), ["blockeditor"]);
+        assert_eq!(app.ui.ribbon_tab, "blockeditor");
+        // The Block Editor closes: the tab shown before comes back.
+        app.run("bclose", json!({ "save": false })).unwrap();
+        assert!(shown(&mut app, &ctx).is_empty());
+        assert_eq!(app.ui.ribbon_tab, "annotate");
+    }
+
+    #[test]
+    fn a_normal_tab_chosen_while_hatch_creation_shows_stays_when_the_hatch_editor_follows() {
+        let ctx = egui::Context::default();
+        let mut app = CadApp::new(cadcraft_engine::Session::default(), Services::default());
+        app.run("new", json!({})).unwrap();
+        let r = app.run("rectang", json!({ "p1": [0, 0], "p2": [20, 10] })).unwrap();
+        app.ui.ribbon_tab = "annotate".into();
+        app.session.start("hatch").unwrap();
+        assert_eq!(shown(&mut app, &ctx), [ribbon_hatch::CREATE_ID]);
+        app.ui.ribbon_tab = "home".into();
+        app.session.cancel();
+        let h = app.run("hatch", json!({ "handles": [r["handle"]], "pattern": "SOLID" })).unwrap();
+        app.session.set_selection(vec![cadcraft_doc::Handle::parse_hex(h["handle"].as_str().unwrap()).unwrap()]);
+        assert_eq!(shown(&mut app, &ctx), [ribbon_hatch::TAB_ID]);
+        assert_eq!(app.ui.ribbon_tab, "home");
+    }
     use super::*;
 
     #[test]

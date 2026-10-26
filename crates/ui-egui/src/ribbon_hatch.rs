@@ -22,11 +22,6 @@ pub const TAB_TITLE: &str = "Hatch Editor";
 pub const CREATE_ID: &str = "hatchcreate";
 pub const CREATE_TITLE: &str = "Hatch Creation";
 
-/// The contextual tab's title for its id.
-pub fn title(id: &str) -> &'static str {
-    if id == CREATE_ID { CREATE_TITLE } else { TAB_TITLE }
-}
-
 /// A Hatch Editor label: its own wording where the tab words it differently from the other tabs
 /// (`hatchribbon`), else the Ribbon's.
 fn hl(source: &str) -> &str {
@@ -50,47 +45,25 @@ const C_REMOVE: Cmd = c("ui.hatchcreate.remove", "Remove", Icon::HatchRemove);
 const C_RECREATE: Cmd = c("", "Recreate", Icon::HatchRecreate);
 const C_SET_ORIGIN: Cmd = c("ui.hatchcreate.origin", "Set Origin", Icon::HatchOrigin);
 const C_CLOSE: Cmd = c("ui.hatchcreate.close", "Close Hatch Creation", Icon::CloseEditor);
+// In the Block Editor, both hatch tabs also close the Block Editor from their right end.
+const BLOCK_CLOSE: Cmd = c("bclose", "Close Block Editor", Icon::CloseEditor);
 const NONE: &[Cmd] = &[];
 
 /// Gallery tiles in a row (and rows of the panel's gallery).
 const TILES: usize = 4;
 const TILE_W: f32 = 54.0;
 
-/// Whether the Hatch Editor shows: the selection is hatches only (in the drawing or the Block
-/// Editor alike). Keeps `UiState::ribbon_tab` on the tab while it appears and goes back to the
-/// tab shown before once the hatches are deselected.
-pub fn context(app: &mut CadApp, ctx: &egui::Context) -> Option<&'static str> {
-    let id = if creating(app) {
+/// Which hatch tab shows: Hatch Creation while HATCH runs, the Hatch Editor while the selection is
+/// hatches only (in the drawing or the Block Editor alike). Opening and closing the tab is the
+/// Ribbon's (`ribbon::CONTEXTUAL`).
+pub fn tab(app: &CadApp) -> Option<&'static str> {
+    if creating(app) {
         Some(CREATE_ID)
     } else if !selected(app).is_empty() {
         Some(TAB_ID)
     } else {
         None
-    };
-    let shown = id.is_some();
-    // Switching between the two contextual tabs (HATCH ended with the new hatch selected).
-    if let Some(id) = id
-        && (app.ui.ribbon_tab == TAB_ID || app.ui.ribbon_tab == CREATE_ID)
-    {
-        app.ui.ribbon_tab = id.to_string();
     }
-    let was_id = egui::Id::unique("rb_hatch_context");
-    let was: bool = ctx.data(|d| d.get_temp(was_id)).unwrap_or(false);
-    if shown && !was {
-        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("rb_hatch_before"), app.ui.ribbon_tab.clone()));
-        // A Ribbon the user reduced to its tabs stays so: the contextual tab opens in the tab row.
-        app.ui.ribbon_tab = id.unwrap_or(TAB_ID).to_string();
-    } else if !shown && was {
-        let before: String = ctx.data(|d| d.get_temp(egui::Id::unique("rb_hatch_before"))).unwrap_or_else(|| "home".to_string());
-        if app.ui.ribbon_tab == TAB_ID || app.ui.ribbon_tab == CREATE_ID {
-            app.ui.ribbon_tab = before;
-        }
-        ctx.data_mut(|d| d.remove::<String>(egui::Id::unique("rb_open_panel")));
-    }
-    if shown != was {
-        ctx.data_mut(|d| d.insert_temp(was_id, shown));
-    }
-    id
 }
 
 /// HATCH or GRADIENT is running (the Hatch Creation tab shows).
@@ -344,12 +317,16 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
         big_w(ui, &set_origin).max(text_w(ui, "Origin") + 24.0) + 2.0 * PAD,
         big_w(ui, &c("", "Associative", Icon::Associative)) + big_w(ui, &c("", "Annotative", Icon::Annotative)) + match_w(ui) + 10.0 + 2.0 * PAD,
         big_w(ui, &close) + 2.0 * PAD,
+        big_w(ui, &BLOCK_CLOSE) + 2.0 * PAD,
     ];
-    let titles = ["Boundaries", "Pattern", "Properties", "Origin", "Options", "Close"];
+    let titles = ["Boundaries", "Pattern", "Properties", "Origin", "Options", "Close", "Close"];
+    // The last panel (Close Block Editor) only while the Block Editor is open.
+    let in_block_editor = app.session.state().ok().and_then(|st| st.block_editor().map(|_| ())).is_some();
+    let count = if in_block_editor { titles.len() } else { titles.len() - 1 };
     let mut x = body.left() + 6.0;
     let open_id = egui::Id::unique("rb_open_panel");
     let open: Option<String> = ui.ctx().data(|d| d.get_temp(open_id));
-    for (i, (w, title)) in widths.iter().zip(titles).enumerate() {
+    for (i, (w, title)) in widths.iter().zip(titles).enumerate().take(count) {
         let pr = Rect::from_min_size(pos2(x, body.top() + 2.0), vec2(*w, BODY + TITLE));
         let cells = Rect::from_min_size(pr.min, vec2(*w, BODY));
         match i {
@@ -358,7 +335,8 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
             2 => properties(ui, cells, &sh, out),
             3 => big(ui, cells.shrink2(vec2(PAD, 0.0)), &set_origin, NONE, out),
             4 => options(ui, cells, &sh, out),
-            _ => big(ui, cells.shrink2(vec2(PAD, 0.0)), &close, NONE, out),
+            5 => big(ui, cells.shrink2(vec2(PAD, 0.0)), &close, NONE, out),
+            _ => big(ui, cells.shrink2(vec2(PAD, 0.0)), &BLOCK_CLOSE, NONE, out),
         }
         // Title row: panels with a second part slide it out under the title (▾).
         let title_r = Rect::from_min_max(pos2(pr.left(), pr.bottom() - TITLE), pr.max);
@@ -411,7 +389,7 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
                 }
             }
         } else {
-            let resp = ui.interact(title_r, ui.scope_id().with(("rbh_title", title)), Sense::hover());
+            let resp = ui.interact(title_r, ui.scope_id().with(("rbh_title", title, i)), Sense::hover());
             ui.painter().text(title_r.center(), Align2::CENTER_CENTER, label, font(), t.text_dim);
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
         }

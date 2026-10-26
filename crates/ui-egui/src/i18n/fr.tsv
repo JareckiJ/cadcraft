@@ -1276,9 +1276,11 @@ hatchribbon	Bring to Front	Mettre au premier plan
 	Select Color	Sélectionner une couleur
 ribbon	Hatch Creation	Création de hachures
 ribbon	Close Hatch Creation	Fermer Création de hachures
+ribbon	Close Block Editor	Fermer l'éditeur de blocs
 ribbon	Retain Boundaries - Polyline	Conserver les contours - Polyligne
 ribbon	Retain Boundaries - Region	Conserver les contours - Région
 ribbon	Select New Boundary Set	Sélectionner un nouveau jeu de contours
 ribbon	Hatch and Gradient	Hachures et gradient
 	Close Hatch Creation	Fermer Création de hachures
+	Close Block Editor	Fermer l'éditeur de blocs
 	Select Hatch	Sélectionner une hachure
