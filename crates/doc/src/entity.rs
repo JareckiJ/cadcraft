@@ -26,6 +26,9 @@ impl Handle {
     }
 }
 
+/// Fields (`%<\AcVar Date>%` …) in text values.
+pub mod fields;
+
 /// Lineweight in hundredths of a millimetre, or a logical value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
