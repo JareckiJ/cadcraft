@@ -41,6 +41,10 @@ fn status_readout_right_click_opens_customization() {
         h.run_steps(2);
     }
     assert!(h.query_by_label("Show All Status Items").is_some());
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Grid (F7)").click();
+    h.run_steps(4);
+    assert!(h.state().ui.hidden_status_items.iter().any(|id| id == "grid"));
+    assert!(h.query_by_label("Show All Status Items").is_some(), "right-click customization stays open after toggling an item");
 }
 
 #[test]
@@ -103,4 +107,18 @@ fn status_customization_does_not_cancel_or_feed_a_point_to_a_running_line() {
     h.state_mut().session.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
     let count = h.state().session.doc().unwrap().space(&Space::Model).unwrap().iter().filter(|e| matches!(e.kind, EntityKind::Line(_))).count();
     assert_eq!(count, 1);
+}
+
+/// Resetting side palettes must not reset the independent status preferences.
+#[test]
+fn status_visibility_survives_palette_reset() {
+    let mut h = harness();
+    h.state_mut().run("ui.status.item", serde_json::json!({"item":"grid","visible":false})).unwrap();
+    h.state_mut().run("ui.resetpalettes", serde_json::json!({})).unwrap();
+    h.run_steps(4);
+    assert_eq!(h.state().ui.hidden_status_items, ["grid"]);
+    assert!(h.query_by_label("Grid (F7)").is_none());
+    h.state_mut().run("ui.status.reset", serde_json::json!({})).unwrap();
+    h.run_steps(4);
+    assert!(h.query_by_label("Grid (F7)").is_some());
 }

@@ -206,6 +206,8 @@ Visibility is an application preference: hiding Grid does not disable the drawin
 system variables, dirty the drawing, or cancel an active command. The customization button
 remains accessible when all items are hidden; Window > Show All Status Items also restores them.
 Unknown, duplicate or malformed saved item lists are ignored atomically.
+Both customization entry points keep the menu open when an item is toggled. Reset Palettes
+preserves status-item visibility; Show All Status Items is the dedicated recovery action.
 
 AutoCAD 2027 on Windows was observed black-box on 2026-10-26: toggling Coordinates in its
 customization menu updates the status bar while keeping the menu open. CADCraft's customization
@@ -218,6 +220,7 @@ these runtime checks are separate from the WASM compilation gate.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-26 | patch | Keep right-click status customization open for consecutive toggles and preserve hidden status items through Reset Palettes (CC-037 review corrections) |
 | 2026-10-26 | minor | Status item visibility, persistent application preferences, recovery command and command-isolation regressions (CC-037); no ribbon dependency |
 | 2026-10-22 | minor | Polyline segment midpoint grips use rectangles, distinct from square vertex grips, with matching hover and pick bounds (#1950) |
 | 2026-10-13 | minor | Filled-region highlight boundaries are traversed in deterministic coordinate order, fixing dash-phase jumps on CPU hover/selection redraws and GPU highlight rebuilds; CPU dash-position, pixel and GPU mesh regressions |

@@ -527,7 +527,7 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         icons::describe_control(ui, &customize, "Status Bar Customization", None, false);
         egui::Popup::menu(&customize).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| status::menu(app, ui));
         customize.on_hover_text(crate::tl!("Status Bar Customization"));
-        background.context_menu(|ui| status::menu(app, ui));
+        egui::Popup::context_menu(&background).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| status::menu(app, ui));
     });
 }
 
