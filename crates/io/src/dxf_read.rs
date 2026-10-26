@@ -1110,12 +1110,33 @@ fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &m
 /// Allocate an entity handle that is unique within the DXF, including against handles assigned
 /// to earlier malformed or generated entities.
 fn fresh_entity_handle(d: &mut Drawing, seen: &mut HashSet<Handle>, reserved: &HashSet<Handle>) -> Handle {
+    // The seed saturates at `u64::MAX`: once a file uses that handle, `new_handle` keeps
+    // returning it and a plain retry loop would never terminate. Stop as soon as it stops
+    // advancing.
+    let mut previous = None;
     loop {
         let h = d.new_handle();
         if !reserved.contains(&h) && seen.insert(h) {
             return h;
         }
+        if previous == Some(h) {
+            break;
+        }
+        previous = Some(h);
     }
+    // Every value the seed can still reach is taken, so scan from the bottom: the occupied set
+    // is finite, which guarantees a free handle within its size plus one candidates.
+    let limit = seen.len().saturating_add(reserved.len()).saturating_add(1);
+    let mut candidate = 1u64;
+    for _ in 0..limit {
+        let h = Handle(candidate);
+        if !reserved.contains(&h) && seen.insert(h) {
+            return h;
+        }
+        candidate = candidate.saturating_add(1);
+    }
+    // Unreachable in practice (pigeonhole over the finite occupied set); never lose the entity.
+    d.new_handle()
 }
 
 /// Parse a run of entity records (ENTITIES section or a block's body) into entities. Records that
