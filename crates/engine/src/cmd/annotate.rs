@@ -606,19 +606,26 @@ fn run_reassociate(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "dimensions": hs.len(), "associated": n, "points": points, "message": format!("{n} of {} dimension(s) associated.", hs.len()) }))
 }
 
+/// DIMDISASSOCIATE: clears the association of the given dimensions (the modelled one and a kept DIMASSOC read from the file); returns how many had one.
 fn run_disassociate(s: &mut Session, p: &Value) -> Result<Value> {
     let hs = dims_of(s, &targets(s, p)?);
     let d = s.doc_mut()?;
     let mut n = 0;
     for h in &hs {
+        let mut had = false;
         let _ = d.modify_entity(*h, |e| {
             if let EntityKind::Dimension(dm) = &mut e.kind
                 && !dm.assoc.is_empty()
             {
                 dm.assoc.clear();
-                n += 1;
+                had = true;
             }
         });
+        // An association read from the file that CADCraft doesn't model (kept as it was).
+        if d.foreign.has_dimassoc(*h) {
+            had |= std::sync::Arc::make_mut(&mut d.foreign).drop_dimassoc(*h);
+        }
+        n += usize::from(had);
     }
     Ok(json!({ "disassociated": n, "message": format!("{n} disassociated.") }))
 }
