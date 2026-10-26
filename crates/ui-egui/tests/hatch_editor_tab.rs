@@ -43,7 +43,8 @@ fn selecting_a_hatch_opens_the_hatch_editor_and_deselecting_closes_it() {
     h.run_steps(3);
     assert_eq!(h.state().ui.ribbon_tab, ribbon_hatch::TAB_ID);
     for label in ["Hatch Editor", "Boundaries", "Pattern", "Origin", "Options", "Close Hatch Editor", "Associative", "Pick Points"] {
-        assert!(h.query_by_label(label).is_some(), "{label} shown");
+        // The Properties palette may show a row with the same label (Pattern).
+        assert!(h.query_all_by_label(label).next().is_some(), "{label} shown");
     }
 
     // A hatch with another object: no Hatch Editor.
@@ -260,7 +261,8 @@ fn quick_properties_of_a_hatch_list_its_rows_and_edit_it() {
     h.run_steps(3);
     // The Properties palette has its own Linetype row.
     let linetypes = h.query_all_by_label("Linetype").count();
-    h.state_mut().run("ui.quickprops", json!({})).unwrap();
+    // As a double-click on the hatch with the Ribbon does.
+    h.state_mut().qp_forced = true;
     h.run_steps(3);
     for label in ["Pattern name", "Annotative", "Associative", "Background color"] {
         assert!(h.query_all_by_label(label).next().is_some(), "{label} shown");
