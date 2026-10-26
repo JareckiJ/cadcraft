@@ -336,6 +336,7 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
     // dropping it cancels it.
     app.canvas.job = None;
     let t0 = crate::now_ms();
+    let window = build_window(views);
     let opts = cadcraft_render::Options {
         tolerance: 2f64.powi(band(px)) * 0.5,
         // Two pixels at the band's finest zoom: the list serves every zoom in the band, so its
@@ -346,10 +347,11 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         lineweights: lwdisplay,
         view_height: st.paper_view().height,
         plot_style_table: None,
-        view: build_window(views),
+        view: window,
         transparency: app.session.settings.transparency_display,
         skip_viewport: split,
         cancel: None,
+        only: None,
     };
     if view_only {
         let t = Tokens::get();
@@ -362,13 +364,20 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
             device: app.canvas.gpu_device.clone(),
         });
         let window = opts.view;
-        let req = rebuild::Request { doc: st.doc.clone(), space: st.space.clone(), opts: opts.clone(), mesh };
+        let req = rebuild::Request { doc: st.doc.clone(), space: st.space.clone(), opts: opts.clone(), mesh, near_view: true };
         if let Some(job) = rebuild::spawn(req, key, window, ctx) {
             app.canvas.job = Some(job);
             return;
         }
     }
     let space = st.space.clone();
+    // An edit rebuilds at once, on this thread: near the view too once there is a list (its
+    // spatial index is then already built and only patched), the whole space on first show.
+    let opts = if app.canvas.list.is_some() {
+        cadcraft_render::Options { only: cadcraft_engine::spatial::near_view(&st.doc, &space, window), ..opts }
+    } else {
+        opts
+    };
     app.canvas.list = Some(cadcraft_render::build(&st.doc, &space, &opts));
     app.canvas.key = key;
     app.canvas.window = opts.view;
@@ -511,6 +520,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             skip_viewport: None,
             transparency,
             cancel: None,
+            only: None,
         };
         c.list = cadcraft_render::viewport_content(&st.doc, &st.space, h, area, &opts);
         c.key = Some(key);
@@ -825,9 +835,7 @@ pub(crate) fn draw_list(p: &egui::Painter, xf: &Xf, list: &DisplayList, bg: Rgb,
                 }
             }
             Kind::Point => {
-                if let Some(q) = pts.first()
-                    && vis.contains(*q)
-                {
+                for q in pts.iter().filter(|q| vis.contains(**q)) {
                     shapes.push(Shape::rect_filled(Rect::from_center_size(xf.to_screen(*q), vec2(1.5, 1.5)), 0.0, col));
                 }
             }
@@ -1060,7 +1068,7 @@ pub(crate) fn draw_highlight(p: &egui::Painter, xf: &Xf, list: &DisplayList, pri
                 }
             }
             Kind::Point => {
-                if let Some(q) = pts.first() {
+                for q in pts {
                     shapes.push(Shape::circle_stroke(xf.to_screen(*q), 3.0, Stroke::new(1.0, color)));
                 }
             }
