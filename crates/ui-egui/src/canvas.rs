@@ -1943,7 +1943,47 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && let Ok(st) = app.session.state()
     {
         let gs = app.session.settings.gripsize as f32;
+        let gdm = app.session.settings.groupdisplaymode;
+        let mut grouped_members = std::collections::HashSet::new();
+        if gdm > 0 && app.session.settings.pickstyle & 1 != 0 {
+            for g in &st.doc.groups {
+                if g.selectable && !g.members.is_empty() && g.members.iter().all(|h| sel.contains(h)) {
+                    let mut b = cadcraft_geom::Bounds2::EMPTY;
+                    for h in &g.members {
+                        if let Some(e) = st.doc.entity(*h) {
+                            grouped_members.insert(*h);
+                            let eb = cadcraft_engine::doc::entity_bounds(&st.doc, e, 0);
+                            b = b.union(&eb);
+                        }
+                    }
+                    if !b.is_empty() {
+                        let bounds = b;
+                        let min_sp = xf.to_screen(bounds.min);
+                        let max_sp = xf.to_screen(bounds.max);
+                        let box_rect = Rect::from_two_pos(min_sp, max_sp).expand(4.0);
+                        if rect.intersects(box_rect) {
+                            painter.rect_stroke(
+                                box_rect,
+                                0.0,
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(0x80, 0x90, 0xb0, 0xb0)),
+                                egui::StrokeKind::Middle,
+                            );
+                            let center_sp = xf.to_screen(bounds.center());
+                            if rect.contains(center_sp) {
+                                let cr = Rect::from_center_size(center_sp, egui::vec2(gs * 2.0, gs * 2.0));
+                                let warm = hover_pos.is_some_and(|hp| cr.expand(2.0).contains(hp));
+                                painter.rect_filled(cr, 0.0, if warm { Color32::from_rgb(0xff, 0x7f, 0x9f) } else { t.grip });
+                                painter.rect_stroke(cr, 0.0, Stroke::new(1.0, Color32::from_rgb(0x10, 0x30, 0x80)), egui::StrokeKind::Middle);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for h in sel.iter().take(200) {
+            if gdm == 1 && grouped_members.contains(h) {
+                continue;
+            }
             if let Some(e) = st.doc.entity(*h) {
                 let grips = e.kind.grips();
                 let count = grips.len();
