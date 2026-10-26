@@ -729,7 +729,8 @@ pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
         let mut act = |c: &'static str, p: Value| action = Some((c, p));
         prop_row(ui, "Color", |ui| {
             let cur = Color::from_aci(h.i64("CECOLOR", 256) as i16);
-            if let Some(c) = color_list_button(ui, egui::Id::new("prop_cecolor"), Some(cur), cur.resolve(Color::WHITE, Color::WHITE), &cur.name()) {
+            if let Some(c) = color_list_button(ui, egui::Id::unique("prop_cecolor"), Some(cur), cur.resolve(Color::WHITE, Color::WHITE), &cur.name())
+            {
                 act("color", json!({ "color": color_param(c) }));
             }
         });

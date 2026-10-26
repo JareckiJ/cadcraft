@@ -74,18 +74,18 @@ pub fn context(app: &mut CadApp, ctx: &egui::Context) -> Option<&'static str> {
     {
         app.ui.ribbon_tab = id.to_string();
     }
-    let was_id = egui::Id::new("rb_hatch_context");
+    let was_id = egui::Id::unique("rb_hatch_context");
     let was: bool = ctx.data(|d| d.get_temp(was_id)).unwrap_or(false);
     if shown && !was {
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("rb_hatch_before"), app.ui.ribbon_tab.clone()));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("rb_hatch_before"), app.ui.ribbon_tab.clone()));
         // A Ribbon the user reduced to its tabs stays so: the contextual tab opens in the tab row.
         app.ui.ribbon_tab = id.unwrap_or(TAB_ID).to_string();
     } else if !shown && was {
-        let before: String = ctx.data(|d| d.get_temp(egui::Id::new("rb_hatch_before"))).unwrap_or_else(|| "home".to_string());
+        let before: String = ctx.data(|d| d.get_temp(egui::Id::unique("rb_hatch_before"))).unwrap_or_else(|| "home".to_string());
         if app.ui.ribbon_tab == TAB_ID || app.ui.ribbon_tab == CREATE_ID {
             app.ui.ribbon_tab = before;
         }
-        ctx.data_mut(|d| d.remove::<String>(egui::Id::new("rb_open_panel")));
+        ctx.data_mut(|d| d.remove::<String>(egui::Id::unique("rb_open_panel")));
     }
     if shown != was {
         ctx.data_mut(|d| d.insert_temp(was_id, shown));
@@ -372,7 +372,7 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
     ];
     let titles = ["Boundaries", "Pattern", "Properties", "Origin", "Options", "Close"];
     let mut x = body.left() + 6.0;
-    let open_id = egui::Id::new("rb_open_panel");
+    let open_id = egui::Id::unique("rb_open_panel");
     let open: Option<String> = ui.ctx().data(|d| d.get_temp(open_id));
     for (i, (w, title)) in widths.iter().zip(titles).enumerate() {
         let pr = Rect::from_min_size(pos2(x, body.top() + 2.0), vec2(*w, BODY + TITLE));
@@ -390,7 +390,7 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
         let expandable = matches!(title, "Boundaries" | "Properties" | "Origin" | "Options");
         let label = hl(title);
         if expandable {
-            let resp = ui.interact(title_r, ui.id().with(("rbh_title", title)), Sense::click());
+            let resp = ui.interact(title_r, ui.scope_id().with(("rbh_title", title)), Sense::click());
             hover_fill(ui, title_r, &resp);
             let tw = text_w(ui, title);
             ui.painter().text(pos2(title_r.center().x - 6.0, title_r.center().y), Align2::CENTER_CENTER, label, font(), t.text_dim);
@@ -416,7 +416,7 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
                 // The dialog launcher (↘) opens the Hatch Edit dialog (Hatch and Gradient while
                 // creating): the only way to the dialog in the Ribbon layout.
                 let lr = Rect::from_center_size(pos2(title_r.right() - 8.0, title_r.center().y), vec2(12.0, 12.0));
-                let l = ui.interact(lr, ui.id().with("rbh_launcher"), Sense::click());
+                let l = ui.interact(lr, ui.scope_id().with("rbh_launcher"), Sense::click());
                 hover_fill(ui, lr, &l);
                 let p = ui.painter();
                 p.line_segment([lr.left_top() + vec2(3.0, 3.0), lr.right_bottom() - vec2(3.0, 3.0)], Stroke::new(1.0, t.text_dim));
@@ -436,9 +436,9 @@ pub(crate) fn body(app: &mut CadApp, ui: &mut egui::Ui, body: Rect, out: &mut Op
                 }
             }
         } else {
-            let resp = ui.interact(title_r, ui.id().with(("rbh_title", title)), Sense::hover());
+            let resp = ui.interact(title_r, ui.scope_id().with(("rbh_title", title)), Sense::hover());
             ui.painter().text(title_r.center(), Align2::CENTER_CENTER, label, font(), t.text_dim);
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
         }
         if open.as_deref() == Some(title) {
             slide_out(ui, title, pr, &sh, out);
@@ -496,7 +496,7 @@ fn gallery(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     let t = Tokens::get();
     let tiles = patterns::gallery();
     let rows = tiles.len().div_ceil(TILES).max(1);
-    let row_id = egui::Id::new("rbh_gallery_row");
+    let row_id = egui::Id::unique("rbh_gallery_row");
     let current = current_tile(&sh.hatch);
     // The row with the current pattern, until the arrows scroll elsewhere.
     let cur_row = tiles.iter().position(|n| n.eq_ignore_ascii_case(&current)).map_or(0, |i| i / TILES);
@@ -505,7 +505,7 @@ fn gallery(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     ui.painter().rect_filled(area, 2.0, t.field);
     for (k, name) in tiles.iter().skip(row * TILES).take(TILES).enumerate() {
         let tr = Rect::from_min_size(pos2(area.left() + k as f32 * TILE_W, area.top()), vec2(TILE_W, area.height()));
-        let resp = ui.interact(tr, ui.id().with(("rbh_tile", name)), Sense::click());
+        let resp = ui.interact(tr, ui.scope_id().with(("rbh_tile", name)), Sense::click());
         patterns::paint_tile(ui.painter(), tr.shrink(1.0), name, name.eq_ignore_ascii_case(&current), resp.hovered());
         icons::describe_control(ui, &resp, name, Some(name.eq_ignore_ascii_case(&current)), false);
         if resp.on_hover_text(hl(name)).clicked() {
@@ -517,7 +517,7 @@ fn gallery(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     let third = col.height() / 3.0;
     let arrow = |k: usize, icon: Icon, enabled: bool, tip: &str| -> bool {
         let ar = Rect::from_min_size(pos2(col.left(), col.top() + k as f32 * third), vec2(col.width(), third));
-        let resp = ui.interact(ar, ui.id().with(("rbh_garrow", k)), Sense::click());
+        let resp = ui.interact(ar, ui.scope_id().with(("rbh_garrow", k)), Sense::click());
         hover_fill(ui, ar, &resp);
         icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(9.0, 9.0)), icon, !enabled);
         if k == 2 {
@@ -532,7 +532,7 @@ fn gallery(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     if arrow(1, Icon::ChevronDown, row + 1 < rows, "Next") {
         ui.ctx().data_mut(|d| d.insert_temp(row_id, row + 1));
     }
-    let full_id = egui::Id::new("rbh_gallery_full");
+    let full_id = egui::Id::unique("rbh_gallery_full");
     let opened = arrow(2, Icon::ChevronDown, true, "More");
     if opened {
         ui.ctx().data_mut(|d| d.insert_temp(full_id, true));
@@ -540,7 +540,7 @@ fn gallery(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     if ui.ctx().data(|d| d.get_temp::<bool>(full_id)).unwrap_or(false) {
         let mut keep = true;
         let at = pos2(area.left(), area.top());
-        let resp = egui::Area::new(egui::Id::new("rbh_gallery_area")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
+        let resp = egui::Area::new(egui::Id::unique("rbh_gallery_area")).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
             // As wide as the gallery in the ribbon, with the same tiles (and the arrows' column).
             egui::Frame::NONE.fill(t.field).stroke(Stroke::new(1.0, t.border)).show(ui, |ui| {
                 ui.set_width(area.width() + 16.0);
@@ -614,7 +614,7 @@ fn swatch(c: &Color) -> Color32 {
 
 /// The colour drop-down under a list box.
 fn color_menu(resp: &egui::Response, id: &str, current: Color, by: bool) -> Option<Color> {
-    match crate::color_list::popup(resp, egui::Id::new(("rbh_color", id)), Some(current), by, false) {
+    match crate::color_list::popup(resp, egui::Id::unique(("rbh_color", id)), Some(current), by, false) {
         Some(crate::color_list::Pick::Color(c)) => Some(c),
         _ => None,
     }
@@ -629,7 +629,7 @@ fn combo(ui: &mut egui::Ui, r: Rect, id: &str, icon: Option<Icon>, sw: Option<Co
         x += 20.0;
     }
     let field = Rect::from_min_max(pos2(x, r.top() + 1.0), pos2(r.right(), r.bottom() - 1.0));
-    let resp = ui.interact(field, ui.id().with(("rbh_combo", id)), if enabled { Sense::click() } else { Sense::hover() });
+    let resp = ui.interact(field, ui.scope_id().with(("rbh_combo", id)), if enabled { Sense::click() } else { Sense::hover() });
     ui.painter().rect_filled(field, 2.0, if resp.hovered() && enabled { t.control_hover } else { t.control });
     let mut tx = field.left() + 5.0;
     if let Some(c) = sw {
@@ -678,7 +678,7 @@ const VALUE_W: f32 = 56.0;
 /// elsewhere commits, Escape cancels. Returns the new value.
 fn value_box(ui: &mut egui::Ui, r: Rect, id: &str, value: f64, decimals: usize, range: (f64, f64), enabled: bool, left: bool) -> Option<f64> {
     let t = Tokens::get();
-    let eid = ui.id().with(("rbh_value", id));
+    let eid = ui.scope_id().with(("rbh_value", id));
     let edit_id = eid.with("edit");
     let col = if enabled { t.text } else { t.text_faint };
     if let Some(mut text) = ui.data(|d| d.get_temp::<String>(edit_id)) {
@@ -690,7 +690,7 @@ fn value_box(ui: &mut egui::Ui, r: Rect, id: &str, value: f64, decimals: usize, 
                     .id(te_id)
                     .font(font())
                     .desired_width(r.width())
-                    .horizontal_align(if left { egui::Align::LEFT } else { egui::Align::RIGHT })
+                    .align(if left { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP })
                     .show(ui)
             })
             .inner;
@@ -749,7 +749,7 @@ fn slider(ui: &mut egui::Ui, r: Rect, id: &str, label: &str, value: f64, range: 
     let t = Tokens::get();
     let field = Rect::from_min_max(r.min + vec2(0.0, 1.0), pos2(r.right() - VALUE_W - 2.0, r.bottom() - 1.0));
     let vbox = Rect::from_min_max(pos2(field.right() + 2.0, field.top()), pos2(r.right(), field.bottom()));
-    let eid = ui.id().with(("rbh_slider", id));
+    let eid = ui.scope_id().with(("rbh_slider", id));
     let resp = ui.interact(field, eid, if enabled { Sense::click_and_drag() } else { Sense::hover() });
     let drag_id = eid.with("drag");
     let mut shown_v: f64 = ui.data(|d| d.get_temp(drag_id)).unwrap_or(value);
@@ -789,7 +789,7 @@ fn spinner(ui: &mut egui::Ui, r: Rect, id: &str, value: f64, enabled: bool) -> O
     let down = Rect::from_min_max(pos2(arrows.left(), arrows.center().y), arrows.max);
     let mut step = None;
     for (rr, icon, k) in [(up, Icon::ChevronUp, 2.0), (down, Icon::ChevronDown, 0.5)] {
-        let resp = ui.interact(rr, ui.id().with(("rbh_spin", id, icon as u8)), if enabled { Sense::click() } else { Sense::hover() });
+        let resp = ui.interact(rr, ui.scope_id().with(("rbh_spin", id, icon as u8)), if enabled { Sense::click() } else { Sense::hover() });
         ui.painter().rect_filled(rr, 1.0, if resp.hovered() && enabled { t.control_hover } else { t.control });
         icons::paint(ui.painter(), rr.shrink(1.5), icon, !enabled);
         if resp.clicked() {
@@ -867,7 +867,7 @@ fn properties(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) 
                 None => None,
             };
             let resp = combo(ui, row(2, 0.0, left_w), "Background Color", Some(Icon::HatchBackground), sw, &label, pattern);
-            match crate::color_list::popup(&resp, egui::Id::new("rbh_background"), h.background, false, true) {
+            match crate::color_list::popup(&resp, egui::Id::unique("rbh_background"), h.background, false, true) {
                 Some(crate::color_list::Pick::None) => *out = Some(sh.edit(json!({ "background": "none" }))),
                 Some(crate::color_list::Pick::Color(c)) => *out = Some(sh.edit(json!({ "background": color_param(c) }))),
                 None => {}
@@ -885,7 +885,7 @@ fn properties(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) 
 /// Hatch Transparency: the ▾ list (current value, ByLayer, ByBlock, a value) and the slider.
 fn transparency(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     let ir = Rect::from_min_size(r.min, vec2(26.0, r.height()));
-    let resp = ui.interact(ir, ui.id().with("rbh_tr_mode"), Sense::click());
+    let resp = ui.interact(ir, ui.scope_id().with("rbh_tr_mode"), Sense::click());
     hover_fill(ui, ir, &resp);
     icons::paint(ui.painter(), Rect::from_min_size(pos2(ir.left() + 1.0, ir.center().y - 8.0), vec2(16.0, 16.0)), Icon::HatchTransparency, false);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(ir.right() - 4.0, ir.center().y), vec2(7.0, 7.0)), Icon::ChevronDown, false);
@@ -925,7 +925,7 @@ fn big_toggle(ui: &mut egui::Ui, r: Rect, label: &'static str, icon: Icon, on: b
         pressed(ui.painter(), r.shrink(1.0));
     }
     let cmd = c("", label, icon);
-    let resp = ui.interact(r, ui.id().with(("rbh_toggle", label)), Sense::click());
+    let resp = ui.interact(r, ui.scope_id().with(("rbh_toggle", label)), Sense::click());
     hover_fill(ui, r, &resp);
     crate::ribbon::paint_icon(
         ui.painter(),
@@ -955,7 +955,7 @@ fn options(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
     let mr = Rect::from_min_size(pos2(x, r.top()), vec2(w, r.height()));
     let t = Tokens::get();
     let top = Rect::from_min_max(mr.min, pos2(mr.right() - 12.0, mr.bottom()));
-    let resp = ui.interact(top, ui.id().with("rbh_match"), Sense::click());
+    let resp = ui.interact(top, ui.scope_id().with("rbh_match"), Sense::click());
     hover_fill(ui, top, &resp);
     icons::paint(
         ui.painter(),
@@ -974,7 +974,7 @@ fn options(ui: &mut egui::Ui, r: Rect, sh: &Shown, out: &mut Option<Action>) {
         *out = Some(Action::Start(if sh.create { "ui.hatchcreate.match" } else { "hatchedit.match" }));
     }
     let vr = Rect::from_min_max(pos2(top.right(), mr.top() + BIG_ICON + 8.0), mr.max);
-    let v = ui.interact(vr, ui.id().with("rbh_match_v"), Sense::click());
+    let v = ui.interact(vr, ui.scope_id().with("rbh_match_v"), Sense::click());
     hover_fill(ui, vr, &v);
     icons::paint(ui.painter(), Rect::from_center_size(pos2(vr.center().x, y + 7.0), vec2(8.0, 8.0)), Icon::ChevronDown, false);
     let items: Vec<String> = MATCH_VARIANTS.iter().map(|s| hl(s).to_string()).collect();
@@ -1040,7 +1040,7 @@ const ISO_PENS: [f64; 9] = [0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0];
 
 fn slide_out(ui: &mut egui::Ui, title: &'static str, pr: Rect, sh: &Shown, out: &mut Option<Action>) {
     let t = Tokens::get();
-    let pin_id = egui::Id::new("rb_pinned_panel");
+    let pin_id = egui::Id::unique("rb_pinned_panel");
     let pinned = ui.ctx().data(|d| d.get_temp::<String>(pin_id)).as_deref() == Some(title);
     let width = match title {
         "Properties" => pr.width(),
@@ -1050,7 +1050,7 @@ fn slide_out(ui: &mut egui::Ui, title: &'static str, pr: Rect, sh: &Shown, out: 
     };
     let at = pos2(pr.left(), pr.bottom());
     let mut close = false;
-    let area = egui::Area::new(egui::Id::new(("rbh_slide", title))).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
+    let area = egui::Area::new(egui::Id::unique(("rbh_slide", title))).order(egui::Order::Foreground).fixed_pos(at).show(ui.ctx(), |ui| {
         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).inner_margin(egui::Margin::same(3)).show(ui, |ui| {
             ui.set_width(width);
             ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
@@ -1064,7 +1064,7 @@ fn slide_out(ui: &mut egui::Ui, title: &'static str, pr: Rect, sh: &Shown, out: 
             let (bar, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
             ui.painter().text(bar.center(), Align2::CENTER_CENTER, hl(title), font(), t.text_dim);
             let pin = Rect::from_min_size(pos2(bar.left() + 2.0, bar.top() + 2.0), vec2(14.0, 14.0));
-            let resp = ui.interact(pin, ui.id().with(("rbh_pin", title)), Sense::click());
+            let resp = ui.interact(pin, ui.scope_id().with(("rbh_pin", title)), Sense::click());
             if pinned {
                 ui.painter().rect_filled(pin, 2.0, t.accent.gamma_multiply(0.4));
             }
@@ -1085,7 +1085,7 @@ fn slide_out(ui: &mut egui::Ui, title: &'static str, pr: Rect, sh: &Shown, out: 
         close = true;
     }
     if close {
-        ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::new("rb_open_panel")));
+        ui.ctx().data_mut(|d| d.remove::<String>(egui::Id::unique("rb_open_panel")));
     }
 }
 

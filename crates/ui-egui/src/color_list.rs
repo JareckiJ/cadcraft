@@ -106,7 +106,7 @@ pub fn popup(resp: &egui::Response, id: egui::Id, current: Option<Color>, by: bo
             // The shades: nine columns, dark to light.
             let cell = ((w - 8.0) / COLUMNS.len() as f32).floor().clamp(14.0, 26.0);
             let swatch = |ui: &mut egui::Ui, r: Rect, fill: Color32, selected: bool, tip: String| -> bool {
-                let resp = ui.interact(r, ui.id().with(("cl", r.min.x as i32, r.min.y as i32)), Sense::click());
+                let resp = ui.interact(r, ui.scope_id().with(("cl", r.min.x as i32, r.min.y as i32)), Sense::click());
                 ui.painter().rect_filled(r.shrink(2.0), 1.0, fill);
                 if selected || resp.hovered() {
                     ui.painter().rect_stroke(

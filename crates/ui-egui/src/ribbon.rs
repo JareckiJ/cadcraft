@@ -1073,7 +1073,7 @@ pub fn ribbon(app: &mut CadApp, ui: &mut egui::Ui) {
             let label = tab_label(crate::ribbon_hatch::title(id));
             let w = ui.painter().layout_no_wrap(label.clone(), crate::theme::body(), t.text).size().x + 18.0;
             let tr = Rect::from_min_size(pos2(x + 4.0, r.top() + 1.0), vec2(w, TAB_ROW - 1.0));
-            let resp = ui.interact(tr, ui.id().with(("rb_tab", id)), Sense::click());
+            let resp = ui.interact(tr, ui.scope_id().with(("rb_tab", id)), Sense::click());
             let is_active = id == active;
             // A contextual tab is drawn in the accent colour, as Windows CAD ribbons do.
             let fill = if is_active { t.accent } else { t.accent.gamma_multiply(if resp.hovered() { 0.75 } else { 0.55 }) };
