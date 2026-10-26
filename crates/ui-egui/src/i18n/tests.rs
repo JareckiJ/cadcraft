@@ -323,8 +323,9 @@ fn live_switch_translates_the_shell_without_mutating_drawing_or_automation() {
         // Without a font for its script, a language stays chosen and the interface shows English.
         let shown = app.language();
         assert_eq!(shown, if crate::theme::can_show(language.code) { language.code } else { "en" });
-        assert_eq!(app.fonts_language, Some(shown));
         let text = render(&mut app, &ctx);
+        // Fonts are a frame-only concern: the render above installs them.
+        assert_eq!(app.fonts_language, Some(shown));
         for source in ["Properties", "File"] {
             assert!(text.contains(tr(shown, source)), "{}: {source}: {text}", language.code);
         }
@@ -345,8 +346,8 @@ fn live_switch_translates_the_shell_without_mutating_drawing_or_automation() {
         let _ = crate::control::handle(&mut app, &ctx, &request);
         assert_eq!(app.ui.interface_language, Preference::parse(code).unwrap());
         app.logic(&ctx);
-        assert_eq!(app.fonts_language, Some(app.language()));
         render(&mut app, &ctx);
+        assert_eq!(app.fonts_language, Some(app.language()));
     }
     assert!(render(&mut app, &ctx).contains("Properties"));
     // The menu tree used by the control channel keeps its original labels and IDs.
@@ -409,9 +410,9 @@ fn interface_fonts_cover_every_letter_in_each_catalog() {
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
                 // In egui 0.36, has_glyph can report a false negative for glyphs in the same
                 // face as the replacement character. Check the family's actual character maps.
-                let mut font = view.fonts.font(&family);
+                let chars = view.characters(&family);
                 for c in &letters {
-                    if !font.characters().contains_key(c) {
+                    if !chars.contains_key(c) {
                         missing.push(format!("{family:?}: {c} (U+{:04X})", u32::from(*c)));
                     }
                 }
@@ -470,9 +471,9 @@ fn korean_ui_fonts_cover_the_language_picker_in_both_families() {
     let missing = ctx.fonts_mut(|view| {
         let mut missing = Vec::new();
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            let mut font = view.fonts.font(&family);
+            let chars = view.characters(&family);
             for c in "한국어".chars() {
-                if !font.characters().contains_key(&c) {
+                if !chars.contains_key(&c) {
                     missing.push(format!("{family:?}: {c}"));
                 }
             }
@@ -606,9 +607,9 @@ fn available_fonts_cover_traditional_chinese_catalog() {
     let letters: BTreeSet<_> = include_str!("zh-Hant.tsv").chars().filter(|c| !c.is_ascii() && !c.is_whitespace()).collect();
     ctx.fonts_mut(|view| {
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            let mut font = view.fonts.font(&family);
+            let chars = view.characters(&family);
             for c in &letters {
-                assert!(font.characters().contains_key(c), "missing {c} in {family:?}");
+                assert!(chars.contains_key(c), "missing {c} in {family:?}");
             }
         }
     });
@@ -654,6 +655,7 @@ fn chinese_font_cache_tracks_tc_sc_and_other_language_switches() {
     for choice in [Preference::Chinese, Preference::TraditionalChinese, Preference::Chinese, Preference::English, Preference::TraditionalChinese] {
         app.ui.interface_language = choice;
         app.logic(&ctx);
+        render(&mut app, &ctx);
         assert_eq!(app.fonts_language, Some(app.language()));
         assert_eq!(app.ui.interface_language, choice);
     }
@@ -661,6 +663,7 @@ fn chinese_font_cache_tracks_tc_sc_and_other_language_switches() {
     for tag in ["zh-TW", "zh-CN", "zh-HK", "it-IT"] {
         app.system_languages = vec![tag.into()];
         app.logic(&ctx);
+        render(&mut app, &ctx);
         assert_eq!(app.fonts_language, Some(app.language()));
     }
 }
@@ -692,4 +695,29 @@ fn traditional_chinese_gaps_are_reported_not_required() {
 #[should_panic(expected = "catalog keys absent from reference")]
 fn traditional_chinese_stale_keys_are_rejected() {
     assert_no_stale_catalog_keys("\tExisting\tExisting\n", "\tRemoved command\t已移除的指令\n");
+}
+
+/// The production font chain covers alphanumeric ASCII in proportional and monospace, plus ⌘ ⇧ ↩ … − in proportional and ⇧ in monospace.
+#[test]
+fn production_font_chain_covers_latin_and_shortcut_symbols() {
+    // Exercise the same chain the app installs: the workspace egui dependency enables
+    // `default_fonts` and `monochrome_emoji_fonts` in production, so web and native builds
+    // always start with bounded Latin and monochrome icon faces instead of an empty family.
+    let ctx = egui::Context::default();
+    crate::theme::install_fonts(&ctx, "en");
+    let mut output = ctx.run_ui(Default::default(), |_| {});
+    output.textures_delta.clear();
+    ctx.fonts_mut(|view| {
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".chars() {
+                assert!(view.has_glyph(&egui::FontId::new(12.0, family.clone()), c), "Latin {c:?} missing in {family:?}");
+            }
+        }
+        // Proportional shortcut labels (`Button::shortcut_text` and the translated menus) use
+        // these symbols: ⌘ from the monochrome icon face, ⇧ from Hack as a bounded fallback.
+        for c in ['\u{2318}', '\u{21e7}', '\u{21a9}', '\u{2026}', '\u{2212}'] {
+            assert!(view.has_glyph(&egui::FontId::proportional(12.0), c), "U+{:04X} missing in Proportional", c as u32);
+        }
+        assert!(view.has_glyph(&egui::FontId::monospace(12.0), '\u{21e7}'), "U+21E7 shift symbol missing in Monospace");
+    });
 }
