@@ -405,8 +405,16 @@ enum PPhase {
     /// The second marker of Break / Straighten.
     VMark,
     VTangent,
+    /// Multiple ([`pedit_multi`]): selecting the objects, converting lines and arcs, the options,
+    /// the width for all, Join's fuzz distance.
+    MSelect,
+    MConvert,
+    MMain,
+    MWidth,
+    MFuzz,
 }
 
+mod pedit_multi;
 mod pedit_vertex;
 
 #[derive(Default)]
@@ -425,6 +433,11 @@ struct PeditM {
     tangents: Vec<(Vec2, Vec2)>,
     /// Pieces split off by Break, with the history length after it (erased again by Undo).
     split_off: Vec<(usize, Vec<Handle>)>,
+    /// Multiple: the polylines being edited, their selection, and the drawing before each option
+    /// (with those polylines) for Undo.
+    multi: Vec<Handle>,
+    msel: SelectPhase,
+    mundo: Vec<(cadcraft_doc::Drawing, Vec<Handle>)>,
 }
 
 impl PeditM {
@@ -478,6 +491,7 @@ impl Interactive for PeditM {
     }
     fn prompt(&self, s: &Session) -> Prompt {
         match self.phase {
+            PPhase::MSelect | PPhase::MConvert | PPhase::MMain | PPhase::MWidth | PPhase::MFuzz => self.multi_prompt(),
             PPhase::Select => Prompt::new("Select polyline or", Accept::POINT).kw(&["Multiple"]),
             PPhase::Convert => {
                 Prompt::new("Object selected is not a polyline. Do you want to turn it into one?", curves::KW).kw(&["Yes", "No"]).default("Y")
@@ -518,6 +532,7 @@ impl Interactive for PeditM {
             _ => None,
         };
         match self.phase {
+            PPhase::MSelect | PPhase::MConvert | PPhase::MMain | PPhase::MWidth | PPhase::MFuzz => self.multi_input(s, i),
             PPhase::Select => match i {
                 Input::Point(p) => {
                     let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
@@ -537,7 +552,11 @@ impl Interactive for PeditM {
                     s.set_selection(vec![h]);
                     Ok(Step::Continue)
                 }
-                Input::Keyword(_) => Err(other("Select one polyline (Multiple is available through the JSON form).")),
+                Input::Keyword(k) if k.eq_ignore_ascii_case("multiple") || k.eq_ignore_ascii_case("m") => {
+                    self.start_multi(s);
+                    Ok(Step::Continue)
+                }
+                Input::Keyword(_) => Err(other("Invalid option keyword.")),
                 Input::Enter => Ok(Step::Cancel),
                 _ => Ok(Step::Continue),
             },
