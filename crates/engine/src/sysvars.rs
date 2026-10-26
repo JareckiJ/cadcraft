@@ -440,6 +440,18 @@ pub fn set(s: &mut Session, name: &str, v: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Every system variable name CADCraft knows, upper case, sorted and without duplicates (the
+/// command line offers them in its AutoComplete list).
+pub fn names() -> &'static [&'static str] {
+    static NAMES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        let mut names: Vec<&'static str> = SESSION_VARS.iter().copied().chain(table::names()).collect();
+        names.sort_unstable();
+        names.dedup();
+        names
+    });
+    &NAMES
+}
+
 pub fn list(s: &Session) -> Value {
     let mut m = serde_json::Map::new();
     for n in SESSION_VARS {
