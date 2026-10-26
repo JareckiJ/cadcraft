@@ -128,6 +128,7 @@ pub fn run(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Days since 1970 become Gregorian dates, leap days and dates out of range included.
     #[test]
     fn civil_dates() {
         let day = |d: u64| date(std::time::UNIX_EPOCH + std::time::Duration::from_secs(d * 86_400));

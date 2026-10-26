@@ -13,10 +13,12 @@ fn printers() -> Vec<PlotterConfig> {
     Vec::new()
 }
 
+/// Refuses every job: this test never gets as far as printing.
 fn print(_: &PrintJob) -> Result<String, String> {
     Err("no printing in this test".into())
 }
 
+/// A hung listing costs one wait: the unknown device's error, a second plot and a plot with no device don't wait again.
 #[test]
 fn an_unknown_device_waits_for_a_hung_listing_only_once() {
     set_plotter_store(PlotterStore::memory());

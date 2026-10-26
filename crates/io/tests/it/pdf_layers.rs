@@ -251,6 +251,7 @@ fn unusual_titles_are_kept() {
     assert_eq!(doc.title.as_deref(), Some("Plan ü (1)\\"));
 }
 
+/// Layers beyond the PDF layer cap still print; only their PDF layers are left out.
 #[test]
 fn layers_past_the_cap_print_without_a_pdf_layer() {
     // One more drawing layer than a file has PDF layers (4096).
@@ -269,6 +270,7 @@ fn layers_past_the_cap_print_without_a_pdf_layer() {
     assert_eq!((pdf_read::count(c, "BDC"), pdf_read::count(c, "EMC")), (4096, 4096));
 }
 
+/// With `portraitMedia`, a landscape sheet is drawn a quarter turn on a portrait page; without it the page stays landscape.
 #[test]
 fn portrait_media_turns_landscape_sheets_for_printers() {
     let d = layered();

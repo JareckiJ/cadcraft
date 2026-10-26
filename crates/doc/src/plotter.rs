@@ -123,6 +123,7 @@ pub struct PlotterConfig {
 }
 
 impl Default for PlotterConfig {
+    /// An unnamed PDF device at 300 dpi, landscape, with no papers: a user device before its settings are filled in.
     fn default() -> Self {
         PlotterConfig {
             name: String::new(),

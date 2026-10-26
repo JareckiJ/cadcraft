@@ -47,6 +47,7 @@ pub fn route(app: &mut CadApp, id: &str) -> Result<Value, String> {
     }
 }
 
+/// Without a file dialog, say on the command line how to run the command with parameters.
 fn no_picker(app: &mut CadApp, name: &str, example: &str) -> Result<Value, String> {
     let msg = format!("{name}: there is no file dialog here; run it with parameters, e.g. {example}");
     app.session.echo(msg.clone());
@@ -391,6 +392,7 @@ mod tests {
         (CadApp::new(Session::new(), services), asked)
     }
 
+    /// Typed and menu commands ask for files or open the preview; JSON calls never do.
     #[test]
     fn typed_and_menu_commands_ask_json_calls_never_do() {
         let (mut app, asked) = app();

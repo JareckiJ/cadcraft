@@ -613,6 +613,7 @@ struct PageChoices {
 }
 
 impl PageChoices {
+    /// The devices and plot style tables the page setup controls offer now.
     fn new(ctx: &egui::Context, d: &cadcraft_doc::Drawing) -> Self {
         PageChoices { devices: device_choices(ctx), styles: cadcraft_doc::plot_style_table_names(d) }
     }
@@ -649,6 +650,7 @@ fn style_label(page: &cadcraft_doc::PageSetup) -> &str {
     if cadcraft_doc::no_plot_style_table(&page.plot_style_table) { "None" } else { page.plot_style_table.as_str() }
 }
 
+/// The translated name of a plot area (`layout`, `extents`, …).
 fn area_label(a: &str) -> &str {
     match a {
         "layout" => crate::tl!("Layout"),
@@ -1186,6 +1188,7 @@ fn apply_to_layout_params(st: &PlotState) -> Value {
     params
 }
 
+/// A titled, framed section of the Plot dialog.
 fn plot_section(ui: &mut egui::Ui, heading: &str, content: impl FnOnce(&mut egui::Ui)) {
     plot_section_filled(ui, heading, 0.0, content);
 }
@@ -1841,11 +1844,13 @@ mod plot_dialog_tests {
     use super::*;
     use cadcraft_engine::Session;
 
+    /// The Plot dialog's state for `target` in a new metric drawing.
     fn state(target: &str) -> PlotState {
         let d = cadcraft_doc::Drawing::new_metric();
         PlotState::new(0, target.into(), plot_page(&d, target), [0.0, 0.0, 10.0, 10.0])
     }
 
+    /// Choosing a device gives the page one of its papers and printable areas, and the plot parameters name them.
     #[test]
     fn a_device_brings_its_papers_and_the_plot_names_them() {
         let mut st = state("Model");
@@ -1924,6 +1929,7 @@ mod plot_dialog_tests {
         assert_eq!(temp::<bool>(&ctx, RETURN_TO_PLOT), Some(false), "once");
     }
 
+    /// Apply to Layout sends the chosen device, plot style table and paper to the layout's page setup.
     #[test]
     fn apply_to_layout_saves_selected_device_and_plot_style() {
         let mut st = state("Layout1");
@@ -1996,6 +2002,7 @@ mod plot_dialog_tests {
         assert!(params.get("center").is_none() && params.get("offset").is_none(), "layout plots retain their page setup mapping");
     }
 
+    /// After picking a plot window on screen, the Plot dialog comes back with that window.
     #[test]
     fn window_pick_brings_the_dialog_back_with_the_picked_window() {
         let ctx = egui::Context::default();

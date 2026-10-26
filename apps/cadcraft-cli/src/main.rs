@@ -171,6 +171,7 @@ fn export_window(s: &Session, framing: Framing, before: Option<&[(u64, Option<Vi
     }
 }
 
+/// File format hooks for the engine: read, write and plot through the io crate, the chosen-version writer, and LISP's DXF group codec.
 fn install_io() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),

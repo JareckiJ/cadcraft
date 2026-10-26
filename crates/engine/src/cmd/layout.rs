@@ -17,6 +17,7 @@ mod plotstyle;
 mod prompts;
 mod viewports;
 
+/// The layout, page setup, viewport and plot commands.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("layout", "Layout", run_layout)
@@ -528,6 +529,7 @@ fn viewport_json(h: Handle, v: &Viewport) -> Value {
 /// VPLAYER's command-line prompts.
 mod vplayer;
 
+/// VIEWPORT.SET: change the scale, centre, lock or frozen layers of the given viewports, or of the active one inside a viewport.
 fn run_viewport_set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "viewport.set";
     let d = s.doc()?;
@@ -1097,6 +1099,7 @@ mod tests {
         assert!(s.running.is_none());
     }
 
+    /// A viewport takes a scale and centre, keeps them while locked, and freezes layers in itself only.
     #[test]
     fn viewport_scale_lock_and_layers() {
         let mut s = session_with_model();

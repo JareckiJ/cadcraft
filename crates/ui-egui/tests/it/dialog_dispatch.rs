@@ -85,6 +85,7 @@ fn typed_json_form_runs_the_command() {
     assert_eq!(app.session.settings.gridmajor, 7);
 }
 
+/// PLOT and PRINT from the menu or typed open the Plot dialog; the JSON form plots without it.
 #[test]
 fn print_opens_the_plot_dialog_but_json_plot_never_does() {
     let (mut app, picks) = app();
@@ -101,6 +102,7 @@ fn print_opens_the_plot_dialog_but_json_plot_never_does() {
     assert_eq!(picks.get(), 0);
 }
 
+/// Cancel in the Plot dialog leaves the drawing as it was and asks for no file.
 #[test]
 fn canceling_plot_dialog_preserves_drawing_and_does_not_open_picker() {
     let (mut app, picks) = app();

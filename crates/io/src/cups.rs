@@ -48,6 +48,7 @@ fn ppd_line(line: &str) -> Option<(&str, &str, &str, &str)> {
     Some((key.trim(), option.trim(), label.trim(), value.trim().trim_matches('"').trim()))
 }
 
+/// Exactly `N` finite numbers separated by spaces (a PPD's sizes and areas), else `None`.
 fn numbers<const N: usize>(s: &str) -> Option<[f64; N]> {
     let v: Vec<f64> = s.split_whitespace().filter_map(|t| t.parse().ok()).filter(|x: &f64| x.is_finite()).collect();
     v.try_into().ok()
@@ -288,6 +289,7 @@ mod system {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
+    /// The destination's PPD from the CUPS folder, when it is readable and not too large.
     fn ppd(name: &str) -> Option<Ppd> {
         let path = format!("/etc/cups/ppd/{name}.ppd");
         if std::fs::metadata(&path).ok()?.len() > MAX_PPD {
@@ -448,6 +450,7 @@ mod tests {
 *PaperDimension Roll610: "1728 2592"
 "#;
 
+    /// A PPD gives the papers with their sizes and printable areas, borderless and roll papers named as such.
     #[test]
     fn ppd_papers_sizes_and_printable_areas() {
         let p = parse_ppd(PPD);
@@ -468,6 +471,7 @@ mod tests {
         assert_eq!(c.paper("Roll 24 in").unwrap().margins, [0.0; 4]);
     }
 
+    /// Destination names and job ids are read from lpstat and lp, and the lp arguments are safe and complete.
     #[test]
     fn lpstat_and_lp_replies() {
         assert_eq!(parse_destinations("EPSON_A\nEPSON_B\n\nbad/name\n"), ["EPSON_A", "EPSON_B"]);
@@ -522,6 +526,7 @@ mod tests {
         assert!(parse_lpoptions("PageSize/Media Size: iso_a4_0x0mm iso_a4_NaNxNaNmm w-1h5\n").papers.is_empty());
     }
 
+    /// The default printer is read from `lpstat -d`; none, or a bad name, gives none.
     #[test]
     fn the_default_destination() {
         assert_eq!(parse_default_destination("system default destination: Office_T120\n").as_deref(), Some("Office_T120"));

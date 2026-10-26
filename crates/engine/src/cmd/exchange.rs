@@ -302,6 +302,7 @@ fn plot_scale(b: &Bounds2, sheet: &Sheet, fit: bool, scale: Option<f64>) -> f64 
     if s.is_finite() && s > 0.0 { s } else { 1.0 }
 }
 
+/// PREVIEW: a PNG of the plot the parameters (or the layout's page setup) describe, as the Plot dialog's preview shows it.
 fn run_preview(s: &mut Session, p: &Value) -> Result<Value> {
     let space = plot_space("preview", s, p)?;
     let d = s.doc()?;

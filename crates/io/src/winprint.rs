@@ -103,6 +103,7 @@ mod system {
         Some(feature.options.first()?.name.as_ref()?.local_name.clone())
     }
 
+    /// One driver paper with its size and, when asked, its printable area.
     fn paper(device: &PrinterDevice, media: &PageMediaSize, ask_margins: bool) -> WinPaper {
         let size = media.size();
         let key = media.option().name.as_ref().map(|n| n.local_name.clone()).unwrap_or_default();
@@ -121,6 +122,7 @@ mod system {
     /// PrintCapabilities document, so a driver with many papers takes seconds one after another.
     const MARGIN_THREADS: usize = 8;
 
+    /// A Windows printer as a device: its driver's papers (no rolls), their printable areas asked on a few threads.
     fn printer(device: &PrinterDevice, default_printer: bool) -> Option<PlotterConfig> {
         let capabilities = PrintCapabilities::fetch(device).ok()?;
         let medias: Vec<PageMediaSize> = capabilities.page_media_sizes().filter(|m| !m.size().is_roll()).take(MAX_PAPERS).collect();
@@ -220,6 +222,7 @@ mod tests {
         println!("listed in {:?}", start.elapsed());
     }
 
+    /// The printable area's origin and size become left, bottom, right and top margins in millimetres.
     #[test]
     fn margins_from_the_printable_area() {
         // A4 with 3.4 mm unprintable left and right, 3 mm at the top and 5 mm at the bottom.
@@ -235,6 +238,8 @@ mod tests {
         assert_eq!(margins_from_imageable((210_000, 297_000), (0, 0), (0, 0)), None);
     }
 
+    /// Driver papers become device papers in mm with their margins, duplicate names and rolls left
+    /// out; the default printer is marked, and an unknown default paper falls back to the first.
     #[test]
     fn driver_papers_become_a_device() {
         let p = |key: &str, name: &str, width, height, margins| WinPaper { key: key.into(), name: name.into(), width, height, margins };

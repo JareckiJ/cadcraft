@@ -82,6 +82,7 @@ fn crop(opts: &Value) -> Result<Option<[f64; 4]>> {
     }
 }
 
+/// A raster plot: the sheet at the asked resolution (capped in pixels), cropped when asked, with the stamp.
 fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let o = PdfOptions::from_json(opts);
     let (sheet, page) = sheet(d, space, &o)?;
@@ -178,6 +179,7 @@ mod tests {
         (be(16), be(20))
     }
 
+    /// A drawing with one line, enough for a plot to have something on the sheet.
     fn drawing() -> Drawing {
         let mut d = Drawing::new_metric();
         d.add(&Space::Model, Common::default(), EntityKind::Line(Line { a: Vec3::ZERO, b: Vec3::new(100.0, 50.0, 0.0) })).unwrap();

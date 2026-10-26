@@ -8,6 +8,7 @@ use cadcraft_engine::cmd::file::{IoHooks, set_io};
 use cadcraft_engine::cmd::plotters::{PlotterStore, PrintJob, SystemPrinters, set_plotter_store, set_system_printers};
 use serde_json::{Value, json};
 
+/// A plotter that returns its options as the file.
 fn echo_plot(_: &Drawing, _: &Space, opts: &Value) -> Result<Vec<u8>, String> {
     Ok(opts.to_string().into_bytes())
 }
@@ -24,10 +25,12 @@ fn printers() -> Vec<PlotterConfig> {
     }]
 }
 
+/// Accepts every job with a fixed job id.
 fn print(j: &PrintJob) -> Result<String, String> {
     Ok(format!("{}-1", j.printer))
 }
 
+/// A plot naming a printer still being listed waits for the listing, and the printer wins over a user device of the same name.
 #[test]
 fn a_printer_still_being_listed_is_waited_for_and_wins_over_a_user_device() {
     set_plotter_store(PlotterStore::memory());

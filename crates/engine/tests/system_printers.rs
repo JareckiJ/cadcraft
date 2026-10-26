@@ -14,10 +14,12 @@ static JOBS: Mutex<Vec<(String, String, u32, String, Value)>> = Mutex::new(Vec::
 /// The tests share [`JOBS`]: one at a time.
 static SERIAL: Mutex<()> = Mutex::new(());
 
+/// A plotter that returns its options as the file, so a print job shows what was plotted.
 fn echo_plot(_: &Drawing, _: &Space, opts: &Value) -> Result<Vec<u8>, String> {
     Ok(opts.to_string().into_bytes())
 }
 
+/// One system printer, a roll plotter with Letter and a 24 in roll, as the system would list it.
 fn printers() -> Vec<PlotterConfig> {
     vec![PlotterConfig {
         name: "Office_T120".into(),
@@ -33,12 +35,14 @@ fn printers() -> Vec<PlotterConfig> {
     }]
 }
 
+/// Records each print job (printer, paper, copies, title and plotted options) and answers with a job id.
 fn print(j: &PrintJob) -> Result<String, String> {
     let opts = serde_json::from_slice(j.pdf).map_err(|e| e.to_string())?;
     JOBS.lock().unwrap().push((j.printer.into(), j.paper.into(), j.copies, j.title.into(), opts));
     Ok(format!("{}-7", j.printer))
 }
 
+/// A session with the stand-in printers and plotter installed and a line to plot.
 fn session() -> Session {
     set_plotter_store(PlotterStore::memory());
     set_system_printers(SystemPrinters { list: printers, print });
@@ -49,6 +53,7 @@ fn session() -> Session {
     s
 }
 
+/// System printers are listed after the built-in devices, and PLOT on one sends the job with its paper, copies and title.
 #[test]
 fn system_printers_are_devices_and_plot_prints_on_them() {
     let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

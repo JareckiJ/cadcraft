@@ -111,6 +111,7 @@ pub struct PdfOptions {
 }
 
 impl Default for PdfOptions {
+    /// Every option unset: the page setup's paper, orientation, scale and plot style decide.
     fn default() -> Self {
         PdfOptions {
             plot_style_table: None,

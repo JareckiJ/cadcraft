@@ -119,6 +119,7 @@ impl PlotterStore {
     }
 }
 
+/// Where user devices are kept: the settings folder natively, memory on the web (or what a host or test installed).
 fn store() -> PlotterStore {
     *STORE.get_or_init(|| {
         #[cfg(not(target_arch = "wasm32"))]
@@ -220,6 +221,7 @@ impl PrinterCache {
     }
 }
 
+/// The process-wide printer cache; a panic while it was held doesn't keep the printers away.
 #[cfg(not(target_arch = "wasm32"))]
 fn printer_cache() -> std::sync::MutexGuard<'static, PrinterCache> {
     static CACHE: OnceLock<Mutex<PrinterCache>> = OnceLock::new();
@@ -345,6 +347,7 @@ const BUILTIN: [(&str, PlotOutput, &str); 3] = [
 /// A page setup's "no device" name.
 const NO_DEVICE: &str = "None";
 
+/// A built-in device writing `output` files on every standard paper, A4 by default.
 fn builtin(name: &str, output: PlotOutput, description: &str) -> PlotterConfig {
     let papers = cadcraft_render::PAPER_SIZES
         .iter()
@@ -426,6 +429,7 @@ fn device_paper<'a>(dev: &'a PlotterConfig, name: &str) -> Option<&'a DevicePape
     dev.paper(name).or_else(|| dev.paper(cadcraft_render::paper_size(name)?.name))
 }
 
+/// Put a device paper's name, size and printable area on a page setup.
 fn set_paper(page: &mut PageSetup, p: &DevicePaper) {
     page.paper = p.name.clone();
     page.width_mm = p.width;
@@ -657,6 +661,7 @@ impl Interactive for PlotWindowM {
 
 // ---------- PLOTTERMANAGER ----------
 
+/// PLOTWINDOW and PLOTTERMANAGER.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("plotwindow", "Plot Window", run_plotwindow)
@@ -686,6 +691,8 @@ fn system_read_only(cmd: &str, name: &str) -> EngineError {
     bad(cmd, format!("`{name}` is a system printer: make a copy with action new, from `{name}`"))
 }
 
+/// A device as PLOTTERMANAGER reports it: name, description, output, whether it is built in, a
+/// system printer or the default one, how many papers it has and its default paper.
 fn summary(c: &PlotterConfig) -> Value {
     json!({
         "name": c.name,
@@ -786,6 +793,7 @@ fn edit_device(cmd: &str, c: &mut PlotterConfig, p: &Value) -> Result<()> {
     Ok(())
 }
 
+/// PLOTTERMANAGER: list, refresh, add, change or delete devices and their papers (user devices only).
 fn run_plottermanager(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "plottermanager";
     let action = str_param(p, "action").unwrap_or("list").trim().to_ascii_lowercase();
@@ -952,6 +960,7 @@ impl Interactive for PlotterManagerM {
             Stage::PaperSize(..) => Prompt::new("Enter the paper width,height in mm", Accept::TEXT),
         }
     }
+    /// The next answer at the PLOTTERMANAGER prompts: an option, then the names and sizes it asks for.
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if i == Input::Cancel {
             return Ok(Step::Cancel);

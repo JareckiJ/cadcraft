@@ -83,6 +83,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The stamp's text is trimmed, capped and filled in, and scales read as AutoCAD writes them.
     #[test]
     fn stamp_text_scale_and_placeholders() {
         assert_eq!(stamp_text(&json!({ "stamp": "  Plan\u{7}.dwg  " })).as_deref(), Some("Plan.dwg"));
@@ -97,6 +98,7 @@ mod tests {
         assert_eq!(fill("{layout} · {paper} · {scale}", "Sheet 1", "A3", "1:50"), "Sheet 1 · A3 · 1:50");
     }
 
+    /// The stamp is drawn just inside the printable area's lower-left corner, about 2 mm high.
     #[test]
     fn the_stamp_draws_text_at_the_corner() {
         let d = Drawing::default();
