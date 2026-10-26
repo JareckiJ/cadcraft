@@ -224,7 +224,7 @@ impl Shown {
     /// HATCHEDIT on the selected hatches with `p`; in Hatch Creation, the HP* variables.
     fn edit(&self, mut p: Value) -> Action {
         if self.create {
-            return create_vars(&p);
+            return create_vars(&p, &self.hatch);
         }
         if let Some(o) = p.as_object_mut() {
             o.insert("handles".into(), json!(self.ids));
@@ -238,7 +238,7 @@ impl Shown {
     /// PROPERTIES.SET on the selected hatches with `p`; in Hatch Creation, the HP* variables.
     fn set(&self, mut p: Value) -> Action {
         if self.create {
-            return create_vars(&p);
+            return create_vars(&p, &self.hatch);
         }
         if let Some(o) = p.as_object_mut() {
             o.insert("handles".into(), json!(self.ids));
@@ -252,20 +252,21 @@ impl Shown {
 }
 
 /// Hatch Creation: an edit of the tab (HATCHEDIT / PROPERTIES.SET parameters) as the HP*
-/// system variables it sets.
-fn create_vars(p: &Value) -> Action {
+/// system variables it sets. `current` is the hatch being made as the tab shows it: a change of
+/// type remembers its pattern or gradient, and turning back to "pattern" or "gradient" takes the
+/// last one a hatch had (as HATCHEDIT does).
+fn create_vars(p: &Value, current: &Hatch) -> Action {
     let mut vars: Vec<(&'static str, Value)> = Vec::new();
     let s = |v: &Value| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string());
-    if let Some(t) = p.get("type").and_then(Value::as_str) {
-        vars.push((
-            "HPNAME",
-            json!(match t {
-                "solid" => "SOLID",
-                "gradient" => "GR_LINEAR",
-                "user" => cadcraft_doc::USER_PATTERN,
-                _ => "ANSI31",
-            }),
-        ));
+    let retype = p.get("type").and_then(Value::as_str).map(str::to_string);
+    let current = current.clone();
+    if let Some(t) = &retype {
+        match t.as_str() {
+            "solid" => vars.push(("HPNAME", json!("SOLID"))),
+            "user" => vars.push(("HPNAME", json!(cadcraft_doc::USER_PATTERN))),
+            // "pattern" and "gradient": from the session's memory, once `current` is in it.
+            _ => {}
+        }
     }
     if let Some(v) = p.get("pattern") {
         vars.push(("HPNAME", json!(s(v))));
@@ -319,6 +320,26 @@ fn create_vars(p: &Value) -> Action {
         vars.push(("HPSEPARATE", json!(i64::from(v))));
     }
     Action::Do(Box::new(move |app: &mut CadApp| {
+        if let Some(t) = &retype {
+            app.session.remember_hatch(&current);
+            match t.as_str() {
+                "pattern" => {
+                    let name = app.session.hatch_last_pattern().map_or("ANSI31", |(n, _)| n).to_string();
+                    vars.insert(0, ("HPNAME", json!(name)));
+                }
+                "gradient" => {
+                    let g = app.session.hatch_last_gradient().cloned();
+                    let name = g.as_ref().and_then(|g| patterns::tile_of_gradient(&g.name)).unwrap_or("GR_LINEAR");
+                    vars.insert(0, ("HPNAME", json!(name)));
+                    if let Some(g) = g {
+                        vars.insert(1, ("GFCLR1", json!(color_param(g.color1))));
+                        vars.insert(2, ("GFCLR2", json!(color_param(g.color2))));
+                        vars.insert(3, ("GFANG", json!(g.angle.to_degrees())));
+                    }
+                }
+                _ => {}
+            }
+        }
         for (name, value) in vars {
             if let Err(e) = app.run("setvar", json!({ "name": name, "value": value })) {
                 app.session.echo(e);
@@ -1241,6 +1262,34 @@ fn slide_options(ui: &mut egui::Ui, sh: &Shown, out: &mut Option<Action>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hatch Creation: pattern ANSI37 → solid → gradient (cylinder) → solid → pattern gives ANSI37
+    /// back, and the gradient back with its settings.
+    #[test]
+    fn hatch_creation_turned_back_takes_the_last_pattern_and_gradient() {
+        let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        app.run("new", json!({})).unwrap();
+        app.run("setvar", json!({ "name": "HPNAME", "value": "ANSI37" })).unwrap();
+        let step = |app: &mut CadApp, p: Value| {
+            let current = shown_create(app).unwrap().hatch;
+            if let Action::Do(f) = create_vars(&p, &current) {
+                f(app);
+            }
+        };
+        let hpname = |app: &CadApp| app.session.doc().unwrap().header.str("HPNAME", "");
+        step(&mut app, json!({ "type": "solid" }));
+        assert_eq!(hpname(&app), "SOLID");
+        step(&mut app, json!({ "type": "gradient" }));
+        step(&mut app, json!({ "gradient": { "name": "CYLINDER", "color1": "1", "angle": 30 } }));
+        step(&mut app, json!({ "type": "solid" }));
+        step(&mut app, json!({ "type": "pattern" }));
+        assert_eq!(hpname(&app), "ANSI37");
+        step(&mut app, json!({ "type": "gradient" }));
+        assert_eq!(hpname(&app), "GR_CYLIN");
+        let hd = &app.session.doc().unwrap().header;
+        assert_eq!(hd.str("GFCLR1", ""), "1");
+        assert!((hd.f64("GFANG", 0.0) - 30.0).abs() < 1e-9);
+    }
 
     #[test]
     fn the_gallery_starts_with_solid_and_places_the_gradients_after_the_g_patterns() {

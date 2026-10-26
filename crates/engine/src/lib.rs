@@ -719,6 +719,9 @@ pub struct Session {
     hatch_boundary_set_block: Option<(u64, String, Vec<Handle>)>,
     /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
     pub hatch_store_origin: bool,
+    /// The last pattern and the last gradient a hatch had: what a hatch turned back to "pattern"
+    /// or "gradient" takes. See [`Session::remember_hatch`].
+    hatch_memory: cmd::hatch::TypeMemory,
 }
 
 impl Default for Session {
@@ -772,6 +775,7 @@ impl Session {
             hatch_boundary_set: None,
             hatch_boundary_set_block: None,
             hatch_store_origin: false,
+            hatch_memory: cmd::hatch::TypeMemory::default(),
         }
     }
     /// Append a new untitled drawing (`DrawingN`, metric or imperial default view), end a running command, make it active, bump the document epoch and return its index.
@@ -857,6 +861,27 @@ impl Session {
             Some(block) => self.hatch_boundary_set_block = set.map(|hs| (uid, block, hs)),
             None => self.hatch_boundary_set = set.map(|hs| (uid, hs)),
         }
+    }
+
+    /// Remember `h`'s pattern (with its lines) when it is a pattern, or its gradient with its
+    /// settings when it is a gradient, so a hatch turned back to that type takes it again.
+    /// Solid and user-defined hatches leave both as they are.
+    pub fn remember_hatch(&mut self, h: &cadcraft_doc::Hatch) {
+        if let Some(g) = &h.gradient {
+            self.hatch_memory.gradient = Some(g.clone());
+        } else if !h.solid && !h.is_user() && !h.pattern.trim().is_empty() {
+            self.hatch_memory.pattern = Some((h.pattern.clone(), h.pattern_lines.clone()));
+        }
+    }
+
+    /// The last pattern a hatch had (name and the lines it brings), if any.
+    pub fn hatch_last_pattern(&self) -> Option<(&str, &[cadcraft_doc::library::PatternLine])> {
+        self.hatch_memory.pattern.as_ref().map(|(n, l)| (n.as_str(), l.as_slice()))
+    }
+
+    /// The last gradient a hatch had, with its colours, angle and centring, if any.
+    pub fn hatch_last_gradient(&self) -> Option<&cadcraft_doc::Gradient> {
+        self.hatch_memory.gradient.as_ref()
     }
 
     /// The Block Editor closed: its boundary set goes with it.

@@ -65,6 +65,14 @@ pub fn specs() -> Vec<CommandSpec> {
     ]
 }
 
+/// The last pattern (name and lines) and the last gradient hatches had in the session: a hatch
+/// turned back to "pattern" or "gradient" takes them ([`Session::remember_hatch`]).
+#[derive(Clone, Debug, Default)]
+pub struct TypeMemory {
+    pub(crate) pattern: Option<(String, Vec<cadcraft_doc::library::PatternLine>)>,
+    pub(crate) gradient: Option<cadcraft_doc::Gradient>,
+}
+
 /// The tolerance curves are flattened with for boundary tracing, in a space with extents `ext`.
 pub(super) fn outline_tol(ext: Bounds2) -> f64 {
     (ext.width() + ext.height()).max(1e-9) / 20000.0
@@ -565,7 +573,11 @@ fn add_hatches(s: &mut Session, st: &HatchSettings, groups: Vec<Vec<HatchLoop>>)
             }
         }
         let sources: Vec<Handle> = loops.iter().flat_map(|l| l.sources.iter().copied()).collect();
-        let h = s.add_entity(st.hatch(loops))?;
+        let kind = st.hatch(loops);
+        if let EntityKind::Hatch(x) = &kind {
+            s.remember_hatch(x);
+        }
+        let h = s.add_entity(kind)?;
         // The Hatch Creation tab's colour, layer, transparency and annotative choice.
         let d = s.doc_mut()?;
         let anno = d.current_anno_scale();

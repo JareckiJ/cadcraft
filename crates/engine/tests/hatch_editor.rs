@@ -45,10 +45,9 @@ fn the_type_list_turns_a_hatch_solid_user_defined_pattern_or_gradient() {
     s.execute("hatchedit", &json!({ "handles": [h], "double": true })).unwrap();
     assert!(hatch(&s, &h).is_double(), "a second family of lines at 90 degrees");
 
-    s.execute("setvar", &json!({ "name": "HPNAME", "value": "ANSI37" })).unwrap();
     s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
     let x = hatch(&s, &h);
-    assert_eq!(x.pattern, "ANSI37", "a hatch turned back to a pattern takes HPNAME");
+    assert_eq!(x.pattern, "ANSI31", "a hatch turned back to a pattern takes the last pattern it had");
     assert!(x.pattern_lines.is_empty() && !x.is_user());
 
     s.execute("hatchedit", &json!({ "handles": [h], "type": "gradient" })).unwrap();
@@ -56,28 +55,49 @@ fn the_type_list_turns_a_hatch_solid_user_defined_pattern_or_gradient() {
     assert!(s.execute("hatchedit", &json!({ "handles": [h], "type": "dotted" })).is_err());
 }
 
-/// Turned to a pattern, a hatch takes ANSI31 when HPNAME holds a gradient tile, and a pattern a
-/// .pat file loaded with its lines.
+/// A hatch turned back to "pattern" or "gradient" takes the last pattern or gradient a hatch had,
+/// whatever its name: never a name test (a .pat pattern may be called GR_…), and its lines and
+/// the gradient's settings come with it.
 #[test]
-fn a_hatch_turned_to_a_pattern_never_takes_a_gradient_tile_and_keeps_pat_lines() {
+fn a_hatch_turned_back_takes_the_last_pattern_and_the_last_gradient() {
     let (mut s, _, _, h) = square_with_island();
+    // A .pat pattern named like a gradient tile, with its lines.
+    let pat = "*GR_TEST,Not a gradient\n0,0,0,0,.5\n90,0,0,0,.5\n";
+    s.execute("rectang", &json!({ "p1": [30, 0], "p2": [40, 10] })).unwrap();
+    s.execute("hatch", &json!({ "points": [[35, 5]], "pattern": "GR_TEST", "patternText": pat })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "pattern": "GR_TEST" })).unwrap();
+    assert_eq!(hatch(&s, &h).pattern, "GR_TEST");
+
+    // Pattern GR_TEST → solid → gradient (cylinder, red to yellow, 30°) → solid → pattern.
     s.execute("hatchedit", &json!({ "handles": [h], "type": "solid" })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "gradient": { "name": "CYLINDER", "color1": "1", "color2": "2", "angle": 30 } })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "solid" })).unwrap();
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
+    let x = hatch(&s, &h);
+    assert_eq!(x.pattern, "GR_TEST", "the last pattern, though its name starts with GR_");
+    assert_eq!(x.pattern_lines.len(), 2, "with its lines");
+    assert!(!x.solid && x.gradient.is_none());
+
+    // Back to a gradient: the last one, with its settings.
+    s.execute("hatchedit", &json!({ "handles": [h], "type": "gradient" })).unwrap();
+    let g = hatch(&s, &h).gradient.expect("a gradient");
+    assert_eq!(g.name, "CYLINDER");
+    assert_eq!((g.color1.to_aci(), g.color2.to_aci()), (1, 2));
+    assert!((g.angle.to_degrees() - 30.0).abs() < 1e-9);
+}
+
+/// With nothing remembered yet, a hatch turned to "pattern" takes ANSI31 (HPNAME, which may hold
+/// a gradient tile, plays no part).
+#[test]
+fn with_nothing_remembered_a_pattern_is_ansi31() {
+    let mut s = Session::new();
+    rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    let h = handle(&s.execute("hatch", &json!({ "points": [[2, 2]], "pattern": "SOLID" })).unwrap());
     s.execute("setvar", &json!({ "name": "HPNAME", "value": "GR_LINEAR" })).unwrap();
     s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
     let x = hatch(&s, &h);
-    assert_eq!(x.pattern, "ANSI31", "a gradient tile is no pattern");
+    assert_eq!(x.pattern, "ANSI31");
     assert!(x.pattern_lines.is_empty() && !x.solid && x.gradient.is_none());
-
-    // A second hatch loads EDITGRID from a .pat file's text; HPNAME then names it.
-    let pat = "*EDITGRID,Edit grid\n0,0,0,0,.5\n90,0,0,0,.5\n";
-    s.execute("rectang", &json!({ "p1": [30, 0], "p2": [40, 10] })).unwrap();
-    s.execute("hatch", &json!({ "points": [[35, 5]], "pattern": "EDITGRID", "patternText": pat })).unwrap();
-    s.execute("hatchedit", &json!({ "handles": [h], "type": "solid" })).unwrap();
-    s.execute("setvar", &json!({ "name": "HPNAME", "value": "EDITGRID" })).unwrap();
-    s.execute("hatchedit", &json!({ "handles": [h], "type": "pattern" })).unwrap();
-    let x = hatch(&s, &h);
-    assert_eq!(x.pattern, "EDITGRID");
-    assert_eq!(x.pattern_lines.len(), 2, "the .pat pattern's lines come with it");
 }
 
 #[test]

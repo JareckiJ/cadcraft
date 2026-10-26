@@ -183,8 +183,9 @@ fn make_user(h: &mut Hatch, double: bool) {
 }
 
 /// Type, pattern, scale (or spacing) and angle (degrees) from the parameters. `default_pattern`
-/// is the pattern a hatch turned to "pattern" from another type takes (HPNAME).
-fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &str) {
+/// is the pattern (name and lines) a hatch turned to "pattern" from another type takes: the last
+/// pattern a hatch had ([`Session::hatch_last_pattern`]).
+fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &(String, Vec<PatternLine>)) {
     match kind {
         Some(Kind::Solid) => {
             h.pattern = "SOLID".into();
@@ -193,11 +194,10 @@ fn properties(h: &mut Hatch, p: &Value, kind: Option<Kind>, default_pattern: &st
             h.pattern_lines.clear();
         }
         Some(Kind::Pattern) if h.solid || h.gradient.is_some() || h.pattern.eq_ignore_ascii_case(USER) => {
-            h.pattern = default_pattern.into();
+            h.pattern.clone_from(&default_pattern.0);
             h.solid = false;
             h.gradient = None;
-            // A pattern a .pat file loaded brings its lines, as when it is picked by name.
-            h.pattern_lines = super::patfile::lines_for(default_pattern);
+            h.pattern_lines.clone_from(&default_pattern.1);
         }
         Some(Kind::User) if !h.pattern.eq_ignore_ascii_case(USER) => make_user(h, false),
         // Gradient: the `gradient` edit (default LINEAR when none is given) does it.
@@ -251,10 +251,10 @@ struct GradientEdit {
 }
 
 impl GradientEdit {
-    /// Make `h` a gradient fill (from the default LINEAR blue-to-white one when it has none) and
-    /// set the given fields.
-    fn apply(&self, h: &mut Hatch) {
-        let mut g = h.gradient.clone().unwrap_or(Gradient {
+    /// Make `h` a gradient fill (from `last`, the last gradient a hatch had, or else the default
+    /// LINEAR blue-to-white one, when it has none) and set the given fields.
+    fn apply(&self, h: &mut Hatch, last: Option<&Gradient>) {
+        let mut g = h.gradient.clone().or_else(|| last.cloned()).unwrap_or(Gradient {
             name: "LINEAR".into(),
             color1: Color::Index(5),
             color2: Color::Index(7),
@@ -530,11 +530,11 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let inherit_origin = bool_or(p, "inheritOrigin", false);
-    let default_pattern = {
-        let n = s.doc()?.header.str("HPNAME", "ANSI31").to_ascii_uppercase();
-        // HPNAME also holds the Hatch Creation gallery's gradient tiles (GR_*), which are no pattern.
-        if n.is_empty() || n == "SOLID" || n == USER || n.starts_with("GR_") { "ANSI31".to_string() } else { n }
-    };
+    // What a hatch turned to another type takes: the last pattern or gradient a hatch had (the
+    // edited ones' own count, see below), else ANSI31 and the default gradient.
+    let mut default_pattern = s.hatch_last_pattern().map_or_else(|| ("ANSI31".to_string(), Vec::new()), |(n, l)| (n.to_string(), l.to_vec()));
+    let mut last_gradient = s.hatch_last_gradient().cloned();
+    let mut remembered: Vec<Hatch> = Vec::new();
     if grad.is_some() && str_param(p, "pattern").map(|v| v.trim().to_ascii_uppercase()).is_some_and(|v| !v.is_empty() && v != "SOLID") {
         return Err(bad("hatchedit", "give `pattern` or `gradient`, not both"));
     }
@@ -583,10 +583,19 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
             h.style = src.style;
             h.origin = if inherit_origin { src.origin } else { origin };
         }
+        // The hatch's pattern or gradient before the edit is remembered, so turning it to
+        // solid and back gives it again.
+        if let Some(g) = &h.gradient {
+            last_gradient = Some(g.clone());
+        } else if !h.solid && !h.is_user() && !h.pattern.trim().is_empty() {
+            default_pattern = (h.pattern.clone(), h.pattern_lines.clone());
+        }
+        remembered.push(h.clone());
         properties(&mut h, p, kind, &default_pattern);
         if let Some(g) = &grad {
-            g.apply(&mut h);
+            g.apply(&mut h, last_gradient.as_ref());
         }
+        remembered.push(h.clone());
         if let Some(b) = background {
             h.background = b;
         }
@@ -648,6 +657,10 @@ pub(super) fn run_hatchedit(s: &mut Session, p: &Value) -> Result<Value> {
         if bool_or(p, "separate", false) {
             created.extend(separate(s, *handle)?);
         }
+    }
+    // Each hatch's type before and after the edit, in order: the last pattern and gradient.
+    for h in &remembered {
+        s.remember_hatch(h);
     }
     // Store as Default Origin: new hatches start from this origin (HPORIGIN, HPORIGINMODE).
     if bool_or(p, "storeOrigin", false)
