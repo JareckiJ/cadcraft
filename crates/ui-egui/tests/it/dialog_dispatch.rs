@@ -39,6 +39,7 @@ fn drafting_settings_menu_opens_the_dialog() {
     assert_eq!(app.session.settings.gridmajor, 10);
 }
 
+/// The Properties menu item shows the Properties palette.
 #[test]
 fn properties_menu_shows_the_palette() {
     let (mut app, _) = app();

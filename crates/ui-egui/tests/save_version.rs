@@ -11,6 +11,7 @@ fn picked() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("cadcraft-ui-save-version-{}.dxf", std::process::id()))
 }
 
+/// A writer that records the version and binary flag it was asked for instead of a drawing.
 fn with_options(_: &Drawing, _: &str, o: &SaveAs) -> Result<Vec<u8>, String> {
     Ok(format!("{}|{}", o.version.map(|v| v.year()).unwrap_or("-"), o.binary).into_bytes())
 }
