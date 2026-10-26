@@ -139,6 +139,33 @@ fn equal_attribute_values_preserve_an_imported_font_baseline() {
     assert_eq!(attributes(s.doc().unwrap(), a), before);
 }
 
+/// Recomputing a justified baseline must not replace its independent insertion elevation.
+#[test]
+fn value_edits_preserve_distinct_insertion_and_alignment_elevations_on_export() {
+    let (mut s, a, _) = fixture();
+    s.doc_mut()
+        .unwrap()
+        .modify_entity(a, |e| {
+            let EntityKind::Insert(i) = &mut e.kind else { panic!("insert") };
+            i.attribs[0].text.insert.z = 9.0;
+        })
+        .unwrap();
+    let anchor = attributes(s.doc().unwrap(), a)[0].text.align_pt;
+    s.execute("attedit", &json!({"handle":a.hex(),"values":{"T":AFTER}})).unwrap();
+    for name in ["elevations.dxf", "elevations.dwg"] {
+        let reopened = cadcraft_io::read(&cadcraft_io::write(s.doc().unwrap(), name).unwrap(), name).unwrap();
+        let restored = attributes(&reopened, a);
+        assert_eq!(restored[0].text.insert.z, 9.0, "{name}: insertion elevation");
+        assert_eq!(restored[0].text.align_pt.map(|p| p.xy()), anchor.map(|p| p.xy()), "{name}: alignment XY");
+        if name.ends_with(".dxf") {
+            assert_eq!(restored[0].text.align_pt, anchor, "DXF retains independent alignment elevation");
+        } else {
+            // The DWG bridge uses one text elevation for both points.
+            assert_eq!(restored[0].text.align_pt.unwrap().z, 9.0);
+        }
+    }
+}
+
 #[test]
 fn value_edits_preserve_left_baseline_and_two_point_placements() {
     for horizontal in [HAlign::Left, HAlign::Aligned, HAlign::Fit] {
