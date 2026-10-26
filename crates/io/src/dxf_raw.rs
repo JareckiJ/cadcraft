@@ -37,8 +37,9 @@ const MODELLED_KEYS: &[&str] = &[
 ];
 
 /// Extension dictionary entries not kept raw: dimension associativity (CADCraft reads and
-/// rewrites it), draw order and annotation scale contexts (written from their own models by the
-/// changes that model them; stale copies would contradict the drawing).
+/// rewrites it), draw order (applied on reading, written by `draw_order`) and annotation scale
+/// contexts (written from their own models by the changes that model them; stale copies would
+/// contradict the drawing).
 const MODELLED_XDICT_KEYS: &[&str] = &["ACAD_DIMASSOC", "ACAD_SORTENTS", "ACDBCONTEXTDATAMANAGER"];
 
 /// Applications whose xdata CADCraft reads and writes itself. `ACAD` holds dimension overrides
@@ -95,7 +96,7 @@ fn is_pointer(code: i32) -> bool {
 }
 
 /// The records of a run of tags: (type, index of the record's `0` group, groups after it).
-fn split(tags: &[Tag]) -> Vec<(String, usize, &[Tag])> {
+pub(crate) fn split(tags: &[Tag]) -> Vec<(String, usize, &[Tag])> {
     let mut out = Vec::new();
     let mut open: Option<(String, usize)> = None;
     for (i, t) in tags.iter().enumerate() {
@@ -116,15 +117,16 @@ type Recs<'a> = Vec<(String, usize, &'a [Tag])>;
 
 /// A record's handle, owner, reactors and extension dictionary (groups before its xdata).
 #[derive(Default)]
-struct Head {
-    handle: Option<String>,
-    owner: Option<String>,
+pub(crate) struct Head {
+    pub(crate) handle: Option<String>,
+    pub(crate) owner: Option<String>,
     reactors: Vec<String>,
-    xdict: Option<String>,
+    pub(crate) xdict: Option<String>,
     has_reactors: bool,
 }
 
-fn head(tags: &[Tag]) -> Head {
+/// A record's [`Head`], from its groups before any xdata.
+pub(crate) fn head(tags: &[Tag]) -> Head {
     let mut h = Head::default();
     let mut group: Option<String> = None;
     for t in tags.iter().take_while(|t| t.code < 1000) {
@@ -149,7 +151,8 @@ fn head(tags: &[Tag]) -> Head {
     h
 }
 
-fn val(tags: &[Tag], code: i32) -> Option<String> {
+/// The first value of group `code` before any xdata.
+pub(crate) fn val(tags: &[Tag], code: i32) -> Option<String> {
     tags.iter().take_while(|t| t.code < 1000).find(|t| t.code == code).map(Tag::str)
 }
 
@@ -1191,16 +1194,16 @@ fn add_appids(out: &mut Vec<Tag>) {
 }
 
 /// The index of the `$HANDSEED` value in the header.
-fn seed_index(tags: &[Tag]) -> Option<usize> {
+pub(crate) fn seed_index(tags: &[Tag]) -> Option<usize> {
     tags.windows(2).position(|w| matches!(w, [a, b] if a.code == 9 && a.str() == "$HANDSEED" && b.code == 5)).map(|i| i + 1)
 }
 
 /// The header's next free handle.
-fn seed(tags: &[Tag]) -> u64 {
+pub(crate) fn seed(tags: &[Tag]) -> u64 {
     seed_index(tags).and_then(|i| tags.get(i)).and_then(|t| Handle::parse_hex(&t.str())).map_or(0, |h| h.0)
 }
 
 /// The largest handle of a record (groups 5 and 105).
-fn max_handle(tags: &[Tag]) -> u64 {
+pub(crate) fn max_handle(tags: &[Tag]) -> u64 {
     tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| Handle::parse_hex(&t.str())).map(|h| h.0).max().unwrap_or(0)
 }

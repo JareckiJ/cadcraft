@@ -106,6 +106,7 @@ mod native {
         let mut doc = outcome.document;
         current_style_names(&mut doc);
         table_merges(&mut doc);
+        complete_sort_tables(&mut doc);
         table_style_rows(&mut doc, false);
         let orphans = drop_orphaned_dgn_components(&mut doc);
         if orphans > 0 {
@@ -229,6 +230,53 @@ mod native {
             82 => "LAYOUT",
             _ => return None,
         })
+    }
+
+    /// Draw order (SORTENTSTABLE) with every entity of its block listed. acadrust 0.6.5's DXF
+    /// writer replaces a table's sort handles by fresh handles in the same order, all above the
+    /// file's handles, while an entity the table doesn't list is drawn by its own handle: every
+    /// listed entity would move above every unlisted one. Listing the others by their own handles
+    /// keeps the source's order through the renumbering. One table per block is completed (the
+    /// one its extension dictionary names under `ACAD_SORTENTS`, else the lowest handle), so a
+    /// file with many tables for one block costs no more than its entity count.
+    fn complete_sort_tables(doc: &mut acadrust::CadDocument) {
+        use acadrust::objects::ObjectType;
+        let mut chosen: std::collections::HashMap<acadrust::Handle, acadrust::Handle> = std::collections::HashMap::new();
+        for (h, o) in &doc.objects {
+            if let ObjectType::SortEntitiesTable(t) = o {
+                let slot = chosen.entry(t.block_owner_handle).or_insert(*h);
+                if h.value() < slot.value() {
+                    *slot = *h;
+                }
+            }
+        }
+        for b in doc.block_records.iter() {
+            let named = doc.extension_dictionary_handle(b.handle).and_then(|x| match doc.objects.get(&x) {
+                Some(ObjectType::Dictionary(d)) => d.entries.iter().find(|(k, _)| k.eq_ignore_ascii_case("ACAD_SORTENTS")).map(|(_, h)| *h),
+                _ => None,
+            });
+            if let Some(n) = named
+                && matches!(doc.objects.get(&n), Some(ObjectType::SortEntitiesTable(t)) if t.block_owner_handle == b.handle)
+            {
+                chosen.insert(b.handle, n);
+            }
+        }
+        let mut missing: Vec<(acadrust::Handle, Vec<acadrust::Handle>)> = Vec::new();
+        for b in doc.block_records.iter() {
+            let Some(h) = chosen.get(&b.handle) else { continue };
+            let Some(ObjectType::SortEntitiesTable(t)) = doc.objects.get(h) else { continue };
+            let add: Vec<_> = b.entity_handles.iter().copied().filter(|e| !t.contains(*e)).collect();
+            if !add.is_empty() {
+                missing.push((*h, add));
+            }
+        }
+        for (h, add) in missing {
+            if let Some(ObjectType::SortEntitiesTable(t)) = doc.objects.get_mut(&h) {
+                for e in add {
+                    t.add_entry(e, e);
+                }
+            }
+        }
     }
 
     /// Merged table cells onto the cells. acadrust 0.6.3 reads a 2010+ (AC1024+) DWG table's
@@ -637,6 +685,53 @@ mod native {
             if others.contains(&c.owner_handle) {
                 c.entity_mode = Some(0);
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod sort_table_tests {
+        use acadrust::entities::Line;
+        use acadrust::objects::{ObjectType, SortEntitiesTable};
+        use acadrust::{CadDocument, DxfVersion, EntityType, Handle};
+
+        /// A sort table for model space listing `listed`, owned by `owner`.
+        fn table(doc: &mut CadDocument, ms: Handle, owner: Handle, listed: Handle) -> Handle {
+            let h = doc.allocate_handle();
+            let mut t = SortEntitiesTable::for_block(ms);
+            t.handle = h;
+            t.owner_handle = owner;
+            t.add_entry(listed, listed);
+            doc.objects.insert(h, ObjectType::SortEntitiesTable(t));
+            h
+        }
+
+        /// Entries of the sort table `h`.
+        fn entries(doc: &CadDocument, h: Handle) -> usize {
+            match doc.objects.get(&h) {
+                Some(ObjectType::SortEntitiesTable(t)) => t.entries().count(),
+                _ => 0,
+            }
+        }
+
+        /// Two tables for model space: only the one its extension dictionary names gets the others.
+        #[test]
+        fn only_the_table_the_block_names_is_completed() -> Result<(), Box<dyn std::error::Error>> {
+            let mut doc = CadDocument::with_version(DxfVersion::AC1032);
+            let mut lines = Vec::new();
+            for i in 0..3 {
+                let y = f64::from(i);
+                lines.push(doc.add_entity(EntityType::Line(Line::from_coords(0., y, 0., 10., y, 0.)))?);
+            }
+            let ms = doc.block_records.get("*Model_Space").ok_or("model space")?.handle;
+            let xd = doc.ensure_extension_dictionary(ms);
+            // A stray table first (lower handle), then the one the block record names.
+            let stray = table(&mut doc, ms, xd, lines[2]);
+            let named = table(&mut doc, ms, xd, lines[0]);
+            let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&xd) else { return Err("extension dictionary".into()) };
+            d.entries.push(("ACAD_SORTENTS".into(), named));
+            super::complete_sort_tables(&mut doc);
+            assert_eq!((entries(&doc, named), entries(&doc, stray)), (3, 1));
+            Ok(())
         }
     }
 }
