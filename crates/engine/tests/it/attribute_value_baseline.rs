@@ -137,6 +137,11 @@ fn equal_attribute_values_preserve_an_imported_font_baseline() {
     s.input(Input::Enter).unwrap();
     s.input(Input::Enter).unwrap();
     assert_eq!(attributes(s.doc().unwrap(), a), before);
+    s.execute("-attedit", &json!({"handles":[a.hex()],"tag":"T","find":"ADAPTER","replace":"ADAPTER"})).unwrap();
+    assert_eq!(attributes(s.doc().unwrap(), a), before, "global JSON no-op");
+    s.script("-attedit\nn\nn\nEquipment\nT\n\nADAPTER\nADAPTER\n").unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(attributes(s.doc().unwrap(), a), before, "global interactive no-op");
 }
 
 /// Recomputing a justified baseline must not replace its independent insertion elevation.
@@ -186,5 +191,13 @@ fn value_edits_preserve_left_baseline_and_two_point_placements() {
         let mut expected = before;
         expected[0].text.value = AFTER.into();
         assert_eq!(attributes(s.doc().unwrap(), a), expected);
+        if horizontal != HAlign::Left {
+            let reopened = cadcraft_io::read_dxf(cadcraft_io::write_dxf(s.doc().unwrap()).as_bytes()).unwrap();
+            let restored = attributes(&reopened, a);
+            assert_eq!(restored[0].text.insert, expected[0].text.insert);
+            assert_eq!(restored[0].text.align_pt, expected[0].text.align_pt);
+            assert_eq!(restored[0].text.halign, horizontal);
+            assert_eq!(restored[0].text.value, AFTER);
+        }
     }
 }
