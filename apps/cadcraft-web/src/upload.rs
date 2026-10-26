@@ -13,7 +13,7 @@ use web_sys::js_sys;
 /// The hidden file input (one at a time; a cancelled pick leaves it until the next one).
 const INPUT_ID: &str = "cadcraft_open_input";
 /// What the picker offers: the formats OPEN reads.
-const ACCEPT: &str = ".dxf,.dwg";
+const ACCEPT: &str = ".dxf,.dwg,.cadcraft";
 
 /// A file read in the browser (name, contents), or why it couldn't be read.
 type Upload = Result<(String, Vec<u8>), String>;

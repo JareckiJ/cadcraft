@@ -147,6 +147,7 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    pub part_edit: Option<cmd::modeling::sketch_edit::Edit>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -173,12 +174,13 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            part_edit: None,
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
     /// saved into its block.
     pub fn is_dirty(&self) -> bool {
-        !Arc::ptr_eq(self.drawing(), &self.saved) || self.block_unsaved()
+        !Arc::ptr_eq(self.drawing(), &self.saved) || self.block_unsaved() || self.part_edit.is_some()
     }
     /// After undo/redo replaced the drawing (`before` is the one shown until then): if the current
     /// layout no longer exists, follow it to its other name when it was renamed (same tab order,
@@ -928,7 +930,7 @@ impl Session {
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         (spec.enabled)(self).map_err(|m| EngineError::Disabled(spec.id.into(), m))?;
-        if let Some(why) = cmd::blocks::bedit::refused_in_editor(self, spec.id) {
+        if let Some(why) = cmd::modeling::sketch_edit::refused(self, spec.id).or_else(|| cmd::blocks::bedit::refused_in_editor(self, spec.id)) {
             return Err(EngineError::Disabled(spec.id.into(), why));
         }
         let before = self.state().ok().map(|s| (s.doc.clone(), s.selection.clone(), s.uid));
@@ -1042,7 +1044,7 @@ impl Session {
             self.cancel();
         }
         (spec.enabled)(self).map_err(|m| EngineError::Disabled(spec.id.into(), m))?;
-        if let Some(why) = cmd::blocks::bedit::refused_in_editor(self, spec.id) {
+        if let Some(why) = cmd::modeling::sketch_edit::refused(self, spec.id).or_else(|| cmd::blocks::bedit::refused_in_editor(self, spec.id)) {
             return Err(EngineError::Disabled(spec.id.into(), why));
         }
         if nested {

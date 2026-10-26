@@ -6,15 +6,18 @@
 //! start a selection window in the drawing). What the overlays do goes through commands:
 //! `zoom.extents` (Top face, Home), `ui.toggle.viewcube`, `ui.toggle.ucsicon`.
 //!
-//! CADCraft's model view is a 2D plan view of the World Coordinate System: there is no view
-//! twist, no 3D view direction and no user coordinate system yet, so the compass ring explains
-//! that instead of rotating, and the WCS menu lists the only coordinate system there is.
+//! The drawing workspace uses a 2D plan view without view twist or a user coordinate system.
+//! Its compass explains that limitation. Parts use the 3D cube in `part`, sharing this layout
+//! and visibility preference. Both workspaces currently use the World Coordinate System.
 
 use egui::{Color32, CursorIcon, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::CadApp;
 use crate::theme::Tokens;
+
+mod part;
+pub(crate) use part::{part_pointer_over, show_part};
 
 /// Shown when the compass ring is clicked or dragged.
 pub const NO_TWIST: &str = "ViewCube: rotating the view needs a view twist, which the 2D plan view doesn't support yet.";

@@ -13,6 +13,7 @@ mod extents;
 mod gdt;
 mod header;
 pub mod library;
+mod part;
 mod plotstyle;
 mod plotter;
 mod refedit;
@@ -29,6 +30,7 @@ pub use entity::*;
 pub use extents::{MAX_BLOCK_DEPTH, entity_bounds};
 pub use gdt::*;
 pub use header::{HVal, Header};
+pub use part::*;
 pub use plotstyle::*;
 pub use plotter::*;
 pub use refedit::{RefEdit, WorkItem};
@@ -84,6 +86,8 @@ impl Space {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Drawing {
+    /// Native part identity. None denotes the existing drafting document.
+    pub part: Option<PartModel>,
     pub header: Header,
     /// File data CADCraft does not model, written back on save.
     pub foreign: std::sync::Arc<foreign::Foreign>,
@@ -158,6 +162,7 @@ impl Drawing {
     }
     fn bare() -> Self {
         Drawing {
+            part: None,
             header: Header::default(),
             foreign: std::sync::Arc::default(),
             layers: vec![Layer::default(), Layer { name: "Defpoints".into(), plot: false, ..Layer::default() }],

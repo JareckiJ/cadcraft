@@ -143,6 +143,12 @@ fn is_dxf(path: &str) -> bool {
 /// The drawing written to `path` with `opts`: through [`IoHooks::write`] when no option is set,
 /// else through the [`write_as`] hook.
 fn write_bytes(s: &Session, cmd: &str, path: &str, opts: &SaveAs) -> Result<Vec<u8>> {
+    if s.doc()?.part.is_some()
+        && matches!(cmd, "saveas" | "qsave" | "save")
+        && !std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("cadcraft"))
+    {
+        return Err(bad(cmd, "Save editable parts as .cadcraft; use Export for drawing output"));
+    }
     let hooks = io().ok_or_else(|| bad(cmd, "file formats are not available in this build"))?;
     if opts.binary && !is_dxf(path) {
         return Err(bad(cmd, "binary applies to DXF files only"));
@@ -304,6 +310,9 @@ pub fn finish_open(s: &mut Session, f: ReadFile) -> Result<Value> {
 fn read_bytes(bytes: &[u8], name: &str, path: Option<String>) -> Result<ReadFile> {
     let hooks = io().ok_or_else(|| bad("open", "file formats are not available in this build"))?;
     let drawing = (hooks.read)(bytes, name).map_err(|e| bad("open", e))?;
+    if drawing.part.is_some() {
+        super::modeling::validate(&drawing)?;
+    }
     // A file that isn't a drawing (an imported SVG) gives the drawing no file name: QSAVE then
     // asks where to save instead of exporting over the original.
     let path = path.filter(|p| is_drawing_file(p));
@@ -509,7 +518,7 @@ fn run_switch(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn run_bytes(s: &mut Session, p: &Value) -> Result<Value> {
-    let fmt = str_param(p, "format").unwrap_or("dxf");
+    let fmt = str_param(p, "format").unwrap_or(if s.doc()?.part.is_some() { "cadcraft" } else { "dxf" });
     let opts = save_options("document.bytes", p)?;
     let version = opts.version.unwrap_or_else(|| drawing_version(s, &format!("drawing.{fmt}")));
     let lost = not_saved_as(s.doc()?, version);
@@ -571,7 +580,7 @@ pub fn drops_unknown(path: &str) -> bool {
 /// Whether `path` is saved as a drawing (DXF, DWG) rather than exported as an image.
 fn is_drawing_file(path: &str) -> bool {
     let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    matches!(ext.as_str(), "dxf" | "dwg" | "dwt" | "")
+    matches!(ext.as_str(), "dxf" | "dwg" | "dwt" | "cadcraft" | "")
 }
 
 /// Say on the command line what the file couldn't keep, and list it in the result's `notSaved`.

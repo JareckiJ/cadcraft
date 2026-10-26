@@ -12,6 +12,7 @@ mod dxf_read;
 mod dxf_table;
 mod dxf_write;
 mod dxf_xref;
+mod native_part;
 pub mod pdf;
 pub mod plotter;
 pub mod svg;
@@ -60,6 +61,9 @@ fn ext(name: &str) -> String {
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
 /// (SVG and gzip-compressed SVGZ).
 pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
+    if ext(name) == "cadcraft" || bytes.iter().copied().find(|b| !b.is_ascii_whitespace()) == Some(b'{') {
+        return native_part::read(bytes);
+    }
     if cadcraft_dwg::is_dwg(bytes) {
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
         let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
@@ -84,6 +88,9 @@ pub fn write(d: &Drawing, name: &str) -> Result<Vec<u8>> {
 /// Like [`write`], with the DXF/DWG version and binary DXF chosen by `opts`. Binary applies to
 /// DXF only; asking for it with another format is an error.
 pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>> {
+    if ext(name) == "cadcraft" {
+        return native_part::write(d);
+    }
     let version = opts.version.unwrap_or_else(|| save_version(d));
     match ext(name).as_str() {
         "dxf" | "" => {
@@ -111,6 +118,9 @@ pub fn write_with(d: &Drawing, name: &str, opts: &SaveOptions) -> Result<Vec<u8>
 /// extents. Formats that are not images (DXF, DWG) ignore the window. The window is checked with
 /// [`check_window`].
 pub fn write_framed(d: &Drawing, name: &str, window: Option<Bounds2>) -> Result<Vec<u8>> {
+    if ext(name) == "cadcraft" {
+        return native_part::write(d);
+    }
     // A drawing template (.dwt) is DWG content.
     if ext(name) == "dwt" {
         return write_framed(d, &format!("{name}.dwg"), None);

@@ -141,6 +141,11 @@ fn command_known(id: &str) -> bool {
 
 /// Tool Sets strip with Drafting/Modeling tabs, their command buttons and the collapse control.
 pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
+    crate::part_editor::sync(app);
+    let part = crate::part_editor::is_part(app);
+    if part {
+        app.ui.toolset_tab = "Modeling".into();
+    }
     let t = Tokens::get();
     egui::Frame::NONE.fill(t.panel).show(ui, |ui| {
         let r = ui.max_rect();
@@ -148,10 +153,11 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         // Tabs.
         let tab_h = 28.0;
         let mut x = r.left();
-        for name in ["Drafting", "Modeling"] {
+        for name in if part { ["Modeling", "Sketch"] } else { ["Drafting", "Modeling"] } {
             let w = 92.0;
             let tr = Rect::from_min_size(pos2(x, r.top()), vec2(w, tab_h));
-            let active = app.ui.toolset_tab == name;
+            let active =
+                if part { name == if crate::part_editor::is_sketch(app) { "Sketch" } else { "Modeling" } } else { app.ui.toolset_tab == name };
             let resp = ui.interact(tr, ui.scope_id().with(("ts", name)), Sense::click());
             p.rect_filled(tr, 0.0, if active { t.tab_active } else { t.chrome });
             p.text(
@@ -163,7 +169,13 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
             );
             icons::describe_control(ui, &resp, crate::i18n::t(name), Some(active), true);
             if resp.clicked() {
-                app.ui.toolset_tab = name.into();
+                if part {
+                    if name == "Sketch" {
+                        crate::part_editor::route(app, "ui.part.sketch");
+                    }
+                } else {
+                    app.ui.toolset_tab = name.into();
+                }
             }
             x += w;
         }
@@ -183,7 +195,13 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                let groups: &[(&str, &[Tool], &[Tool])] = if app.ui.toolset_tab == "Drafting" { DRAFTING } else { MODELING };
+                let groups: &[(&str, &[Tool], &[Tool])] = if part {
+                    if crate::part_editor::is_sketch(app) { PART_SKETCH } else { PART_MODELING }
+                } else if app.ui.toolset_tab == "Drafting" {
+                    DRAFTING
+                } else {
+                    MODELING
+                };
                 for (name, large, small) in groups {
                     let collapsed = app.ui.collapsed_groups.iter().any(|g| g == name);
                     // Header.
@@ -235,7 +253,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                     if hidden(cmd) {
                                         continue;
                                     }
-                                    ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    ui.add_enabled_ui(command_known(cmd) && (!part || crate::part_editor::tool_enabled(app, cmd)), |ui| {
                                         if icons::button(ui, *icon, 40.0, tip, false).clicked() {
                                             clicked = Some(cmd);
                                         }
@@ -251,7 +269,7 @@ pub fn toolsets(app: &mut CadApp, ui: &mut egui::Ui) {
                                 ui.add_space(8.0);
                                 ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
                                 for (icon, cmd, tip) in row.iter() {
-                                    ui.add_enabled_ui(command_known(cmd), |ui| {
+                                    ui.add_enabled_ui(command_known(cmd) && (!part || crate::part_editor::tool_enabled(app, cmd)), |ui| {
                                         if icons::button(ui, *icon, 23.0, tip, false).clicked() {
                                             clicked = Some(cmd);
                                         }
@@ -305,7 +323,29 @@ pub const MODELING: &[(&str, &[Tool], &[Tool])] = &[
     ("View", &[(Icon::Orbit, "3dorbit", "Orbit"), (Icon::ZoomExtents, "zoom.extents", "Zoom Extents")], &[]),
 ];
 
-fn section_header(ui: &mut egui::Ui, title: &str) -> Rect {
+const PART_MODELING: &[(&str, &[Tool], &[Tool])] = &[
+    (
+        "Datum",
+        &[(Icon::DatumPlane, "ui.part.plane", "Offset Plane")],
+        &[(Icon::XLine, "part.axis", "Datum Axis"), (Icon::Point, "part.point", "Datum Point")],
+    ),
+    ("Sketch", &[(Icon::Sketch, "ui.part.sketch", "Create or Edit Sketch")], &[]),
+    (
+        "Solid",
+        &[(Icon::Extrude, "extrude", "Extrude")],
+        &[(Icon::Rotate, "revolve", "Revolve"), (Icon::Spline, "sweep", "Sweep"), (Icon::Offset, "loft", "Loft")],
+    ),
+    ("View", &[], &[(Icon::ZoomExtents, "ui.part.fit", "Fit / Isometric"), (Icon::Orbit, "3dorbit", "Orbit")]),
+];
+const PART_SKETCH: &[(&str, &[Tool], &[Tool])] = &[
+    ("Setup", &[], &[(Icon::DatumPlane, "ui.part.placement", "Sketch Plane")]),
+    DRAFTING[0],
+    DRAFTING[3],
+    DRAFTING[8],
+    ("View", &[], &[(Icon::ZoomExtents, "ui.part.fit", "Fit Sketch"), (Icon::Sketch, "ui.part.normal", "Normal to Sketch")]),
+];
+
+pub(crate) fn section_header(ui: &mut egui::Ui, title: &str) -> Rect {
     let t = Tokens::get();
     let (hr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().text(
@@ -517,7 +557,7 @@ pub(crate) fn layers_section(app: &mut CadApp, ui: &mut egui::Ui) {
 }
 
 /// Properties row: a right-aligned translated label in a 106-point layout box that exposes a Label node to accessibility and names the control added by `add`.
-fn prop_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn prop_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     let t = Tokens::get();
     ui.horizontal(|ui| {
         let mut job = egui::text::LayoutJob::simple(crate::i18n::t(label).to_string(), crate::theme::body(), t.text_dim, 106.0);
@@ -707,6 +747,10 @@ fn properties_header(app: &mut CadApp, ui: &mut egui::Ui) {
 
 /// Properties palette: the selection's common properties, or the current defaults when nothing is selected; formats lengths per drawing units and dispatches setter commands.
 pub(crate) fn properties_section(app: &mut CadApp, ui: &mut egui::Ui) {
+    if crate::part_editor::is_part(app) && !crate::part_editor::drafting(app) {
+        crate::part_editor::properties(app, ui);
+        return;
+    }
     let t = Tokens::get();
     properties_header(app, ui);
     let sel = app.session.selection();

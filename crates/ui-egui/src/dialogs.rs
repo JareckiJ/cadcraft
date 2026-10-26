@@ -19,6 +19,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         "layers" => crate::layers::dialog(app, ctx, &mut open),
         "qselect" => crate::quick::qselect_dialog(app, ctx, &mut open),
         "parameters" => crate::parametric::parameters_dialog(app, ctx, &mut open),
+        "modeling" => crate::modeling::dialog(app, ctx, &mut open),
         "dsettings" => dsettings(app, ctx, &mut open),
         "units" => units(app, ctx, &mut open),
         "hatch" => crate::hatchdlg::dialog(app, ctx, &mut open),

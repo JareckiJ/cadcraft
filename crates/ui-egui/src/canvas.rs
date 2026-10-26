@@ -15,6 +15,8 @@ use crate::theme::Tokens;
 /// World ↔ screen transform for the canvas rect.
 #[derive(Clone, Copy, Debug)]
 pub struct Xf {
+    /// Projected sketch-plane basis, in screen right/up coordinates.
+    pub affine: Option<[Vec2; 2]>,
     pub rect: Rect,
     pub center: Vec2,
     /// Pixels (points) per drawing unit.
@@ -24,14 +26,26 @@ pub struct Xf {
 impl Xf {
     pub fn to_screen(&self, p: Vec2) -> Pos2 {
         let c = self.rect.center();
-        pos2(c.x + ((p.x - self.center.x) * self.scale) as f32, c.y - ((p.y - self.center.y) * self.scale) as f32)
+        let delta = p - self.center;
+        let projected = self.affine.map_or(delta, |[u, v]| u * delta.x + v * delta.y);
+        pos2(c.x + (projected.x * self.scale) as f32, c.y - (projected.y * self.scale) as f32)
     }
     pub fn to_world(&self, p: Pos2) -> Vec2 {
         let c = self.rect.center();
-        Vec2::new(self.center.x + f64::from(p.x - c.x) / self.scale, self.center.y - f64::from(p.y - c.y) / self.scale)
+        let q = Vec2::new(f64::from(p.x - c.x) / self.scale, -f64::from(p.y - c.y) / self.scale);
+        let delta = if let Some([u, v]) = self.affine {
+            let determinant = u.x * v.y - v.x * u.y;
+            let denominator = if determinant.abs() < 1e-4 { 1e-4_f64.copysign(determinant) } else { determinant };
+            Vec2::new((q.x * v.y - q.y * v.x) / denominator, (u.x * q.y - u.y * q.x) / denominator)
+        } else {
+            q
+        };
+        self.center + delta
     }
     pub fn world_bounds(&self) -> Bounds2 {
-        Bounds2::new(self.to_world(self.rect.left_bottom()), self.to_world(self.rect.right_top()))
+        Bounds2::from_points(
+            [self.rect.left_bottom(), self.rect.right_bottom(), self.rect.right_top(), self.rect.left_top()].map(|p| self.to_world(p)),
+        )
     }
 }
 
@@ -523,7 +537,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
     let (k, b) = vp_motion(&vp, c.view)?;
     c.motion = Some((k, b));
     // Paper p = k·p0 + b, so the list is drawn by the paper transform scaled by k about b.
-    let xf = Xf { rect: xf_paper.rect, center: (xf_paper.center - b) / k, scale: xf_paper.scale * k };
+    let xf = Xf { affine: None, rect: xf_paper.rect, center: (xf_paper.center - b) / k, scale: xf_paper.scale * k };
     let on_screen = Rect::from_two_pos(xf_paper.to_screen(Vec2::new(rect.min.x, rect.max.y)), xf_paper.to_screen(Vec2::new(rect.max.x, rect.min.y)));
     Some(VpFrame { xf, on_screen, outline: clip.map(|p| p.polygon().to_vec()) })
 }
@@ -720,6 +734,13 @@ fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
             for i in x0..=x1 {
                 let x = i as f64 * minor;
                 let is_major = (x / major).round() * major - x == 0.0 || ((x / major) - (x / major).round()).abs() < 1e-6;
+                if xf.affine.is_some() {
+                    lines.push(Shape::line_segment(
+                        [xf.to_screen(Vec2::new(x, wb.min.y)), xf.to_screen(Vec2::new(x, wb.max.y))],
+                        Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
+                    ));
+                    continue;
+                }
                 let sx = xf.to_screen(Vec2::new(x, 0.0)).x;
                 lines.push(Shape::line_segment(
                     [pos2(sx, xf.rect.top()), pos2(sx, xf.rect.bottom())],
@@ -729,6 +750,13 @@ fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
             for j in y0..=y1 {
                 let y = j as f64 * minor;
                 let is_major = ((y / major) - (y / major).round()).abs() < 1e-6;
+                if xf.affine.is_some() {
+                    lines.push(Shape::line_segment(
+                        [xf.to_screen(Vec2::new(wb.min.x, y)), xf.to_screen(Vec2::new(wb.max.x, y))],
+                        Stroke::new(1.0, if is_major { t.grid_major } else { t.grid_minor }),
+                    ));
+                    continue;
+                }
                 let sy = xf.to_screen(Vec2::new(0.0, y)).y;
                 lines.push(Shape::line_segment(
                     [pos2(xf.rect.left(), sy), pos2(xf.rect.right(), sy)],
@@ -739,6 +767,11 @@ fn draw_grid(app: &CadApp, p: &egui::Painter, xf: &Xf) {
         p.extend(lines);
     }
     // Axes through the origin.
+    if xf.affine.is_some() {
+        p.line_segment([xf.to_screen(Vec2::new(wb.min.x, 0.0)), xf.to_screen(Vec2::new(wb.max.x, 0.0))], Stroke::new(1.0, t.axis_x));
+        p.line_segment([xf.to_screen(Vec2::new(0.0, wb.min.y)), xf.to_screen(Vec2::new(0.0, wb.max.y))], Stroke::new(1.0, t.axis_y));
+        return;
+    }
     let o = xf.to_screen(Vec2::ZERO);
     if xf.rect.y_range().contains(o.y) {
         p.line_segment([pos2(xf.rect.left(), o.y), pos2(xf.rect.right(), o.y)], Stroke::new(1.0, t.axis_x));
@@ -1093,7 +1126,7 @@ mod highlight_stability_tests {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0));
         let input = egui::RawInput { screen_rect: Some(rect), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
         let mut output = ctx.run_ui(input, |ui| {
-            draw_highlight(ui.painter(), &Xf { rect, center: Vec2::ZERO, scale: 11.0 }, list, &[0], Color32::LIGHT_BLUE, look);
+            draw_highlight(ui.painter(), &Xf { affine: None, rect, center: Vec2::ZERO, scale: 11.0 }, list, &[0], Color32::LIGHT_BLUE, look);
         });
         let shapes = std::mem::take(&mut output.shapes);
         output.textures_delta.clear();
@@ -1150,7 +1183,7 @@ mod highlight_stability_tests {
             let dir = std::path::PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
             let mut h = egui_kittest::Harness::builder().with_size(vec2(600.0, 400.0)).build_ui(|ui| {
-                let xf = Xf { rect: ui.max_rect(), center: Vec2::new(3.5, 1.5), scale: 31.0 };
+                let xf = Xf { affine: None, rect: ui.max_rect(), center: Vec2::new(3.5, 1.5), scale: 31.0 };
                 draw_highlight(ui.painter(), &xf, &list, &[0], Color32::LIGHT_BLUE, Look { width: 2.0, dashed: true });
             });
             h.run_steps(3);
@@ -1327,6 +1360,12 @@ fn effective_point(app: &mut CadApp, raw: Vec2, xf: &Xf, ctx: &egui::Context) ->
     }
     app.canvas.snap = r.snap;
     app.canvas.track = r.track;
+    if r.snap.is_none()
+        && let Some(hit) = crate::part_editor::reference_hit(app, raw, q.aperture)
+    {
+        app.canvas.snap = Some(hit);
+        return hit.point;
+    }
     r.point
 }
 
@@ -1364,6 +1403,14 @@ fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOptions, page: f3
 /// just its items), a tooltip or a floating palette above the canvas keeps the normal OS cursor
 /// visible (#1701), and so do the menus painted on the canvas itself (see [`over_canvas_menu`]).
 pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
+    crate::part_editor::sync(app);
+    if crate::part_editor::drafting(app) {
+        crate::part_editor::toolbar(app, ui);
+    }
+    if crate::part_editor::is_part(app) && !crate::part_editor::drafting(app) {
+        crate::part_editor::canvas(app, ui);
+        return;
+    }
     let t = Tokens::get();
     let full = ui.available_rect_before_wrap();
     // Tiled model viewports (VPORTS): the current tile is the drawing area below; `draw_tiles`
@@ -1381,7 +1428,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let Ok(st) = app.session.state() else { return };
     let view = st.view();
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = crate::part_editor::sketch_xf(app, Xf { affine: None, rect, center: view.center, scale });
     app.canvas.xf = Some(xf);
 
     // ---------- input ----------
@@ -1401,7 +1448,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // or a floating palette lives on a layer above the canvas, where `hovered()` alone still
     // counts the canvas. Over those the OS cursor stays visible and the crosshair stays put, as
     // over the menu bar (#1701).
-    let inside = hover_pos.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()) && resp.hovered());
+    let inside = hover_pos.is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()) && resp.hovered())
+        && crate::part_editor::sketch_pickable(app)
+        && !crate::viewcube::part_pointer_over(app, ui, rect);
     // The menus the canvas paints itself (selection cycling's rows, Dynamic Input's options) are
     // menus too, but they share the canvas's layer: `layer_id_at` reports the drawing under them,
     // so only their rectangles tell them apart from it ([`over_canvas_menu`]). They are excluded
@@ -1457,7 +1506,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Pan with the middle button (or Shift+right-drag / two-finger drag on trackpads is scroll).
     let middle_pressed = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Middle));
     let focused = ui.input(|i| i.focused);
+    crate::part_editor::sketch_navigation(app, ui, &resp, &xf);
     if middle_down
+        && !crate::part_editor::drafting(app)
         && focused
         && (app.canvas.pan_last.is_some() || (middle_pressed && inside))
         && let Some(hp) = hover_pos
@@ -1498,13 +1549,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // Re-read the view after navigation.
     let view = app.session.state().map(|s| s.view()).unwrap_or(view);
     let scale = f64::from(rect.height()) / view.height.max(1e-12);
-    let xf = Xf { rect, center: view.center, scale };
+    let xf = crate::part_editor::sketch_xf(app, Xf { affine: None, rect, center: view.center, scale });
     app.canvas.xf = Some(xf);
     // The paper (display) transform; equal to `xf` except inside an MSPACE viewport.
     let (xf_paper, active_vp) = match app.session.state() {
         Ok(st) => {
             let pv = st.paper_view();
-            let xp = Xf { rect, center: pv.center, scale: f64::from(rect.height()) / pv.height.max(1e-12) };
+            let xp = Xf { affine: None, rect, center: pv.center, scale: f64::from(rect.height()) / pv.height.max(1e-12) };
             (if st.mspace.is_some() { xp } else { xf }, st.active_viewport().map(|(_, v)| v))
         }
         Err(_) => (xf, None),
@@ -1784,6 +1835,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
     // ---------- paint ----------
     painter.rect_filled(rect, 0.0, t.canvas);
+    if crate::part_editor::drafting(app) {
+        crate::part_editor::sketch_context(app, &painter, xf);
+        crate::part_editor::shade(app, &painter, xf);
+    }
     let t0 = crate::now_ms();
     let mut views = vec![(xf_paper.world_bounds(), 1.0 / xf_paper.scale)];
     views.extend(tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0).map(|(r, tile)| {
@@ -1829,7 +1884,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
         masked = gpu && f.outline.is_some();
     }
-    if app.canvas.gpu.is_some() {
+    if app.canvas.gpu.is_some() && xf.affine.is_none() {
         draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
     } else if let Some(list) = &app.canvas.list {
         draw_list(&painter, &xf_paper, list, bg, app.session.settings.lwdisplay);
@@ -1892,7 +1947,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             draw_highlight(&painter, &xf, list, &prim_index.prims(*list_gen, list, &[h]), t.hover, preview_look);
         }
         if let Some(look) = selection_look {
-            if gpu.is_some() && !sel.is_empty() {
+            if gpu.is_some() && xf.affine.is_none() && !sel.is_empty() {
                 let list_id = *list_gen;
                 let hl = (hl_key, &*hl_slot, hl_origin, &mut *hl_infinite);
                 draw_highlight_gpu(
@@ -1973,7 +2028,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     // Rubber band preview of the active command.
     // `xf` is the space being edited: paper space, or model space inside the active viewport.
-    let drag = match (app.canvas.cursor, app.canvas.gpu.is_some()) {
+    let drag = match (app.canvas.cursor, app.canvas.gpu.is_some() && xf.affine.is_none()) {
         (Some(c), true) => app.session.drag(c),
         _ => None,
     };
@@ -2025,9 +2080,23 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         crate::viewcube::ucs_icon(app, ui, rect);
     }
     if app.ui.show_viewcube && sheet.is_none() {
-        draw_viewcube(app, ui, rect);
+        if crate::part_editor::drafting(app) {
+            crate::viewcube::show_part(app, ui, rect);
+        } else {
+            draw_viewcube(app, ui, rect);
+        }
     }
-    viewport_label(&painter, rect);
+    if crate::part_editor::drafting(app) {
+        painter.text(
+            rect.left_top() + vec2(14.0, 12.0),
+            egui::Align2::LEFT_TOP,
+            "3D Model Space / Sketch plane",
+            crate::theme::small(),
+            t.canvas_ink,
+        );
+    } else {
+        viewport_label(&painter, rect);
+    }
     // Typing and Escape reach the command line even when its overlay is hidden.
     crate::cmdline::keyboard(app, ui.ctx());
     // Command line overlay.
@@ -2096,7 +2165,7 @@ fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile
 
 /// The world ↔ screen transform of a model tile drawn in `r`.
 fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
-    Xf { rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12) }
+    Xf { affine: None, rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12) }
 }
 
 /// The tiles other than the current one (each with its own view, clipped to it), then the
@@ -2737,7 +2806,7 @@ pub(crate) mod tests {
         let h = d.add(&cadcraft_doc::Space::Model, common, cadcraft_doc::EntityKind::Line(line)).unwrap();
         let drag = cadcraft_engine::Drag { handles: vec![h], matrix: cadcraft_geom::Mat3::IDENTITY, extra: Vec::new(), clipboard: false };
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 100.0));
-        let xf = Xf { rect, center: Vec2::new(5.0, 0.0), scale: 10.0 };
+        let xf = Xf { affine: None, rect, center: Vec2::new(5.0, 0.0), scale: 10.0 };
         let painter = egui::Painter::new(egui::Context::default(), egui::LayerId::background(), rect);
         // One canvas across the toggle: the cached drag mesh must be rebuilt.
         let mut c = CanvasState::default();

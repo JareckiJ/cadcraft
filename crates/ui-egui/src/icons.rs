@@ -11,6 +11,9 @@ use crate::theme::Tokens;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {
     New,
+    DatumPlane,
+    Sketch,
+    Extrude,
     Open,
     Save,
     SaveAs,
@@ -232,6 +235,22 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
     let (b, a) = (pen.base, pen.acc);
     use Icon::*;
     match icon {
+        DatumPlane => {
+            pen.poly(&[(3.0, 16.0), (8.0, 5.0), (21.0, 8.0), (16.0, 19.0)], true, a);
+            pen.l(5.0, 21.0, 19.0, 2.0);
+        }
+        Sketch => {
+            pen.poly(&[(3.0, 18.0), (7.0, 7.0), (18.0, 9.0), (14.0, 20.0)], true, b);
+            pen.la(9.0, 16.0, 20.0, 3.0);
+            pen.dot(9.0, 16.0);
+        }
+        Extrude => {
+            pen.poly(&[(4.0, 10.0), (12.0, 6.0), (20.0, 10.0), (12.0, 14.0)], true, a);
+            pen.poly(&[(4.0, 10.0), (4.0, 19.0), (12.0, 23.0), (20.0, 19.0), (20.0, 10.0)], false, b);
+            pen.l(12.0, 14.0, 12.0, 23.0);
+            pen.la(12.0, 6.0, 12.0, 0.5);
+            pen.arrow_tip(12.0, 0.5, 0.0, -1.0, a);
+        }
         New => {
             pen.poly(&[(6.0, 3.0), (15.0, 3.0), (19.0, 7.0), (19.0, 21.0), (6.0, 21.0)], true, b);
             pen.poly(&[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)], false, b);

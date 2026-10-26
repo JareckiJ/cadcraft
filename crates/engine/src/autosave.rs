@@ -352,7 +352,7 @@ mod native {
     }
 
     fn write_file(write: WriteHook, doc: &Drawing, path: &str) -> std::result::Result<(), String> {
-        let bytes = write(doc, "autosave.dxf")?;
+        let bytes = write(doc, if doc.part.is_some() { "autosave.cadcraft" } else { "autosave.dxf" })?;
         if let Some(dir) = Path::new(path).parent() {
             create_folder(dir).map_err(|e| e.to_string())?;
         }
