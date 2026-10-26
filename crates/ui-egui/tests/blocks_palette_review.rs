@@ -11,6 +11,43 @@ fn release(h: &mut Harness<'_, CadApp>, pos: Pos2) {
     h.event(Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
 }
 
+/// The Blocks palette participates in the column-based DockContent renderer.
+#[test]
+fn docked_blocks_render_previews_and_reopen() {
+    use cadcraft_ui_egui::{blockmgr, docking::Panel};
+    let mut session = Session::new();
+    let circle = session.execute("circle", &json!({"center": [0, 0], "radius": 2})).unwrap();
+    session.execute("block", &json!({"name": "Pin", "base": [0, 0], "handles": [circle["handle"]], "keep": "delete"})).unwrap();
+    let mut app = CadApp::new(session, Services::default());
+    app.ui.start_tab = false;
+    blockmgr::open(&mut app).unwrap();
+    let shots = std::env::var_os("CADCRAFT_BLOCK_SHOTS").map(std::path::PathBuf::from);
+    let builder = Harness::builder().with_size(vec2(1600.0, 1000.0));
+    let builder = if shots.is_some() { builder.wgpu() } else { builder };
+    let mut h = builder.build_ui_state(
+        |ui, app: &mut CadApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(5);
+    assert!(h.state().ui.docking.layout.contains(&Panel::Blocks));
+    assert!(h.state().ui.docking.layout.floating.is_empty());
+    assert_eq!(blockmgr::cached_preview_count(&h.ctx), 1);
+    h.state_mut().run("ui.dock", json!({"operation": "close", "panel": "blocks"})).unwrap();
+    h.run_steps(3);
+    assert!(!h.state().ui.docking.layout.contains(&Panel::Blocks));
+    blockmgr::open(h.state_mut()).unwrap();
+    h.run_steps(5);
+    assert!(h.state().ui.docking.layout.contains(&Panel::Blocks));
+    assert_eq!(blockmgr::cached_preview_count(&h.ctx), 1);
+    if let Some(dir) = shots {
+        std::fs::create_dir_all(&dir).unwrap();
+        h.render().unwrap().save(dir.join("docked-blocks-merge.png")).unwrap();
+    }
+}
+
 #[test]
 fn selection_menu_click_cannot_place_a_block_when_insert_starts() {
     let mut session = Session::new();
