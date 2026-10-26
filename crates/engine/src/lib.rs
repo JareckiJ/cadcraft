@@ -643,6 +643,17 @@ impl Default for MLeaderOptions {
     }
 }
 
+/// A boundary set and where it belongs: the drawing (`DocState::uid`), the block when it was
+/// chosen in the Block Editor, and whether pick points use it (`false`: Use Current Viewport, the
+/// set kept for later).
+#[derive(Clone, Debug)]
+struct BoundarySet {
+    uid: u64,
+    block: Option<String>,
+    handles: Vec<Handle>,
+    active: bool,
+}
+
 /// The editor session: open drawings, settings, the running command and the command log.
 pub struct Session {
     pub docs: Vec<DocState>,
@@ -711,12 +722,11 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
-    /// The Hatch Editor's boundary set (HATCHBOUNDARYSET) and the drawing (`DocState::uid`) it
-    /// belongs to: see [`Session::hatch_boundary_set`].
-    hatch_boundary_set: Option<(u64, Vec<Handle>)>,
-    /// The boundary set chosen in the Block Editor, with its drawing and the block edited: the
-    /// editor's objects are numbered apart from the drawing's, so each keeps its own set.
-    hatch_boundary_set_block: Option<(u64, String, Vec<Handle>)>,
+    /// The Hatch Editor's boundary set (HATCHBOUNDARYSET): see [`Session::hatch_boundary_set`].
+    hatch_boundary_set: Option<BoundarySet>,
+    /// The boundary set chosen in the Block Editor: the editor's objects are numbered apart from
+    /// the drawing's, so each keeps its own set.
+    hatch_boundary_set_block: Option<BoundarySet>,
     /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
     pub hatch_store_origin: bool,
     /// The last pattern and the last gradient a hatch had: what a hatch turned back to "pattern"
@@ -834,33 +844,54 @@ impl Session {
         }
     }
 
-    /// The current drawing's boundary set (HATCHBOUNDARYSET): the only objects pick points look
-    /// at; `None` uses everything visible in the current viewport. A set chosen in another drawing
-    /// doesn't apply (handles are numbered per drawing). In the Block Editor, the set chosen there
-    /// for the block edited: the drawing's set waits for BCLOSE.
-    pub fn hatch_boundary_set(&self) -> Option<&[Handle]> {
+    /// The boundary set of the current drawing (of the block edited, in the Block Editor), in use
+    /// or kept. A set chosen in another drawing doesn't apply (handles are numbered per drawing).
+    fn boundary_slot(&self) -> Option<&BoundarySet> {
         let st = self.state().ok()?;
-        match st.block_editor() {
-            Some(block) => self
-                .hatch_boundary_set_block
-                .as_ref()
-                .filter(|(u, b, _)| *u == st.uid && b.eq_ignore_ascii_case(block))
-                .map(|(_, _, hs)| hs.as_slice()),
-            None => self.hatch_boundary_set.as_ref().filter(|(u, _)| *u == st.uid).map(|(_, hs)| hs.as_slice()),
+        let slot = match st.block_editor() {
+            Some(_) => self.hatch_boundary_set_block.as_ref(),
+            None => self.hatch_boundary_set.as_ref(),
+        };
+        slot.filter(|b| b.uid == st.uid && b.block.as_deref().map(str::to_ascii_uppercase) == st.block_editor().map(str::to_ascii_uppercase))
+    }
+
+    /// The current drawing's boundary set (HATCHBOUNDARYSET): the only objects pick points look
+    /// at; `None` uses everything visible in the current viewport ("Use Current Viewport", a set
+    /// chosen earlier then being kept, see [`Session::hatch_boundary_set_kept`]). In the Block
+    /// Editor, the set chosen there for the block edited: the drawing's set waits for BCLOSE.
+    pub fn hatch_boundary_set(&self) -> Option<&[Handle]> {
+        self.boundary_slot().filter(|b| b.active).map(|b| b.handles.as_slice())
+    }
+
+    /// The current drawing's boundary set, in use or kept aside by Use Current Viewport.
+    pub fn hatch_boundary_set_kept(&self) -> Option<&[Handle]> {
+        self.boundary_slot().map(|b| b.handles.as_slice())
+    }
+
+    /// Make `set` the current drawing's boundary set (the Block Editor's while it is open), in
+    /// use; `None` is Use Current Viewport: the set is kept aside, not forgotten.
+    pub fn set_hatch_boundary_set(&mut self, set: Option<Vec<Handle>>) {
+        let Ok(st) = self.state() else { return };
+        let (uid, block) = (st.uid, st.block_editor().map(str::to_string));
+        let editor = block.is_some();
+        let slot = if editor { &mut self.hatch_boundary_set_block } else { &mut self.hatch_boundary_set };
+        match set {
+            Some(handles) => *slot = Some(BoundarySet { uid, block, handles, active: true }),
+            None => {
+                if let Some(b) = slot.as_mut().filter(|b| b.uid == uid) {
+                    b.active = false;
+                }
+            }
         }
     }
 
-    /// Set the current drawing's boundary set (the Block Editor's while it is open), or clear it.
-    pub fn set_hatch_boundary_set(&mut self, set: Option<Vec<Handle>>) {
-        let Ok(st) = self.state() else {
-            self.hatch_boundary_set = None;
-            return;
-        };
-        let uid = st.uid;
-        match st.block_editor().map(str::to_string) {
-            Some(block) => self.hatch_boundary_set_block = set.map(|hs| (uid, block, hs)),
-            None => self.hatch_boundary_set = set.map(|hs| (uid, hs)),
-        }
+    /// Use the kept boundary set again; its size, or `None` when there is none.
+    pub fn use_kept_hatch_boundary_set(&mut self) -> Option<usize> {
+        let n = self.hatch_boundary_set_kept()?.len();
+        let editor = self.state().ok()?.block_editor().is_some();
+        let slot = if editor { &mut self.hatch_boundary_set_block } else { &mut self.hatch_boundary_set };
+        slot.as_mut()?.active = true;
+        Some(n)
     }
 
     /// Remember `h`'s pattern (with its lines) when it is a pattern, or its gradient with its

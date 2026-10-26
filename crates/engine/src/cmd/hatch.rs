@@ -54,9 +54,9 @@ pub fn specs() -> Vec<CommandSpec> {
             .noundo()
             .interactive(|_| Ok(Box::new(PickHatchM))),
         CommandSpec::new("hatchboundaryset", "Boundary Set", run_boundary_set)
-            .params("{handles?: [hex] (the new boundary set), clear?: true (use the current viewport)}")
+            .params("{handles?: [hex] (the new boundary set, in use), clear?: true (Use Current Viewport: the set is kept aside), reuse?: true (use the kept set again)}")
             .noundo()
-            .interactive(|_| Ok(Box::new(BoundarySetM))),
+            .interactive(|s| Ok(Box::new(BoundarySetM(BoundaryAsk::new(s))))),
         CommandSpec::new("hatchpick", "Hatch Pick", pick::run_hatchpick)
             .params("{points?: [[x,y]] (internal points), handles?: [hex] (closed objects)} (typed: Points, Objects, oRigin or Hatch, then the picks): the Hatch and Gradient dialog's picks, kept in the session; changes nothing")
             .enabled(has_doc)
@@ -729,43 +729,129 @@ impl Interactive for PickHatchM {
     }
 }
 
+/// What Use Current Viewport says: pick points look at every object again, and the boundary set
+/// is kept for later.
+fn current_viewport_message(s: &Session) -> String {
+    match s.hatch_boundary_set_kept() {
+        Some(hs) => format!("Pick points use the current viewport (boundary set of {} object(s) kept).", hs.len()),
+        None => "Pick points use the current viewport.".into(),
+    }
+}
+
 /// HATCHBOUNDARYSET: the objects pick points look at (Hatch Editor > Boundaries > Select New
-/// Boundary Set), or everything again with `clear`.
+/// Boundary Set); `clear` is Use Current Viewport (the set is kept aside), `reuse` takes the kept
+/// set again.
 fn run_boundary_set(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_or(p, "clear", false) {
         s.set_hatch_boundary_set(None);
-        return Ok(json!({ "objects": Value::Null, "message": "Pick points use the current viewport." }));
+        let n = s.hatch_boundary_set_kept().map(<[Handle]>::len);
+        return Ok(json!({ "objects": Value::Null, "kept": n, "message": current_viewport_message(s) }));
+    }
+    if bool_or(p, "reuse", false) {
+        let n = s.use_kept_hatch_boundary_set().ok_or_else(|| bad("hatchboundaryset", "there is no boundary set to use again"))?;
+        return Ok(json!({ "objects": n, "message": format!("Boundary set: {n} object(s).") }));
     }
     let hs = targets(s, p)?;
     if hs.is_empty() {
-        return Err(bad("hatchboundaryset", "select the objects of the boundary set, or give `clear: true`"));
+        return Err(bad("hatchboundaryset", "select the objects of the boundary set, or give `clear: true` or `reuse: true`"));
     }
     let n = hs.len();
     s.set_hatch_boundary_set(Some(hs));
     Ok(json!({ "objects": n, "message": format!("Boundary set: {n} object(s).") }))
 }
 
-/// HATCHBOUNDARYSET typed: select the objects of the new boundary set.
-struct BoundarySetM;
+const KEYWORDS: Accept = Accept { point: false, number: false, text: false, select: false, enter: true };
+
+/// Choosing a boundary set (Hatch Creation > Select New Boundary Set, HATCHBOUNDARYSET typed):
+/// with a set already chosen, in use or kept, "Current boundary set: N object(s)." then "Do you
+/// want a new boundary set? [Yes/No] <No>", where No uses it again; then objects are selected, as
+/// many as wanted, until Enter.
+pub(crate) struct BoundaryAsk {
+    question: bool,
+    sel: machines::SelectPhase,
+}
+
+impl BoundaryAsk {
+    pub(crate) fn new(s: &Session) -> Self {
+        BoundaryAsk { question: s.hatch_boundary_set_kept().is_some(), sel: machines::SelectPhase::default() }
+    }
+    /// Say which set there is, before the question.
+    pub(crate) fn announce(&self, s: &mut Session) {
+        if self.question
+            && let Some(n) = s.hatch_boundary_set_kept().map(<[Handle]>::len)
+        {
+            s.echo(format!("Current boundary set: {n} object(s)."));
+        }
+    }
+    pub(crate) fn prompt(&self, _: &Session) -> Prompt {
+        if self.question {
+            Prompt::new("Do you want a new boundary set", KEYWORDS).kw(&["Yes", "No"]).default("No")
+        } else {
+            Prompt::new("Select objects for the new boundary set", Accept::SELECT)
+        }
+    }
+    /// Feed `i`; `true` once the boundary set is chosen (or the choice given up).
+    pub(crate) fn input(&mut self, s: &mut Session, i: &Input) -> Result<bool> {
+        if self.question {
+            let new = match i {
+                Input::Cancel => return Ok(true),
+                Input::Enter => false,
+                Input::Keyword(k) | Input::Text(k) => match self.prompt(s).match_keyword(k).as_deref() {
+                    Some("Yes") => true,
+                    Some(_) => false,
+                    None => {
+                        s.echo("Answer Yes or No.");
+                        return Ok(false);
+                    }
+                },
+                _ => return Ok(false),
+            };
+            if new {
+                self.question = false;
+                return Ok(false);
+            }
+            if let Some(n) = s.use_kept_hatch_boundary_set() {
+                s.echo(format!("Boundary set: {n} object(s)."));
+            }
+            return Ok(true);
+        }
+        if matches!(i, Input::Cancel) {
+            s.set_selection(Vec::new());
+            return Ok(true);
+        }
+        match self.sel.feed(s, i)? {
+            machines::SelOutcome::More => Ok(false),
+            machines::SelOutcome::Done(hs) => {
+                let n = hs.len();
+                s.set_selection(Vec::new());
+                s.set_hatch_boundary_set(Some(hs));
+                s.echo(format!("Boundary set: {n} object(s)."));
+                Ok(true)
+            }
+            machines::SelOutcome::Empty => {
+                s.set_selection(Vec::new());
+                Ok(true)
+            }
+        }
+    }
+}
+
+/// HATCHBOUNDARYSET typed.
+struct BoundarySetM(BoundaryAsk);
 
 impl Interactive for BoundarySetM {
     fn name(&self) -> &'static str {
         "HATCHBOUNDARYSET"
     }
-    fn prompt(&self, _: &Session) -> Prompt {
-        Prompt::new("Select objects for the new boundary set", Accept::SELECT)
+    fn begin(&mut self, s: &mut Session) -> Result<Step> {
+        self.0.announce(s);
+        Ok(Step::Continue)
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        self.0.prompt(s)
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        match i {
-            Input::Pick(hs) if !hs.is_empty() => {
-                let n = hs.len();
-                s.set_hatch_boundary_set(Some(hs));
-                s.echo(format!("Boundary set: {n} object(s)."));
-                Ok(Step::Done)
-            }
-            Input::Enter | Input::Cancel => Ok(Step::Done),
-            _ => Ok(Step::Continue),
-        }
+        Ok(if self.0.input(s, &i)? { Step::Done } else { Step::Continue })
     }
 }
 
@@ -828,8 +914,6 @@ enum HatchAsk {
     Remove,
     /// Hatch Creation > Match Properties: the source hatch.
     Inherit,
-    /// Hatch Creation > Select New Boundary Set.
-    BoundarySet,
 }
 
 struct HatchM {
@@ -838,6 +922,8 @@ struct HatchM {
     /// Loops by pick (one hatch each when separate).
     loops: Vec<Vec<HatchLoop>>,
     asking: Option<HatchAsk>,
+    /// Hatch Creation > Select New Boundary Set, while it is being chosen.
+    boundary: Option<BoundaryAsk>,
     /// "Select objects" mode instead of "Pick internal point"; the next HATCH starts in it again.
     selecting: bool,
 }
@@ -849,6 +935,7 @@ impl HatchM {
             settings: HatchSettings::from(s, &Value::Null, gradient),
             loops: Vec::new(),
             asking: None,
+            boundary: None,
             selecting: s.last_used.hatch_select,
         }
     }
@@ -934,7 +1021,7 @@ impl HatchM {
                 }
             }
             // Picks, not typed answers.
-            HatchAsk::Remove | HatchAsk::Inherit | HatchAsk::BoundarySet => {}
+            HatchAsk::Remove | HatchAsk::Inherit => {}
             HatchAsk::Origin => {
                 let mode = match t {
                     "Bottom left" => OriginMode::BottomLeft,
@@ -970,6 +1057,9 @@ impl Interactive for HatchM {
         Ok(Step::Continue)
     }
     fn prompt(&self, s: &Session) -> Prompt {
+        if let Some(b) = &self.boundary {
+            return b.prompt(s);
+        }
         // The sub-prompts offer the current value: Enter keeps it.
         match self.asking {
             Some(HatchAsk::Pattern) => {
@@ -990,7 +1080,6 @@ impl Interactive for HatchM {
             Some(HatchAsk::Origin) => return Prompt::new("Specify the pattern origin", Accept::POINT).kw(&ORIGIN_KW).default("Use current"),
             Some(HatchAsk::Remove) => return Prompt::new("Select boundaries to remove", Accept::POINT),
             Some(HatchAsk::Inherit) => return Prompt::new("Select hatch object", Accept::SELECT),
-            Some(HatchAsk::BoundarySet) => return Prompt::new("Select objects for the new boundary set", Accept::SELECT),
             None => {}
         }
         // The pattern picker stays offered while boundaries are picked: a choice sets the pattern.
@@ -1018,6 +1107,12 @@ impl Interactive for HatchM {
         ]))
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if let Some(b) = self.boundary.as_mut() {
+            if b.input(s, &i)? {
+                self.boundary = None;
+            }
+            return Ok(Step::Continue);
+        }
         if let Some(a) = self.asking.take() {
             match &i {
                 Input::Point(p) if a == HatchAsk::Remove => {
@@ -1026,10 +1121,6 @@ impl Interactive for HatchM {
                     self.asking = Some(HatchAsk::Remove);
                 }
                 Input::Pick(hs) if a == HatchAsk::Inherit => inherit_settings(s, hs)?,
-                Input::Pick(hs) if a == HatchAsk::BoundarySet && !hs.is_empty() => {
-                    s.echo(format!("Boundary set: {} object(s).", hs.len()));
-                    s.set_hatch_boundary_set(Some(hs.clone()));
-                }
                 Input::Point(p) if a == HatchAsk::Origin => self.set_origin(s, Some(*p), OriginMode::Current)?,
                 Input::Text(t) | Input::Keyword(t) => self.answer(s, a, t)?,
                 _ => {}
@@ -1073,7 +1164,15 @@ impl Interactive for HatchM {
                     // The Hatch Creation tab's buttons (not offered at the prompt).
                     "Remove boundaries" => self.asking = Some(HatchAsk::Remove),
                     "Inherit properties" => self.asking = Some(HatchAsk::Inherit),
-                    "new boundary Set" => self.asking = Some(HatchAsk::BoundarySet),
+                    "new boundary Set" => {
+                        let ask = BoundaryAsk::new(s);
+                        ask.announce(s);
+                        self.boundary = Some(ask);
+                    }
+                    "use Current viewport" => {
+                        s.set_hatch_boundary_set(None);
+                        s.echo(current_viewport_message(s));
+                    }
                     "sEparate" => {
                         self.settings.separate = !self.settings.separate;
                         s.doc_mut()?.header.set_i64("HPSEPARATE", i64::from(self.settings.separate));

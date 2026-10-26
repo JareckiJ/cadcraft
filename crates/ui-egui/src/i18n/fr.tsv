@@ -1234,6 +1234,9 @@ ribbon	Bring in Front of Boundary	Placer devant le contour
 ribbon	Hatch Type	Type de hachure
 ribbon	Hatch Color	Couleur de hachure
 ribbon	Background Color	Couleur d'arrière-plan
+# Boundary set prompts (Hatch Creation > Select New Boundary Set, HATCHBOUNDARYSET).
+	Do you want a new boundary set	Voulez-vous un nouveau jeu de contours
+	Select objects for the new boundary set	Sélectionnez les objets du nouveau jeu de contours
 # Quick Properties of a hatch: the reference's wording (owner's screenshot, 2026-10-26).
 	Predefined	Prédéfinies
 	User defined	Défini par l'utilisateur

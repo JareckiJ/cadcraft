@@ -360,3 +360,78 @@ fn the_block_editor_and_the_drawing_keep_their_own_boundary_sets() {
     s.execute("bedit", &json!({ "name": "Box" })).unwrap();
     assert_eq!(s.hatch_boundary_set(), None);
 }
+
+fn hx(h: &str) -> Handle {
+    Handle::parse_hex(h).unwrap()
+}
+
+/// Hatch Creation > Select New Boundary Set takes objects until Enter, then HATCH asks for points
+/// again; Use Current Viewport keeps the set aside, and choosing a set again offers it back
+/// ("Do you want a new boundary set? [Yes/No] <No>").
+#[test]
+fn a_boundary_set_takes_several_objects_and_is_kept_by_use_current_viewport() {
+    let mut s = Session::new();
+    let a = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    let b = rect(&mut s, [30.0, 0.0], [50.0, 20.0]);
+    let c = rect(&mut s, [60.0, 0.0], [80.0, 20.0]);
+    s.start("hatch").unwrap();
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    assert!(s.current_prompt().unwrap().message.contains("new boundary set"), "no set yet: selection straight away");
+    // Two picks: the selection goes on until Enter.
+    s.input(Input::Pick(vec![hx(&a)])).unwrap();
+    assert!(s.current_prompt().unwrap().message.contains("new boundary set"), "still selecting");
+    s.input(Input::Pick(vec![hx(&b)])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert_eq!(s.hatch_boundary_set().map(<[Handle]>::len), Some(2));
+    assert!(s.current_prompt().unwrap().message.contains("Pick internal point"), "back to HATCH");
+    assert!(s.selection().is_empty(), "the set's objects are not left selected");
+
+    // Use Current Viewport: every object again, the set kept.
+    s.input(Input::Keyword("use Current viewport".into())).unwrap();
+    assert_eq!(s.hatch_boundary_set(), None);
+    assert_eq!(s.hatch_boundary_set_kept().map(<[Handle]>::len), Some(2));
+    assert!(s.log.iter().any(|l| l.contains("boundary set of 2 object(s) kept")), "{:?}", s.log);
+
+    // Select New Boundary Set again: No (Enter) uses the kept set.
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    let p = s.current_prompt().unwrap();
+    assert!(s.log.last().is_some_and(|l| l.contains("Current boundary set: 2 object(s).")), "{:?}", s.log.last());
+    assert!(p.message.contains("Do you want a new boundary set"), "{}", p.message);
+    assert_eq!(p.default.as_deref(), Some("No"));
+    s.input(Input::Enter).unwrap();
+    assert_eq!(s.hatch_boundary_set().map(<[Handle]>::len), Some(2));
+
+    // Yes: a new set replaces it.
+    s.input(Input::Keyword("new boundary Set".into())).unwrap();
+    s.input(Input::Keyword("Yes".into())).unwrap();
+    s.input(Input::Pick(vec![hx(&c)])).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert_eq!(s.hatch_boundary_set(), Some(&[hx(&c)][..]));
+    s.cancel();
+}
+
+/// HATCHBOUNDARYSET typed asks the same question whenever a set exists, in use or kept.
+#[test]
+fn hatchboundaryset_typed_offers_the_set_it_has() {
+    let mut s = Session::new();
+    let a = rect(&mut s, [0.0, 0.0], [20.0, 20.0]);
+    let b = rect(&mut s, [30.0, 0.0], [50.0, 20.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [a, b] })).unwrap();
+    s.start("hatchboundaryset").unwrap();
+    assert!(s.log.last().is_some_and(|l| l.contains("Current boundary set: 2 object(s).")));
+    assert!(s.current_prompt().unwrap().message.contains("Do you want a new boundary set"));
+    s.input(Input::Keyword("No".into())).unwrap();
+    assert!(s.current_prompt().is_none(), "No ends the command");
+    assert_eq!(s.hatch_boundary_set().map(<[Handle]>::len), Some(2));
+
+    // Kept aside, then offered back the same way.
+    let r = s.execute("hatchboundaryset", &json!({ "clear": true })).unwrap();
+    assert_eq!(r["kept"], json!(2));
+    assert_eq!(s.hatch_boundary_set(), None);
+    s.start("hatchboundaryset").unwrap();
+    s.input(Input::Enter).unwrap();
+    assert_eq!(s.hatch_boundary_set().map(<[Handle]>::len), Some(2), "Enter: No, the kept set is used");
+    // The JSON form: `reuse` takes the kept set again.
+    s.execute("hatchboundaryset", &json!({ "clear": true })).unwrap();
+    assert_eq!(s.execute("hatchboundaryset", &json!({ "reuse": true })).unwrap()["objects"], json!(2));
+}

@@ -1150,11 +1150,8 @@ fn slide_boundaries(ui: &mut egui::Ui, sh: &Shown, out: &mut Option<Action>) {
         && let Some(i) = menu(&resp, 260.0, &items, Some(shown_set))
     {
         *out = Some(Action::Do(Box::new(move |app: &mut CadApp| {
-            if i == 0 {
-                app.session.set_hatch_boundary_set(None);
-            } else {
-                keyword(app, "new boundary Set");
-            }
+            // Both go through the running HATCH: Use Current Viewport keeps the set aside.
+            keyword(app, if i == 0 { "use Current viewport" } else { "new boundary Set" });
         })));
     }
 }
