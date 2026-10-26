@@ -322,7 +322,13 @@ fn area_preview_fill(command: Option<&str>, ents: &[cadcraft_doc::Entity], xf: &
     if !poly.closed || poly.vertices.len() < 3 || poly.vertices.len() > 256 {
         return None;
     }
-    let boundary: Vec<Vec2> = poly.vertices.iter().map(|v| v.p).collect();
+    let mut boundary: Vec<Vec2> = poly.vertices.iter().map(|v| v.p).collect();
+    // AREA appends the cursor after the selected vertices. Immediately after a click
+    // it can coincide with the last selected point; discard only that final
+    // preview vertex, not any duplicate points actually selected by the user.
+    if boundary.last() == boundary.get(boundary.len() - 2) {
+        boundary.truncate(boundary.len() - 1);
+    }
     // A self-crossing polygon may shade multiple lobes even when AREA's shoelace
     // measurement is zero. Keep its outline, but do not show a misleading fill.
     if !area_preview_boundary_is_simple(&boundary) {
@@ -2893,6 +2899,40 @@ pub(crate) mod tests {
         s.input(Input::Point(Vec2::new(2.0, 0.0))).unwrap();
         let ents = s.preview(Vec2::new(4.0, 0.0));
         let xf = Xf { rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0)), center: Vec2::new(2.0, 0.0), scale: 10.0 };
+        assert!(area_preview_fill(s.active_command_id(), &ents, &xf).is_none());
+        s.cancel();
+    }
+
+    /// A stationary cursor repeats only the temporary preview vertex; the valid triangle stays shaded.
+    #[test]
+    fn area_preview_keeps_fill_when_cursor_equals_last_selected_point() {
+        let mut s = cadcraft_engine::Session::new();
+        let initial = s.doc().unwrap().model.len();
+        s.start("area").unwrap();
+        for p in [Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(0.0, 3.0)] {
+            s.input(Input::Point(p)).unwrap();
+        }
+        let cursor = Vec2::new(0.0, 3.0);
+        let ents = s.preview(cursor);
+        let xf = Xf { rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0)), center: Vec2::new(2.0, 1.5), scale: 10.0 };
+        let mesh = area_preview_fill(s.active_command_id(), &ents, &xf).unwrap();
+        assert!(!mesh.indices.is_empty());
+        assert_eq!(s.doc().unwrap().model.len(), initial);
+        s.cancel();
+        assert_eq!(s.active_command_id(), None);
+    }
+
+    /// Real duplicate clicks remain invalid even when the cursor repeats the final selected point.
+    #[test]
+    fn area_preview_still_rejects_duplicate_selected_points() {
+        let mut s = cadcraft_engine::Session::new();
+        s.start("area").unwrap();
+        for p in [Vec2::new(0.0, 0.0), Vec2::new(4.0, 0.0), Vec2::new(0.0, 3.0), Vec2::new(0.0, 3.0)] {
+            s.input(Input::Point(p)).unwrap();
+        }
+        let ents = s.preview(Vec2::new(0.0, 3.0));
+        let xf = Xf { rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0)), center: Vec2::new(2.0, 1.5), scale: 10.0 };
+        assert!(!ents.is_empty(), "the outline remains available");
         assert!(area_preview_fill(s.active_command_id(), &ents, &xf).is_none());
         s.cancel();
     }
