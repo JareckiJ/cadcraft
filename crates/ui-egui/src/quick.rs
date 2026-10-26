@@ -248,11 +248,96 @@ fn ro_row(ui: &mut egui::Ui, label: &str, v: String) {
     ui.end_row();
 }
 
+/// A hatch's rows, as the reference's Quick Properties lists them: type, pattern name, annotative,
+/// angle, scale, associative and background colour. Pattern, annotative, angle and scale go to
+/// PROPERTIES.SET (`set`); type, associativity and background to HATCHEDIT (`edit`).
+fn hatch_rows(
+    ui: &mut egui::Ui,
+    ids: &[String],
+    h: &cadcraft_doc::Hatch,
+    annotative: bool,
+    set: &mut Option<(String, Value)>,
+    edit: &mut Option<Value>,
+) {
+    let dim = Tokens::get().text_dim;
+    let caption = |ui: &mut egui::Ui, l: &str| ui.label(RichText::new(crate::i18n::t(l)).color(dim));
+    let yes_no = |ui: &mut egui::Ui, salt: &str, label: egui::Id, on: bool| -> Option<bool> {
+        let mut picked = None;
+        let shown = crate::i18n::t(if on { "Yes" } else { "No" });
+        let combo = egui::ComboBox::from_id_salt((salt, ids)).width(150.0).selected_text(shown).show_ui(ui, |ui| {
+            for v in [true, false] {
+                if ui.selectable_label(v == on, crate::i18n::t(if v { "Yes" } else { "No" })).clicked() && v != on {
+                    picked = Some(v);
+                }
+            }
+        });
+        combo.response.labelled_by(label);
+        picked
+    };
+    // Type: predefined (SOLID among them) or user defined; a gradient is shown as such.
+    let cap = caption(ui, "Type");
+    if h.gradient.is_some() {
+        ui.label(crate::i18n::t("Gradient"));
+    } else {
+        let user = h.is_user();
+        let shown = crate::i18n::t(if user { "User defined" } else { "Predefined" });
+        let combo = egui::ComboBox::from_id_salt(("qp_hatch_type", ids)).width(150.0).selected_text(shown).show_ui(ui, |ui| {
+            for (u, name, key) in [(false, "Predefined", "pattern"), (true, "User defined", "user")] {
+                if ui.selectable_label(u == user, crate::i18n::t(name)).clicked() && u != user {
+                    *edit = Some(json!({ "type": key }));
+                }
+            }
+        });
+        combo.response.labelled_by(cap.id);
+    }
+    ui.end_row();
+    // Pattern name: the pattern list for a predefined pattern.
+    let cap = caption(ui, "Pattern name");
+    let name = h.gradient.as_ref().map_or_else(|| h.pattern.clone(), |g| g.name.clone());
+    if h.gradient.is_some() || h.is_user() {
+        ui.label(name);
+    } else {
+        let r = ui.menu_button(name, |ui| {
+            if let Some(n) = crate::palettes::patterns::menu(ui, &h.pattern) {
+                *set = Some(("pattern".into(), json!(n)));
+                ui.close();
+            }
+        });
+        r.response.labelled_by(cap.id);
+    }
+    ui.end_row();
+    let cap = caption(ui, "Annotative");
+    if let Some(v) = yes_no(ui, "qp_hatch_anno", cap.id, annotative) {
+        *set = Some(("annotative".into(), json!(v)));
+    }
+    ui.end_row();
+    num_row(ui, "Angle", egui::Id::unique(("qp_hatch_ang", ids)), h.angle.to_degrees(), set, "angle");
+    num_row(ui, "Scale", egui::Id::unique(("qp_hatch_sc", ids)), h.scale, set, "scale");
+    let cap = caption(ui, "Associative");
+    if let Some(v) = yes_no(ui, "qp_hatch_assoc", cap.id, h.associative) {
+        *edit = Some(json!({ "associative": v }));
+    }
+    ui.end_row();
+    // Background colour: None or a colour.
+    let cap = caption(ui, "Background color");
+    let shown = h.background.map_or_else(|| crate::i18n::t("None").to_string(), |c| c.name());
+    let resp = ui.add(egui::Button::new(shown).min_size(vec2(150.0, 0.0))).labelled_by(cap.id);
+    match crate::color_list::popup(&resp, egui::Id::unique(("qp_hatch_bg", ids)), h.background, false, true) {
+        Some(crate::color_list::Pick::None) => *edit = Some(json!({ "background": "none" })),
+        Some(crate::color_list::Pick::Color(c)) => *edit = Some(json!({ "background": crate::ribbon_hatch::color_param(c) })),
+        None => {}
+    }
+    ui.end_row();
+}
+
 /// The Quick Properties palette, near where the selection was made.
 pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
     let sid = egui::Id::unique("qp_state");
     let sel = app.session.selection();
-    let active = app.session.settings.qpmode
+    if sel.is_empty() {
+        app.qp_forced = false;
+    }
+    let active = (app.session.settings.qpmode || app.qp_forced)
         && !sel.is_empty()
         && app.session.running.is_none()
         && !app.ui.start_tab
@@ -298,6 +383,11 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
     let kind = if ents.len() == 1 { Some(first.kind.clone()) } else { None };
     let ids: Vec<String> = sel.iter().map(|h| h.hex()).collect();
     let mut set: Option<(String, Value)> = None;
+    // HATCHEDIT parameters (hatch type, associativity, background colour).
+    let mut hatch_edit: Option<Value> = None;
+    // A hatch lists no linetype, as the reference's Quick Properties.
+    let hatches = same_type && matches!(first.kind, EntityKind::Hatch(_));
+    let annotative = cadcraft_doc::is_annotative(first);
     // Rotations show as the drawing measures directions (ANGBASE, ANGDIR).
     let angles = app.session.angle_settings();
     let mut close = false;
@@ -325,18 +415,20 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
                     }
                 });
                 ui.end_row();
-                ui.label(RichText::new(crate::tl!("Linetype")).color(Tokens::get().text_dim));
-                egui::ComboBox::from_id_salt("qp_lt").width(150.0).selected_text(linetype.clone()).show_ui(ui, |ui| {
-                    for l in std::iter::once("ByLayer".to_string())
-                        .chain(std::iter::once("ByBlock".to_string()))
-                        .chain(linetypes.iter().filter(|l| !["ByLayer", "ByBlock"].contains(&l.as_str())).cloned())
-                    {
-                        if ui.selectable_label(l == linetype, &l).clicked() {
-                            set = Some(("linetype".into(), json!(l)));
+                if !hatches {
+                    ui.label(RichText::new(crate::tl!("Linetype")).color(Tokens::get().text_dim));
+                    egui::ComboBox::from_id_salt("qp_lt").width(150.0).selected_text(linetype.clone()).show_ui(ui, |ui| {
+                        for l in std::iter::once("ByLayer".to_string())
+                            .chain(std::iter::once("ByBlock".to_string()))
+                            .chain(linetypes.iter().filter(|l| !["ByLayer", "ByBlock"].contains(&l.as_str())).cloned())
+                        {
+                            if ui.selectable_label(l == linetype, &l).clicked() {
+                                set = Some(("linetype".into(), json!(l)));
+                            }
                         }
-                    }
-                });
-                ui.end_row();
+                    });
+                    ui.end_row();
+                }
                 let id = |k: &str| egui::Id::unique(("qp", k, &ids));
                 match &kind {
                     Some(EntityKind::Line(l)) => {
@@ -393,6 +485,7 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
                         num_row(ui, "Rotation", id("rot"), angles.shown(i.rotation).to_degrees(), &mut set, "rotation");
                         num_row(ui, "Scale", id("sc"), i.scale.x, &mut set, "scale");
                     }
+                    Some(EntityKind::Hatch(hh)) => hatch_rows(ui, &ids, hh, annotative, &mut set, &mut hatch_edit),
                     Some(EntityKind::Dimension(dm)) => {
                         let label = ui.label(RichText::new(crate::tl!("Text override")).color(Tokens::get().text_dim));
                         if let Some(v) = crate::parametric::expr_field(ui, id("dt"), &dm.text, Some(label.id)) {
@@ -420,6 +513,12 @@ pub fn quick_properties(app: &mut CadApp, ctx: &egui::Context) {
             v = json!(angles.unshown(f.to_radians()).to_degrees());
         }
         let _ = app.run("properties.set", json!({ "handles": ids, k: v }));
+    }
+    if let Some(mut p) = hatch_edit {
+        p["handles"] = json!(ids);
+        if let Err(e) = app.run("hatchedit", p) {
+            app.session.echo(e);
+        }
     }
     if close {
         let _ = app.run("qpmode", json!({ "on": false }));

@@ -252,3 +252,27 @@ fn hatchedit_opens_the_hatch_edit_dialog_with_the_ribbon_shown() {
     h.run_steps(3);
     assert!(h.state().session.running.is_some(), "a hatch is asked for");
 }
+
+#[test]
+fn quick_properties_of_a_hatch_list_its_rows_and_edit_it() {
+    let (mut h, hatch, _) = harness(false);
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    // The Properties palette has its own Linetype row.
+    let linetypes = h.query_all_by_label("Linetype").count();
+    h.state_mut().run("ui.quickprops", json!({})).unwrap();
+    h.run_steps(3);
+    for label in ["Pattern name", "Annotative", "Associative", "Background color"] {
+        assert!(h.query_all_by_label(label).next().is_some(), "{label} shown");
+    }
+    // Quick Properties lists no linetype for a hatch.
+    assert_eq!(h.query_all_by_label("Linetype").count(), linetypes);
+    // Associative: No (through HATCHEDIT).
+    h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Associative").click();
+    h.run_steps(3);
+    h.get_all_by_label("No").last().unwrap().click();
+    h.run_steps(3);
+    let d = h.state().session.doc().unwrap();
+    let cadcraft_engine::doc::EntityKind::Hatch(x) = &d.entity(hatch).unwrap().kind else { panic!() };
+    assert!(!x.associative);
+}

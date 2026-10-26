@@ -1234,6 +1234,13 @@ ribbon	Bring in Front of Boundary	Placer devant le contour
 ribbon	Hatch Type	Type de hachure
 ribbon	Hatch Color	Couleur de hachure
 ribbon	Background Color	Couleur d'arrière-plan
+# Quick Properties of a hatch: the reference's wording (owner's screenshot, 2026-10-26).
+	Predefined	Prédéfinies
+	User defined	Défini par l'utilisateur
+	Pattern name	Nom de motif
+	Annotative	Annotatif
+	Associative	Associatif
+	Background color	Couleur d'arrière-plan
 ribbon	Gradient Color 2	Couleur de dégradé 2
 ribbon	Hatch Layer Override	Remplacement du calque de hachure
 ribbon	Island Detection	Détection d'îlots

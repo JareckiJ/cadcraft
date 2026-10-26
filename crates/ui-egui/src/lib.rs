@@ -281,6 +281,9 @@ pub struct CadApp {
     /// The interface scale last handed to egui (`None` until the first frame).
     shown_interface_scale: Option<f32>,
     pub frame_ms: f64,
+    /// Quick Properties asked for by double-clicking a hatch with the Ribbon: shown for the
+    /// selection even with QPMODE off, until nothing is selected.
+    pub qp_forced: bool,
     pub quit_requested: bool,
     /// The app may close although drawings have unsaved changes (they were dealt with, or the
     /// quit came from the control channel, which never asks).
@@ -343,6 +346,7 @@ impl CadApp {
             shown_animations: None,
             shown_interface_scale: None,
             frame_ms: 0.0,
+            qp_forced: false,
             quit_requested: false,
             quit_confirmed: false,
             closing: None,

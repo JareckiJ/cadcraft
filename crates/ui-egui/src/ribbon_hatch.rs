@@ -579,7 +579,7 @@ fn color_label(c: &Color) -> String {
 }
 
 /// A colour as HATCHEDIT and PROPERTIES.SET take it.
-fn color_param(c: Color) -> String {
+pub(crate) fn color_param(c: Color) -> String {
     match c {
         Color::True(rgb) => format!("{},{},{}", rgb.0, rgb.1, rgb.2),
         other => other.to_aci().to_string(),
