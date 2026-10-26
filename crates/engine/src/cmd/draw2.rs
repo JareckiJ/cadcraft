@@ -1588,6 +1588,11 @@ fn rect_kind(first: Vec2, (w, h): (f64, f64), rot: f64, fillet: f64, chamfer: (f
 /// Draws a rectangle from the JSON form: `p1` is a corner, or the centre when `center` is
 /// true, and the size comes from `p2`, `dimensions` or `area` plus `length`/`breadth`.
 pub(crate) fn run_rectang2(s: &mut Session, p: &Value) -> Result<Value> {
+    reject_unknown_params(
+        "rectang",
+        p,
+        &["p1", "p2", "dimensions", "area", "length", "breadth", "rotation", "fillet", "chamfer", "width", "elevation", "thickness"],
+    )?;
     let a = point_req("rectang", p, "p1")?;
     // Centre mode: `p1` is the rectangle's centre, so the rectangle spans it evenly.
     let centered = bool_or(p, "center", false);
