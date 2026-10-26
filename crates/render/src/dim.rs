@@ -428,7 +428,15 @@ fn linear_text(meas: f64, d: &Dimension, st: &DimStyle, prefix: &str) -> String 
         let alt = format_linear(v * st.alt_factor, &af).1;
         s += &format!(" [{}]", post(&st.alt_post, &alt));
     }
-    inspected(apply_override(&s, d), d)
+    inspected(apply_override(&s, d, Some(shown_value(v, nf.decimals))), d)
+}
+
+/// A measurement rounded as the dimension shows it (`decimals` places), for a formula's `<>`:
+/// `=<>/2` of a 1250 dimension is 625, not 624.99995.
+fn shown_value(v: f64, decimals: u8) -> f64 {
+    let k = 10f64.powi(i32::from(decimals.min(8)));
+    let r = (v * k).round() / k;
+    if r.is_finite() { r } else { v }
 }
 
 /// DIMINSPECT: the label and the rate either side of the value, two spaces apart.
@@ -468,10 +476,13 @@ fn measured_number(base: &str) -> Option<f64> {
 }
 
 /// Apply dimension text overrides: empty uses the base, whitespace suppresses text, and other text substitutes it.
-fn apply_override(base: &str, d: &Dimension) -> String {
-    // A formula: worked out with `<>` as the measurement (shown as the dimension shows it).
+/// `value`: the measurement as a number (in the dimension's units, degrees for an angle), which a
+/// formula's `<>` stands for; read back from the formatted text when not given.
+fn apply_override(base: &str, d: &Dimension, value: Option<f64>) -> String {
+    // A formula: worked out with `<>` as the measurement.
     if let Some(f) = d.marks.formula.as_deref().filter(|f| crate::textformula::is_formula(f)) {
-        let env = crate::textformula::Env { measured: measured_number(base), now: crate::textformula::local_now(), ..Default::default() };
+        let measured = value.filter(|v| v.is_finite()).or_else(|| measured_number(base));
+        let env = crate::textformula::Env { measured, now: crate::textformula::local_now(), ..Default::default() };
         if let Some(v) = crate::textformula::evaluate(f, &env) {
             return v;
         }
@@ -1002,7 +1013,7 @@ pub fn dimension_geometry_with(d: &Dimension, st: &DimStyle, dimscale: f64, font
             let azin = (st.angular_zero_suppression & 3) * 4;
             let txt = format_angle_with_separator(sweep, st.angular_unit, st.angular_decimals, azin, &st.decimal_separator);
             // DIMPOST is a linear-dimension prefix/suffix; angles have their own format only.
-            g.mtext = inspected(apply_override(&txt, d), d);
+            g.mtext = inspected(apply_override(&txt, d, Some(shown_value(sweep.to_degrees(), st.angular_decimals))), d);
             let mut pts = Vec::new();
             arc.tessellate(r * 1e-3, &mut pts);
             g.dim(pts);

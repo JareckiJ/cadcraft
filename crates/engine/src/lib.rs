@@ -914,8 +914,13 @@ impl Session {
     pub fn add_entity(&mut self, kind: EntityKind) -> Result<Handle> {
         // Text starting with `=` is a formula: it keeps the formula and shows the result.
         let mut kind = kind;
-        if matches!(kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
-            let env = textformula::env(self);
+        // Multileader and dimension text too, as when it is edited (a dimension's `<>` is its
+        // measurement).
+        if matches!(kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::MLeader(_) | EntityKind::Dimension(_)) {
+            let mut env = textformula::env(self);
+            if let EntityKind::Dimension(dm) = &kind {
+                env.measured = textformula::measured(self.doc()?, dm);
+            }
             textformula::apply(&mut kind, &env, true);
         }
         let common = self.current_common();

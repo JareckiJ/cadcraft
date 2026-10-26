@@ -74,7 +74,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("mleaderstyle", "Multileader Style...", run_mleaderstyle)
             .menu(&["Format", "Multileader Style..."])
             .alias(&["mls"])
-            .params("{name, arrowSize?, textHeight?, landingGap?, dogleg?, textStyle?, annotative?, current?} → styles"),
+            .params("{name, arrowSize?, arrowBlock? (\"\" = closed filled, a built-in `_Open`… or a block), textHeight?, landingGap?, dogleg?, textStyle?, annotative?, current?} → styles"),
         CommandSpec::new("ddptype", "Point Style...", run_ptype)
             .menu(&["Format", "Point Style..."])
             .alias(&["ptype"])
@@ -206,6 +206,9 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|v| v.as_f64().filter(|x| x.is_finite()).ok_or_else(|| bad("properties.set", "thickness must be a finite number")))
         .transpose()?;
     let lw = p.get("lineweight").map(|v| super::layer::parse_lw(v).ok_or_else(|| bad("properties.set", "bad lineweight"))).transpose()?;
+    // A new text is worked out like a typed one: a formula becomes the text's formula, other
+    // text drops the one it had.
+    let formula_env = crate::textformula::env(s);
     let d = s.doc_mut()?;
     // An explicit object linetype must be ByLayer, ByBlock or a loaded definition (as `linetype current` requires).
     let linetype = str_param(p, "linetype")
@@ -241,17 +244,28 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
     let justify = str_param(p, "justify");
     let text_justify = justify.and_then(super::draw::justify);
     let mtext_justify = justify.and_then(mtext_attach);
-    if let Some(j) = justify
-        && text_justify.is_none()
-        && mtext_justify.is_none()
-    {
-        return Err(bad("properties.set", format!("unknown justification `{j}`")));
+    if let Some(j) = justify {
+        if text_justify.is_none() && mtext_justify.is_none() {
+            return Err(bad("properties.set", format!("unknown justification `{j}`")));
+        }
+        // Each selected object must have it: multiline text has no baseline justifications (C, A...).
+        for e in hs.iter().filter_map(|h| d.entity(*h)) {
+            let missing = match &e.kind {
+                EntityKind::Text(_) => text_justify.is_none(),
+                EntityKind::MText(_) => mtext_justify.is_none(),
+                _ => false,
+            };
+            if missing {
+                return Err(bad("properties.set", format!("justification `{j}` does not apply to {}", e.kind.type_name())));
+            }
+        }
     }
     let style_doc = justify.map(|_| cadcraft_doc::Drawing { text_styles: d.text_styles.clone(), header: d.header.clone(), ..Default::default() });
     let dim_over = dim_overrides(p)?;
     let anno_scale = d.current_anno_scale();
     for h in &hs {
         d.modify_entity(*h, |e| {
+            let mut new_text = false;
             // The text style of text, multiline text and a multileader's text.
             if let Some(st) = &text_style {
                 match &mut e.kind {
@@ -349,6 +363,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 EntityKind::Text(t) => {
                     if let Some(v) = str_param(p, "text") {
                         t.value = v.to_string();
+                        new_text = true;
                     }
                     if let Some(x) = num("height").filter(|x| *x > 0.0) {
                         t.height = x;
@@ -380,6 +395,7 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                 EntityKind::MText(t) => {
                     if let Some(v) = str_param(p, "text") {
                         t.contents = v.replace('\n', "\\P");
+                        new_text = true;
                     }
                     if let Some(x) = num("height").filter(|x| *x > 0.0) {
                         t.height = x;
@@ -523,6 +539,9 @@ fn run_set(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                 }
                 _ => {}
+            }
+            if new_text {
+                crate::textformula::apply(&mut e.kind, &formula_env, true);
             }
         })?;
     }
@@ -821,9 +840,14 @@ pub fn substitute_font() -> String {
 pub fn missing_fonts(d: &cadcraft_doc::Drawing) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for st in &d.text_styles {
+        // The font, and the big font (Asian characters) an SHX style may add.
         let font = st.font.trim();
-        if !cadcraft_fonts::ttf::available(font) && !out.iter().any(|(_, f)| f.eq_ignore_ascii_case(font)) {
-            out.push((st.name.clone(), font.to_string()));
+        let big = st.big_font.trim();
+        let missing_big = !big.is_empty() && cadcraft_fonts::shx::find(big).is_none();
+        for (f, missing) in [(font, !cadcraft_fonts::ttf::available(font)), (big, missing_big)] {
+            if missing && !out.iter().any(|(_, o)| o.eq_ignore_ascii_case(f)) {
+                out.push((st.name.clone(), f.to_string()));
+            }
         }
     }
     out
@@ -1202,6 +1226,14 @@ fn run_tablestyle(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn run_mleaderstyle(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut()?;
+    // The arrowhead: closed filled (empty or `_ClosedFilled`), a built-in one or a block of the
+    // drawing.
+    let arrow = match str_param(p, "arrowBlock").map(str::trim) {
+        None => None,
+        Some(a) if a.is_empty() || a.eq_ignore_ascii_case("_ClosedFilled") || a.eq_ignore_ascii_case("ClosedFilled") => Some(String::new()),
+        Some(a) if a.starts_with('_') || d.blocks.keys().any(|k| k.eq_ignore_ascii_case(a)) => Some(a.to_string()),
+        Some(a) => return Err(bad("mleaderstyle", format!("arrowhead block `{a}` not found"))),
+    };
     if let Some(name) = str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
         let idx = match d.mleader_styles.iter().position(|t| t.name.eq_ignore_ascii_case(name)) {
             Some(i) => i,
@@ -1226,6 +1258,9 @@ fn run_mleaderstyle(s: &mut Session, p: &Value) -> Result<Value> {
             }
             if let Some(t) = str_param(p, "textStyle") {
                 st.text_style = t.to_string();
+            }
+            if let Some(a) = &arrow {
+                st.arrow_block.clone_from(a);
             }
             if let Some(a) = p.get("annotative").and_then(Value::as_bool) {
                 st.annotative = a;

@@ -32,10 +32,34 @@ pub(crate) fn formula(tags: &[Tag]) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
-/// A formula as 1000 strings of at most 250 characters (whole characters).
+/// A formula as 1000 strings of at most 250 bytes (whole characters).
 pub(crate) fn formula_chunks(f: &str) -> Vec<String> {
-    let chars: Vec<char> = f.chars().take(4000).collect();
-    chars.chunks(250).map(|c| c.iter().collect()).collect()
+    // An xdata string holds at most 255 bytes: Hebrew, Cyrillic or Chinese letters take 2 to 4
+    // bytes each, so the pieces are cut by bytes, between letters.
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for c in f.chars().take(4000) {
+        if cur.len() + c.len_utf8() > 250 {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+#[cfg(test)]
+mod formula_chunk_tests {
+    #[test]
+    fn chunks_fit_an_xdata_string_in_bytes() {
+        let f = format!("=\"{}\"", "שלום ".repeat(200));
+        let chunks = super::formula_chunks(&f);
+        assert!(chunks.iter().all(|c| c.len() <= 250), "{:?}", chunks.iter().map(String::len).collect::<Vec<_>>());
+        assert_eq!(chunks.concat(), f, "nothing lost, no letter cut");
+        assert_eq!(super::formula_chunks("=1+1"), ["=1+1"]);
+    }
 }
 
 /// An AutoCAD colour value (`1071`/`420`-style, top byte the method): 0xC2 RGB, 0xC3 an index

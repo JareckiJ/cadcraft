@@ -34,7 +34,7 @@ pub struct Found {
 struct Listing {
     folder: String,
     generation: u64,
-    patterns: Vec<Found>,
+    patterns: std::rc::Rc<Vec<Found>>,
     problem: Option<String>,
 }
 
@@ -57,13 +57,21 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return (Vec::new(), Some(crate::tl!("This folder does not exist").to_string()));
     };
-    let mut files: Vec<std::path::PathBuf> = rd
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("pat")))
-        .take(MAX_FILES)
-        .collect();
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for entry in rd.take(MAX_FILES * 20) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => return (Vec::new(), Some(format!("{}: {e}", crate::tl!("The folder can't be read")))),
+        };
+        // `file_type` does not follow symbolic links: a link to a file elsewhere is not read.
+        let path = entry.path();
+        if entry.file_type().is_ok_and(|t| t.is_file()) && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("pat")) {
+            files.push(path);
+        }
+    }
+    // The same files every time: sorted, then the first ones kept.
     files.sort();
+    files.truncate(MAX_FILES);
     let mut out = Vec::new();
     for path in files {
         if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX) > MAX_FILE_BYTES {
@@ -84,13 +92,14 @@ pub fn scan(folder: &str) -> (Vec<Found>, Option<String>) {
 }
 
 /// The folder's patterns, read again when the folder or the reload count changed.
-fn listing(folder: &str) -> (Vec<Found>, Option<String>) {
+/// Shared, not copied: the tab asks for it every frame and a folder may hold thousands.
+fn listing(folder: &str) -> (std::rc::Rc<Vec<Found>>, Option<String>) {
     let generation = GENERATION.with(|g| *g.borrow());
     LISTING.with(|cell| {
         let mut l = cell.borrow_mut();
         if l.folder != folder || l.generation != generation {
             let (patterns, problem) = scan(folder);
-            *l = Listing { folder: folder.to_string(), generation, patterns, problem };
+            *l = Listing { folder: folder.to_string(), generation, patterns: std::rc::Rc::new(patterns), problem };
         }
         (l.patterns.clone(), l.problem.clone())
     })
@@ -157,7 +166,7 @@ pub fn tab_ui(ui: &mut egui::Ui, folder: &mut String, pattern: &mut String, file
                     .min_scrolled_height(200.0)
                     .show(ui, |ui| {
                         ui.set_width(182.0);
-                        for f in &found {
+                        for f in found.iter() {
                             let on = selected.is_some_and(|s| s.name == f.name && s.file == f.file);
                             let tip = if f.description.is_empty() { f.file.clone() } else { format!("{}\n{}", f.description, f.file) };
                             if ui.selectable_label(on, &f.name).on_hover_text(tip).clicked() {
@@ -204,6 +213,16 @@ mod tests {
         assert_eq!(found.get(1).map(|f| f.lines.len()), Some(2));
         let (none, problem) = super::scan(&dir.join("missing").to_string_lossy());
         assert!(none.is_empty() && problem.is_some());
+        // A symbolic link to a pattern file elsewhere is not read.
+        #[cfg(unix)]
+        {
+            let outside = std::env::temp_dir().join(format!("cadcraft-outside-{}.pat", std::process::id()));
+            std::fs::write(&outside, "*OUTSIDE, x\n0, 0,0, 0,1\n").unwrap();
+            let _ = std::os::unix::fs::symlink(&outside, dir.join("link.pat"));
+            let (found, _) = super::scan(&dir.to_string_lossy());
+            assert!(!found.iter().any(|f| f.name == "OUTSIDE"), "a link is skipped");
+            let _ = std::fs::remove_file(outside);
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 }

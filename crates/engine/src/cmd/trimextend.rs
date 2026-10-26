@@ -31,6 +31,18 @@ fn proj_mode(s: &Session) -> i64 {
 }
 
 /// Whether a trim error says the object meets no cutting edge (a Quick-mode trim then erases it).
+/// What trimming a hatch takes away, as the glow shows it: the outline of that part and the
+/// part filled.
+fn hatch_glow(hatch: &cadcraft_doc::Hatch, face: Vec<Vec<Vec2>>) -> Vec<EntityKind> {
+    let mut out: Vec<EntityKind> = face.iter().map(|l| lwpoly(l.iter().copied().map(PolyVertex::new).collect(), true)).collect();
+    let loops = face
+        .into_iter()
+        .map(|l| cadcraft_doc::HatchLoop { vertices: l.into_iter().map(PolyVertex::new).collect(), outer: false, sources: Vec::new() })
+        .collect();
+    out.push(EntityKind::Hatch(cadcraft_doc::Hatch { pattern: "SOLID".into(), solid: true, loops, gradient: None, style: 0, ..hatch.clone() }));
+    out
+}
+
 fn misses_edges(e: &EngineError) -> bool {
     e.to_string().contains("intersect")
 }
@@ -368,32 +380,14 @@ impl TrimM {
         }
         // A trim only meets the edges around the object.
         let cut = trim_edges(s, Edges { only: self.edges.as_deref(), implied }, h).ok()?;
-        let kinds = match trim_result(s, h, c, &cut) {
-            Ok((e, pieces)) => match &e.kind {
-                EntityKind::Hatch(hatch) => {
-                    let (_, face) = super::trim_hatch::trim_hatch(hatch, &cut, c).ok()?;
-                    // The outline of the part taken away, and the part filled.
-                    let mut out: Vec<EntityKind> = face.iter().map(|l| lwpoly(l.iter().copied().map(PolyVertex::new).collect(), true)).collect();
-                    let loops = face
-                        .into_iter()
-                        .map(|l| cadcraft_doc::HatchLoop {
-                            vertices: l.into_iter().map(PolyVertex::new).collect(),
-                            outer: false,
-                            sources: Vec::new(),
-                        })
-                        .collect();
-                    out.push(EntityKind::Hatch(cadcraft_doc::Hatch {
-                        pattern: "SOLID".into(),
-                        solid: true,
-                        loops,
-                        gradient: None,
-                        style: 0,
-                        ..hatch.clone()
-                    }));
-                    out
-                }
-                k => uncovered(k, &pieces),
-            },
+        // A hatch's trim is worked out once, for the part it takes away (`trim_result` would
+        // work it out again only to drop that part).
+        let result = match &d.entity(h)?.kind {
+            EntityKind::Hatch(hatch) => super::trim_hatch::trim_hatch(hatch, &cut, c).map(|(_, face)| hatch_glow(hatch, face)),
+            _ => trim_result(s, h, c, &cut).map(|(e, pieces)| uncovered(&e.kind, &pieces)),
+        };
+        let kinds = match result {
+            Ok(kinds) => kinds,
             // A Quick-mode trim of an object no edge crosses erases all of it.
             Err(err) if quick && misses_edges(&err) => vec![d.entity(h)?.kind.clone()],
             Err(_) => return None,

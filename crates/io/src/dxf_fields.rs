@@ -178,4 +178,27 @@ mod tests {
         assert_eq!(code(&o, "L0", 0), None);
         assert!(t.elapsed().as_secs() < 5, "took {:?}", t.elapsed());
     }
+
+    /// The length cap alone: one level whose filled-in code would pass MAX_LEN is refused.
+    #[test]
+    fn a_filled_in_code_past_the_limit_is_refused() {
+        let mut o = HashMap::new();
+        o.insert("A".to_string(), field("%<\\_FldIdx 0>%%<\\_FldIdx 1>%%<\\_FldIdx 2>%", &["B", "B", "B"]));
+        o.insert("B".to_string(), field(&"x".repeat(MAX_LEN / 2), &[]));
+        assert_eq!(code(&o, "A", 0), None);
+    }
+
+    /// Shared children alone: eight levels of two places using one child each fit the limit and
+    /// are worked out (each child once per level, not 2^8 times).
+    #[test]
+    fn shared_children_are_filled_in() {
+        let mut o = HashMap::new();
+        for k in 0..MAX_DEPTH {
+            let next = format!("L{}", k + 1);
+            o.insert(format!("L{k}"), field("%<\\_FldIdx 0>%%<\\_FldIdx 1>%", &[next.as_str(), next.as_str()]));
+        }
+        o.insert(format!("L{MAX_DEPTH}"), field("x", &[]));
+        let c = code(&o, "L0", 0).expect("fits the limit");
+        assert_eq!(c.matches('x').count(), 1 << MAX_DEPTH);
+    }
 }

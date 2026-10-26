@@ -1062,7 +1062,7 @@
 	Changes apply at once and are kept for next time.	Изменения применяются сразу и сохраняются до следующего запуска.
 	Fonts	Шрифты
 	Font folders	Папки шрифтов
-	Put TrueType or OpenType fonts (.ttf, .otf, .ttc) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins.	Положите шрифты TrueType или OpenType (.ttf, .otf, .ttc) в папку и добавьте её сюда. Эти папки просматриваются раньше системных шрифтов; папка выше в списке имеет приоритет.
+	Put TrueType, OpenType or SHX fonts (.ttf, .otf, .ttc, .shx) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins.	Положите шрифты TrueType, OpenType или SHX (.ttf, .otf, .ttc, .shx) в папку и добавьте её сюда. Эти папки просматриваются раньше системных шрифтов; папка выше в списке имеет приоритет.
 	No font folders yet	Папок шрифтов пока нет
 	This folder does not exist	Такой папки нет
 	Add Folder...	Добавить папку...
@@ -1798,3 +1798,4 @@
 	Check for Updates…	Проверить обновления…
 	CADCraft is up to date.	У вас последняя версия CADCraft.
 	Could not check for updates.	Не удалось проверить обновления.
+	The folder can't be read	Папку не удаётся прочитать

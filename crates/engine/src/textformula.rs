@@ -44,15 +44,16 @@ pub fn measured(d: &Drawing, dm: &cadcraft_doc::Dimension) -> Option<f64> {
 /// is not a formula drops the formula. Text, attribute definitions, multiline text,
 /// multileader text and dimension text (whose `<>` is its measurement, `env.measured`).
 pub fn apply(kind: &mut EntityKind, env: &Env, edited: bool) {
-    let (value, formula): (&mut String, &mut Option<String>) = match kind {
-        EntityKind::Text(t) => (&mut t.value, &mut t.formula),
-        EntityKind::AttDef(a) => (&mut a.text.value, &mut a.text.formula),
-        EntityKind::MText(t) => (&mut t.contents, &mut t.formula),
+    // Multiline text keeps a result's `\`, `{` and `}` as letters, not formatting codes.
+    let (value, formula, mtext): (&mut String, &mut Option<String>, bool) = match kind {
+        EntityKind::Text(t) => (&mut t.value, &mut t.formula, false),
+        EntityKind::AttDef(a) => (&mut a.text.value, &mut a.text.formula, false),
+        EntityKind::MText(t) => (&mut t.contents, &mut t.formula, true),
         EntityKind::MLeader(m) => match &mut m.text {
-            Some(t) => (&mut t.contents, &mut t.formula),
+            Some(t) => (&mut t.contents, &mut t.formula, true),
             None => return,
         },
-        EntityKind::Dimension(d) => (&mut d.text, &mut d.marks.formula),
+        EntityKind::Dimension(d) => (&mut d.text, &mut d.marks.formula, false),
         _ => return,
     };
     if edited {
@@ -67,7 +68,7 @@ pub fn apply(kind: &mut EntityKind, env: &Env, edited: bool) {
     if let Some(f) = formula.as_deref()
         && let Some(v) = evaluate(f, env)
     {
-        *value = v;
+        *value = if mtext { cadcraft_doc::mtext_literal(&v) } else { v };
     }
 }
 
@@ -89,29 +90,36 @@ pub fn refresh(d: &mut Drawing, env: &Env) -> usize {
     let mut n = 0;
     // Dimensions' measurements first (they need the whole drawing).
     let mut measures: std::collections::HashMap<cadcraft_doc::Handle, Option<f64>> = std::collections::HashMap::new();
-    for e in d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())) {
+    // Dimensions in block definitions too: their `<>` is their own measurement.
+    for e in d.model.iter().chain(d.layouts.iter().flat_map(|l| l.entities.iter())).chain(d.blocks.values().flat_map(|b| b.entities.iter())) {
         if let EntityKind::Dimension(dm) = &e.kind
             && dm.marks.formula.is_some()
         {
             measures.insert(e.handle, measured(d, dm));
         }
     }
-    let fix = |store: &mut cadcraft_doc::EntityStore, n: &mut usize| {
+    // Each space with its own sheet name (SHEET()): model space is "Model", a layout its name;
+    // block definitions keep the name given.
+    let fix = |store: &mut cadcraft_doc::EntityStore, sheet: Option<&str>, n: &mut usize| {
         let hs: Vec<cadcraft_doc::Handle> = store.iter().filter(|e| has_formula(&e.kind)).map(|e| e.handle).collect();
         for h in hs {
-            let env = Env { measured: measures.get(&h).copied().flatten(), ..env.clone() };
+            let mut env = Env { measured: measures.get(&h).copied().flatten(), ..env.clone() };
+            if let Some(sheet) = sheet {
+                env.sheet = sheet.to_string();
+            }
             store.modify(h, |e| apply(&mut e.kind, &env, false));
             *n += 1;
         }
     };
-    fix(&mut d.model, &mut n);
+    fix(&mut d.model, Some("Model"), &mut n);
     for l in &mut d.layouts {
-        fix(&mut l.entities, &mut n);
+        let name = l.name.clone();
+        fix(&mut l.entities, Some(&name), &mut n);
     }
     let names: Vec<String> = d.blocks.iter().filter(|(_, b)| b.entities.iter().any(|e| has_formula(&e.kind))).map(|(k, _)| k.clone()).collect();
     for k in names {
         if let Some(b) = d.blocks.get_mut(&k) {
-            fix(&mut std::sync::Arc::make_mut(b).entities, &mut n);
+            fix(&mut std::sync::Arc::make_mut(b).entities, None, &mut n);
         }
     }
     n

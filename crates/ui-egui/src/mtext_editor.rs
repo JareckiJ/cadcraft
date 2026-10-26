@@ -227,7 +227,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     }
     let base_h = if mt.height > 0.0 { mt.height } else { 0.2 };
     let px = ((base_h * scale) as f32).clamp(MIN_PX, MAX_PX);
-    let width = if mt.width > 0.0 { ((mt.width * scale) as f32).clamp(380.0, rect.width().max(380.0) * 0.9) } else { 380.0 };
+    let width = editor_width(mt.width * scale, rect.width());
     // The box's top-left corner on screen (rotation is ignored while editing).
     let code = usize::from(mt.attach.clamp(1, 9) - 1);
     let (col, row) = ((code % 3) as f64, (code / 3) as f64);
@@ -629,6 +629,16 @@ fn toolbar(ui: &mut egui::Ui, st: &mut State, base_h: f64) {
     if refocus {
         ui.ctx().memory_mut(|m| m.request_focus(edit_id()));
     }
+}
+
+/// The editor's width on screen for a text `text_w` wide (pixels; 0 or less: no width set) on a
+/// canvas `canvas_w` wide: at least 380 pixels, at most nine tenths of the canvas, and never a
+/// minimum above the maximum (a narrow window).
+fn editor_width(text_w: f64, canvas_w: f32) -> f32 {
+    let max = (canvas_w * 0.9).max(120.0);
+    let min = 380.0_f32.min(max);
+    let w = text_w as f32;
+    if text_w > 0.0 && w.is_finite() { w.clamp(min, max) } else { min }
 }
 
 /// The symbols of the Additional symbols menu: drafting marks, comparisons, Greek letters,
@@ -1084,6 +1094,24 @@ mod tests {
         let field = harness.get_by_role_and_label(Role::SpinButton, "Text height");
         assert_eq!(field.accesskit_node().label().as_deref(), Some("Text height"));
         assert!(harness.unnamed_widgets().is_empty(), "unnamed controls: {:?}", harness.unnamed_widgets());
+    }
+
+    /// A narrow window (400 pixels and less) never orders the bounds the wrong way round, which
+    /// would panic (#2034 review); the width stays within the canvas.
+    #[test]
+    fn the_editor_width_fits_narrow_canvases() {
+        for canvas in [0.0_f32, 50.0, 300.0, 400.0, 421.0, 800.0, 2000.0, f32::NAN] {
+            for text in [-1.0, 0.0, 10.0, 370.0, 390.0, 5000.0, f64::NAN, f64::INFINITY] {
+                let w = editor_width(text, canvas);
+                assert!(w.is_finite() && w > 0.0, "{canvas} {text}: {w}");
+                if canvas.is_finite() && canvas >= 140.0 {
+                    assert!(w <= canvas * 0.9 + 1e-3, "{canvas} {text}: {w}");
+                }
+            }
+        }
+        assert_eq!(editor_width(0.0, 2000.0), 380.0);
+        assert_eq!(editor_width(1000.0, 2000.0), 1000.0);
+        assert_eq!(editor_width(500.0, 400.0), 360.0);
     }
 
     #[test]

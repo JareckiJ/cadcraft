@@ -449,6 +449,22 @@ pub fn sanitize(items: &[String]) -> Vec<String> {
     out
 }
 
+/// The bar's items as the Customize dialog edits them: known commands once each and every
+/// separator where it is (side by side, first or last too), so a separator added at the end
+/// stays for the command added after it. The bar itself shows them [`sanitize`]d.
+pub fn editable(items: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items.iter().take(MAX_ITEMS * 4) {
+        if out.len() >= MAX_ITEMS {
+            break;
+        }
+        if item == SEPARATOR || (find(item).is_some() && !out.contains(item)) {
+            out.push(item.clone());
+        }
+    }
+    out
+}
+
 /// Move the item at `from` so it lands before the item now at `slot` (`items.len()` = the end).
 pub fn move_item(items: &mut Vec<String>, from: usize, slot: usize) {
     if from >= items.len() || slot > items.len() {
@@ -1525,7 +1541,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, which: &str, open: &mut boo
     let state_id = id.with(("state", bar.id()));
     let mut st: DialogState = ctx.data(|d| d.get_temp(state_id)).unwrap_or_default();
     let bar_state = state(&app.ui, bar);
-    let mut items = sanitize(&bar_state.items);
+    let mut items = editable(&bar_state.items);
     let mut dock = bar_state.dock;
     let mut show = bar_state.show;
     let mut changed = false;
@@ -1797,6 +1813,19 @@ mod tests {
     fn every_tool_has_a_description() {
         let missing: Vec<&str> = catalog().iter().map(|t| t.command).filter(|c| description(c).is_none()).collect();
         assert!(missing.is_empty(), "{missing:?}");
+    }
+
+    /// The Customize dialog keeps a separator added at the end (and two side by side) while
+    /// editing, so a command can follow it; the bar shows the cleaned list (#2034 review).
+    #[test]
+    fn editing_keeps_separators_where_they_are() {
+        let items = strings(&["line", "|", "|", "nosuch", "line", "|"]);
+        assert_eq!(editable(&items), strings(&["line", "|", "|", "|"]));
+        let mut list = editable(&strings(&["line"]));
+        list.push(SEPARATOR.to_string());
+        assert_eq!(editable(&list), strings(&["line", "|"]), "the trailing separator survives the next frame");
+        list.push("circle".to_string());
+        assert_eq!(sanitize(&list), strings(&["line", "|", "circle"]));
     }
 
     #[test]

@@ -25,7 +25,7 @@ struct State {
 /// A block's preview, built once per block and drawing revision.
 #[derive(Clone)]
 struct Preview {
-    key: (String, u64),
+    key: (String, u64, u64),
     list: Arc<cadcraft_render::DisplayList>,
     bounds: Bounds2,
 }
@@ -117,8 +117,9 @@ pub fn paint_list(p: &egui::Painter, r: Rect, list: &cadcraft_render::DisplayLis
 
 /// The preview of `name`, from the cache when the drawing hasn't changed.
 fn preview(app: &CadApp, ctx: &egui::Context, name: &str) -> Option<Preview> {
-    let revision = app.session.state().map(|s| s.revision).unwrap_or(0);
-    let key = (name.to_string(), revision);
+    // The drawing too: two open drawings can have a block of that name at the same revision.
+    let (doc, revision) = app.session.state().map(|s| (s.uid, s.revision)).unwrap_or((0, 0));
+    let key = (name.to_string(), doc, revision);
     let id = egui::Id::unique("cc_block_manager_preview");
     if let Some(p) = ctx.data(|d| d.get_temp::<Preview>(id)).filter(|p| p.key == key) {
         return Some(p);

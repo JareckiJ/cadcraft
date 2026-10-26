@@ -489,6 +489,14 @@ struct HatchSettings {
 
 /// A `background` parameter: a colour name, ACI number or `r,g,b`; `"None"`, `""` or null for
 /// none. `None` when absent or not a colour.
+/// A `background` given that is not a colour, `none` or null: an error, not a silent no-background.
+pub(crate) fn check_background(cmd: &str, p: &Value) -> Result<()> {
+    if p.get("background").is_some() && background_param(p).is_none() {
+        return Err(bad(cmd, "`background` must be a colour (an ACI number, a name, \"r,g,b\"), \"none\" or null"));
+    }
+    Ok(())
+}
+
 pub(crate) fn background_param(p: &Value) -> Option<Option<cadcraft_color::Color>> {
     match p.get("background")? {
         Value::Null => Some(None),
@@ -669,6 +677,7 @@ fn add_hatches(s: &mut Session, st: &HatchSettings, groups: Vec<Vec<HatchLoop>>)
 }
 
 fn run_hatch(s: &mut Session, p: &Value) -> Result<Value> {
+    check_background("hatch", p)?;
     patfile::load_param(p)?;
     // Like the prompt: a name without a definition would be drawn as ANSI31.
     if let Some(up) = str_param(p, "pattern").map(str::to_ascii_uppercase)
@@ -1029,6 +1038,26 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    /// A background that is not a colour is an error, not a quiet "no background"; a trimmed
+    /// hatch stays behind the lines it touches (#2034 review).
+    #[test]
+    fn a_bad_background_is_refused_and_a_trimmed_hatch_stays_at_the_back() {
+        let mut s = Session::new();
+        s.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+        for bad in [json!("blu"), json!(true), json!({})] {
+            assert!(s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "ANSI31", "background": bad })).is_err(), "{bad}");
+        }
+        s.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap();
+        let (h, _) = only_hatch(&s);
+        assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": "blu" })).is_err());
+        assert!(s.execute("hatchedit", &json!({ "handles": [h], "background": "none" })).is_ok());
+        let l = s.execute("line", &json!({ "points": [[4, -1], [4, 11]] })).unwrap();
+        let l = l["handles"][0].as_str().unwrap().to_string();
+        s.execute("trim", &json!({ "handle": h, "pick": [2, 5], "edges": [l] })).unwrap();
+        let first = s.doc().unwrap().model.iter().next().map(|e| matches!(e.kind, EntityKind::Hatch(_)));
+        assert_eq!(first, Some(true), "the trimmed hatch is drawn first, under the lines");
+    }
 
     /// A block whose lines are drawn with a dashed linetype: its outline still bounds a hatch, and
     /// its lines still cut, across the gaps between dashes (#2034 review).

@@ -52,7 +52,18 @@ fn fonts() -> &'static Mutex<HashMap<(String, String), TextFont>> {
     F.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Forget what was worked out with fonts that changed since: the font folders were edited or
+/// searched again ([`cadcraft_fonts::ttf::generation`]), so a font that was missing may be there.
+fn follow_font_changes() {
+    static SEEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = cadcraft_fonts::ttf::generation();
+    if SEEN.swap(now, std::sync::atomic::Ordering::Relaxed) != now {
+        clear();
+    }
+}
+
 fn resolve(font: &str, big: &str) -> TextFont {
+    follow_font_changes();
     let k = (font.to_string(), big.to_string());
     let mut f = fonts().lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(t) = f.get(&k) {
@@ -73,6 +84,7 @@ pub fn clear() {
 }
 
 fn glyph(f: &EditorFont, italic: bool, c: char) -> std::sync::Arc<Glyph> {
+    follow_font_changes();
     let oblique = f.oblique + if italic { ITALIC } else { 0.0 };
     let key = (f.font.clone(), f.big_font.clone(), f.wf().to_bits(), oblique.to_bits(), c);
     if let Some(g) = cache().lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
@@ -159,5 +171,17 @@ mod tests {
         assert!(advance(&wide, false, 'A', 20.0) > a * 1.5);
         assert!(advance(&f, false, ' ', 20.0) > 0.0);
         assert!(!glyph(&f, false, 'A').shaped.strokes.is_empty());
+    }
+
+    /// A font missing when the editor first asked for it is looked up again once the fonts are
+    /// searched again (a font folder added), without restarting (#2034 review).
+    #[test]
+    fn a_rescan_forgets_resolved_fonts() {
+        let key = ("cadcraft_editor_cache_test.shx".to_string(), String::new());
+        let _ = resolve(&key.0, "");
+        assert!(fonts().lock().unwrap_or_else(PoisonError::into_inner).contains_key(&key));
+        cadcraft_fonts::ttf::rescan();
+        let _ = resolve("", "");
+        assert!(!fonts().lock().unwrap_or_else(PoisonError::into_inner).contains_key(&key), "forgotten after the rescan");
     }
 }

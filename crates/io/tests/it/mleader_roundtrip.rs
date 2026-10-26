@@ -293,3 +293,21 @@ fn a_multileaders_own_arrowhead_survives() {
     let got: Vec<String> = mleaders(&back).iter().map(|m| m.arrow.to_ascii_uppercase()).collect();
     assert_eq!(got, ["HATZ", "_OPEN30", ""], "own arrowheads kept, the style's left to the style");
 }
+
+/// Leader type None with leader lines in the file: the lines are kept (hidden), not thrown away,
+/// so the multileader comes back as it was (#2034 review).
+#[test]
+fn hidden_leader_lines_are_kept() {
+    let mut d = Drawing::new_metric();
+    let mut m = text_mleader();
+    m.no_leader = true;
+    m.dogleg = 0.0;
+    m.style = "Standard".into();
+    d.add(&Space::Model, Common::default(), EntityKind::MLeader(m.clone())).unwrap();
+    let (_, back) = roundtrip(&d);
+    let got = mleaders(&back);
+    assert_eq!(got.len(), 1);
+    assert!(got[0].no_leader, "still hidden");
+    assert_eq!(got[0].leaders, m.leaders, "the lines are kept");
+    assert!(got[0].leader_paths().is_empty(), "and not drawn");
+}

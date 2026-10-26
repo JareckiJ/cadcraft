@@ -1508,27 +1508,15 @@ pub fn named_arrow(d: &Drawing, name: &str, tip: Vec2, dir: Vec2, size: f64) -> 
 /// the arrow pointing along +x at unit size). Built-in arrowhead blocks (`_Oblique`…) are
 /// drawn in code instead, so they are left out.
 fn user_arrow(d: &Drawing, name: &str) -> Option<ArrowGeom> {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock, PoisonError};
     if name.starts_with('_') {
         return None;
     }
-    let b = arrow_block(d, name)?;
-    static CACHE: OnceLock<Mutex<HashMap<(usize, usize, String), Option<ArrowGeom>>>> = OnceLock::new();
-    let key = (b as *const cadcraft_doc::Block as usize, b.entities.len(), name.to_string());
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(g) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
-        return g.clone();
-    }
-    let g = arrow_geometry(b);
-    let mut c = cache.lock().unwrap_or_else(PoisonError::into_inner);
-    if c.len() > 512 {
-        c.clear();
-    }
-    c.insert(key, g.clone());
-    g
+    // Worked out from the block each time (at most 512 of its objects): a cache keyed by the
+    // block's address could hand one drawing's arrowhead to another, or keep an edited one.
+    arrow_geometry(arrow_block(d, name)?)
 }
 
+/// The geometry of a user arrowhead block (see [`user_arrow`]).
 fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
     use cadcraft_doc::EntityKind as K;
     const SEGS: usize = 32;
@@ -1573,17 +1561,15 @@ fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
                 g.lines.push(arc_pts(a.center.xy(), a.radius, a.start, sweep));
             }
             K::LwPolyline(p) => {
-                let pts = poly_pts(&p.vertices, p.closed);
                 let w = p.const_width.max(p.vertices.iter().map(|v| v.start_width.max(v.end_width)).fold(0.0, f64::max));
                 if w > 1e-12 {
-                    // A wide polyline: each piece a filled band.
-                    for s in pts.windows(2) {
-                        let (a, c) = (s[0], s[1]);
-                        let n = (c - a).perp().normalized() * (w / 2.0);
-                        g.tris.extend([a - n, c - n, c + n, a - n, c + n, a + n]);
-                    }
+                    // A wide polyline with its widths as drawn, tapers included (a tip from width
+                    // 0 to 1 is a triangle, not a band).
+                    let size = Bounds2::from_points(p.vertices.iter().map(|v| v.p));
+                    let tol = ((size.width() + size.height()).max(w) / 2000.0).max(1e-9);
+                    g.tris.extend(fill::wide_polyline(p, tol).into_iter().map(|q| q - base));
                 } else {
-                    g.lines.push(pts);
+                    g.lines.push(poly_pts(&p.vertices, p.closed));
                 }
             }
             K::Solid(s) | K::Trace(s) => {
@@ -1593,14 +1579,10 @@ fn arrow_geometry(b: &cadcraft_doc::Block) -> Option<ArrowGeom> {
                 }
             }
             K::Hatch(h) if h.solid => {
-                for l in &h.loops {
-                    let pts = poly_pts(&l.vertices, true);
-                    if let Some((&first, rest)) = pts.split_first() {
-                        for s in rest.windows(2) {
-                            g.tris.extend([first, s[0], s[1]]);
-                        }
-                    }
-                }
+                // Its loops together, even-odd: an island stays a hole, a concave outline is
+                // filled as it is.
+                let loops: Vec<Vec<Vec2>> = h.loops.iter().map(|l| poly_pts(&l.vertices, true)).collect();
+                g.tris.extend(fill::triangulate_evenodd(&loops));
             }
             _ => {}
         }

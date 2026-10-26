@@ -382,13 +382,17 @@ pub fn show(
         let before_cursor = st.cursor;
         let mut edited = false;
         for ev in events {
-            let lay = layout(&chars, look, (!single_line).then_some(inner_w), default_size);
+            // Laid out only for the keys that move by what is on screen (arrows, Home, End).
+            let lay = || layout(&chars, look, (!single_line).then_some(inner_w), default_size);
             match ev {
                 Event::Ime(egui::ImeEvent::Preedit { text, .. }) => st.preedit = text,
                 Event::Text(s) | Event::Paste(s) | Event::Ime(egui::ImeEvent::Commit(s)) => {
                     st.preedit.clear();
-                    let s: String = s.chars().filter(|c| !c.is_control() || (*c == '\n' && !single_line)).collect();
+                    // Line breaks (Windows' \r\n too) become spaces in a one-line box, before
+                    // other control characters are dropped.
+                    let s = s.replace("\r\n", "\n").replace('\r', "\n");
                     let s = if single_line { s.replace('\n', " ") } else { s };
+                    let s: String = s.chars().filter(|c| !c.is_control() || *c == '\n').collect();
                     edited |= replace(&mut chars, st, &s, max_chars);
                 }
                 Event::Copy | Event::Cut => {
@@ -405,6 +409,7 @@ pub fn show(
                     let mut moved = None;
                     match key {
                         Key::ArrowLeft | Key::ArrowRight => {
+                            let lay = lay();
                             let dir = if key == Key::ArrowLeft { -1.0 } else { 1.0 };
                             let (a, b) = st.range();
                             moved = Some(if word {
@@ -422,6 +427,7 @@ pub fn show(
                             st.preferred_x = None;
                         }
                         Key::ArrowUp | Key::ArrowDown => {
+                            let lay = lay();
                             let (li, x) = lay.caret_x(st.cursor);
                             let px = *st.preferred_x.get_or_insert(x);
                             let to = if key == Key::ArrowUp { li.checked_sub(1) } else { Some(li + 1).filter(|n| *n < lay.lines.len()) };
@@ -432,10 +438,12 @@ pub fn show(
                             });
                         }
                         Key::Home => {
+                            let lay = lay();
                             moved = Some(if modifiers.command { 0 } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.start) });
                             st.preferred_x = None;
                         }
                         Key::End => {
+                            let lay = lay();
                             moved = Some(if modifiers.command { chars.len() } else { lay.lines.get(lay.line_of(st.cursor)).map_or(0, |l| l.end) });
                             st.preferred_x = None;
                         }
@@ -672,6 +680,31 @@ mod tests {
         };
         assert_eq!(walk(c.len(), -1.0), 0, "Left from the end reaches the start");
         assert_eq!(walk(0, 1.0), c.len(), "Right from the start reaches the end");
+    }
+
+    /// A paste of several lines into a one-line box keeps a space where each break was
+    /// (`\n` and Windows' `\r\n`), instead of running the lines together (#2034 review).
+    #[test]
+    fn a_pasted_line_break_is_a_space_in_a_one_line_box() {
+        let ctx = egui::Context::default();
+        for (pasted, want_line, want_box) in [("one\ntwo", "one two", "one\ntwo"), ("one\r\ntwo\tthree", "one twothree", "one\ntwothree")] {
+            for single in [true, false] {
+                let mut text = String::new();
+                let mut st = EditState::default();
+                let id = egui::Id::unique(("paste_test", single, pasted));
+                let raw = |events| egui::RawInput { events, ..Default::default() };
+                let run = |text: &mut String, st: &mut EditState, events| {
+                    let mut out = ctx.run_ui(raw(events), |ui| {
+                        ui.memory_mut(|m| m.request_focus(id));
+                        show(ui, id, text, st, single, 300.0, 1, &look, 20.0, 1000);
+                    });
+                    out.textures_delta.clear();
+                };
+                run(&mut text, &mut st, Vec::new());
+                run(&mut text, &mut st, vec![Event::Paste(pasted.into())]);
+                assert_eq!(text, if single { want_line } else { want_box }, "single line: {single}");
+            }
+        }
     }
 
     #[test]

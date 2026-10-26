@@ -55,6 +55,8 @@ fn snapshot(ui: &UiState) -> Result<Value, String> {
         "docking": ui.docking,
         "dockingVersion": cadcraft_ui_egui::docking::LAYOUT_VERSION,
         "showToolsets": ui.show_toolsets,
+        "toolsetsRibbon": ui.toolsets_ribbon,
+        "ribbonTab": ui.ribbon_tab,
         "showPalettes": ui.show_palettes,
         "showToolbar": ui.show_toolbar,
         "toolbarDock": ui.toolbar_dock,
@@ -295,6 +297,22 @@ mod tests {
         let tools = reloaded.docking.layout.location(&Panel::ToolSets).unwrap();
         assert_eq!(serde_json::to_value(&tools.group).unwrap()["column"]["side"], json!("Start"), "{tools:?}");
         assert_eq!(reloaded.docking.layout.floating[0].rect, [120.0, 90.0, 340.0, 410.0]);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// The Tool Sets ribbon and its open tab come back after a restart (#2034 review).
+    #[test]
+    fn the_tool_sets_ribbon_and_its_tab_survive_a_restart() {
+        let directory = temp_dir();
+        let path = directory.join("workspace.json");
+        let (mut store, _, _) = Workspace::at(Some(path.clone()));
+        let ui = UiState { toolsets_ribbon: true, ribbon_tab: "Modify".into(), ..UiState::default() };
+        store.save_if_changed(&ui, Instant::now()).unwrap();
+        let (_, reloaded, error) = Workspace::at(Some(path));
+        assert!(error.is_none(), "{error:?}");
+        let reloaded = reloaded.unwrap();
+        assert!(reloaded.toolsets_ribbon);
+        assert_eq!(reloaded.ribbon_tab, "Modify");
         fs::remove_dir_all(directory).unwrap();
     }
 

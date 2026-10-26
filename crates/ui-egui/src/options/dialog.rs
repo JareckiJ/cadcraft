@@ -264,7 +264,7 @@ fn fonts(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     hint(
         ui,
         crate::tl!(
-            "Put TrueType or OpenType fonts (.ttf, .otf, .ttc) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins."
+            "Put TrueType, OpenType or SHX fonts (.ttf, .otf, .ttc, .shx) in a folder and add it here. These folders are searched before the system fonts; a folder higher in the list wins."
         ),
     );
     ui.add_space(4.0);
@@ -355,7 +355,10 @@ fn fonts(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     let generation = cadcraft_fonts::ttf::generation();
     let mut seen: FontsSeen = ui.data(|d| d.get_temp(seen_id)).unwrap_or_default();
     if seen.generation != Some(generation) {
-        let fonts = cadcraft_fonts::ttf::installed().into_iter().filter(|f| f.user).map(|f| (f.name, f.family)).collect();
+        // Outline fonts with their family names, then the SHX fonts.
+        let mut fonts: Vec<(String, Option<String>)> =
+            cadcraft_fonts::ttf::installed().into_iter().filter(|f| f.user).map(|f| (f.name, f.family)).collect();
+        fonts.extend(cadcraft_fonts::shx::installed().into_iter().map(|stem| (format!("{stem}.shx"), None)));
         seen = FontsSeen { generation: Some(generation), fonts };
         ui.data_mut(|d| d.insert_temp(seen_id, seen.clone()));
     }

@@ -251,6 +251,9 @@ fn serial(y: i64, m: i64, d: i64) -> f64 {
 
 /// (year, month, day, hour, minute, second) of a serial.
 fn parts(s: f64) -> (i64, i64, i64, i64, i64, i64) {
+    // About ±8000 years around 1900: the calendar arithmetic stays far from overflowing (a
+    // file's formula can hold any number, `=YEAR(1E300)`).
+    let s = if s.is_finite() { s.clamp(-3_000_000.0, 3_000_000.0) } else { 0.0 };
     let days = s.floor();
     let secs = ((s - days) * 86_400.0).round() as i64;
     let (y, m, d) = civil_from_days(days as i64 - EPOCH_SERIAL);
@@ -570,6 +573,21 @@ impl P<'_> {
         }
         Ok(v)
     }
+    /// Where the argument starting here ends: the next comma or closing parenthesis outside
+    /// any parentheses it opens (`None`: the formula ends first).
+    fn arg_end(&self) -> Option<usize> {
+        let mut level = 0usize;
+        for (k, t) in self.t.iter().enumerate().skip(self.i) {
+            match t {
+                Tok::LParen => level += 1,
+                Tok::RParen if level == 0 => return Some(k),
+                Tok::RParen => level -= 1,
+                Tok::Comma if level == 0 => return Some(k),
+                _ => {}
+            }
+        }
+        None
+    }
     fn atom(&mut self) -> R {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
@@ -597,10 +615,22 @@ impl P<'_> {
                     return Err(Err::Name);
                 }
                 self.i += 1;
-                let mut args = Vec::new();
+                // Each argument's value or the error working it out gave: IF uses only the branch
+                // it picks, so an error in the other one (`=IF(TRUE;1;1/0)`) doesn't count.
+                let mut args: Vec<R> = Vec::new();
                 if self.peek() != Some(&Tok::RParen) {
                     loop {
-                        args.push(self.compare()?);
+                        let end = self.arg_end().ok_or(Err::Syntax)?;
+                        let depth = self.depth;
+                        let v = self.compare();
+                        self.depth = depth;
+                        match v {
+                            Err(Err::Syntax) => return Err(Err::Syntax),
+                            Ok(_) if self.i != end => return Err(Err::Syntax),
+                            _ => {}
+                        }
+                        self.i = end;
+                        args.push(v);
                         if args.len() > MAX_ARGS {
                             return Err(Err::Value);
                         }
@@ -612,7 +642,15 @@ impl P<'_> {
                     }
                 }
                 self.i += 1;
-                call(&n, &args, self.env)
+                if n == "IF" {
+                    let mut it = args.into_iter();
+                    let c = it.next().unwrap_or(Err(Err::Value))?.truth()?;
+                    let (yes, no) = (it.next(), it.next());
+                    if c { yes.unwrap_or(Ok(Val::Bool(true))) } else { no.unwrap_or(Ok(Val::Bool(false))) }
+                } else {
+                    let args: Vec<Val> = args.into_iter().collect::<std::result::Result<_, _>>()?;
+                    call(&n, &args, self.env)
+                }
             }
             _ => Err(Err::Syntax),
         };
@@ -788,6 +826,28 @@ mod tests {
 
     fn ev(f: &str) -> String {
         evaluate(f, &env()).unwrap_or_default()
+    }
+
+    /// Huge or infinite dates never overflow (a crash in a test build, nonsense otherwise).
+    #[test]
+    fn huge_date_serials_do_not_overflow() {
+        for f in ["=YEAR(1E300)", "=YEAR(-1E300)", "=TEXT(1E300,\"yyyy\")", "=TODAY()+1E300", "=MONTH(1E308*10)"] {
+            let _ = ev(f);
+        }
+        assert_eq!(ev("=YEAR(45000)"), "2023");
+    }
+
+    /// IF works out only the branch it picks: an error in the other one is not its result
+    /// (#2034 review). Errors in the condition or the picked branch still show.
+    #[test]
+    fn if_uses_only_the_branch_it_picks() {
+        assert_eq!(ev("=IF(TRUE,1,1/0)"), "1");
+        assert_eq!(ev("=IF(FALSE,1/0,2)"), "2");
+        assert_eq!(ev("=IF(1<2;(1/0)+5;3)"), "#DIV/0!");
+        assert_eq!(ev("=IF(1/0,1,2)"), "#DIV/0!");
+        assert_eq!(ev("=IF(FALSE,SQRT(-1)*2,IF(TRUE,7,1/0))"), "7");
+        assert_eq!(ev("=SUM(1,1/0)"), "#DIV/0!", "other functions still need every argument");
+        assert_eq!(ev("=IF(TRUE,1 2,3)"), "#ERROR!", "a malformed branch is still an error");
     }
 
     #[test]

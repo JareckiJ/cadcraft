@@ -225,12 +225,16 @@ fn dwg_preview(sec: &[u8], at: u64) -> Option<Rgba> {
 /// The THUMBNAILIMAGE section's bitmap (hex in group 310 lines).
 #[cfg(not(target_arch = "wasm32"))]
 fn dxf_preview(text: &str) -> Option<Vec<u8>> {
+    /// Largest preview read (hostile files).
+    const MAX_BYTES: usize = 16 << 20;
     let at = text.find("THUMBNAILIMAGE")?;
-    let mut lines = text.get(at..)?.lines().map(str::trim);
+    // From the line after the section's name, group code and value pairs.
+    let mut lines = text.get(at..)?.lines().skip(1).map(str::trim);
     let mut out = Vec::new();
     while let Some(code) = lines.next() {
         let value = lines.next()?;
         match code {
+            "310" if out.len() + value.len() / 2 > MAX_BYTES => return None,
             "310" => {
                 let b = value.as_bytes();
                 for pair in b.chunks(2) {
@@ -402,6 +406,18 @@ pub fn paint_missing(p: &egui::Painter, r: egui::Rect, ink: egui::Color32) {
 
 #[cfg(test)]
 mod tests {
+    /// The section is read as group code / value pairs from the line after its name: the bytes
+    /// come back, not a misaligned nothing (#2034 review).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_dxf_thumbnail_section_is_read_in_pairs() {
+        let dxf = "  0\nSECTION\n  2\nTHUMBNAILIMAGE\n 90\n2\n310\nAABB\n  0\nENDSEC\n  0\nEOF\n";
+        assert_eq!(super::dxf_preview(dxf), Some(vec![0xAA, 0xBB]));
+        let crlf = dxf.replace('\n', "\r\n");
+        assert_eq!(super::dxf_preview(&crlf), Some(vec![0xAA, 0xBB]));
+        assert_eq!(super::dxf_preview("  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n"), None);
+    }
+
     #[test]
     fn a_bitmap_decodes_bottom_up_with_its_palette() {
         // 2×2, 8 bits, two palette colours: bottom row red/green, top row green/red.

@@ -885,11 +885,14 @@ pub(crate) fn edge_segments_owned(s: &Session, edges: Edges, near: Option<cadcra
             continue;
         }
         if matches!(e.kind, EntityKind::Insert(_) | EntityKind::MLeader(_) | EntityKind::Table(_)) {
-            // A block reference (and a multileader or table) cuts with the lines it draws.
+            // A block reference (and a multileader or table) cuts with the lines it draws, its
+            // curves as finely as hatch boundaries are (a fixed step would miss on big blocks).
+            let b = cadcraft_doc::entity_bounds(d, e, 0);
+            let tolerance = if b.is_empty() { 0.001 } else { ((b.width() + b.height()) / 20000.0).max(1e-9) };
             let list = cadcraft_render::build_entities(
                 d,
                 std::iter::once(&**e),
-                &cadcraft_render::Options { text: false, fill: false, continuous: true, ..Default::default() },
+                &cadcraft_render::Options { tolerance, text: false, fill: false, continuous: true, ..Default::default() },
             );
             for p in list.prims.iter().filter(|p| matches!(p.kind, cadcraft_render::Kind::Polyline)) {
                 out.extend(list.points(p).windows(2).filter_map(|w| Some((e.handle, Segment::Line(Line::new(*w.first()?, *w.get(1)?))))));
@@ -965,8 +968,13 @@ pub(crate) fn trim(s: &mut Session, h: Handle, pick: Vec2, edges: Edges) -> Resu
     let mut out = Vec::new();
     for k in pieces {
         let nh = d.new_handle();
+        // A hatch goes behind the lines again, as a new hatch does.
+        let hatch = matches!(k, EntityKind::Hatch(_));
         if let Some(st) = d.space_mut(&space) {
             st.push(Entity { handle: nh, common: common.clone(), kind: k });
+            if hatch {
+                st.send_to_back(nh);
+            }
             out.push(nh);
         }
     }
