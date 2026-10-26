@@ -32,7 +32,7 @@ use pen::Pen;
 
 pub use dim::{ArrowGeom, Arrowhead, DimGeometry, DimText, LineRole, arrowhead, dimension_geometry, dimension_geometry_with, format_linear_value};
 pub use fill::triangulate_evenodd;
-pub use hatch::{fill_loops as hatch_fill_loops, pattern_swatch};
+pub use hatch::{HatchBudget, fill_loops as hatch_fill_loops, pattern_swatch};
 pub use paper::{PAPER_SIZES, PaperSize, Sheet, paper_size, sheet};
 pub use tolerance::{gdt_points, tolerance_in};
 
@@ -206,6 +206,9 @@ pub struct Options {
     pub text: bool,
     /// Highlighted (selected) handles are not special here; the canvas overlays them.
     pub fill: bool,
+    /// Optional work budget shared by all hatches of a thumbnail, including nested blocks.
+    /// Exhausted hatches fall back to bounded contours; normal drawing/export uses `None`.
+    pub hatch_budget: Option<std::sync::Arc<HatchBudget>>,
     pub lineweights: bool,
     /// Height of the visible area in world units of the space being built. Relative point
     /// sizes (`PDSIZE` <= 0) are a percentage of it; 0 = the height of the space's extents.
@@ -242,6 +245,7 @@ impl Default for Options {
             min_dash: 0.0,
             text: true,
             fill: true,
+            hatch_budget: None,
             lineweights: false,
             view_height: 0.0,
             plot_style_table: None,

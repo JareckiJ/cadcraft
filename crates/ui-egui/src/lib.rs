@@ -12,6 +12,7 @@ pub mod aliasdlg;
 pub mod animation;
 pub mod autosave;
 pub mod bedit;
+pub mod blockmgr;
 pub mod canvas;
 pub mod capture;
 pub mod chrome;
@@ -101,6 +102,8 @@ pub struct UiState {
     pub in_window_menu: bool,
     pub start_tab: bool,
     pub dialog: Option<String>,
+    /// Show the Block Manager as a floating window instead of a right-hand panel.
+    pub blocks_window: bool,
     pub history_lines: usize,
     /// Interface theme: "system" (follow the OS light/dark appearance), "light" or "dark".
     pub theme: theme::ThemePref,
@@ -159,6 +162,7 @@ impl SaveFormat {
 }
 
 impl Default for UiState {
+    /// Construct the default interface state for a new CADCraft session.
     fn default() -> Self {
         UiState {
             docking: docking::default_workspace(),
@@ -181,6 +185,7 @@ impl Default for UiState {
             in_window_menu: !cfg!(target_os = "macos"),
             start_tab: false,
             dialog: None,
+            blocks_window: false,
             history_lines: 3,
             theme: theme::ThemePref::default(),
             animations: animation::AnimationPref::default(),
@@ -365,7 +370,7 @@ impl CadApp {
 
     /// Run a command programmatically (or a UI command).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if let Some(r) = menus::run_ui_command(self, id, &params) {
+        if let Some(r) = menus::run_ui_command(self, id, &params, false) {
             return r;
         }
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
@@ -384,7 +389,7 @@ impl CadApp {
 
     /// Start a command as if typed (interactive when it has prompts).
     pub fn start(&mut self, name: &str) {
-        if menus::run_ui_command(self, name, &Value::Null).is_some() {
+        if menus::run_ui_command(self, name, &Value::Null, true).is_some() {
             return;
         }
         if let Err(e) = self.session.start(name) {
@@ -399,7 +404,7 @@ impl CadApp {
             let first = text.split_whitespace().next().unwrap_or("");
             // `cmd {json}` is a programmatic call: the engine runs it with those parameters.
             let json_form = text.trim_start().get(first.len()..).is_some_and(|rest| rest.trim_start().starts_with('{'));
-            if !first.is_empty() && !json_form && menus::run_ui_command(self, &first.to_ascii_lowercase(), &Value::Null).is_some() {
+            if !first.is_empty() && !json_form && menus::run_ui_command(self, &first.to_ascii_lowercase(), &Value::Null, true).is_some() {
                 return None;
             }
         }

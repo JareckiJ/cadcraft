@@ -137,6 +137,8 @@ pub struct CanvasState {
     hover_cycle: Option<(Pos2, Vec<Handle>, usize)>,
     /// What the cycling list and the Shift+Space highlight were made for (see [`CycleKey`]).
     cycle_key: Option<CycleKey>,
+    /// The current primary-button gesture started on a canvas-painted menu.
+    menu_press: bool,
 }
 
 /// The command, prompt, drawing (and its revision) and view that the objects under the cursor
@@ -343,6 +345,7 @@ fn ensure_list(app: &mut CadApp, xf: &Xf, views: &[(Bounds2, f64)], ctx: &egui::
         min_dash: 2f64.powi(lod_band) * 2.0,
         text: true,
         fill: true,
+        hatch_budget: None,
         lineweights: lwdisplay,
         view_height: st.paper_view().height,
         plot_style_table: None,
@@ -504,6 +507,7 @@ fn ensure_vp_content(app: &mut CadApp, xf_paper: &Xf, ctx: &egui::Context) -> Op
             min_dash: 2f64.powi(band) * 2.0,
             text: true,
             fill: true,
+            hatch_budget: None,
             lineweights: lwdisplay,
             view_height: st.paper_view().height,
             plot_style_table: None,
@@ -1408,6 +1412,12 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // from the cursor contract below, though not from the canvas's input: a click on a row is
     // taken by the row.
     let on_menu = hover_pos.is_some_and(|p| over_canvas_menu(app, p));
+    // A command can close the menu on the press frame. Keep ownership through release;
+    // the next press on bare canvas starts a fresh gesture.
+    if ui.ctx().current_pass_index() == 0 && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+        app.canvas.menu_press = on_menu;
+    }
+    let menu_click = on_menu || app.canvas.menu_press;
     // Whether Ctrl is held right now. Written every frame (not just while a command prompts), so
     // previews that read `Session::ctrl_down` always see the current state. The engine
     // deliberately does not carry modifiers through `Input`, which is UI-agnostic (see PR
@@ -1565,7 +1575,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && app.session.pending_window.is_none()
         && !app.session.realtime_zoom_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
-    if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
+    if point_prompt && inside && !menu_click && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
                 .iter()
@@ -1577,7 +1587,14 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         });
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
-            for pos in earlier.iter().filter(|p| rect.contains(**p)) {
+            for pos in earlier {
+                if !rect.contains(*pos)
+                    || over_canvas_menu(app, *pos)
+                    || over_navigation_control(app, rect, *pos)
+                    || ui.ctx().layer_id_at(*pos) != Some(ui.layer_id())
+                {
+                    continue;
+                }
                 let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
                 let result = match app.canvas.snap {
                     Some(hit) => app.session.input_snapped(hit),
@@ -1663,8 +1680,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.canvas.cycle_key = Some(key);
     }
     let cycled = pressed_primary && !middle_down && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
-    // Clicks.
+    // A menu can disappear when a command starts or its prompt changes in this frame.
+    // Its previously painted rows still own the click; never pass it through as a point.
     if inside
+        && !menu_click
         && pressed_primary
         && !middle_down
         && !cycled
@@ -2201,6 +2220,20 @@ fn cycle_badge(p: &egui::Painter, at: Pos2) {
         p.rect_filled(r, 1.0, t.cmd_bg);
         p.rect_stroke(r, 1.0, Stroke::new(1.0, t.text), egui::StrokeKind::Inside);
     }
+}
+
+/// Earlier releases in a batched frame cannot use `Response::hovered()` (it describes
+/// only the final pointer position). Reuse the exact navigation widget hit rectangles.
+fn over_navigation_control(app: &CadApp, rect: Rect, p: Pos2) -> bool {
+    if app.ui.show_ucs_icon && crate::viewcube::ucs_arms(rect).iter().any(|r| r.contains(p)) {
+        return true;
+    }
+    let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
+    if app.ui.show_viewcube && sheet.is_none() {
+        let layout = crate::viewcube::Layout::new(rect);
+        return layout.bounds.contains(p) || layout.pill.contains(p);
+    }
+    false
 }
 
 /// Whether `p` lies on a menu the canvas paints itself — the selection cycling list's rows or the
@@ -3001,6 +3034,37 @@ mod hatch_pick_tests {
         assert_eq!(app.hatch_dlg.as_ref().map(|s| s.edit.iter().map(|h| h.hex()).collect::<Vec<_>>()), Some(vec![hx]));
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
+    }
+
+    #[test]
+    fn navigation_control_hit_test_matches_displayed_viewcube() {
+        use cadcraft_geom::Bounds2;
+        use cadcraft_render::DisplayList;
+        use egui::{Pos2, Rect, vec2};
+
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 1000.0));
+        let layout = crate::viewcube::Layout::new(rect);
+        let p = layout.center;
+
+        app.canvas.list = None;
+        assert!(super::over_navigation_control(&app, rect, p));
+
+        // When the display list holds a paper sheet (before or during layout rebuild),
+        // the ViewCube is not displayed, so clicks on bare canvas are not discarded.
+        app.canvas.list = Some(DisplayList {
+            sheet: Some(cadcraft_render::paper::Sheet {
+                size: Vec2::new(100.0, 100.0),
+                printable: Bounds2::new(Vec2::ZERO, Vec2::new(100.0, 100.0)),
+                unit_mm: 1.0,
+            }),
+            ..Default::default()
+        });
+        assert!(!super::over_navigation_control(&app, rect, p));
+
+        // Model space display list without a sheet: ViewCube is displayed and hit-tested.
+        app.canvas.list = Some(DisplayList::default());
+        assert!(super::over_navigation_control(&app, rect, p));
     }
 }
 
