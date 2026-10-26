@@ -990,6 +990,11 @@ impl Session {
 
     // ---------------- interactive commands ----------------
 
+    /// The running interactive command id, or `None` if the command line is idle.
+    pub fn active_command_id(&self) -> Option<&str> {
+        self.running.as_ref().map(|r| r.id.as_str())
+    }
+
     /// Start a command by name or alias as if typed at the command line.
     pub fn start(&mut self, name: &str) -> Result<()> {
         self.last_polar = None;
