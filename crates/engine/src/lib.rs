@@ -714,6 +714,9 @@ pub struct Session {
     /// The Hatch Editor's boundary set (HATCHBOUNDARYSET) and the drawing (`DocState::uid`) it
     /// belongs to: see [`Session::hatch_boundary_set`].
     hatch_boundary_set: Option<(u64, Vec<Handle>)>,
+    /// The boundary set chosen in the Block Editor, with its drawing and the block edited: the
+    /// editor's objects are numbered apart from the drawing's, so each keeps its own set.
+    hatch_boundary_set_block: Option<(u64, String, Vec<Handle>)>,
     /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
     pub hatch_store_origin: bool,
 }
@@ -767,6 +770,7 @@ impl Session {
             lisp_last: None,
             hatch_picks: None,
             hatch_boundary_set: None,
+            hatch_boundary_set_block: None,
             hatch_store_origin: false,
         }
     }
@@ -828,16 +832,36 @@ impl Session {
 
     /// The current drawing's boundary set (HATCHBOUNDARYSET): the only objects pick points look
     /// at; `None` uses everything visible in the current viewport. A set chosen in another drawing
-    /// doesn't apply (handles are numbered per drawing).
+    /// doesn't apply (handles are numbered per drawing). In the Block Editor, the set chosen there
+    /// for the block edited: the drawing's set waits for BCLOSE.
     pub fn hatch_boundary_set(&self) -> Option<&[Handle]> {
-        let uid = self.state().ok()?.uid;
-        self.hatch_boundary_set.as_ref().filter(|(u, _)| *u == uid).map(|(_, hs)| hs.as_slice())
+        let st = self.state().ok()?;
+        match st.block_editor() {
+            Some(block) => self
+                .hatch_boundary_set_block
+                .as_ref()
+                .filter(|(u, b, _)| *u == st.uid && b.eq_ignore_ascii_case(block))
+                .map(|(_, _, hs)| hs.as_slice()),
+            None => self.hatch_boundary_set.as_ref().filter(|(u, _)| *u == st.uid).map(|(_, hs)| hs.as_slice()),
+        }
     }
 
-    /// Set the current drawing's boundary set, or clear it.
+    /// Set the current drawing's boundary set (the Block Editor's while it is open), or clear it.
     pub fn set_hatch_boundary_set(&mut self, set: Option<Vec<Handle>>) {
-        let uid = self.state().map(|st| st.uid).ok();
-        self.hatch_boundary_set = set.zip(uid).map(|(hs, uid)| (uid, hs));
+        let Ok(st) = self.state() else {
+            self.hatch_boundary_set = None;
+            return;
+        };
+        let uid = st.uid;
+        match st.block_editor().map(str::to_string) {
+            Some(block) => self.hatch_boundary_set_block = set.map(|hs| (uid, block, hs)),
+            None => self.hatch_boundary_set = set.map(|hs| (uid, hs)),
+        }
+    }
+
+    /// The Block Editor closed: its boundary set goes with it.
+    pub(crate) fn drop_block_hatch_boundary_set(&mut self) {
+        self.hatch_boundary_set_block = None;
     }
 
     pub fn state(&self) -> Result<&DocState> {

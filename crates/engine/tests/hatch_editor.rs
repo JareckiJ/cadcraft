@@ -313,3 +313,30 @@ fn a_pick_outside_the_boundary_set_says_so() {
     let e = s.execute("hatch", &json!({ "points": [[60, 10]] })).unwrap_err().to_string();
     assert!(e.contains("boundary set"), "{e}");
 }
+
+#[test]
+fn the_block_editor_and_the_drawing_keep_their_own_boundary_sets() {
+    let mut s = Session::new();
+    // Block "Box": a 10 x 10 square. In the drawing, a 20 x 20 square chosen as the boundary set.
+    let inner = rect(&mut s, [0.0, 0.0], [10.0, 10.0]);
+    s.execute("block", &json!({ "name": "Box", "base": [0, 0], "handles": [inner] })).unwrap();
+    let outer = rect(&mut s, [100.0, 100.0], [120.0, 120.0]);
+    s.execute("hatchboundaryset", &json!({ "handles": [outer] })).unwrap();
+    let host = s.hatch_boundary_set().map(<[Handle]>::to_vec);
+
+    // In the Block Editor the drawing's set doesn't apply: the block's square bounds a hatch.
+    s.execute("bedit", &json!({ "name": "Box" })).unwrap();
+    assert_eq!(s.hatch_boundary_set(), None);
+    s.execute("hatch", &json!({ "points": [[5, 5]] })).unwrap();
+    // A set chosen in the editor stays there.
+    let square = s.doc().unwrap().model.iter().find(|e| matches!(e.kind, EntityKind::LwPolyline(_))).unwrap().handle.hex();
+    s.execute("hatchboundaryset", &json!({ "handles": [square] })).unwrap();
+    assert!(s.hatch_boundary_set().is_some());
+    s.execute("bclose", &json!({ "save": false })).unwrap();
+
+    // Back in the drawing: its own set again, unchanged; the editor's is gone.
+    assert_eq!(s.hatch_boundary_set().map(<[Handle]>::to_vec), host);
+    s.execute("hatch", &json!({ "points": [[110, 110]] })).unwrap();
+    s.execute("bedit", &json!({ "name": "Box" })).unwrap();
+    assert_eq!(s.hatch_boundary_set(), None);
+}
