@@ -52,6 +52,8 @@ pub fn shortcut_commands(app: &mut CadApp, ctx: &egui::Context) -> Vec<&'static 
         match e {
             egui::Event::Copy => out.push(if shift { "copybase" } else { "copyclip" }),
             egui::Event::Cut => out.push("cutclip"),
+            // Clicked in the command line with the pointer still on it: the text goes there.
+            egui::Event::Paste(text) if crate::cmdline::takes_paste(app, ctx) => crate::cmdline::paste(app, &text),
             egui::Event::Paste(text) => {
                 let h = hash(&text);
                 if ctx.data(|d| d.get_temp::<u64>(text_id())) != Some(h) && clipboard::load_system_text(&mut app.session, &text) {

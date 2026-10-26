@@ -48,8 +48,11 @@ fn frame(app: &mut CadApp, ctx: &egui::Context) {
 /// checking that the engine started that command (not only that the history shows it).
 fn press(app: &mut CadApp, ctx: &egui::Context, text: &str, keys: &[&str]) -> Option<String> {
     app.session.last_command = None;
-    app.synthetic.push(egui::Event::Text(text.into()));
-    frame(app, ctx);
+    // Nothing to type: no text event, which would put the choice back on the first row.
+    if !text.is_empty() {
+        app.synthetic.push(egui::Event::Text(text.into()));
+        frame(app, ctx);
+    }
     for k in keys {
         let ev = match *k {
             " " | "\t" => egui::Event::Text((*k).into()),
@@ -68,11 +71,34 @@ fn press(app: &mut CadApp, ctx: &egui::Context, text: &str, keys: &[&str]) -> Op
     if let Some(name) = &ran {
         let started = app.session.last_command.clone();
         let id = cadcraft_engine::cmd::resolve_alias(&name.to_ascii_lowercase());
+        // A system variable's name asks for its value (SETVAR).
+        let id = if cadcraft_engine::sysvars::names().contains(&name.to_ascii_uppercase().as_str()) { "setvar".to_string() } else { id };
         assert_eq!(started.as_deref(), Some(id.as_str()), "{name} is in the history, so it must have started");
     }
     app.session.cancel();
     frame(app, ctx);
     ran
+}
+
+/// How many rows the AutoComplete list offers for `typed`: Down until the choice wraps to the first.
+fn rows(app: &mut CadApp, ctx: &egui::Context, typed: &str) -> usize {
+    app.synthetic.push(egui::Event::Text(typed.into()));
+    frame(app, ctx);
+    let mut n = 0;
+    loop {
+        app.synthetic.push(key(egui::Key::ArrowDown));
+        frame(app, ctx);
+        n += 1;
+        if app.cmd.suggestion == 0 || n > 8 {
+            break;
+        }
+    }
+    app.cmd.buffer.clear();
+    n
+}
+
+fn key(k: egui::Key) -> egui::Event {
+    egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }
 }
 
 #[test]
@@ -93,7 +119,7 @@ fn up_and_down_choose_the_suggestion_that_enter_or_space_runs() {
     assert_eq!(press(&mut a, &ctx, "dimc", &["ArrowDown", " "]).as_deref(), Some(second.as_str()));
     // Up at the first row goes to the last one; Down there comes back to the first. Tab moves
     // down as Down does.
-    let n = cmdline::suggestions_count("dimc");
+    let n = rows(&mut a, &ctx, "dimc");
     let mut downs = vec!["ArrowDown"; n - 1];
     downs.push("Enter");
     let last = press(&mut a, &ctx, "dimc", &downs);
@@ -115,7 +141,6 @@ fn the_chosen_row_completes_the_typed_name_until_backspace() {
     let shown = cmdline::completion(&a).expect("the first row completes the typed name");
     assert!(!second.ends_with(&shown), "{shown} completes the first row, not {second}");
     // Down: the completion follows the chosen row.
-    let key = |k: egui::Key| egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
     a.synthetic.push(key(egui::Key::ArrowDown));
     frame(&mut a, &ctx);
     let rest = cmdline::completion(&a).expect("the second row completes the typed name");
@@ -125,7 +150,8 @@ fn the_chosen_row_completes_the_typed_name_until_backspace() {
     frame(&mut a, &ctx);
     assert_eq!(cmdline::completion(&a), None);
     assert_eq!(a.cmd.buffer, "dimc");
-    // Tab shows a completion again (the next row's), Up the second row's again.
+    // Tab shows a completion again (the next row's); Up comes back to the second row, and Enter
+    // runs it although Backspace erased its completion.
     a.synthetic.push(egui::Event::Text("\t".into()));
     frame(&mut a, &ctx);
     assert!(cmdline::completion(&a).is_some());
@@ -167,4 +193,25 @@ fn a_row_chosen_with_down_wins_over_an_exact_alias() {
     assert!(chosen.len() > 1 && !chosen.eq_ignore_ascii_case("line"), "the chosen row runs, not LINE: {chosen}");
     // Down then Up comes back to the first row: the alias runs as typed again.
     assert_eq!(press(&mut a, &ctx, "l", &["ArrowDown", "ArrowUp", "Enter"]).as_deref(), Some("l"));
+}
+
+#[test]
+fn a_lisp_command_typed_in_full_is_the_chosen_row_and_enter_runs_it() {
+    let ctx = egui::Context::default();
+    let mut a = CadApp::new(Session::new(), Services::default());
+    for _ in 0..3 {
+        frame(&mut a, &ctx);
+    }
+    type_line(&mut a, "(defun c:dimc () (princ \"LISP DIMC RAN\") (princ))");
+    a.synthetic.push(egui::Event::Text("dimc".into()));
+    frame(&mut a, &ctx);
+    // DIMC itself is the chosen row: nothing left to complete.
+    assert_eq!(cmdline::completion(&a), None);
+    a.synthetic.push(key(egui::Key::Enter));
+    frame(&mut a, &ctx);
+    assert!(a.session.log.iter().any(|l| l.contains("LISP DIMC RAN")), "{:?}", a.session.log);
+    // One more letter: the commands again.
+    a.synthetic.push(egui::Event::Text("dimco".into()));
+    frame(&mut a, &ctx);
+    assert!(cmdline::completion(&a).is_some());
 }

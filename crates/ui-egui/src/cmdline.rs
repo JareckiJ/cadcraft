@@ -22,6 +22,11 @@ pub struct CmdLine {
     pub suggestion: usize,
     /// Backspace erased the completion shown after the typed name; Up, Down or Tab show it again.
     pub completion_hidden: bool,
+    /// The command line's whole area last frame (screen), while it is shown.
+    area: Option<Rect>,
+    /// The last click went to the command line: Ctrl+V pastes text into it while the pointer
+    /// stays over it.
+    clicked: bool,
     /// What was typed at command prompts (not command names), oldest first: the in-command
     /// shortcut menu's Recent Input.
     pub recent_input: Vec<String>,
@@ -88,7 +93,8 @@ pub fn capture_tab(ctx: &egui::Context, raw: &mut egui::RawInput) {
 }
 
 /// Tab on the command line: cycle the object snaps under the cursor, type the Dynamic Input
-/// separator (`,` or `<`) after a value, or complete a command name.
+/// separator (`,` or `<`) after a value, or move down the AutoComplete list. Free text typed at a
+/// prompt is left alone.
 fn tab(app: &mut CadApp) {
     // Grip dimensional input: Tab locks the typed value and moves to the next field.
     if crate::grip_dyn::tab(app) {
@@ -109,20 +115,13 @@ fn tab(app: &mut CadApp) {
     } else if suggesting(app) {
         // Tab moves down the AutoComplete list as Down does.
         step_suggestion(app, 1);
-    } else if let Some(s) = suggestions(&app.cmd.buffer).first() {
-        app.cmd.buffer = s.id.clone();
     }
-}
-
-/// How many rows the AutoComplete list offers for `typed`.
-pub fn suggestions_count(typed: &str) -> usize {
-    suggestions(typed).len()
 }
 
 /// Moves the chosen AutoComplete row by `delta`, wrapping from the last row to the first and back,
 /// and shows its completion again.
 fn step_suggestion(app: &mut CadApp, delta: isize) {
-    let n = suggestions(&app.cmd.buffer).len();
+    let n = suggestions_for(app, &app.cmd.buffer).len();
     if n == 0 {
         return;
     }
@@ -138,11 +137,31 @@ pub fn completion(app: &CadApp) -> Option<String> {
         return None;
     }
     let typed = app.cmd.buffer.as_str();
-    let sug = suggestions(typed);
+    let sug = suggestions_for(app, typed);
     let s = sug.get(app.cmd.suggestion).or(sug.first())?;
     let head = s.id.get(..typed.len())?;
     let rest = s.id.get(typed.len()..)?;
     (head.eq_ignore_ascii_case(typed) && !rest.is_empty()).then(|| rest.to_string())
+}
+
+/// Ctrl+V pastes text into the command line (not objects into the drawing): it was clicked and
+/// the pointer is still over it.
+pub fn takes_paste(app: &CadApp, ctx: &egui::Context) -> bool {
+    app.cmd.clicked && app.cmd.area.zip(ctx.pointer_hover_pos()).is_some_and(|(a, p)| a.contains(p))
+}
+
+/// The longest text a paste adds to the command line.
+const MAX_PASTE: usize = 256;
+
+/// Pastes `text` into the command line as if typed: its first line, without control characters,
+/// up to [`MAX_PASTE`] characters.
+pub fn paste(app: &mut CadApp, text: &str) {
+    let line = text.lines().next().unwrap_or_default();
+    app.cmd.preedit.clear();
+    app.cmd.buffer.extend(line.chars().filter(|c| !c.is_control()).take(MAX_PASTE));
+    app.cmd.suggestion = 0;
+    app.cmd.completion_hidden = false;
+    app.cmd.history_pos = None;
 }
 
 /// An AutoComplete suggestion for the command line.
@@ -156,14 +175,17 @@ pub struct Suggestion {
     pub label: &'static str,
 }
 
-/// Matching command names/aliases for AutoComplete.
-fn suggestions(prefix: &str) -> Vec<Suggestion> {
-    if prefix.is_empty() || prefix.contains(' ') {
-        return Vec::new();
-    }
-    let p = prefix.to_ascii_lowercase();
+/// The AutoComplete rows of the commands for `prefix`: its exact command or alias, the command
+/// names it starts, shortest first, and the aliases it starts.
+struct CommandRows {
+    exact: Option<Suggestion>,
+    names: Vec<Suggestion>,
+    aliases: Vec<Suggestion>,
+}
 
-    let mut out: Vec<Suggestion> = Vec::new();
+fn command_rows(prefix: &str) -> CommandRows {
+    let p = prefix.to_ascii_lowercase();
+    let mut rows = CommandRows { exact: None, names: Vec::new(), aliases: Vec::new() };
     let mut seen_ids: HashSet<&'static str> = HashSet::new();
 
     // 1. Exact match: alias resolution or exact command name match.
@@ -173,7 +195,7 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
     {
         let display =
             if spec.id == p { spec.id.to_ascii_uppercase() } else { format!("{} ({})", p.to_ascii_uppercase(), spec.id.to_ascii_uppercase()) };
-        out.push(Suggestion { id: spec.id.to_ascii_uppercase(), display, label: spec.label });
+        rows.exact = Some(Suggestion { id: spec.id.to_ascii_uppercase(), display, label: spec.label });
         seen_ids.insert(spec.id);
     }
 
@@ -182,7 +204,7 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
         cadcraft_engine::command_specs().iter().filter(|c| !c.id.contains('.') && !seen_ids.contains(c.id) && c.id.starts_with(&p)).collect();
     id_matches.sort_by_key(|c| (c.id.len(), c.id));
     for c in id_matches {
-        out.push(Suggestion { id: c.id.to_ascii_uppercase(), display: c.id.to_ascii_uppercase(), label: c.label });
+        rows.names.push(Suggestion { id: c.id.to_ascii_uppercase(), display: c.id.to_ascii_uppercase(), label: c.label });
         seen_ids.insert(c.id);
     }
 
@@ -200,15 +222,56 @@ fn suggestions(prefix: &str) -> Vec<Suggestion> {
     alias_matches.sort_by_key(|(alias, c)| (alias.len(), *alias, c.id));
     for (alias, c) in alias_matches {
         if seen_ids.insert(c.id) {
-            out.push(Suggestion {
+            rows.aliases.push(Suggestion {
                 id: c.id.to_ascii_uppercase(),
                 display: format!("{} ({})", alias.to_ascii_uppercase(), c.id.to_ascii_uppercase()),
                 label: c.label,
             });
         }
     }
+    rows
+}
 
-    out.truncate(8);
+/// Matching command names/aliases for AutoComplete, with `lisp`, the LISP commands the drawing
+/// defines, and the system variables: everything that can be typed at the command line.
+fn suggestions(prefix: &str, lisp: &[String]) -> Vec<Suggestion> {
+    if prefix.is_empty() || prefix.contains(' ') {
+        return Vec::new();
+    }
+    let rows = command_rows(prefix);
+    merge_typed(prefix, rows.exact, rows.names, rows.aliases, lisp)
+}
+
+/// Joins the commands' rows with the LISP commands and system variables, ranked alike: an exact
+/// name first, then the names it starts (LISP commands among the commands), shortest first, then
+/// the aliases (`aliases`, in their order), then the system variables, shortest first; 8 at most.
+fn merge_typed(prefix: &str, exact: Option<Suggestion>, names: Vec<Suggestion>, aliases: Vec<Suggestion>, lisp: &[String]) -> Vec<Suggestion> {
+    const LISP: &str = "LISP command";
+    const SYSVAR: &str = "System variable";
+    let up = prefix.to_ascii_uppercase();
+    let row = |name: &str, label: &'static str| Suggestion { id: name.to_string(), display: name.to_string(), label };
+    let sysvars = cadcraft_engine::sysvars::names();
+    let mut out: Vec<Suggestion> = Vec::new();
+    match exact {
+        Some(s) => out.push(s),
+        None if lisp.contains(&up) => out.push(row(&up, LISP)),
+        None if sysvars.binary_search(&up.as_str()).is_ok() => out.push(row(&up, SYSVAR)),
+        None => {}
+    }
+    let taken = |out: &[Suggestion], id: &str| out.iter().any(|o| o.id.eq_ignore_ascii_case(id));
+    let mut named: Vec<Suggestion> = names;
+    named.extend(lisp.iter().filter(|n| n.starts_with(&up)).map(|n| row(n, LISP)));
+    named.sort_by(|a, b| (a.id.len(), &a.id).cmp(&(b.id.len(), &b.id)));
+    let mut vars: Vec<&str> = sysvars.iter().copied().filter(|n| n.starts_with(&up)).collect();
+    vars.sort_by_key(|n| (n.len(), *n));
+    for s in named.into_iter().chain(aliases).chain(vars.into_iter().map(|n| row(n, SYSVAR))) {
+        if out.len() >= 8 {
+            break;
+        }
+        if !taken(&out, &s.id) {
+            out.push(s);
+        }
+    }
     out
 }
 
@@ -322,6 +385,9 @@ fn enable_ime(app: &mut CadApp, ctx: &egui::Context) {
 
 /// Handle keyboard input destined for the command line (when no text field has focus).
 pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
+    if !app.ui.show_command_line {
+        app.cmd.area = None;
+    }
     if ctx.egui_wants_keyboard_input() {
         app.cmd.preedit.clear();
         app.cmd.ime_on = false;
@@ -395,6 +461,10 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                 app.cmd.preedit.clear();
                 if text != "\n" && text != "\r" {
                     app.cmd.buffer.push_str(&text);
+                    // As typed letters: the AutoComplete list starts over for the new text.
+                    app.cmd.suggestion = 0;
+                    app.cmd.completion_hidden = false;
+                    app.cmd.history_pos = None;
                 }
             }
             egui::Event::Ime(_) => {}
@@ -516,7 +586,7 @@ fn complete_command(app: &mut CadApp) {
     if typed.is_empty() || (!chosen && app.session.knows_command(typed)) {
         return;
     }
-    let sug = suggestions(typed);
+    let sug = suggestions_for(app, typed);
     if let Some(s) = sug.get(app.cmd.suggestion).or(sug.first()) {
         app.cmd.buffer = s.id.clone();
     }
@@ -524,7 +594,12 @@ fn complete_command(app: &mut CadApp) {
 
 /// The AutoComplete list is showing (a command name is being typed).
 fn suggesting(app: &CadApp) -> bool {
-    !app.session.prompting() && app.cmd.history_pos.is_none() && !suggestions(&app.cmd.buffer).is_empty()
+    !app.session.prompting() && app.cmd.history_pos.is_none() && !suggestions_for(app, &app.cmd.buffer).is_empty()
+}
+
+/// The AutoComplete list for what is typed, with the drawing's LISP commands.
+fn suggestions_for(app: &CadApp, typed: &str) -> Vec<Suggestion> {
+    suggestions(typed, &app.session.lisp_commands())
 }
 
 fn visible_lines(app: &CadApp, canvas: Rect, bar: Rect) -> usize {
@@ -666,7 +741,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     );
     // AutoComplete list.
     if !app.session.prompting() {
-        let sug = suggestions(&app.cmd.buffer);
+        let sug = suggestions_for(app, &app.cmd.buffer);
         if !sug.is_empty() {
             let rh = 20.0;
             let lr = Rect::from_min_size(
@@ -728,7 +803,7 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
     let grip = Rect::from_min_max(pos2(bar.left(), top - 3.0), pos2(bar.right(), top + 3.0));
     let mut all = bar.union(grip);
     if !app.session.prompting() {
-        let k = suggestions(&app.cmd.buffer).len();
+        let k = suggestions_for(app, &app.cmd.buffer).len();
         if k > 0 {
             let above = if n == 0 { 0.0 } else { LINE_H * n as f32 + 6.0 };
             all = all.union(Rect::from_min_size(pos2(bar.left(), bar.top() - 6.0 - 20.0 * k as f32 - above), vec2(bar.width(), 1.0)));
@@ -744,6 +819,10 @@ fn zones(app: &CadApp, canvas: Rect, bar: Rect) -> Zones {
 fn history(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect, bar: Rect) {
     let z = zones(app, canvas, bar);
     let resp = ui.interact(z.all, ui.scope_id().with("cmdline"), Sense::click_and_drag());
+    app.cmd.area = Some(z.all);
+    if let Some(o) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten()) {
+        app.cmd.clicked = z.all.contains(o);
+    }
     let at = resp.hover_pos().or(resp.interact_pointer_pos());
     let on_grip = |p: Pos2| z.grip.contains(p) && z.window.is_none();
     let on_toggle = |p: Pos2| z.chevron.contains(p) || z.lines.is_some_and(|r| r.contains(p));
@@ -836,6 +915,52 @@ mod tests {
 
     fn press(app: &mut CadApp, ctx: &egui::Context, at: Pos2, pressed: bool) {
         frame(app, ctx, vec![Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: egui::Modifiers::default() }]);
+    }
+
+    #[test]
+    fn tab_leaves_free_text_at_a_prompt_alone() {
+        use cadcraft_engine::geom::Vec2;
+        let mut app = CadApp::new(Session::new(), crate::Services::default());
+        app.run("text", serde_json::json!({"at": [0, 0], "text": "HELLO", "height": 2.5})).unwrap();
+        app.start("textedit");
+        app.session.input(Input::Point(Vec2::new(1.0, 1.0))).unwrap();
+        app.cmd.buffer = "li".into();
+        tab(&mut app);
+        assert_eq!(app.cmd.buffer, "li");
+    }
+
+    #[test]
+    fn ctrl_v_pastes_into_the_command_line_only_after_a_click_on_it_with_the_pointer_still_there() {
+        let mut app = CadApp::new(Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        frame(&mut app, &ctx, Vec::new());
+        frame(&mut app, &ctx, Vec::new());
+        let area = app.cmd.area.expect("the command line is shown");
+        let on = area.center_bottom() - vec2(0.0, 8.0);
+        let off = pos2(area.center().x, area.top() - 200.0);
+        let click = |app: &mut CadApp, at: Pos2| {
+            frame(app, &ctx, vec![Event::PointerMoved(at)]);
+            press(app, &ctx, at, true);
+            press(app, &ctx, at, false);
+        };
+        let objects = |app: &CadApp| app.session.doc().map(|d| d.model.iter().count()).unwrap_or(0);
+        let before = objects(&app);
+        // Clicked on the command line and still over it: the text is typed there, one line.
+        click(&mut app, on);
+        frame(&mut app, &ctx, vec![Event::Paste("cer\nline 2".into())]);
+        assert_eq!(app.cmd.buffer, "cer");
+        assert_eq!(objects(&app), before);
+        assert_eq!(app.cmd.suggestion, 0);
+        // Clicked on the command line, then the pointer left it: the paste goes to the drawing.
+        app.cmd.buffer.clear();
+        frame(&mut app, &ctx, vec![Event::PointerMoved(off)]);
+        frame(&mut app, &ctx, vec![Event::Paste("cer".into())]);
+        assert!(app.cmd.buffer.is_empty());
+        // A click in the drawing, then the pointer back over the command line: the drawing again.
+        click(&mut app, off);
+        frame(&mut app, &ctx, vec![Event::PointerMoved(on)]);
+        frame(&mut app, &ctx, vec![Event::Paste("cer".into())]);
+        assert!(app.cmd.buffer.is_empty());
     }
 
     #[test]
@@ -969,9 +1094,40 @@ mod delete_key_tests {
 mod autocomplete_tests {
     use super::*;
 
+    fn suggestions_en(prefix: &str) -> Vec<Suggestion> {
+        suggestions(prefix, &[])
+    }
+
+    #[test]
+    fn lisp_commands_and_system_variables_are_offered_like_commands() {
+        let lisp = vec!["DIMC".to_string(), "ZAP".to_string()];
+        // An exact LISP name comes first: Enter runs it.
+        let dimc = suggestions("dimc", &lisp);
+        assert_eq!((dimc[0].id.as_str(), dimc[0].label), ("DIMC", "LISP command"));
+        assert!(dimc.iter().skip(1).all(|s| s.id != "DIMC"));
+        // One more letter: the other names.
+        assert!(suggestions("dimco", &lisp).iter().all(|s| s.id != "DIMC"));
+        // A LISP name ranks among the command names, shortest first.
+        assert!(suggestions("z", &lisp).iter().any(|s| s.id == "ZAP" && s.label == "LISP command"));
+        // System variables follow the commands; an exact one comes first.
+        let osm = suggestions_en("osm");
+        assert!(osm.iter().any(|s| s.id == "OSMODE" && s.label == "System variable"), "{osm:?}");
+        assert_eq!(suggestions_en("osmode")[0].id, "OSMODE");
+        assert!(suggestions_en("x").len() <= 8);
+    }
+
+    #[test]
+    fn a_complete_name_with_nothing_else_has_no_completion() {
+        let mut app = CadApp::new(cadcraft_engine::Session::empty(), crate::Services::default());
+        app.cmd.buffer = "circle".to_string();
+        assert_eq!(completion(&app), None);
+        app.cmd.buffer = "circ".to_string();
+        assert_eq!(completion(&app).as_deref(), Some("LE"));
+    }
+
     #[test]
     fn exact_alias_is_first_suggestion_with_alias_display() {
-        let rec = suggestions("rec");
+        let rec = suggestions_en("rec");
         assert!(!rec.is_empty());
         assert_eq!(rec[0].id, "RECTANG");
         assert_eq!(rec[0].display, "REC (RECTANG)");
@@ -981,26 +1137,26 @@ mod autocomplete_tests {
         assert_eq!(rec[1].id, "RECOVER");
         assert_eq!(rec[1].display, "RECOVER");
 
-        let l = suggestions("l");
+        let l = suggestions_en("l");
         assert_eq!(l[0].id, "LINE");
         assert_eq!(l[0].display, "L (LINE)");
 
-        let c = suggestions("c");
+        let c = suggestions_en("c");
         assert_eq!(c[0].id, "CIRCLE");
         assert_eq!(c[0].display, "C (CIRCLE)");
 
-        let co = suggestions("co");
+        let co = suggestions_en("co");
         assert_eq!(co[0].id, "COPY");
         assert_eq!(co[0].display, "CO (COPY)");
     }
 
     #[test]
     fn prefix_without_alias_shows_command_id() {
-        let rect = suggestions("rect");
+        let rect = suggestions_en("rect");
         assert_eq!(rect[0].id, "RECTANG");
         assert_eq!(rect[0].display, "RECTANG");
 
-        let line = suggestions("line");
+        let line = suggestions_en("line");
         assert_eq!(line[0].id, "LINE");
         assert_eq!(line[0].display, "LINE");
     }
@@ -1011,7 +1167,7 @@ mod autocomplete_tests {
         app.cmd.buffer = "rec".to_string();
         assert_eq!(completion(&app).as_deref(), Some("TANG"));
         // Tab moves down the list as Down does, back to the first row after the last.
-        let n = suggestions("rec").len();
+        let n = suggestions_en("rec").len();
         assert!(n > 1);
         tab(&mut app);
         assert_eq!(app.cmd.buffer, "rec");
