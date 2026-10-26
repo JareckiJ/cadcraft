@@ -20,8 +20,9 @@ pub struct CmdLine {
     pub history_pos: Option<usize>,
     /// The AutoComplete row Enter takes (Up/Down/Tab move it; typing puts it back on the first).
     pub suggestion: usize,
-    /// Backspace erased the completion shown after the typed name; Up, Down or Tab show it again.
-    pub completion_hidden: bool,
+    /// The text on which Backspace erased the completion shown after the typed name: it stays
+    /// hidden while that text is unchanged, until Up, Down or Tab show it again.
+    completion_hidden_for: Option<String>,
     /// The command line's whole area last frame (screen), while it is shown.
     area: Option<Rect>,
     /// The last click went to the command line: Ctrl+V pastes text into it while the pointer
@@ -112,32 +113,37 @@ fn tab(app: &mut CadApp) {
     {
         // Both values typed: Tab locks the second one as well.
         app.cmd.locked_second = Some(app.cmd.buffer.clone());
-    } else if suggesting(app) {
+    } else {
         // Tab moves down the AutoComplete list as Down does.
         step_suggestion(app, 1);
     }
 }
 
-/// Moves the chosen AutoComplete row by `delta`, wrapping from the last row to the first and back,
-/// and shows its completion again.
-fn step_suggestion(app: &mut CadApp, delta: isize) {
-    let n = suggestions_for(app, &app.cmd.buffer).len();
+/// While the AutoComplete list is showing, moves its chosen row by `delta`, wrapping from the
+/// last row to the first and back, and shows its completion again. `false`: no list showing.
+fn step_suggestion(app: &mut CadApp, delta: isize) -> bool {
+    let n = listed(app).len();
     if n == 0 {
-        return;
+        return false;
     }
     let cur = app.cmd.suggestion.min(n - 1);
     app.cmd.suggestion = if delta < 0 { cur.checked_sub(1).unwrap_or(n - 1) } else { (cur + 1) % n };
-    app.cmd.completion_hidden = false;
+    app.cmd.completion_hidden_for = None;
+    true
 }
 
 /// The rest of the chosen AutoComplete row's name after what was typed (`CO` + `PY`), shown
 /// selected on the command line; `None` when nothing is offered or Backspace erased it.
 pub fn completion(app: &CadApp) -> Option<String> {
-    if app.cmd.completion_hidden || !app.cmd.preedit.is_empty() || !suggesting(app) {
+    completion_in(app, &listed(app))
+}
+
+/// [`completion`] from the AutoComplete rows `sug` already worked out for the typed text.
+fn completion_in(app: &CadApp, sug: &[Suggestion]) -> Option<String> {
+    if app.cmd.completion_hidden() || !app.cmd.preedit.is_empty() {
         return None;
     }
     let typed = app.cmd.buffer.as_str();
-    let sug = suggestions_for(app, typed);
     let s = sug.get(app.cmd.suggestion).or(sug.first())?;
     let head = s.id.get(..typed.len())?;
     let rest = s.id.get(typed.len()..)?;
@@ -160,7 +166,6 @@ pub fn paste(app: &mut CadApp, text: &str) {
     app.cmd.preedit.clear();
     app.cmd.buffer.extend(line.chars().filter(|c| !c.is_control()).take(MAX_PASTE));
     app.cmd.suggestion = 0;
-    app.cmd.completion_hidden = false;
     app.cmd.history_pos = None;
 }
 
@@ -294,6 +299,11 @@ impl CmdLine {
     /// Tab locked the second Dynamic Input value and nothing was typed since.
     pub fn second_locked(&self) -> bool {
         self.locked_second.as_deref() == Some(self.buffer.as_str())
+    }
+
+    /// Backspace erased the completion of the text as it is now.
+    fn completion_hidden(&self) -> bool {
+        self.completion_hidden_for.as_deref() == Some(self.buffer.as_str())
     }
 
     /// The options menu row under `at` (screen), if the menu is open.
@@ -448,7 +458,6 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     app.cmd.preedit.clear();
                     app.cmd.buffer.push_str(&t);
                     app.cmd.suggestion = 0;
-                    app.cmd.completion_hidden = false;
                     // Editing a recalled command leaves the history: AutoComplete applies again.
                     app.cmd.history_pos = None;
                 }
@@ -463,7 +472,6 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     app.cmd.buffer.push_str(&text);
                     // As typed letters: the AutoComplete list starts over for the new text.
                     app.cmd.suggestion = 0;
-                    app.cmd.completion_hidden = false;
                     app.cmd.history_pos = None;
                 }
             }
@@ -472,7 +480,6 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                 Key::Enter => submit(app),
                 Key::Escape => {
                     app.cmd.buffer.clear();
-                    app.cmd.completion_hidden = false;
                     app.cmd.preedit.clear();
                     app.session.cancel();
                 }
@@ -489,19 +496,18 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     if erase {
                         let _ = app.run("erase.selection", serde_json::json!({}));
                     } else if completion(app).is_some() {
-                        // The completion goes first; the chosen row stays chosen.
-                        app.cmd.completion_hidden = true;
+                        // The completion goes first, and the first row is chosen again.
+                        app.cmd.completion_hidden_for = Some(app.cmd.buffer.clone());
+                        app.cmd.suggestion = 0;
                     } else {
                         app.cmd.buffer.pop();
                         app.cmd.suggestion = 0;
                         app.cmd.history_pos = None;
-                        app.cmd.completion_hidden = true;
+                        app.cmd.completion_hidden_for = Some(app.cmd.buffer.clone());
                     }
                 }
-                Key::ArrowUp if !modifiers.any() && suggesting(app) => step_suggestion(app, -1),
-                Key::ArrowDown if !modifiers.any() && suggesting(app) => step_suggestion(app, 1),
                 Key::ArrowUp if !modifiers.any() => {
-                    if !app.cmd.history.is_empty() {
+                    if !step_suggestion(app, -1) && !app.cmd.history.is_empty() {
                         let n = app.cmd.history.len();
                         let pos = app.cmd.history_pos.map(|p| p.saturating_sub(1)).unwrap_or(n - 1);
                         app.cmd.history_pos = Some(pos);
@@ -509,7 +515,8 @@ pub fn keyboard(app: &mut CadApp, ctx: &egui::Context) {
                     }
                 }
                 Key::ArrowDown if !modifiers.any() => {
-                    if !options_key(app, 1)
+                    if !step_suggestion(app, 1)
+                        && !options_key(app, 1)
                         && let Some(p) = app.cmd.history_pos
                     {
                         let np = p + 1;
@@ -553,7 +560,6 @@ pub fn submit(app: &mut CadApp) {
     complete_command(app);
     let text = std::mem::take(&mut app.cmd.buffer);
     app.cmd.suggestion = 0;
-    app.cmd.completion_hidden = false;
     app.cmd.locked_second = None;
     app.cmd.history_pos = None;
     if !text.trim().is_empty() && !app.session.prompting() {
@@ -592,9 +598,10 @@ fn complete_command(app: &mut CadApp) {
     }
 }
 
-/// The AutoComplete list is showing (a command name is being typed).
-fn suggesting(app: &CadApp) -> bool {
-    !app.session.prompting() && app.cmd.history_pos.is_none() && !suggestions_for(app, &app.cmd.buffer).is_empty()
+/// The AutoComplete rows Up, Down, Tab and Enter work on: none while a command prompts or a
+/// recalled command is shown.
+fn listed(app: &CadApp) -> Vec<Suggestion> {
+    if app.session.prompting() || app.cmd.history_pos.is_some() { Vec::new() } else { suggestions_for(app, &app.cmd.buffer) }
 }
 
 /// The AutoComplete list for what is typed, with the drawing's LISP commands.
@@ -709,8 +716,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
     let gw = g.size().x;
     p.galley(pos2(x, bar.center().y - g.size().y / 2.0), g, t.text);
     let mut caret_x = x + gw;
+    // The AutoComplete list, worked out once for the completion and the list below.
+    let sug = if app.session.prompting() { Vec::new() } else { suggestions_for(app, &app.cmd.buffer) };
     // The chosen AutoComplete row's completion follows the typed name, selected.
-    if let Some(rest) = completion(app) {
+    if let Some(rest) = completion_in(app, &sug).filter(|_| app.cmd.history_pos.is_none()) {
         let g = p.layout_no_wrap(rest, font.clone(), t.text);
         let r = Rect::from_min_size(pos2(caret_x, bar.top() + 4.0), vec2(g.size().x, h - 8.0));
         p.rect_filled(r, 0.0, t.select_bg);
@@ -740,37 +749,31 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui, canvas: Rect) {
         false,
     );
     // AutoComplete list.
-    if !app.session.prompting() {
-        let sug = suggestions_for(app, &app.cmd.buffer);
-        if !sug.is_empty() {
-            let rh = 20.0;
-            let lr = Rect::from_min_size(
-                pos2(
-                    bar.left() + 24.0,
-                    bar.top() - 6.0 - rh * sug.len() as f32 - (if lines.is_empty() { 0.0 } else { 16.0 * lines.len() as f32 + 6.0 }),
-                ),
-                vec2((bar.width() - 24.0).max(0.0), rh * sug.len() as f32),
+    if !sug.is_empty() {
+        let rh = 20.0;
+        let lr = Rect::from_min_size(
+            pos2(bar.left() + 24.0, bar.top() - 6.0 - rh * sug.len() as f32 - (if lines.is_empty() { 0.0 } else { 16.0 * lines.len() as f32 + 6.0 })),
+            vec2((bar.width() - 24.0).max(0.0), rh * sug.len() as f32),
+        );
+        p.rect_filled(lr, 3.0, t.list_bg);
+        p.rect_stroke(lr, 3.0, Stroke::new(1.0, t.cmd_border), egui::StrokeKind::Inside);
+        for (i, s) in sug.iter().enumerate() {
+            let r = Rect::from_min_size(pos2(lr.left(), lr.top() + rh * i as f32), vec2(lr.width(), rh));
+            let resp = ui.interact(r, ui.scope_id().with(("sug", i)), Sense::click());
+            if resp.hovered() || i == app.cmd.suggestion.min(sug.len() - 1) {
+                p.rect_filled(r.shrink(1.0), 2.0, if resp.hovered() { t.cmd_keyword_hover } else { t.list_row });
+            }
+            p.text(Pos2::new(r.left() + 8.0, r.center().y), egui::Align2::LEFT_CENTER, &s.display, crate::theme::body(), t.text);
+            p.text(
+                Pos2::new(r.right() - 8.0, r.center().y),
+                egui::Align2::RIGHT_CENTER,
+                crate::i18n::t(s.label),
+                crate::theme::small(),
+                t.text_faint,
             );
-            p.rect_filled(lr, 3.0, t.list_bg);
-            p.rect_stroke(lr, 3.0, Stroke::new(1.0, t.cmd_border), egui::StrokeKind::Inside);
-            for (i, s) in sug.iter().enumerate() {
-                let r = Rect::from_min_size(pos2(lr.left(), lr.top() + rh * i as f32), vec2(lr.width(), rh));
-                let resp = ui.interact(r, ui.scope_id().with(("sug", i)), Sense::click());
-                if resp.hovered() || i == app.cmd.suggestion.min(sug.len() - 1) {
-                    p.rect_filled(r.shrink(1.0), 2.0, if resp.hovered() { t.cmd_keyword_hover } else { t.list_row });
-                }
-                p.text(Pos2::new(r.left() + 8.0, r.center().y), egui::Align2::LEFT_CENTER, &s.display, crate::theme::body(), t.text);
-                p.text(
-                    Pos2::new(r.right() - 8.0, r.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    crate::i18n::t(s.label),
-                    crate::theme::small(),
-                    t.text_faint,
-                );
-                if resp.clicked() {
-                    app.cmd.buffer.clear();
-                    app.start(&s.id.to_ascii_lowercase());
-                }
+            if resp.clicked() {
+                app.cmd.buffer.clear();
+                app.start(&s.id.to_ascii_lowercase());
             }
         }
     }

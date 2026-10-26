@@ -145,17 +145,22 @@ fn the_chosen_row_completes_the_typed_name_until_backspace() {
     frame(&mut a, &ctx);
     let rest = cmdline::completion(&a).expect("the second row completes the typed name");
     assert!(second.ends_with(&rest), "{rest} completes {second}");
-    // Backspace erases only the completion; the typed name and the chosen row stay.
+    // Backspace erases only the completion, and the first row is chosen again.
     a.synthetic.push(key(egui::Key::Backspace));
     frame(&mut a, &ctx);
     assert_eq!(cmdline::completion(&a), None);
     assert_eq!(a.cmd.buffer, "dimc");
-    // Tab shows a completion again (the next row's); Up comes back to the second row, and Enter
-    // runs it although Backspace erased its completion.
+    assert_eq!(a.cmd.suggestion, 0);
+    // Tab shows a completion again: the second row's.
     a.synthetic.push(egui::Event::Text("\t".into()));
     frame(&mut a, &ctx);
-    assert!(cmdline::completion(&a).is_some());
-    assert_eq!(press(&mut a, &ctx, "", &["ArrowUp", "Backspace", "Enter"]).as_deref(), Some(second.as_str()));
+    assert_eq!(cmdline::completion(&a), Some(rest));
+    a.session.cancel();
+    a.cmd.buffer.clear();
+    frame(&mut a, &ctx);
+    // Enter after Backspace runs the first row, not the one Down chose.
+    let first = press(&mut a, &ctx, "dimc", &["Enter"]);
+    assert_eq!(press(&mut a, &ctx, "dimc", &["ArrowDown", "Backspace", "Enter"]), first);
 }
 
 #[test]
@@ -193,6 +198,8 @@ fn a_row_chosen_with_down_wins_over_an_exact_alias() {
     assert!(chosen.len() > 1 && !chosen.eq_ignore_ascii_case("line"), "the chosen row runs, not LINE: {chosen}");
     // Down then Up comes back to the first row: the alias runs as typed again.
     assert_eq!(press(&mut a, &ctx, "l", &["ArrowDown", "ArrowUp", "Enter"]).as_deref(), Some("l"));
+    // Erasing the chosen row's completion chooses the first row again: the alias runs.
+    assert_eq!(press(&mut a, &ctx, "l", &["ArrowDown", "Backspace", "Enter"]).as_deref(), Some("l"));
 }
 
 #[test]
