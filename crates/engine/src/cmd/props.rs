@@ -7,10 +7,11 @@ pub use matchprop::MatchProps;
 
 use cadcraft_color::Color;
 use cadcraft_doc::{EntityKind, Lineweight, Transparency};
-use cadcraft_geom::Vec3;
+use cadcraft_geom::{Vec2, Vec3};
 use serde_json::{Value, json};
 
-use super::*;
+use super::{CommandSpec, always, bad, bool_or, f64_req, find_command, ok, point_req, point_value, str_param, targets};
+
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -1397,9 +1398,8 @@ fn rejustify_mtext(d: &cadcraft_doc::Drawing, t: &mut cadcraft_doc::MText, attac
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde_json::json;
-
-    use crate::Session;
 
     #[test]
     fn properties_set_rejects_unloaded_linetype() {

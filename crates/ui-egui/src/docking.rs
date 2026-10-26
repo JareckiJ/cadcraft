@@ -2,8 +2,8 @@
 //! Document contents remain owned by their existing view implementations.
 
 use craft_ui::docking::{
-    Action, DockArea, DockCommand, DockOperation, DockStyle, FloatSpace, Layout, Location, Node, PanelLimits, Permissions, Placement, StackEntry,
-    UiDock, Zone,
+    Action, Column, DockArea, DockCommand, DockContent, DockHeights, DockOperation, DockStyle, FloatSpace, Group, Layout, Location, Node,
+    PanelLimits, Permissions, Placement, Side, Sides, Target, UiDock, Zone,
 };
 use craft_ui::layout::{SplitAxis, SplitSize};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,19 @@ impl Panel {
             Self::Blocks => "Blocks",
         }
     }
+    /// The icon a palette shows in a column collapsed to icons.
+    pub fn icon(self) -> Option<crate::icons::Icon> {
+        use crate::icons::Icon;
+        match self {
+            Self::Canvas => None,
+            Self::ToolSets => Some(Icon::Switcher),
+            Self::QuickCalc => Some(Icon::Table),
+            Self::Layers => Some(Icon::Layers),
+            Self::Properties => Some(Icon::Properties),
+            Self::ExternalRefs => Some(Icon::Attach),
+            Self::Blocks => Some(Icon::Blocks),
+        }
+    }
     /// Palettes outside the default arrangement, opened on request (QUICKCALC, BLOCKSPALETTE).
     pub const ON_DEMAND: &[Self] = &[Self::QuickCalc, Self::Blocks];
 }
@@ -67,31 +80,106 @@ fn split(axis: SplitAxis, size: SplitSize, first: Node<Panel>, second: Node<Pane
 /// The saved panel arrangement: craft-ui's workspace over CADCraft's panels.
 pub type Workspace = craft_ui::docking::Workspace<Panel>;
 
-/// Tool Sets on the left, the drawing, and the Layers and Properties accordion on the right.
+/// The panel layout's shape version, saved beside it. Layouts saved without it, or with an
+/// older one, are the split frames from before the dock columns and give way to the default.
+pub const LAYOUT_VERSION: u32 = 2;
+
+/// Width of the left dock's Tool Sets column.
+pub const TOOL_SETS_WIDTH: f32 = 220.0;
+/// Width of the right dock's palettes column.
+pub const PALETTES_WIDTH: f32 = 300.0;
+/// Layers' body height above Properties in a dock column.
+const LAYERS_HEIGHT: f32 = 280.0;
+
+fn dock(side: Side, width: f32, groups: &[Panel]) -> Node<Panel> {
+    let groups = groups.iter().map(|panel| Group::new(vec![*panel], 0)).collect();
+    Node::Dock { side, columns: vec![Column::new(groups, width)] }
+}
+
+/// Tool Sets in the left dock, the drawing, and Layers above Properties in the right dock.
 pub fn default_workspace() -> Workspace {
     Workspace::new(Layout {
         root: Some(split(
             SplitAxis::Horizontal,
-            SplitSize::FixedFirst(220.0),
-            tabs(Panel::ToolSets),
+            SplitSize::FixedFirst(TOOL_SETS_WIDTH),
+            dock(Side::Start, TOOL_SETS_WIDTH, &[Panel::ToolSets]),
             split(
                 SplitAxis::Horizontal,
-                SplitSize::FixedSecond(300.0),
+                SplitSize::FixedSecond(PALETTES_WIDTH),
                 tabs(Panel::Canvas),
-                Node::Stack {
-                    entries: vec![
-                        StackEntry { panel: Panel::Layers, open: true, height: Some(280.0) },
-                        StackEntry { panel: Panel::Properties, open: true, height: None },
-                    ],
-                },
+                dock(Side::End, PALETTES_WIDTH, &[Panel::Layers, Panel::Properties]),
             ),
         )),
         floating: Vec::new(),
     })
 }
 
+/// The dock a panel belongs in: Tool Sets on the left, the palettes on the right.
+fn home_side(panel: Panel) -> (Side, f32) {
+    if panel == Panel::ToolSets { (Side::Start, TOOL_SETS_WIDTH) } else { (Side::End, PALETTES_WIDTH) }
+}
+
+/// The panels of every dock group on `side`: columns from the window edge inwards, groups from
+/// top to bottom.
+fn dock_groups(layout: &Layout<Panel>, side: Side) -> Vec<Vec<Vec<Panel>>> {
+    let mut nodes: Vec<&Node<Panel>> = layout.root.iter().collect();
+    let mut seen = 0usize;
+    while let Some(node) = nodes.pop() {
+        seen = seen.saturating_add(1);
+        if seen > 4 * craft_ui::docking::MAX_PANELS {
+            break;
+        }
+        match node {
+            Node::Split { first, second, .. } => nodes.extend([&**first, &**second]),
+            Node::Dock { side: s, columns } if *s == side => {
+                return columns.iter().map(|column| column.groups.iter().map(|group| group.panels.clone()).collect()).collect();
+            }
+            _ => {}
+        }
+    }
+    Vec::new()
+}
+
+fn docked(layout: &Layout<Panel>, panel: Panel) -> bool {
+    [Side::Start, Side::End].into_iter().any(|side| dock_groups(layout, side).iter().flatten().flatten().any(|p| *p == panel))
+}
+
+/// The docked neighbour a panel with no recorded place opens beside, as a new group above
+/// (`false`) or below (`true`) it: Layers above Properties, External References and QuickCalc
+/// below them, Tool Sets at the top of the left dock.
+fn home_anchor(layout: &Layout<Panel>, panel: Panel) -> Option<(Panel, bool)> {
+    let neighbours: &[(Panel, bool)] = match panel {
+        Panel::Canvas | Panel::ToolSets => &[],
+        Panel::Layers => &[(Panel::Properties, false), (Panel::ExternalRefs, false)],
+        Panel::Properties => &[(Panel::Layers, true), (Panel::ExternalRefs, false)],
+        Panel::ExternalRefs => &[(Panel::Properties, true), (Panel::Layers, true)],
+        Panel::QuickCalc | Panel::Blocks => &[(Panel::ExternalRefs, true), (Panel::Properties, true), (Panel::Layers, true)],
+    };
+    if let Some(found) = neighbours.iter().copied().find(|(neighbour, _)| docked(layout, *neighbour)) {
+        return Some(found);
+    }
+    let (side, _) = home_side(panel);
+    let columns = dock_groups(layout, side);
+    let column = columns.first()?;
+    if panel == Panel::ToolSets {
+        column.first().and_then(|group| group.first()).map(|anchor| (*anchor, false))
+    } else {
+        column.last().and_then(|group| group.first()).map(|anchor| (*anchor, true))
+    }
+}
+
+/// The actions that open a panel with no recorded place in its dock: a new group beside its
+/// docked neighbour, else a new dock on its side at its default width.
+fn home(layout: &Layout<Panel>, panel: Panel) -> Vec<Action<Panel>> {
+    if let Some((anchor, below)) = home_anchor(layout, panel) {
+        return vec![Action::OpenAt { panel, anchor, placement: Placement::Group { below, height: None } }];
+    }
+    let (side, width) = home_side(panel);
+    vec![Action::Open { panel, anchor: None }, Action::MovePanel { panel, to: Target::NewDock { side } }, Action::ResizeColumn { panel, width }]
+}
+
 /// craft-ui's checks plus the drawing view's: a saved or hand-edited file cannot hide, float,
-/// group or collapse it, or restore a palette over it.
+/// group, collapse or dock it, or restore a palette over it.
 pub fn validate(workspace: &Workspace) -> Result<(), String> {
     workspace.validate().map_err(|error| error.to_string())?;
     if !workspace.layout.contains(&Panel::Canvas) {
@@ -128,11 +216,17 @@ pub fn validate(workspace: &Workspace) -> Result<(), String> {
     Ok(())
 }
 
-/// Show a panel and select it at its recorded place (craft-ui places a panel it has no place
-/// for), keeping the drawing view's rules.
+/// Show a panel and select it at its recorded place, keeping the drawing view's rules. A panel
+/// with no recorded place opens in its dock ([`home`]); one whose recorded place is gone joins
+/// its docked neighbour's group.
 pub fn reveal_panel(workspace: &mut Workspace, panel: Panel) -> Result<(), String> {
     let mut next = workspace.clone();
-    next.set_visible(panel, true, None, permissions).map_err(|error| error.to_string())?;
+    if next.layout.contains(&panel) || next.hidden.iter().any(|(id, _)| *id == panel) {
+        let fallback = home_anchor(&next.layout, panel).map(|(anchor, _)| anchor);
+        next.set_visible(panel, true, fallback, permissions).map_err(|error| error.to_string())?;
+    } else {
+        next.apply_all(home(&next.layout, panel).into_iter().chain([Action::Activate { panel }]), permissions).map_err(|error| error.to_string())?;
+    }
     validate(&next)?;
     *workspace = next;
     Ok(())
@@ -193,7 +287,7 @@ fn sync(workspace: &mut Workspace, app: &crate::CadApp) -> Result<(), String> {
         set_visible(workspace, Panel::Layers, false)?;
         set_visible(workspace, Panel::Properties, false)?;
     } else if !workspace.layout.contains(&Panel::Layers) && !workspace.layout.contains(&Panel::Properties) {
-        // Reopen the last surviving accordion entry before restoring its earlier sibling.
+        // Reopen the palette that closed last before the one recorded beside it.
         set_visible(workspace, Panel::Properties, true)?;
         set_visible(workspace, Panel::Layers, true)?;
     }
@@ -214,6 +308,10 @@ pub fn command(app: &mut crate::CadApp, reset: bool, params: &Value) -> Result<V
     } else {
         sync(&mut workspace, app)?;
         apply_command(&mut workspace, params)?;
+        // An opened panel's floating window comes to the front, in its own OS window too.
+        if matches!(params.get("operation").and_then(Value::as_str), Some("open" | "activate")) {
+            app.raise_panel = params.get("panel").and_then(|panel| serde_json::from_value(panel.clone()).ok());
+        }
     }
     publish_visibility(app, &workspace);
     app.ui.docking = workspace;
@@ -242,19 +340,70 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
     style.border = egui::Stroke::new(1.0, t.border);
     style.accent = t.accent;
     style.font = crate::theme::body();
-    // Panels arrange in a split tree around the drawing; floating title bars only move windows.
-    style.new_dock_zones = false;
+    // AutoCAD's palettes dock only in the left and right dock columns: a window edge without a
+    // dock makes one, and neither the drawing nor the top and bottom edges take a drop.
+    // Floating title bars only move windows.
+    style.side_edge_zones = false;
+    style.new_dock_zones = true;
+    style.drop_edges = Sides::NONE;
     style.title_bar_docks = false;
-    let output = DockArea::new(egui::Id::unique("cadcraft-docking")).show_with_limits(
-        ui,
-        &workspace.layout,
-        &style,
-        |panel| crate::i18n::t(panel.label()).into(),
-        permissions,
-        panel_limits,
-        |ui, panel| match panel {
+    let mut area = DockArea::new(egui::Id::unique("cadcraft-docking")).input_blocked(native_input_blocked(app, ui.ctx()));
+    if let Some(panel) = app.raise_panel.take() {
+        area = area.raise_panel(panel);
+    }
+    let mut output = area.show_content(ui, &workspace.layout, &style, &mut Panels { app });
+    // Keys typed in a floating panel's own OS window run the main window's shortcuts and
+    // command line; files dropped on one open like files dropped on the main window.
+    app.forward_native_input(ui.ctx(), std::mem::take(&mut output.forwarded_events), output.forwarded_modifiers);
+    #[cfg(not(target_arch = "wasm32"))]
+    for files in std::mem::take(&mut output.window_files) {
+        for file in files.dropped {
+            let path = file.path().to_string_lossy().to_string();
+            if !path.is_empty() {
+                app.open_path(&path);
+            }
+        }
+    }
+    // Existing panel close buttons and commands still own their visibility switches.
+    let rendered = workspace;
+    let mut workspace = app.ui.docking.clone();
+    let _ = sync(&mut workspace, app);
+    let stale = workspace != rendered;
+    if stale {
+        craft_ui::docking::cancel_drag::<Panel>(ui.ctx(), egui::Id::unique("cadcraft-docking"));
+    }
+    publish_visibility(app, &workspace);
+    app.ui.docking = workspace;
+    if stale {
+        return;
+    }
+    for action in output.actions {
+        if let Err(error) =
+            serde_json::to_value(action).map_err(|error| error.to_string()).and_then(|action| command(app, false, &json!({"action": action})))
+        {
+            app.set_status(format!("Panel move was not applied: {error}"));
+        }
+    }
+}
+
+/// Whether the floating panels' own OS windows ignore input: while a modal dialog is up, since
+/// egui's `Modal` blocks only the main window. egui's modal layer is last frame's; the app's
+/// state covers the frame a modal opens in.
+pub fn native_input_blocked(app: &crate::CadApp, ctx: &egui::Context) -> bool {
+    app.shows_modal() || ctx.memory(|memory| memory.top_modal_layer()).is_some()
+}
+
+/// The panels' contents, names, size limits and icons for the dock area.
+pub struct Panels<'a> {
+    pub app: &'a mut crate::CadApp,
+}
+
+impl DockContent<Panel> for Panels<'_> {
+    fn body(&mut self, ui: &mut egui::Ui, panel: &Panel) {
+        let app = &mut *self.app;
+        match panel {
             Panel::Canvas => {
-                ui.painter().rect_filled(ui.max_rect(), 0.0, t.canvas);
+                ui.painter().rect_filled(ui.max_rect(), 0.0, crate::theme::Tokens::get().canvas);
                 crate::canvas::show(app, ui);
             }
             Panel::ToolSets => crate::palettes::toolsets(app, ui),
@@ -274,34 +423,25 @@ pub fn show(app: &mut crate::CadApp, ui: &mut egui::Ui) {
             Panel::ExternalRefs => {
                 egui::ScrollArea::both().id_salt("dock-xrefs").auto_shrink([false, false]).show(ui, |ui| crate::xrefs::section(app, ui));
             }
-        },
-    );
-    // Existing panel close buttons and commands still own their visibility switches.
-    let rendered = workspace;
-    let mut workspace = app.ui.docking.clone();
-    let _ = sync(&mut workspace, app);
-    let stale = workspace != rendered;
-    if stale {
-        craft_ui::docking::cancel_drag::<Panel>(ui.ctx(), egui::Id::unique("cadcraft-docking"));
-    }
-    publish_visibility(app, &workspace);
-    app.ui.docking = workspace;
-    if stale {
-        return;
-    }
-    for action in output.actions {
-        // Tool Sets dragged to the top edge becomes the ribbon under the menu bar.
-        if let Action::Move { panel: Panel::ToolSets, anchor: Panel::Canvas, placement: Placement::Split(Zone::Top) } = &action {
-            if let Err(error) = apply_toolsets(app, ToolSetsAction::Ribbon, ui.ctx()) {
-                app.set_status(format!("Panel move was not applied: {error}"));
-            }
-            continue;
         }
-        if let Err(error) =
-            serde_json::to_value(action).map_err(|error| error.to_string()).and_then(|action| command(app, false, &json!({"action": action})))
-        {
-            app.set_status(format!("Panel move was not applied: {error}"));
-        }
+    }
+    fn logical_label(&self, panel: &Panel) -> String {
+        crate::i18n::t(panel.label()).into()
+    }
+    fn permissions(&self, panel: &Panel) -> Permissions {
+        permissions(panel)
+    }
+    fn limits(&self, panel: &Panel) -> PanelLimits {
+        panel_limits(panel)
+    }
+    fn dock_heights(&self, panel: &Panel) -> Option<DockHeights> {
+        // Layers keeps its list's height above Properties, which takes the rest of the column.
+        (*panel == Panel::Layers).then(|| DockHeights::new(LAYERS_HEIGHT))
+    }
+    fn paint_icon(&mut self, painter: &egui::Painter, rect: egui::Rect, panel: &Panel, _color: egui::Color32) -> bool {
+        let Some(icon) = panel.icon() else { return false };
+        crate::icons::paint(painter, rect, icon, false);
+        true
     }
 }
 
@@ -309,8 +449,8 @@ fn panel_limits(panel: &Panel) -> PanelLimits {
     let (min, max_width) = match panel {
         Panel::Canvas => (egui::vec2(300.0, 180.0), 1_000_000.0),
         Panel::QuickCalc => (egui::vec2(240.0, 160.0), 600.0),
-        Panel::Blocks => (egui::vec2(240.0, 200.0), 600.0),
         Panel::ToolSets => (egui::vec2(220.0, 150.0), 480.0),
+        Panel::Blocks => (egui::vec2(240.0, 200.0), 600.0),
         Panel::Layers | Panel::Properties | Panel::ExternalRefs => (egui::vec2(220.0, 100.0), 720.0),
     };
     PanelLimits { min, max: egui::vec2(max_width, 1_000_000.0) }
@@ -336,24 +476,6 @@ pub enum ToolSetsAction {
     /// Into the group (tabs or stack) that holds this panel.
     Group(Panel),
     Close,
-}
-
-/// Every panel of a node, in order.
-fn node_panels(node: &Node<Panel>, out: &mut Vec<Panel>) {
-    match node {
-        Node::Split { first, second, .. } => {
-            node_panels(first, out);
-            node_panels(second, out);
-        }
-        Node::Tabs { panels, .. } => out.extend(panels.iter().copied()),
-        Node::Stack { entries } => out.extend(entries.iter().map(|e| e.panel)),
-        Node::Dock { columns, .. } => {
-            for g in columns.iter().flat_map(|c| &c.groups) {
-                out.extend(g.panels.iter().copied());
-            }
-        }
-        _ => {}
-    }
 }
 
 /// The groups (tab groups, stacks and floating groups) of a layout, each as its panels.
@@ -438,9 +560,6 @@ pub fn toolsets_menu(ui: &mut egui::Ui, place: ToolSetsPlace, groups: &[(Panel, 
     item(ui, "Close Panel", ToolSetsAction::Close, out);
 }
 
-/// Width of Tool Sets pinned on the left.
-const PINNED_WIDTH: f32 = 220.0;
-
 /// Carry out a Tool Sets menu choice.
 pub fn apply_toolsets(app: &mut crate::CadApp, action: ToolSetsAction, ctx: &egui::Context) -> Result<(), String> {
     if action == ToolSetsAction::Close {
@@ -464,24 +583,11 @@ pub fn apply_toolsets(app: &mut crate::CadApp, action: ToolSetsAction, ctx: &egu
                 .map_err(|e| e.to_string())?;
         }
         ToolSetsAction::PinLeft => {
-            // Out of where it is, then back in as a column left of everything docked.
+            // Out of where it is, then back into the left dock (a new one when there is none).
             workspace.apply(Action::Close { panel: Panel::ToolSets }, permissions).map_err(|e| e.to_string())?;
-            let mut sibling = Vec::new();
-            if let Some(root) = &workspace.layout.root {
-                node_panels(root, &mut sibling);
-            }
-            let location = Location {
-                floating: None,
-                anchor: Some(Panel::Canvas),
-                placement: Placement::Split(Zone::Left),
-                size: Some(SplitSize::FixedFirst(PINNED_WIDTH)),
-                stack: None,
-                sibling,
-                group: None,
-            };
             workspace.hidden.retain(|(p, _)| *p != Panel::ToolSets);
-            workspace.hidden.push((Panel::ToolSets, location));
-            workspace.set_visible(Panel::ToolSets, true, None, permissions).map_err(|e| e.to_string())?;
+            let open = home(&workspace.layout, Panel::ToolSets).into_iter().chain([Action::Activate { panel: Panel::ToolSets }]);
+            workspace.apply_all(open, permissions).map_err(|e| e.to_string())?;
         }
     }
     publish_visibility(app, &workspace);

@@ -225,73 +225,15 @@ fn display(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
 /// Files tab: save format and default version, new-drawing units, autosave interval and autosave file location; edits accumulate in `changes`.
 fn files(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
     grid(ui, "options_files", |ui| {
-        ui.label(crate::tl!("Save new drawings as"));
-        ui.horizontal(|ui| {
-            for f in crate::SaveFormat::ALL {
-                let label = match f {
-                    crate::SaveFormat::Dxf => crate::tl!("DXF"),
-                    crate::SaveFormat::Dwg => crate::tl!("DWG"),
-                };
-                if ui.radio(app.ui.save_format == f, label).clicked() && app.ui.save_format != f {
-                    changes.insert("saveFormat".into(), json!(f.as_str()));
-                }
-            }
-        });
+        save_format_row(ui, app, changes);
         ui.end_row();
-
-        let version_caption = ui.label(crate::tl!("Default save version"));
-        let current = crate::SaveVersion::parse(&app.ui.save_version).unwrap_or_default();
-        let mut version = current;
-        let version_combo = egui::ComboBox::from_id_salt("options_save_version").selected_text(version.year()).show_ui(ui, |ui| {
-            for v in crate::SaveVersion::ALL {
-                ui.selectable_value(&mut version, v, v.year());
-            }
-        });
-        version_combo.response.labelled_by(version_caption.id);
-        if version != current {
-            changes.insert("saveVersion".into(), json!(version.year()));
-        }
+        save_version_row(ui, app, changes);
         ui.end_row();
-
-        ui.label(crate::tl!("Units of new drawings"));
-        ui.horizontal(|ui| {
-            let metric = app.session.settings.measureinit;
-            if ui.radio(!metric, crate::tl!("Imperial (inches)")).clicked() && metric {
-                changes.insert("MEASUREINIT".into(), json!(0));
-            }
-            if ui.radio(metric, crate::tl!("Metric (millimetres)")).clicked() && !metric {
-                changes.insert("MEASUREINIT".into(), json!(1));
-            }
-        });
+        units_row(ui, app, changes);
         ui.end_row();
-
-        let minutes_caption = ui.label(crate::tl!("Automatic save every"));
-        let mut minutes = cadcraft_engine::autosave::savetime();
-        let max = cadcraft_engine::autosave::MAX_SAVETIME;
-        if ui
-            .add(egui::DragValue::new(&mut minutes).range(0..=max).suffix(format!(" {}", crate::tl!("min"))))
-            .labelled_by(minutes_caption.id)
-            .changed()
-        {
-            changes.insert("SAVETIME".into(), json!(minutes));
-        }
+        autosave_row(ui, changes);
         ui.end_row();
-
-        let savefile_label = ui.label(crate::tl!("Automatic save file location"));
-        // Edited as text; the folder changes when the field loses focus.
-        let id = egui::Id::unique("cc_options_savefilepath");
-        let current = cadcraft_engine::autosave::savefilepath();
-        let mut path = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.clone());
-        let r = ui.add(egui::TextEdit::singleline(&mut path).desired_width(330.0)).labelled_by(savefile_label.id);
-        if r.changed() {
-            ui.data_mut(|d| d.insert_temp(id, path.clone()));
-        }
-        if r.lost_focus() {
-            ui.data_mut(|d| d.remove::<String>(id));
-            if path.trim() != current {
-                changes.insert("SAVEFILEPATH".into(), json!(path.trim()));
-            }
-        }
+        savefile_row(ui, changes);
         ui.end_row();
     });
     hint(ui, crate::tl!("New and the first drawing at startup use these units unless a default template is set (QNEWTEMPLATE)."));
@@ -441,6 +383,76 @@ fn fonts(app: &CadApp, ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
             for (style, font) in missing.iter().take(12) {
                 ui.label(format!("{font}  ({} {style})  → {sub}", crate::tl!("style")));
             }
+        }
+    }
+}
+
+fn save_format_row(ui: &mut egui::Ui, app: &CadApp, changes: &mut Map<String, Value>) {
+    ui.label(crate::tl!("Save new drawings as"));
+    ui.horizontal(|ui| {
+        for f in crate::SaveFormat::ALL {
+            let label = match f {
+                crate::SaveFormat::Dxf => crate::tl!("DXF"),
+                crate::SaveFormat::Dwg => crate::tl!("DWG"),
+            };
+            if ui.radio(app.ui.save_format == f, label).clicked() && app.ui.save_format != f {
+                changes.insert("saveFormat".into(), json!(f.as_str()));
+            }
+        }
+    });
+}
+
+fn save_version_row(ui: &mut egui::Ui, app: &CadApp, changes: &mut Map<String, Value>) {
+    let version_caption = ui.label(crate::tl!("Default save version"));
+    let current = crate::SaveVersion::parse(&app.ui.save_version).unwrap_or_default();
+    let mut version = current;
+    let version_combo = egui::ComboBox::from_id_salt("options_save_version").selected_text(version.year()).show_ui(ui, |ui| {
+        for v in crate::SaveVersion::ALL {
+            ui.selectable_value(&mut version, v, v.year());
+        }
+    });
+    version_combo.response.labelled_by(version_caption.id);
+    if version != current {
+        changes.insert("saveVersion".into(), json!(version.year()));
+    }
+}
+
+fn units_row(ui: &mut egui::Ui, app: &CadApp, changes: &mut Map<String, Value>) {
+    ui.label(crate::tl!("Units of new drawings"));
+    ui.horizontal(|ui| {
+        let metric = app.session.settings.measureinit;
+        if ui.radio(!metric, crate::tl!("Imperial (inches)")).clicked() && metric {
+            changes.insert("MEASUREINIT".into(), json!(0));
+        }
+        if ui.radio(metric, crate::tl!("Metric (millimetres)")).clicked() && !metric {
+            changes.insert("MEASUREINIT".into(), json!(1));
+        }
+    });
+}
+
+fn autosave_row(ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
+    let minutes_caption = ui.label(crate::tl!("Automatic save every"));
+    let mut minutes = cadcraft_engine::autosave::savetime();
+    let max = cadcraft_engine::autosave::MAX_SAVETIME;
+    if ui.add(egui::DragValue::new(&mut minutes).range(0..=max).suffix(format!(" {}", crate::tl!("min")))).labelled_by(minutes_caption.id).changed() {
+        changes.insert("SAVETIME".into(), json!(minutes));
+    }
+}
+
+fn savefile_row(ui: &mut egui::Ui, changes: &mut Map<String, Value>) {
+    let savefile_label = ui.label(crate::tl!("Automatic save file location"));
+    // Edited as text; the folder changes when the field loses focus.
+    let id = egui::Id::unique("cc_options_savefilepath");
+    let current = cadcraft_engine::autosave::savefilepath();
+    let mut path = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| current.clone());
+    let r = ui.add(egui::TextEdit::singleline(&mut path).desired_width(330.0)).labelled_by(savefile_label.id);
+    if r.changed() {
+        ui.data_mut(|d| d.insert_temp(id, path.clone()));
+    }
+    if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
+        if path.trim() != current {
+            changes.insert("SAVEFILEPATH".into(), json!(path.trim()));
         }
     }
 }
