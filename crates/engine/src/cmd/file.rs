@@ -471,25 +471,69 @@ pub fn looks_like_drawing(bytes: &[u8]) -> bool {
 /// How much of a drawing's end [`looks_complete`] reads.
 const TAIL_BYTES: u64 = 256;
 
-/// The smallest DWG [`looks_complete`] takes for a whole drawing: an empty drawing is over 10 KB
-/// in every version, so a file cut off after its header is not.
-const MIN_DWG_BYTES: u64 = 2048;
-
-/// Whether a drawing that [`looks_like_drawing`] (`head`, its start) also looks whole from its
-/// end (`tail`, its last bytes) and size `len`, without reading it all: a DXF ends with
-/// `0`/`EOF` (a binary one with `EOF` and its NUL), and a DWG has at least [`MIN_DWG_BYTES`]. A
-/// file cut off by a failed save or another program then doesn't replace a good backup.
-pub fn looks_complete(head: &[u8], tail: &[u8], len: u64) -> bool {
+/// Whether a drawing that [`looks_like_drawing`] (`head`, its first bytes, at least 256 of them
+/// for a DWG) is whole, from its end (`tail`, its last bytes) and size `len`, without reading it
+/// all: a DXF ends with `0`/`EOF` (a binary one with `EOF` and its NUL); a DWG reaches the end its
+/// own header gives ([`dwg_complete`]). `None` when that can't be told (a 2007 DWG), so a file cut
+/// off by a failed save or another program doesn't replace a good backup.
+pub fn completeness(head: &[u8], tail: &[u8], len: u64) -> Option<bool> {
     let dwg = head.len() >= 6 && head.starts_with(b"AC") && head[2..6].iter().all(|b| b.is_ascii_digit());
     if dwg {
-        return len >= MIN_DWG_BYTES;
+        return dwg_complete(head, len);
     }
     if cadcraft_dxf::is_binary(head) {
-        return tail.ends_with(b"EOF\0");
+        return Some(tail.ends_with(b"EOF\0"));
     }
     let text = String::from_utf8_lossy(tail);
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty()).rev();
-    matches!((lines.next(), lines.next()), (Some(last), Some("0")) if last.eq_ignore_ascii_case("EOF"))
+    Some(matches!((lines.next(), lines.next()), (Some(last), Some("0")) if last.eq_ignore_ascii_case("EOF")))
+}
+
+/// [`completeness`] known to be whole.
+pub fn looks_complete(head: &[u8], tail: &[u8], len: u64) -> bool {
+    completeness(head, tail, len) == Some(true)
+}
+
+/// Whether a DWG of `len` bytes reaches the end its header gives (Open Design Specification for
+/// .dwg files): from 2004 on, the copy of the file header that ends the file (its address is in
+/// the encrypted header at 0x80, and the copy is 0x6C bytes); up to 2000, the end of every section
+/// the locator records give. `None` for another layout (2007, or before R13).
+fn dwg_complete(head: &[u8], len: u64) -> Option<bool> {
+    let version = head.get(..6)?;
+    match version {
+        b"AC1018" | b"AC1024" | b"AC1027" | b"AC1032" => {
+            // The header at 0x80 is XORed with the generator the specification gives.
+            let enc = head.get(0x80..0x80 + 0x6C)?;
+            let mut seed: u32 = 1;
+            let h: Vec<u8> = enc
+                .iter()
+                .map(|b| {
+                    seed = seed.wrapping_mul(0x343FD).wrapping_add(0x0026_9EC3);
+                    b ^ (seed >> 16) as u8
+                })
+                .collect();
+            if h.get(..12) != Some(&b"AcFssFcAJMB\0"[..]) {
+                return Some(false);
+            }
+            let second = u64::from_le_bytes(h.get(0x34..0x3C)?.try_into().ok()?);
+            Some(second >= 0x100 && second.checked_add(0x6C).is_some_and(|end| len >= end))
+        }
+        b"AC1012" | b"AC1014" | b"AC1015" => {
+            let n = i32::from_le_bytes(head.get(0x15..0x19)?.try_into().ok()?);
+            if !(1..=16).contains(&n) {
+                return Some(false);
+            }
+            let mut end = 0u64;
+            for i in 0..n as usize {
+                let r = head.get(0x19 + i * 9..0x19 + i * 9 + 9)?;
+                let seek = u64::from(u32::from_le_bytes(r.get(1..5)?.try_into().ok()?));
+                let size = u64::from(u32::from_le_bytes(r.get(5..9)?.try_into().ok()?));
+                end = end.max(seek + size);
+            }
+            Some(len >= end)
+        }
+        _ => None,
+    }
 }
 
 /// Before `path` is replaced: copy it to its `.bak`, streamed and written atomically too
@@ -516,11 +560,13 @@ fn backup(path: &std::path::Path) -> std::io::Result<()> {
         (&mut src).take(TAIL_BYTES).read_to_end(&mut tail)?;
         src.seek(std::io::SeekFrom::Start(head.len() as u64))?;
     }
-    if !looks_like_drawing(&head) || !looks_complete(&head, &tail, len) {
+    let bak = backup_path(path);
+    // Whole, or (a 2007 DWG, which can't be told) with no backup yet to keep.
+    let whole = looks_like_drawing(&head) && completeness(&head, &tail, len).unwrap_or_else(|| !bak.exists());
+    if !whole {
         log::warn!("save: {} doesn't look like a whole drawing; its backup is left as it was", path.display());
         return Ok(());
     }
-    let bak = backup_path(path);
     // The backup is no more readable than the drawing, nor than the .bak it replaces (a private
     // 0600 drawing or .bak stays private). The mode is set as the new file is created, so a
     // failed write leaves the old .bak as it was; a symlink at the .bak is replaced, never

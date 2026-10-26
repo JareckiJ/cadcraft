@@ -11,6 +11,10 @@ fn hooks() {
         write: |d, n| cadcraft_io::write(d, n).map_err(|e| e.to_string()),
         plot: None,
     });
+    // Saves at a chosen version (a DWG 2000), as the app's.
+    cadcraft_engine::cmd::file::set_write_as(|d, n, o| {
+        cadcraft_io::write_with(d, n, &cadcraft_io::SaveOptions { version: o.version, binary: o.binary }).map_err(|e| e.to_string())
+    });
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
@@ -201,5 +205,36 @@ fn whole_drawings_are_told_from_cut_off_ones() {
     assert!(looks_complete(&binary, &binary, binary.len() as u64));
     assert!(!looks_complete(&binary, &binary[..binary.len() - 5], binary.len() as u64 - 5));
     assert!(!looks_complete(b"AC1032", b"AC1032", 6));
-    assert!(looks_complete(b"AC1032", b"", 30_000));
+    assert!(!looks_complete(b"AC1032", b"", 30_000), "a DWG tag without its header is not whole");
+}
+
+/// A DWG reaches the end its own header gives: cut off anywhere (not only right after its start),
+/// in a 2018 and a 2000 file, it doesn't replace the good backup; whole, it does.
+#[test]
+fn a_dwg_cut_off_anywhere_keeps_the_good_backup() {
+    let _saving = saving();
+    hooks();
+    for version in [2018, 2000] {
+        let dir = temp_dir(&format!("dwg{version}"));
+        let path = dir.join("Plan.dwg");
+        let p = path.to_string_lossy().to_string();
+        let mut s = Session::new();
+        add_circle(&mut s, 0.0);
+        s.execute("saveas", &json!({ "path": p, "version": version })).unwrap();
+        add_circle(&mut s, 5.0);
+        s.execute("qsave", &json!({})).unwrap();
+        assert_eq!(circles(&backup_path(&path)), 1, "{version}: the first save is backed up");
+        let whole = std::fs::read(&path).unwrap();
+        let head = &whole[..whole.len().min(4096)];
+        assert!(looks_complete(head, &whole[whole.len().saturating_sub(256)..], whole.len() as u64), "{version}: whole");
+        for keep in [whole.len() / 2, whole.len() * 9 / 10, whole.len() - 1] {
+            assert!(!looks_complete(head, &[], keep as u64), "{version}: cut to {keep} of {}", whole.len());
+        }
+        // Another program leaves it cut off at 90%: the next save keeps the good backup.
+        std::fs::write(&path, &whole[..whole.len() * 9 / 10]).unwrap();
+        add_circle(&mut s, 10.0);
+        s.execute("qsave", &json!({})).unwrap();
+        assert_eq!(circles(&backup_path(&path)), 1, "{version}: the cut-off file didn't replace it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
