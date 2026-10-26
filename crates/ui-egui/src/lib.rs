@@ -30,6 +30,7 @@ pub mod spacemouse;
 // The External References palette.
 pub mod xrefs;
 
+pub mod color_list;
 pub mod dyngrips;
 pub mod dyninput;
 pub mod gpu;
@@ -46,6 +47,8 @@ pub mod palettes;
 pub mod parametric;
 pub mod plotstyles;
 pub mod quick;
+pub mod ribbon;
+pub mod ribbon_hatch;
 pub mod shortcut_menus;
 pub mod theme;
 #[cfg(not(target_arch = "wasm32"))]
@@ -97,6 +100,15 @@ pub struct UiState {
     /// menu puts them back.
     pub hidden_tools: Vec<String>,
     pub properties_all: bool,
+    /// The Ribbon above the drawing (the Windows layout).
+    pub show_ribbon: bool,
+    /// The Ribbon tab shown (`ribbon::TABS` ids).
+    pub ribbon_tab: String,
+    /// Ribbon reduced to its tab row (double-click a tab).
+    pub ribbon_minimized: bool,
+    /// The desktop app has set up the Windows layout once (Ribbon, Properties docked
+    /// left, no Tool Sets); later choices of layout are the user's (`ui.layout.pc` / `.mac`).
+    pub pc_layout_applied: bool,
     /// Show an in-window menu bar (platforms without a native menu bar, or on request).
     pub in_window_menu: bool,
     pub start_tab: bool,
@@ -178,6 +190,10 @@ impl Default for UiState {
             collapsed_groups: Vec::new(),
             hidden_tools: Vec::new(),
             properties_all: true,
+            show_ribbon: false,
+            ribbon_tab: "home".into(),
+            ribbon_minimized: false,
+            pc_layout_applied: false,
             in_window_menu: !cfg!(target_os = "macos"),
             start_tab: false,
             dialog: None,
@@ -265,6 +281,10 @@ pub struct CadApp {
     /// The interface scale last handed to egui (`None` until the first frame).
     shown_interface_scale: Option<f32>,
     pub frame_ms: f64,
+    /// Quick Properties asked for (double-clicking a hatch with the Ribbon), for this selection:
+    /// shown even with QPMODE off while the selection stays it
+    /// ([`CadApp::force_quick_properties`]).
+    pub qp_forced: Option<Vec<cadcraft_doc::Handle>>,
     pub quit_requested: bool,
     /// The app may close although drawings have unsaved changes (they were dealt with, or the
     /// quit came from the control channel, which never asks).
@@ -291,6 +311,12 @@ pub struct CadApp {
 }
 
 impl CadApp {
+    /// Show Quick Properties for the current selection, even with QPMODE off, until the
+    /// selection changes or the palette is closed.
+    pub fn force_quick_properties(&mut self) {
+        self.qp_forced = Some(self.session.selection());
+    }
+
     /// Construct `CadApp` from a session and services with default UI state, options, canvas and command line; no control channel, capture geometry or pending shots are installed.
     pub fn new(session: Session, services: Services) -> Self {
         CadApp {
@@ -327,6 +353,7 @@ impl CadApp {
             shown_animations: None,
             shown_interface_scale: None,
             frame_ms: 0.0,
+            qp_forced: None,
             quit_requested: false,
             quit_confirmed: false,
             closing: None,
@@ -817,8 +844,12 @@ impl CadApp {
         control::begin_frame(ui.ctx());
         let t = theme::Tokens::get();
         chrome::title_and_toolbar(self, ui);
+        // Top panels stack in call order: the menu bar sits above the Ribbon, as on Windows.
         if self.ui.in_window_menu {
             menus::menu_bar(self, ui);
+        }
+        if self.ui.show_ribbon {
+            ribbon::ribbon(self, ui);
         }
         if self.ui.show_status_bar {
             chrome::status_bar(self, ui);
@@ -827,7 +858,8 @@ impl CadApp {
             chrome::file_tabs(self, ui);
         }
         let has_doc = !self.session.docs.is_empty() && !self.ui.start_tab;
-        if has_doc && !self.ui.show_toolsets {
+        // With the Ribbon the tools are in it: no collapsed Tool Sets strip.
+        if has_doc && !self.ui.show_toolsets && !self.ui.show_ribbon {
             palettes::toolsets_strip(self, ui);
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
