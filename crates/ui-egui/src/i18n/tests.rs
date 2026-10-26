@@ -164,6 +164,7 @@ fn locale_and_saved_preference_resolution() {
         ("sv", &["sv", "sv-SE", "sv_SE.UTF-8", "SV-se", " sv-SE ", "sv-FI"]),
         ("hu", &["hu", "hu-HU", "hu_HU.UTF-8", "HU-hu", " hu-HU "]),
         ("tr", &["tr", "tr-TR", "tr_TR.UTF-8", "TR-tr", " tr-TR ", "tr-CY"]),
+        ("pl", &["pl", "pl-PL", "pl_PL.UTF-8", "PL-pl", " pl-PL ", "pl_PL@euro"]),
         ("el", &["el", "el-GR", "el_GR.UTF-8", "EL-cy"]),
         ("zh", &["zh", "zh-CN"]),
     ] {
@@ -172,15 +173,15 @@ fn locale_and_saved_preference_resolution() {
         }
     }
     // Look-alike codes, three-letter codes and endonyms pick nothing: `se` is Northern Sami.
-    let look_alikes = ["ua", "ukulele", "pl-PL", "", "garbage", "💙", "ptolemy", "cz", "csharp", "csomething", "italic"];
-    let others = ["kr", "korean", "kotlin", "se", "swe", "svenska", "hun", "magyar", "tur", "türkçe", "elvish"];
+    let look_alikes = ["ua", "ukulele", "nl-NL", "", "garbage", "💙", "ptolemy", "cz", "csharp", "csomething", "italic"];
+    let others = ["kr", "korean", "kotlin", "se", "swe", "svenska", "hun", "magyar", "tur", "türkçe", "elvish", "pol", "polski", "plain"];
     for tag in look_alikes.into_iter().chain(others) {
         assert_eq!(locale_language(tag), None, "{tag}");
     }
-    assert_eq!(Preference::Auto.resolve(&["pl-PL".into(), "pt-BR".into()]), "pt-BR");
+    assert_eq!(Preference::Auto.resolve(&["nl-NL".into(), "pt-BR".into()]), "pt-BR");
     assert_eq!(Preference::Auto.resolve(&["fr-FR".into(), "pt-BR".into()]), "fr");
     assert_eq!(Preference::Auto.resolve(&["es-ES".into(), "pt-BR".into()]), "es");
-    let locales = vec!["pl-PL".into(), "uk-UA".into(), "en-US".into()];
+    let locales = vec!["nl-NL".into(), "uk-UA".into(), "en-US".into()];
     assert_eq!(Preference::Auto.resolve(&locales), "uk");
     assert_eq!(Preference::English.resolve(&locales), "en");
     assert_eq!(Preference::Auto.resolve(&["en-US".into(), "uk-UA".into()]), "en");
@@ -199,7 +200,7 @@ fn locale_and_saved_preference_resolution() {
         // A chosen language wins over the system's; Auto takes the first system language there is.
         assert_eq!(preference.resolve(&["uk-UA".into()]), preference.code());
         if preference != Preference::English {
-            assert_eq!(Preference::Auto.resolve(&["pl-PL".into(), preference.code().into(), "en-US".into()]), preference.code());
+            assert_eq!(Preference::Auto.resolve(&["nl-NL".into(), preference.code().into(), "en-US".into()]), preference.code());
         }
         // Saved with the host's other preferences; a bad saved value keeps the current choice.
         let mut a = CadApp::new(Session::new(), Services::default());
@@ -220,6 +221,8 @@ fn plural_rules_pick_the_cldr_form() {
     assert_eq!(uk, [2, 0, 1, 1, 2, 2, 2, 2, 0, 1, 2, 0, 2, 2, 2]);
     assert_eq!([0, 1, 2, 5, 21, u64::MAX].map(plural_pt), [0, 0, 1, 1, 1, 1]);
     assert_eq!([0, 1, 2, 4, 5, 11, 21, 22, 25, u64::MAX].map(plural_cs), [2, 0, 1, 1, 2, 2, 2, 2, 2, 2]);
+    let pl = [0, 1, 2, 4, 5, 11, 12, 14, 21, 22, 24, 25, 101, 102, 112, 122].map(plural_pl);
+    assert_eq!(pl, [2, 0, 1, 1, 2, 2, 2, 2, 2, 1, 1, 2, 2, 1, 2, 1]);
     for language in &LANGUAGES {
         for n in [0, 1, 2, 3, 5, 11, 21, 22, 101, 111, u64::MAX] {
             assert!((language.plural)(n) < language.plural_forms, "{}: {n}", language.code);
