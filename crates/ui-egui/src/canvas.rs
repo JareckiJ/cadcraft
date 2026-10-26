@@ -1545,9 +1545,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
 
     // Double-click a hatch (no command running) to edit it in the Hatch Edit dialog. The click is
-    // used up: it must not also start a grip edit on the hatch's centre grip below.
-    let mut hatch_dialog = false;
-    if inside
+    // used up: it must not also start a grip edit on the hatch's centre grip below. In the Block
+    // Editor, double-clicking a lookup action opens its lookup table, as in AutoCAD.
+    let mut hatch_dialog = inside && dbl_primary && blockedit::double_click(app, ui.ctx(), &xf, hover_pos);
+    if !hatch_dialog
+        && inside
         && dbl_primary
         && app.session.running.is_none()
         && let Some(hp) = hover_pos

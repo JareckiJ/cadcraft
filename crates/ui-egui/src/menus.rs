@@ -98,6 +98,9 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if let Some(r) = crate::bvstate::route(app, id, params) {
         return Some(r);
     }
+    if let Some(r) = crate::blookup::route(app, id, params) {
+        return Some(r);
+    }
     if let Some(r) = crate::managers::route(app, id, params) {
         return Some(r);
     }
