@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>工事写真 カメラ</title>
+<script>(function(){try{var t=JSON.parse(localStorage.getItem('kc_theme')||'null');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}})();</script>
+<style>
+:root{--bg:#f3f1ec;--surface:#fff;--soft:#faf9f6;--ink:#20242c;--ink2:#5b6472;--line:#e1ddd1;--pri:#1e3a5f;--pri2:#132840;--acc:#a9822f;--accs:#f3e9d2;--err:#9c3b31;--errbg:#f7e6e4;--ok:#2f6b3d;--okbg:#e6f2e8;--oncta:#fff;--hdr-a:var(--pri);--hdr-b:var(--pri2);--on-hdr:#fff;--btn-a:var(--pri);--btn-b:var(--pri2);--cta-a:var(--acc);--cta-b:color-mix(in srgb,var(--acc) 72%,#000);--body-bg:var(--bg)}
+html[data-theme=purple]{--bg:#f4f1fb;--soft:#faf8ff;--ink:#251c3d;--ink2:#6a5f88;--line:#e3daf7;--pri:#4c2f8c;--pri2:#341f66;--acc:#7b5cff;--accs:#eae3ff}
+html[data-theme=emerald]{--bg:#eff5f0;--soft:#f7fbf7;--ink:#183328;--ink2:#557060;--line:#d9e9dd;--pri:#1f5c45;--pri2:#123d2d;--acc:#2f9e6e;--accs:#dff3e7}
+html[data-theme=dark]{color-scheme:dark;--bg:#14161c;--surface:#1d2029;--soft:#22252f;--ink:#e9e9ee;--ink2:#9a9fb0;--line:#313542;--pri:#5c7cad;--pri2:#3d5378;--acc:#d3a94a;--accs:#3a331f;--err:#e6a19b;--errbg:#3a2325;--ok:#8fe6a8;--okbg:#12291b;--oncta:#1d2029}
+html[data-theme=pink]{--bg:#fbf1f4;--soft:#fdf7f9;--ink:#3a2430;--ink2:#8a6478;--line:#f3dbe4;--pri:#b23a6b;--pri2:#7d2549;--acc:#e08bb0;--accs:#fbe4ee}
+html[data-theme=orange]{--bg:#fdf3ec;--soft:#fef8f2;--ink:#3a2a1c;--ink2:#8a6b4e;--line:#f3dfc9;--pri:#c1622a;--pri2:#8a3f16;--acc:#e0973f;--accs:#fbe8d2}
+html[data-theme=sakura]{--bg:#fdeff3;--surface:#fffbfc;--soft:#fff3f7;--ink:#3a2430;--ink2:#8a6478;--line:#f3d5df;--pri:hsl(var(--hue) 55% 36%);--pri2:hsl(var(--hue) 55% 27%);--acc:hsl(var(--hue) 75% 44%);--accs:hsl(var(--hue) 90% 94%);--hdr-a:#ffe4ed;--hdr-b:#ffcfe0;--on-hdr:#4a2437;--btn-a:hsl(var(--hue) 70% 42%);--btn-b:hsl(calc(var(--hue) + 55) 70% 36%);--rb-a:hsl(var(--hue) 90% 68%);--rb-b:hsl(calc(var(--hue) + 120) 90% 68%);--rb-c:hsl(calc(var(--hue) + 240) 90% 68%);--body-bg:linear-gradient(180deg,hsl(var(--hue) 100% 94%),#fdeff3 45%);animation:hueflow 16s linear infinite}
+html[data-theme=sakura] header::before{content:"🌸"}
+html[data-theme=rgb]{color-scheme:dark;--bg:#07080c;--surface:#11141b;--soft:#171b24;--ink:#ecedf3;--ink2:#9aa1b5;--line:#2a2f3d;--pri:hsl(var(--hue) 100% 72%);--pri2:hsl(var(--hue) 90% 20%);--acc:hsl(var(--hue) 100% 62%);--accs:hsl(var(--hue) 60% 16%);--err:#ffaba3;--errbg:#341a1d;--ok:#8fe6a8;--okbg:#12291b;--oncta:#07080c;--hdr-a:hsl(var(--hue) 90% 22%);--hdr-b:hsl(calc(var(--hue) + 70) 90% 11%);--btn-a:hsl(var(--hue) 85% 40%);--btn-b:hsl(calc(var(--hue) + 60) 85% 28%);--body-bg:linear-gradient(180deg,hsl(var(--hue) 55% 9%),#07080c 55%);--rb-a:hsl(var(--hue) 100% 60%);--rb-b:hsl(calc(var(--hue) + 120) 100% 60%);--rb-c:hsl(calc(var(--hue) + 240) 100% 60%);animation:hueflow 16s linear infinite}
+html[data-theme=rgb] header{border-bottom:3px solid var(--acc);box-shadow:0 4px 26px hsl(var(--hue) 100% 55%/.45);text-shadow:0 0 14px var(--acc)}
+html[data-theme=rgb] header::before{content:"🌈"}
+html[data-theme=rgb] .card,html[data-theme=sakura] .card{border:2px solid transparent;background:linear-gradient(var(--surface),var(--surface)) padding-box,linear-gradient(135deg,var(--rb-a),var(--rb-b),var(--rb-c)) border-box}
+html[data-theme=rgb] header,html[data-theme=sakura] header{border-bottom:4px solid transparent;border-image:linear-gradient(90deg,var(--rb-a),var(--rb-b),var(--rb-c),var(--rb-a)) 1}
+@property --hue{syntax:'<number>';inherits:true;initial-value:200}
+@keyframes hueflow{to{--hue:560}}
+@media (prefers-reduced-motion:reduce){html[data-theme=rgb],html[data-theme=sakura]{animation:none}}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Hiragino Sans","Yu Gothic",-apple-system,sans-serif;background:var(--body-bg);color:var(--ink);padding-bottom:60px}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(155deg,var(--hdr-a),var(--hdr-b));color:var(--on-hdr);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ht{flex:1;min-width:0;font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dots{display:flex;flex-wrap:nowrap;gap:4px;justify-content:flex-end}
+.dot{width:18px;height:18px;flex:0 0 auto;border-radius:50%;border:2px solid rgba(255,255,255,.85);padding:0;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.dot.selected{outline:2px solid currentColor;outline-offset:2px}
+nav{display:grid;grid-template-columns:repeat(3,1fr);background:var(--surface);border-bottom:1px solid var(--line)}
+nav button{background:none;border:none;border-bottom:3px solid transparent;padding:12px 4px;font-size:14px;font-weight:700;color:var(--ink2);font-family:inherit}
+nav button.on{color:var(--acc);border-bottom-color:var(--acc)}
+.view{display:none;padding:12px 14px}.view.on{display:block}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px}
+.card h2{font-size:13px;margin:0 0 10px;color:var(--acc)}
+label{display:block;font-size:13px;font-weight:700;margin-bottom:5px}
+select,input[type=text],input[type=password],input[type=url],input[type=datetime-local],textarea{width:100%;padding:11px 10px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:var(--soft);color:var(--ink);margin-bottom:10px;font-family:inherit}
+textarea{min-height:84px;resize:vertical}
+input[type=range]{width:100%;accent-color:var(--acc)}
+button{font-family:inherit}
+.btn{display:block;width:100%;padding:14px;font-size:16px;font-weight:700;border:none;border-radius:12px;margin-bottom:10px;color:#fff;background:#1e3a5f;background-color:var(--pri)}
+@supports (aspect-ratio:1/1){.btn{background:linear-gradient(155deg,var(--btn-a),var(--btn-b))}}
+@supports not (aspect-ratio:1/1){.btn{background:#3d5378!important;color:#fff!important}.btn.up{background:#d3a94a!important;color:#1d2029!important}.btn.lib{background:#fff!important;color:#7a5a12!important;border:1.5px solid #a9822f!important}.btn.del{background:#f7e6e4!important;color:#9c3b31!important}.btn:disabled{opacity:.5}}
+.btn.lib,.btn.lib:disabled{background:var(--surface);color:var(--acc);border:1.5px solid var(--acc)}
+.btn.up{background:#a9822f;background-color:var(--acc);color:#fff;color:var(--oncta)}
+@supports (aspect-ratio:1/1) and (background:color-mix(in srgb,red,blue)){.btn.up{background:linear-gradient(155deg,var(--cta-a),var(--cta-b))}}
+.btn.sm{padding:9px;font-size:13px;margin-bottom:6px}
+.btn.del{background:#f7e6e4;background-color:var(--errbg);color:var(--err)}
+.btn:disabled{opacity:.45}
+.row{display:flex;align-items:center;gap:8px}
+.row input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc)}
+.val{float:right;font-size:12px;color:var(--ink2)}
+.hint{font-size:12px;color:var(--ink2);margin:2px 0 8px;line-height:1.6}
+.msg{margin:8px 0;padding:10px;border-radius:10px;font-size:14px;display:none;line-height:1.6}
+.msg.err{display:block;background:var(--errbg);color:var(--err)}
+.msg.ok{display:block;background:var(--okbg);color:var(--ok)}
+.msg.warn{display:block;background:var(--accs);color:var(--ink)}
+#vw{position:relative;background:#000;border-radius:10px;overflow:hidden}
+#view{display:block;width:100%;max-height:52vh;max-height:52svh;object-fit:contain;background:#000}
+#camOff{position:absolute;top:0;right:0;bottom:0;left:0;display:flex;align-items:center;justify-content:center;color:#9aa;font-size:14px;text-align:center;padding:20px}
+#badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fff;border-radius:14px;padding:3px 10px;font-size:13px}
+#zoomRow{display:none;margin:6px 0 0}
+#fsBtn,#fsExit{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:14px;padding:6px 12px;font-size:13px;z-index:2}
+#fsBtn{display:none}#fsExit{display:none}
+#rotHint{display:none;position:absolute;left:8px;right:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;border-radius:10px;padding:6px 10px;font-size:11px;line-height:1.5;z-index:2}
+body.fs #rotHint{bottom:auto;top:calc(56px + env(safe-area-inset-top))}
+/* 全画面モード：映像を画面いっぱいにし、撮影ボタン・ズーム・看板の位置ボタンを上に重ねる */
+body.fs{overflow:hidden}
+body.fs>*{visibility:hidden}
+body.fs>#vw,body.fs>#toast,body.fs #shutter,body.fs #zoomRow,body.fs #corners{visibility:visible}
+body.fs #vw{z-index:2147483000}
+body.fs #shutter,body.fs #zoomRow,body.fs #corners{z-index:2147483001}
+body.fs #vw{position:fixed;top:0;left:0;width:100%;border-radius:0;height:100vh;display:-webkit-flex;display:flex;-webkit-align-items:center;align-items:center;-webkit-justify-content:center;justify-content:center}
+body.fs #view{width:auto;height:auto;max-width:none;max-height:none}
+body.fs #fsBtn{display:none!important}
+body.fs #fsExit{display:block;top:calc(10px + env(safe-area-inset-top));right:10px;padding:9px 14px;font-size:14px}
+body.fs #badge{top:auto;left:14px;bottom:calc(34px + env(safe-area-inset-bottom))}
+body.fs #shutter{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom));width:auto;padding:16px 38px;margin:0;border-radius:40px;box-shadow:0 2px 14px rgba(0,0,0,.5)}
+body.fs #shutter:active{transform:translateX(-50%) scale(.97)}
+body.fs #zoomRow{position:fixed;left:20px;right:20px;bottom:calc(98px + env(safe-area-inset-bottom));background:rgba(0,0,0,.55);color:#fff;border-radius:12px;padding:6px 12px;margin:0}
+body.fs #corners{position:fixed;top:calc(10px + env(safe-area-inset-top));left:10px;grid-template-columns:repeat(4,54px);gap:4px;margin:0}
+body.fs #corners button{padding:8px 0;font-size:12px}
+.corners{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}
+.corners button{padding:10px 0;font-size:13px;border:1px solid var(--acc);color:var(--acc);background:var(--surface);border-radius:8px}
+.corners button.on{background:var(--acc);color:var(--oncta)}
+#shutter{width:100%;padding:18px;font-size:19px;font-weight:700;border:none;border-radius:14px;background:#c0392b;color:#fff;margin-top:10px}
+#shutter:disabled{opacity:.4}
+#shutter:active{transform:scale(.98)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.chip{padding:6px 11px;border-radius:14px;background:var(--accs);border:1px solid var(--line);font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.grp{margin-bottom:16px}
+.grp h3{font-size:14px;margin:0 0 6px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.grp h3 span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.th{position:relative;border-radius:8px;overflow:hidden;background:var(--line)}
+.th:before{content:"";display:block;padding-top:100%}
+.th img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block}
+.pw{background:var(--line);border-radius:8px;overflow:hidden;height:12px;margin:8px 0;display:none}
+.pb{background:var(--acc);height:100%;width:0;transition:width .2s}
+.colors{display:flex;gap:8px;margin-bottom:10px}
+.cd{width:38px;height:38px;border-radius:50%;border:2px solid var(--line);font-size:17px;padding:0}
+.cd.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--surface) inset}
+#ed{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:50;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}
+#ed .top{position:sticky;top:0;z-index:2;background:linear-gradient(155deg,var(--hdr-a),var(--hdr-b));color:var(--on-hdr);padding:8px 10px;display:flex;align-items:center;gap:8px}
+#ed .top b{flex:1;text-align:center;font-size:13px}
+#ed .top button{background:rgba(255,255,255,.25);color:var(--on-hdr);border:none;border-radius:8px;padding:8px 12px;font-size:15px}
+#edc{width:100%;display:block;touch-action:none;background:#555}
+#bp{display:none;position:fixed;top:0;right:0;bottom:0;left:0;z-index:60;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}
+#bp .top{position:sticky;top:0;z-index:2;background:linear-gradient(155deg,var(--hdr-a),var(--hdr-b));color:var(--on-hdr);padding:8px 10px;display:flex;align-items:center;gap:8px}
+#bp .top b{flex:1;text-align:center;font-size:14px}
+#bp .top button{background:rgba(255,255,255,.25);color:var(--on-hdr);border:none;border-radius:8px;padding:8px 12px;font-size:15px}
+.bpi{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
+.bpi .tx{flex:1;min-width:0;text-align:left;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:15px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.bpi .x{flex:0 0 auto;width:44px;border:none;border-radius:10px;background:var(--errbg);color:var(--err);font-size:18px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:8px 16px;border-radius:20px;font-size:13px;z-index:99;display:none}
+</style>
+</head>
+<body>
+<header><span class="ht">工事写真 カメラ</span><div class="dots" id="dots"></div></header>
+<nav>
+  <button id="t-cam" class="on" onclick="go('cam')">撮影</button>
+  <button id="t-list" onclick="go('list')">送信待ち</button>
+  <button id="t-set" onclick="go('set')">設定</button>
+</nav>
+
+<!-- 撮影 -->
+<section class="view on" id="v-cam">
+  <div id="inframe" class="msg warn">いま開いている画面は「Apps Script の中」なので、カメラが使えません。ChromeかSafariで、次のアドレスを直接開いてください：<br><b id="homeUrl"></b></div>
+  <div id="inapp" class="msg warn">いまの画面（アプリの中のブラウザ）ではカメラが使えないことがあります。右上のメニューから「ブラウザで開く」を選んで、ChromeかSafariで開いてください。</div>
+  <div class="card">
+    <h2>① 現場（先に選ぶと、撮った写真はすべてこの現場に入ります）</h2>
+    <select id="site" onchange="onSite()"></select>
+    <div id="newBox" style="display:none">
+      <input type="text" id="newSite" placeholder="新しい現場名を入力">
+      <button class="btn sm lib" onclick="addSite()">この現場名で追加する</button>
+    </div>
+  </div>
+  <div id="vw">
+    <canvas id="view" width="16" height="9"></canvas>
+    <div id="camOff">「カメラを起動する」を押してください</div>
+    <div id="badge" style="display:none">0枚</div>
+    <div id="rotHint">端末を横にしても画面が横向きにならないときは、「画面の向きのロック」が入っています。コントロールセンターでロックを解除してください。写真は、端末を構えた向きのまま保存されます。</div>
+    <button id="fsBtn" onclick="setFs(true)">⛶ 全画面</button>
+    <button id="fsExit" onclick="setFs(false)">✕ 戻る</button>
+  </div>
+  <div id="zoomRow"><label>ズーム <span class="val" id="zv"></span></label><input type="range" id="zoom" oninput="setZoom()"></div>
+  <button class="btn" id="startBtn" onclick="startCam()" style="margin-top:10px">カメラを起動する</button>
+  <button id="shutter" onclick="shoot()" disabled>● 撮影</button>
+  <div id="camMsg" class="msg"></div>
+  <div class="hint" style="margin-top:10px">看板の位置（撮ったあとでも変えられます）</div>
+  <div class="corners" id="corners">
+    <button data-c="tl">左上</button><button data-c="tr">右上</button>
+    <button data-c="bl" class="on">左下</button><button data-c="br">右下</button>
+  </div>
+  <label>検査内容（3行まで。撮ったあとでも直せます）</label>
+  <textarea id="body" placeholder="例:&#10;柱の開先状況&#10;ルート間隔7mm&#10;開先角度35度" oninput="onBody()"></textarea>
+  <div class="chips" id="hist"></div>
+  <button class="btn sm lib" onclick="openPick(function(t){g('body').value=t;onBody()})">保存済みの一覧から選ぶ</button>
+  <div class="hint" id="bodySt"></div>
+</section>
+
+<!-- 送信待ちの写真 -->
+<section class="view" id="v-list">
+  <div id="listMsg" class="msg"></div>
+  <div class="pw" id="pw"><div class="pb" id="pb"></div></div>
+  <div class="hint" id="upSt"></div>
+  <div id="groups"></div>
+  <button class="btn up" id="upAll" onclick="uploadAll()" style="display:none">すべて送信する</button>
+  <div class="hint" id="listHint"></div>
+</section>
+
+<!-- 設定 -->
+<section class="view" id="v-set">
+  <div class="card">
+    <h2>送り先（Googleの保存先）</h2>
+    <label>Apps Script のアドレス（…/exec で終わるもの）</label>
+    <input type="url" id="cUrl" placeholder="https://script.google.com/macros/s/…/exec">
+    <label>合言葉（Apps Script のコードに書いたもの）</label>
+    <input type="password" id="cKey" autocomplete="off">
+    <button class="btn" onclick="saveConn()">保存して接続を確かめる</button>
+    <div id="setMsg" class="msg"></div>
+  </div>
+  <div class="card">
+    <h2>看板の見た目</h2>
+    <div class="row" style="margin-bottom:10px"><input type="checkbox" id="bEn" onchange="saveB()"><label style="margin:0">写真に看板を入れる</label></div>
+    <label>看板の色</label><div class="colors" id="colors"></div>
+    <label>透過度 <span class="val" id="opv"></span></label>
+    <input type="range" id="bOp" min="40" max="100" oninput="saveB()">
+    <label>看板の大きさ <span class="val" id="szv"></span></label>
+    <input type="range" id="bSz" min="60" max="140" oninput="saveB()">
+    <div class="hint">看板の縦横比は固定です。空欄があっても形は変わりません。</div>
+  </div>
+</section>
+
+<!-- 編集 -->
+<div id="ed">
+  <div class="top"><button onclick="nav(-1)">◀</button><b id="edT"></b><button onclick="nav(1)">▶</button><button onclick="closeEd()">完了</button></div>
+  <canvas id="edc"></canvas>
+  <div style="padding:12px 14px 40px">
+    <div class="hint">看板をドラッグして動かせます（看板の外をタップすると、そこへ移動します）</div>
+    <div class="corners">
+      <button onclick="edCorner('tl')">左上</button><button onclick="edCorner('tr')">右上</button>
+      <button onclick="edCorner('bl')">左下</button><button onclick="edCorner('br')">右下</button>
+    </div>
+    <label>検査内容（3行まで）</label>
+    <textarea id="eBody" oninput="edBody()"></textarea>
+    <div class="chips" id="eHist"></div>
+    <button class="btn sm lib" onclick="openPick(function(t){g('eBody').value=t;edBody()})">保存済みの一覧から選ぶ</button>
+    <button class="btn sm lib" onclick="edCopyPrev()">前の写真と同じ内容にする</button>
+    <label>撮影日時（撮った時刻が自動で入っています）</label>
+    <input type="datetime-local" id="eDate" oninput="edDate()">
+    <button class="btn sm lib" onclick="edApply('pos')">この位置を、この現場の全写真に適用</button>
+    <button class="btn sm lib" onclick="edApply('body')">この検査内容を、この現場の全写真に適用</button>
+    <button class="btn sm del" onclick="edDelete()">この写真を削除する</button>
+  </div>
+</div>
+<div id="bp">
+  <div class="top"><b>保存済みの検査内容（全員で共有）</b><button onclick="closePick()">閉じる</button></div>
+  <div style="padding:12px 14px 40px">
+    <input type="text" id="bpq" placeholder="言葉で絞り込む" oninput="renderPick()">
+    <div class="hint" id="bpSt"></div>
+    <div id="bpl"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ========== 共通 ========== */
+function g(i){return document.getElementById(i)}
+var LS={get:function(k,d){try{var v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:function(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+function pad(n){return String(n).padStart(2,'0')}
+function isoLocal(t){var d=new Date(t);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())}
+function fmtD(s){return s?s.replace(/-/g,'/').replace('T',' '):''}
+function toast(t){var e=g('toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(function(){e.style.display='none'},1800)}
+function showMsg(id,type,t){var e=g(id);e.className='msg '+(t?type:'');e.textContent=t||'';if(!t)e.style.display='none';else e.style.display='block'}
+window.addEventListener('error',function(ev){showMsg('camMsg','err','画面エラー: '+ev.message)});
+
+/* テーマ */
+var THEMES={standard:'linear-gradient(135deg,#1e3a5f 50%,#a9822f 50%)',purple:'linear-gradient(135deg,#4c2f8c 50%,#7b5cff 50%)',emerald:'linear-gradient(135deg,#1f5c45 50%,#2f9e6e 50%)',dark:'linear-gradient(135deg,#14161c 50%,#d3a94a 50%)',pink:'linear-gradient(135deg,#b23a6b 50%,#e08bb0 50%)',orange:'linear-gradient(135deg,#c1622a 50%,#e0973f 50%)',rgb:'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)',sakura:'radial-gradient(circle at 35% 35%,#fff 0 18%,#ffb7cf 20% 60%,#e0709c)'};
+var TN={standard:'スタンダード',purple:'パープル',emerald:'エメラルド',dark:'ダーク',pink:'ピンク',orange:'オレンジ',rgb:'RGBレインボー',sakura:'さくらレインボー'};
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);LS.set('kc_theme',t);document.querySelectorAll('.dot').forEach(function(d){d.classList.toggle('selected',d.dataset.t===t)})}
+Object.keys(THEMES).forEach(function(t){var b=document.createElement('button');b.className='dot';b.dataset.t=t;b.title=TN[t];b.setAttribute('aria-label',TN[t]);b.style.background=THEMES[t];b.onclick=function(){setTheme(t)};g('dots').appendChild(b)});
+setTheme(LS.get('kc_theme','standard'));
+
+/* 画面切り替え */
+var cur='cam';
+function go(v){cur=v;['cam','list','set'].forEach(function(n){g('v-'+n).classList.toggle('on',n===v);g('t-'+n).classList.toggle('on',n===v)});
+  if(v==='list')renderList();if(v!=='cam')stopCam();window.scrollTo(0,0)}
+
+/* ========== 設定 ========== */
+var conn=LS.get('kc_conn',{url:'',key:''});
+var B=Object.assign({en:true,color:'green',op:85,sz:100},LS.get('kc_board',{}));
+var cam=Object.assign({site:'',body:'',pos:{c:'bl'}},LS.get('kc_cam',{}));
+function saveCam(){LS.set('kc_cam',cam)}
+var COLORS={gray:[74,74,74,'#fff'],white:[255,255,255,'#1c2b3a'],black:[17,17,17,'#fff'],green:[33,82,58,'#fff'],blue:[31,78,121,'#fff']};
+var SW={gray:'#4a4a4a',white:'#fff',black:'#111',green:'#21523a',blue:'#1f4e79'};
+Object.keys(COLORS).forEach(function(k){var d=document.createElement('button');d.className='cd';d.style.background=SW[k];d.dataset.k=k;d.textContent='✓';d.onclick=function(){B.color=k;saveB()};g('colors').appendChild(d)});
+function paintB(){g('bEn').checked=B.en;g('bOp').value=B.op;g('bSz').value=B.sz;g('opv').textContent=B.op+'%';g('szv').textContent=B.sz+'%';
+  document.querySelectorAll('.cd').forEach(function(d){var s=d.dataset.k===B.color;d.classList.toggle('sel',s);d.style.color=s?(B.color==='white'?'#333':'#fff'):'transparent'})}
+function saveB(){B.en=g('bEn').checked;B.op=+g('bOp').value;B.sz=+g('bSz').value;LS.set('kc_board',B);paintB()}
+paintB();
+g('cUrl').value=conn.url;g('cKey').value=conn.key;
+
+/* ========== 通信（Apps Script） ========== */
+function api(action,data){
+  if(!conn.url||!conn.key)return Promise.reject(new Error('設定の画面で、送り先のアドレスと合言葉を入れてください'));
+  var ctl=new AbortController(),to=setTimeout(function(){ctl.abort()},90000);
+  return fetch(conn.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({key:conn.key,action:action},data||{})),signal:ctl.signal})
+    .then(function(r){return r.json()}).then(function(j){clearTimeout(to);if(!j.ok)throw new Error(j.error||'送り先でエラーが出ました');return j})
+    .catch(function(e){clearTimeout(to);if(e.name==='AbortError')throw new Error('時間がかかりすぎました。電波を確かめてください');if(e instanceof TypeError)throw new Error('送り先につながりません（電波、またはアドレスの間違い、公開設定を確かめてください）');throw e})}
+function saveConn(){conn={url:g('cUrl').value.trim(),key:g('cKey').value};LS.set('kc_conn',conn);showMsg('setMsg','warn','接続を確かめています...');
+  loadSites(true).then(function(){showMsg('setMsg','ok','つながりました。現場が'+sites.length+'件見つかりました');loadBodies().then(flushBodies);paintHist();}).catch(function(e){showMsg('setMsg','err',e.message)})}
+
+/* ========== 現場 ========== */
+var sites=LS.get('kc_sites',[]);
+function fillSites(){var s=g('site');s.innerHTML='';var o=document.createElement('option');o.value='';o.textContent='現場を選んでください';s.appendChild(o);
+  sites.forEach(function(n){var o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)});
+  var n=document.createElement('option');n.value='__NEW__';n.textContent='＋ 新しい現場を追加';s.appendChild(n);
+  if(cam.site&&sites.indexOf(cam.site)<0){var x=document.createElement('option');x.value=cam.site;x.textContent=cam.site;s.insertBefore(x,s.children[1])}
+  s.value=cam.site||'';updShutter()}
+function loadSites(show){return api('sites').then(function(j){sites=j.sites||[];LS.set('kc_sites',sites);fillSites();return j}).catch(function(e){if(show)throw e;fillSites()})}
+function onSite(){var v=g('site').value;g('newBox').style.display=v==='__NEW__'?'block':'none';if(v!=='__NEW__'){cam.site=v;saveCam()}updShutter()}
+function addSite(){var n=g('newSite').value.trim();if(!n)return;if(sites.indexOf(n)<0){sites.push(n);LS.set('kc_sites',sites)}cam.site=n;saveCam();g('newSite').value='';g('newBox').style.display='none';fillSites();
+  api('prepare',{site:n}).then(function(){toast('Googleにフォルダを用意しました')}).catch(function(){toast('フォルダは最初の送信のときに作られます')})}
+function updShutter(){g('shutter').disabled=!(cam.site&&stream)}
+
+/* ========== 看板の描画（プレビュー・保存で共通） ========== */
+function rect(W,H){var w=Math.round(Math.min(W,H)*0.62*B.sz/100);w=Math.min(w,Math.round(W*0.96));return{w:w,h:Math.round(w*0.68)}}
+function resolve(pos,W,H,r){var m=Math.round(Math.min(W,H)*0.008),x,y;
+  if(pos.c){x=pos.c.charAt(1)==='l'?m:W-r.w-m;y=pos.c.charAt(0)==='t'?m:H-r.h-m}else{x=pos.x*W;y=pos.y*H}
+  return{x:Math.max(0,Math.min(W-r.w,Math.round(x))),y:Math.max(0,Math.min(H-r.h,Math.round(y)))}}
+function fit(c,t,maxW,px,bold){var f=Math.round(px);c.font=(bold?'bold ':'')+f+'px sans-serif';while(c.measureText(t).width>maxW&&f>px*0.4){f--;c.font=(bold?'bold ':'')+f+'px sans-serif'}}
+function drawBoard(c,W,H,it,proj){if(!B.en)return;
+  var col=COLORS[B.color]||COLORS.green,r=rect(W,H),p=resolve(it.pos,W,H,r),u=r.w,gp=u*0.018,hh=u*0.15,fh=u*0.10;
+  var x0=p.x+gp,y0=p.y+gp,iw=r.w-2*gp,ih=r.h-2*gp,lw=u*0.2;
+  c.save();
+  c.fillStyle='rgba('+col[0]+','+col[1]+','+col[2]+','+B.op/100+')';c.fillRect(p.x,p.y,r.w,r.h);
+  c.strokeStyle=col[3];c.lineWidth=Math.max(2,u*0.01);c.strokeRect(x0,y0,iw,ih);
+  c.lineWidth=Math.max(1,u*0.006);c.beginPath();
+  c.moveTo(x0,y0+hh);c.lineTo(x0+iw,y0+hh);c.moveTo(x0+lw,y0);c.lineTo(x0+lw,y0+hh);c.moveTo(x0,y0+ih-fh);c.lineTo(x0+iw,y0+ih-fh);c.stroke();
+  c.fillStyle=col[3];c.textBaseline='middle';c.textAlign='left';
+  fit(c,'工事名',lw-u*0.03,hh*0.5,true);c.fillText('工事名',x0+u*0.015,y0+hh/2);
+  fit(c,proj||'',iw-lw-u*0.03,hh*0.5,false);c.fillText(proj||'',x0+lw+u*0.015,y0+hh/2);
+  var lines=(it.body||'').split('\n').map(function(l){return l.trim()}).filter(Boolean).slice(0,3),lh=(ih-hh-fh)/3,off=(3-lines.length)/2*lh;c.textAlign='center';
+  lines.forEach(function(l,i){fit(c,l,iw-u*0.05,lh*0.62,true);c.fillText(l,x0+iw/2,y0+hh+off+lh*(i+0.5))});
+  if(it.date){var d=fmtD(it.date);c.textAlign='right';fit(c,d,iw*0.7,fh*0.62,false);c.fillText(d,x0+iw-u*0.02,y0+ih-fh/2)}
+  c.restore()}
+
+/* ========== カメラ ========== */
+var v=document.createElement('video');v.setAttribute('playsinline','');v.muted=true;
+var cv=g('view'),cx=cv.getContext('2d'),stream=null,raf=0;
+var HOME_URL='https://luxultrarich2020-netizen.github.io/koji-camera/';
+var inFrame=false;try{inFrame=window.top!==window.self}catch(e){inFrame=true}
+g('homeUrl').textContent=HOME_URL;g('inframe').style.display=inFrame?'block':'none';
+if(!inFrame&&/FBAN|FBAV|Messenger|Line\/|Instagram|MicroMessenger/i.test(navigator.userAgent))g('inapp').style.display='block';else g('inapp').style.display='none';
+function startCam(){
+  showMsg('camMsg','','');
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showMsg('camMsg','err','この画面ではカメラを使えません。ChromeかSafariで、https:// のアドレスを開いてください');return}
+  g('startBtn').disabled=true;g('startBtn').textContent='起動中...';
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false}).then(function(s){
+    stream=s;v.srcObject=s;return v.play()}).then(function(){
+    g('startBtn').style.display='none';g('camOff').style.display='none';g('badge').style.display='block';g('fsBtn').style.display='block';updShutter();setupZoom();loop()}).catch(function(e){
+    g('startBtn').disabled=false;g('startBtn').textContent='カメラを起動する';
+    if(inFrame){showMsg('camMsg','err','Apps Script の中で開かれているため、カメラが使えません。上のアドレスを、ChromeかSafariで直接開いてください');return}
+    if(e.name==='NotFoundError'||e.name==='OverconstrainedError'){
+      var n=0;(navigator.mediaDevices.enumerateDevices?navigator.mediaDevices.enumerateDevices():Promise.resolve([])).then(function(l){l.forEach(function(d){if(d.kind==='videoinput')n++})}).catch(function(){}).then(function(){
+        showMsg('camMsg','err','カメラが見つかりません（'+e.name+'、検出：'+n+'台）。パソコンにカメラがない、または他のアプリがカメラを使っている可能性があります。スマホのChromeやSafariで、もう一度試してください')});return}
+    if(e.name==='NotAllowedError'||e.name==='SecurityError'){showMsg('camMsg','err','カメラの許可がありません（'+e.name+'）。ブラウザのアドレス欄の左のマークから、カメラを「許可」にしてください');return}
+    showMsg('camMsg','err','カメラを開けませんでした：'+e.name+'（'+e.message+'）')})}
+/* 全画面（ブラウザの全画面にできる端末ではそれも使い、できない端末は画面いっぱいの表示にする） */
+function fitFs(){var vw=g('vw');if(!document.body.classList.contains('fs')){vw.style.height='';cv.style.width='';cv.style.height='';return}
+  var W=window.innerWidth,H=window.innerHeight;vw.style.height=H+'px';
+  if(!cv.width||!cv.height)return;var k=Math.min(W/cv.width,H/cv.height);cv.style.width=Math.round(cv.width*k)+'px';cv.style.height=Math.round(cv.height*k)+'px'}
+window.addEventListener('resize',function(){fitFs();setTimeout(fitFs,300)});window.addEventListener('orientationchange',function(){setTimeout(fitFs,300);setTimeout(fitFs,800)});
+var vwHome=null;
+function moveVw(on){var vw=g('vw');if(on&&!vwHome){vwHome=document.createComment('vw');vw.parentNode.insertBefore(vwHome,vw);document.body.appendChild(vw)}
+  else if(!on&&vwHome){vwHome.parentNode.insertBefore(vw,vwHome);vwHome.parentNode.removeChild(vwHome);vwHome=null}}
+function setFs(on){
+  moveVw(!!on);document.body.classList.toggle('fs',!!on);fitFs();
+  try{
+    if(on){var el=document.documentElement;if(el.requestFullscreen&&!document.fullscreenElement)el.requestFullscreen().catch(function(){});else if(el.webkitRequestFullscreen&&!document.webkitFullscreenElement)el.webkitRequestFullscreen()}
+    else{if(document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen().catch(function(){});else if(document.webkitFullscreenElement&&document.webkitExitFullscreen)document.webkitExitFullscreen()}
+  }catch(e){}
+}
+function onFsChange(){if(!document.fullscreenElement&&!document.webkitFullscreenElement&&document.body.classList.contains('fs')){moveVw(false);document.body.classList.remove('fs');fitFs()}}
+document.addEventListener('fullscreenchange',onFsChange);document.addEventListener('webkitfullscreenchange',onFsChange);
+function stopCam(){cancelAnimationFrame(raf);if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
+  g('startBtn').style.display='block';g('startBtn').disabled=false;g('startBtn').textContent='カメラを起動する';g('camOff').style.display='flex';g('badge').style.display='none';g('fsBtn').style.display='none';g('zoomRow').style.display='none';setFs(false);updShutter()}
+/* 端末を横にしたとき、映像だけ縦のまま届く端末があるので、画面の向きに合わせて映像を回す */
+function vrot(){var vw=v.videoWidth,vh=v.videoHeight,land=window.innerWidth>window.innerHeight;if(land===(vw>=vh)||!land)return 0;   // 画面が縦で映像が横（向きのロック中）は、回さずそのまま使う
+  var a=(screen.orientation&&screen.orientation.angle!=null)?screen.orientation.angle:(window.orientation||0);a=((a%360)+360)%360;return(a===90||a===270)?a:90}
+function vdims(){var r=vrot();return r%180?{w:v.videoHeight,h:v.videoWidth,r:r}:{w:v.videoWidth,h:v.videoHeight,r:r}}
+function paintVideo(ctx,w,h,r){if(!r){ctx.drawImage(v,0,0,w,h);return}ctx.save();ctx.translate(w/2,h/2);ctx.rotate(r*Math.PI/180);ctx.drawImage(v,-h/2,-w/2,h,w);ctx.restore()}
+var hintOn=false;
+function lockHint(){var on=window.innerWidth<=window.innerHeight&&v.videoWidth>v.videoHeight;if(on!==hintOn){hintOn=on;g('rotHint').style.display=on?'block':'none'}}
+function loop(){if(!stream)return;if(v.videoWidth){var d=vdims();if(cv.width!==d.w||cv.height!==d.h){cv.width=d.w;cv.height=d.h;fitFs()}
+  paintVideo(cx,cv.width,cv.height,d.r);lockHint();drawBoard(cx,cv.width,cv.height,{pos:cam.pos,body:cam.body,date:isoLocal(Date.now())},cam.site)}raf=requestAnimationFrame(loop)}
+document.addEventListener('visibilitychange',function(){if(document.hidden&&stream)stopCam()});
+function setupZoom(){try{var t=stream.getVideoTracks()[0],c=t.getCapabilities&&t.getCapabilities();if(c&&c.zoom){var z=g('zoom');z.min=c.zoom.min;z.max=c.zoom.max;z.step=c.zoom.step||0.1;z.value=(t.getSettings().zoom)||c.zoom.min;g('zoomRow').style.display='block';g('zv').textContent='×'+(+z.value).toFixed(1)}}catch(e){}}
+function setZoom(){try{var z=+g('zoom').value;stream.getVideoTracks()[0].applyConstraints({advanced:[{zoom:z}]});g('zv').textContent='×'+z.toFixed(1)}catch(e){}}
+document.querySelectorAll('#corners button').forEach(function(b){b.onclick=function(){cam.pos={c:b.dataset.c};saveCam();paintCorners()}});
+function paintCorners(){document.querySelectorAll('#corners button').forEach(function(b){b.classList.toggle('on',!!cam.pos.c&&b.dataset.c===cam.pos.c)})}
+g('body').value=cam.body;paintCorners();
+function onBody(){cam.body=g('body').value;saveCam()}
+
+/* 検査内容の履歴：Googleのスプレッドシートに保存して、全員で共有する */
+function normBody(t){return String(t||'').replace(/\r\n?/g,'\n').split('\n').map(function(l){return l.trim()}).filter(Boolean).slice(0,3).join('\n')}
+var bodies=LS.get('kc_bodies',[]);   // Googleに保存済み：[{text,last,count}]（最近使った順）
+var bq=LS.get('kc_bq',[]);           // まだ送れていないもの：[text]（新しい順）
+(function(){var old=LS.get('kc_hist',[]);if(old&&old.length){old.forEach(function(t){t=normBody(t);if(t&&bq.indexOf(t)<0)bq.push(t)});LS.set('kc_bq',bq);try{localStorage.removeItem('kc_hist')}catch(e){}}})();
+function allBodies(){var seen={},out=[];bq.forEach(function(t){if(!seen[t]){seen[t]=1;out.push(t)}});bodies.forEach(function(b){if(!seen[b.text]){seen[b.text]=1;out.push(b.text)}});return out}
+function saveHist(t){t=normBody(t);if(!t)return;
+  if(!bq.length&&bodies.length&&bodies[0].text===t)return;
+  bq=bq.filter(function(x){return x!==t});bq.unshift(t);LS.set('kc_bq',bq);paintHist();flushBodies()}
+var flushing=false;
+function flushBodies(){if(flushing||!bq.length||!conn.url||!conn.key)return;flushing=true;
+  var list=bq.slice().reverse(),i=0;
+  (function next(){if(i>=list.length){flushing=false;paintHist();return}
+    var t=list[i++];
+    api('saveBody',{text:t}).then(function(){
+      bq=bq.filter(function(x){return x!==t});bodies=[{text:t,last:Date.now(),count:1}].concat(bodies.filter(function(b){return b.text!==t}));
+      LS.set('kc_bq',bq);LS.set('kc_bodies',bodies);next()
+    }).catch(function(){flushing=false;paintHist()})})()}
+function loadBodies(){if(!conn.url||!conn.key)return Promise.resolve();
+  return api('bodies').then(function(j){bodies=j.bodies||[];LS.set('kc_bodies',bodies);paintHist()}).catch(function(){})}
+function histChips(el,onPick){el.innerHTML='';allBodies().slice(0,7).forEach(function(t){var b=document.createElement('button');b.className='chip';b.textContent=t.split('\n')[0]+(t.indexOf('\n')>=0?' …':'');b.onclick=function(){onPick(t)};el.appendChild(b)})}
+function paintHist(){histChips(g('hist'),function(t){g('body').value=t;onBody()});
+  var n=allBodies().length;g('bodySt').textContent=(conn.url?'Googleのスプレッドシートに保存・全員で共有：':'保存先が未設定：')+n+'件'+(bq.length?'（未送信 '+bq.length+'件。電波のよいところで自動で送ります）':'');
+  if(g('ed').style.display==='block')histChips(g('eHist'),function(t){g('eBody').value=t;edBody()})}
+/* 保存済みの一覧から選ぶ */
+var pickCb=null;
+function openPick(cb){pickCb=cb;g('bpq').value='';g('bp').style.display='block';document.body.style.overflow='hidden';renderPick();loadBodies().then(renderPick)}
+function closePick(){g('bp').style.display='none';pickCb=null;if(g('ed').style.display!=='block')document.body.style.overflow=''}
+function renderPick(){var q=g('bpq').value.trim(),list=allBodies().filter(function(t){return !q||t.indexOf(q)>=0}),w=g('bpl');w.innerHTML='';
+  g('bpSt').textContent=list.length+'件（最近使った順）。タップで選びます';
+  list.forEach(function(t){var d=document.createElement('div');d.className='bpi';
+    var b=document.createElement('button');b.className='tx';b.textContent=t;b.onclick=function(){var cb=pickCb;closePick();if(cb)cb(t)};
+    var x=document.createElement('button');x.className='x';x.textContent='🗑';x.title='この検査内容を削除';x.onclick=function(){delPick(t)};
+    d.appendChild(b);d.appendChild(x);w.appendChild(d)})}
+function delPick(t){if(!confirm('この検査内容を、全員の一覧から削除しますか？\n\n'+t))return;
+  bq=bq.filter(function(x){return x!==t});LS.set('kc_bq',bq);
+  api('deleteBody',{text:t}).then(function(){bodies=bodies.filter(function(b){return b.text!==t});LS.set('kc_bodies',bodies);paintHist();renderPick()}).catch(function(e){alert('削除できませんでした：'+e.message);paintHist();renderPick()})}
+paintHist();
+
+/* ========== 端末内の保存（撮った写真を溜める） ========== */
+var db=null,items=[];
+function dbOpen(){return new Promise(function(ok,ng){var r=indexedDB.open('kojiCamera',1);r.onupgradeneeded=function(){r.result.createObjectStore('photos',{keyPath:'id'})};r.onsuccess=function(){ok(r.result)};r.onerror=function(){ng(r.error)}})}
+function dbReq(mode,fn){return new Promise(function(ok,ng){var t=db.transaction('photos',mode),s=t.objectStore('photos'),r=fn(s);t.oncomplete=function(){ok(r&&r.result)};t.onerror=function(){ng(t.error)};t.onabort=function(){ng(t.error)}})}
+function dbPut(it){return dbReq('readwrite',function(s){return s.put(it)})}
+function dbDel(id){return dbReq('readwrite',function(s){return s.delete(id)})}
+function dbAll(){return dbReq('readonly',function(s){return s.getAll()})}
+function sortItems(){items.sort(function(a,b){return a.site<b.site?-1:a.site>b.site?1:a.t-b.t})}
+function updBadge(){var n=items.length;g('badge').textContent='送信待ち '+n+'枚';g('t-list').textContent='送信待ち'+(n?'（'+n+'）':'')}
+dbOpen().then(function(d){db=d;return dbAll()}).then(function(a){items=a||[];updBadge()}).catch(function(){showMsg('camMsg','err','この画面では、写真を端末に溜めておけません（プライベートモードではないか確かめてください）')});
+
+function shoot(){
+  if(!stream||!v.videoWidth||!cam.site||!db)return;
+  var d=vdims(),W=d.w,H=d.h,k=Math.min(1,1600/Math.max(W,H)),c=document.createElement('canvas');c.width=Math.round(W*k);c.height=Math.round(H*k);
+  paintVideo(c.getContext('2d'),c.width,c.height,d.r);
+  var t=Date.now(),it={id:t+'_'+Math.random().toString(36).slice(2,6),t:t,site:cam.site,body:cam.body,date:isoLocal(t),pos:JSON.parse(JSON.stringify(cam.pos))};
+  saveHist(cam.body);paintHist();
+  try{if(navigator.vibrate)navigator.vibrate(30)}catch(e){}
+  cv.style.opacity='.4';setTimeout(function(){cv.style.opacity=''},80);
+  c.toBlob(function(b){c.width=0;it.blob=b;items.push(it);updBadge();dbPut(it).catch(function(){showMsg('camMsg','err','保存に失敗しました。端末の空き容量を確かめてください')})},'image/jpeg',0.9)}
+
+/* ========== 溜まった写真の一覧 ========== */
+var thumbUrls=[];
+function bitmapOf(blob){return window.createImageBitmap?createImageBitmap(blob):new Promise(function(ok,ng){var im=new Image(),u=URL.createObjectURL(blob);im.onload=function(){URL.revokeObjectURL(u);ok(im)};im.onerror=ng;im.src=u})}
+function bw(b){return b.width||b.naturalWidth}function bh(b){return b.height||b.naturalHeight}
+function renderTo(it,maxDim,q){return bitmapOf(it.blob).then(function(b){var k=Math.min(1,maxDim/Math.max(bw(b),bh(b))),c=document.createElement('canvas');c.width=Math.round(bw(b)*k);c.height=Math.round(bh(b)*k);
+  var x=c.getContext('2d');x.drawImage(b,0,0,c.width,c.height);if(b.close)b.close();drawBoard(x,c.width,c.height,it,it.site);
+  return new Promise(function(ok){c.toBlob(function(bl){c.width=0;ok(bl)},'image/jpeg',q)})})}
+function renderList(){
+  thumbUrls.forEach(function(u){URL.revokeObjectURL(u)});thumbUrls=[];sortItems();updBadge();
+  var wrap=g('groups');wrap.innerHTML='';
+  g('upAll').style.display=items.length?'block':'none';g('upAll').textContent='すべて送信する（'+items.length+'枚）';
+  g('listHint').textContent=items.length?'写真をタップすると、看板の内容や位置を直せます。送信すると、看板が写真に入ります。':'まだ写真がありません。「撮影」の画面で撮ってください。';
+  var bySite={};items.forEach(function(it){(bySite[it.site]=bySite[it.site]||[]).push(it)});
+  Object.keys(bySite).forEach(function(s){
+    var d=document.createElement('div');d.className='grp';
+    var h=document.createElement('h3');var sp=document.createElement('span');sp.textContent=s+'（'+bySite[s].length+'枚）';h.appendChild(sp);
+    var bt=document.createElement('button');bt.className='btn sm up';bt.style.width='auto';bt.style.margin='0';bt.style.padding='7px 12px';bt.textContent='この現場だけ送信';bt.onclick=function(){uploadAll(s)};h.appendChild(bt);d.appendChild(h);
+    var gr=document.createElement('div');gr.className='grid';d.appendChild(gr);wrap.appendChild(d);
+    bySite[s].forEach(function(it){var th=document.createElement('div');th.className='th';var im=document.createElement('img');th.appendChild(im);th.onclick=function(){openEd(items.indexOf(it))};gr.appendChild(th);
+      renderTo(it,360,0.7).then(function(bl){var u=URL.createObjectURL(bl);thumbUrls.push(u);im.src=u})})})}
+
+/* ========== 編集 ========== */
+var ei=0,eImg=null,eRender=0;
+function openEd(i){if(i<0)return;ei=i;g('ed').style.display='block';document.body.style.overflow='hidden';loadEd()}
+function closeEd(){var it=items[ei];if(it){saveHist(it.body);dbPut(it)}g('ed').style.display='none';document.body.style.overflow='';renderList()}
+function nav(d){var n=ei+d;if(n<0||n>=items.length)return;dbPut(items[ei]);ei=n;loadEd()}
+function loadEd(){var it=items[ei];if(!it)return;g('edT').textContent=it.site+'　'+(ei+1)+'/'+items.length;g('eBody').value=it.body||'';g('eDate').value=it.date||'';histChips(g('eHist'),function(t){g('eBody').value=t;edBody()});
+  bitmapOf(it.blob).then(function(b){var k=Math.min(1,1000/Math.max(bw(b),bh(b))),c=document.createElement('canvas');c.width=Math.round(bw(b)*k);c.height=Math.round(bh(b)*k);c.getContext('2d').drawImage(b,0,0,c.width,c.height);if(b.close)b.close();eImg=c;
+    var e=g('edc');e.width=c.width;e.height=c.height;drawEd();g('ed').scrollTop=0})}
+function drawEd(){if(!eImg)return;var c=g('edc'),x=c.getContext('2d');x.drawImage(eImg,0,0);drawBoard(x,c.width,c.height,items[ei],items[ei].site)}
+function edBody(){items[ei].body=g('eBody').value;drawEd()}
+function edDate(){items[ei].date=g('eDate').value;drawEd()}
+function edCorner(c){items[ei].pos={c:c};drawEd()}
+function edCopyPrev(){if(ei<1)return;g('eBody').value=items[ei-1].body||'';edBody()}
+function edApply(k){var it=items[ei];items.forEach(function(o){if(o.site!==it.site)return;if(k==='pos')o.pos=JSON.parse(JSON.stringify(it.pos));else o.body=it.body;dbPut(o)});if(k==='body')saveHist(it.body);toast('この現場の全写真に適用しました')}
+function edDelete(){var it=items[ei];if(!confirm('この写真を削除しますか？'))return;dbDel(it.id);items.splice(ei,1);updBadge();if(!items.length){closeEd();return}if(ei>=items.length)ei=items.length-1;loadEd()}
+(function(){var c=g('edc'),drag=false,ox=0,oy=0;
+  function pt(ev){var r=c.getBoundingClientRect();return{x:(ev.clientX-r.left)*c.width/r.width,y:(ev.clientY-r.top)*c.height/r.height}}
+  function setPos(x,y){var it=items[ei],W=c.width,H=c.height,r=rect(W,H);x=Math.max(0,Math.min(W-r.w,x));y=Math.max(0,Math.min(H-r.h,y));it.pos={x:x/W,y:y/H};drawEd()}
+  c.addEventListener('pointerdown',function(ev){var it=items[ei];if(!it)return;var W=c.width,H=c.height,r=rect(W,H),b=resolve(it.pos,W,H,r),p=pt(ev);
+    if(p.x>=b.x&&p.x<=b.x+r.w&&p.y>=b.y&&p.y<=b.y+r.h){ox=p.x-b.x;oy=p.y-b.y}else{ox=r.w/2;oy=r.h/2;setPos(p.x-ox,p.y-oy)}
+    drag=true;c.setPointerCapture(ev.pointerId);ev.preventDefault()});
+  c.addEventListener('pointermove',function(ev){if(!drag)return;var p=pt(ev);setPos(p.x-ox,p.y-oy)});
+  c.addEventListener('pointerup',function(){drag=false});c.addEventListener('pointercancel',function(){drag=false})})();
+
+/* ========== 送信（1枚ずつ：看板を入れて、送って、端末から消す） ========== */
+var busy=false;
+function b64(b){return new Promise(function(ok,ng){var r=new FileReader();r.onload=function(e){ok(e.target.result.split(',')[1])};r.onerror=ng;r.readAsDataURL(b)})}
+function nameOf(it){var d=new Date(it.t);return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'_'+it.id.slice(-4)+'.jpg'}
+async function uploadAll(site){
+  if(busy)return;sortItems();
+  var todo=items.filter(function(i){return !site||i.site===site});if(!todo.length)return;
+  busy=true;g('upAll').disabled=true;showMsg('listMsg','','');g('pw').style.display='block';g('pb').style.width='0';
+  var done=0,total=todo.length,touched={},fail=null;
+  for(var i=0;i<todo.length;i++){var it=todo[i];
+    g('upSt').textContent=(done+1)+' / '+total+'枚 送信中（'+it.site+'）...';
+    try{
+      var blob=await renderTo(it,1600,0.85),data=await b64(blob);
+      await api('upload',{site:it.site,name:nameOf(it),base64:data,mimeType:'image/jpeg'});
+      await dbDel(it.id);items.splice(items.indexOf(it),1);touched[it.site]=1;done++;g('pb').style.width=Math.round(done/total*100)+'%';updBadge();
+    }catch(e){fail=e;break}}
+  Object.keys(touched).forEach(function(s){api('finish',{site:s}).catch(function(){})});
+  busy=false;g('upAll').disabled=false;g('pw').style.display='none';g('upSt').textContent='';
+  if(fail)showMsg('listMsg','err','送信できたのは'+done+'枚です。残りは端末に残っています。理由：'+fail.message+'（電波がよいところで、もう一度押してください）');
+  else showMsg('listMsg','ok','送信が完了しました（'+done+'枚）');
+  renderList()}
+
+/* ========== 起動 ========== */
+fillSites();
+if(conn.url&&conn.key){loadSites(false);loadBodies().then(flushBodies)}else{go('set');showMsg('setMsg','warn','はじめに、送り先のアドレスと合言葉を入れてください')}
+</script>
+</body>
+</html>
