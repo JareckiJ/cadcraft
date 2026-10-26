@@ -2341,6 +2341,20 @@ fn svg_elliptical_rounded_corners_are_traced() {
     let svg = format!("{SVG_PAGE}<g transform=\"scale(2,1)\"><rect x=\"1\" y=\"1\" width=\"3\" height=\"4\" rx=\"1\"/></g></svg>");
     let (p, mids) = polyline_and_arc_midpoints(&read(svg.as_bytes(), "stretched.svg").unwrap());
     assert!(p.closed && mids.is_empty() && p.vertices.len() > 8, "{p:?}");
+    // A tiny scale is still non-uniform: the test is relative to the scale, not absolute.
+    let svg = format!("{SVG_PAGE}<g transform=\"scale(0.00001,0.00002)\"><rect width=\"200000\" height=\"100000\" rx=\"20000\"/></g></svg>");
+    let (p, mids) = polyline_and_arc_midpoints(&read(svg.as_bytes(), "tiny.svg").unwrap());
+    assert!(p.closed && mids.is_empty() && p.vertices.len() > 8, "{p:?}");
+}
+
+/// A closed path's last point is dropped only when it repeats the first to within rounding,
+/// however far from the origin the drawing is.
+#[test]
+fn svg_closed_path_keeps_a_distinct_last_point_far_from_the_origin() {
+    let svg = format!("{SVG_PAGE}<path d=\"M1000000000 0 L1000000010 0 L1000000010 10 L1000000000.5 0 Z\"/></svg>");
+    let d = read(svg.as_bytes(), "far.svg").unwrap();
+    let p = first(&d, |k| if let EntityKind::LwPolyline(p) = k { Some(p.clone()) } else { None });
+    assert!(p.closed && p.vertices.len() == 4, "{p:?}");
 }
 
 #[test]

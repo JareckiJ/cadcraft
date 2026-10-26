@@ -582,12 +582,13 @@ impl Parser {
     }
 
     fn flush_run(&mut self, run: &mut Vec<PolyVertex>, closed: bool) -> Result<()> {
-        // A closed run that ends back on its first vertex: the closing segment is that last
-        // step, so the repeated vertex goes and the step's bulge stays on the vertex before it.
+        // A closed run that ends back on its first vertex (to within rounding): the closing
+        // segment is that last step, so the repeated vertex goes and the step's bulge stays on
+        // the vertex before it.
         if closed
             && run.len() > 2
             && let (Some(first), Some(last)) = (run.first(), run.last())
-            && (last.p - first.p).len() <= 1e-9 * (1.0 + first.p.x.abs().max(first.p.y.abs()))
+            && (last.p - first.p).len() <= 64.0 * f64::EPSILON * (1.0 + first.p.x.abs().max(first.p.y.abs()))
         {
             run.pop();
         }
@@ -636,8 +637,9 @@ fn num(e: &BytesStart, name: &[u8], fallback: f64) -> f64 {
 fn preserves_circles(m: &Mat3) -> bool {
     let ex = m.apply_vec(Vec2::new(1.0, 0.0));
     let ey = m.apply_vec(Vec2::new(0.0, 1.0));
-    let mag = (ex.x * ex.x + ex.y * ex.y + ey.x * ey.x + ey.y * ey.y).max(1.0);
-    (ex.x * ex.x + ex.y * ex.y - (ey.x * ey.x + ey.y * ey.y)).abs() <= 1e-9 * mag && (ex.x * ey.x + ex.y * ey.y).abs() <= 1e-9 * mag
+    // Relative to the basis vectors' size, so a tiny but non-uniform scale isn't taken as uniform.
+    let mag = ex.x * ex.x + ex.y * ex.y + ey.x * ey.x + ey.y * ey.y;
+    mag > 0.0 && (ex.x * ex.x + ex.y * ex.y - (ey.x * ey.x + ey.y * ey.y)).abs() <= 1e-9 * mag && (ex.x * ey.x + ex.y * ey.y).abs() <= 1e-9 * mag
 }
 
 /// A `rect`'s corner radii (SVG 1.1 §9.2): a missing, negative or unreadable (`auto`) radius
