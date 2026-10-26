@@ -261,6 +261,55 @@ fn rebuilt_preview<'a>(doc: &cadcraft_doc::Drawing, ents: impl IntoIterator<Item
     cadcraft_render::build_entities(doc, ents, &preview_options(scale))
 }
 
+/// Check whether a closed AREA boundary is a simple polygon safe to fill.
+/// Nonadjacent edges may neither cross nor touch: AREA uses shoelace area while the
+/// even-odd triangulator shades individual lobes of self-intersecting outlines.
+/// Fail closed on degenerate edges or non-finite intermediate calculations. This
+/// runs only for previews of up to 256 vertices; the drawing and AREA result stay unchanged.
+fn area_preview_boundary_is_simple(boundary: &[Vec2]) -> bool {
+    let n = boundary.len();
+    if !(3..=256).contains(&n) || boundary.iter().any(|p| !p.is_finite()) {
+        return false;
+    }
+    let opposite = |a: f64, b: f64| (a > 0.0 && b < 0.0) || (a < 0.0 && b > 0.0);
+    let on_segment = |a: Vec2, b: Vec2, p: Vec2| {
+        p.x >= a.x.min(b.x) && p.x <= a.x.max(b.x) && p.y >= a.y.min(b.y) && p.y <= a.y.max(b.y)
+    };
+    for (i, &a) in boundary.iter().enumerate() {
+        let Some(&b) = boundary.get((i + 1) % n) else { return false };
+        if a == b {
+            return false;
+        }
+        // Edges sharing a corner are adjacent; only nonadjacent intersections
+        // make the preview ambiguous. Include endpoint touches and collinear overlap.
+        for (j, &c) in boundary.iter().enumerate().skip(i + 2) {
+            if i == 0 && j == n - 1 {
+                continue;
+            }
+            let Some(&d) = boundary.get((j + 1) % n) else { return false };
+            let ab = b - a;
+            let cd = d - c;
+            let ac = c - a;
+            let ad = d - a;
+            let ca = a - c;
+            let cb = b - c;
+            let (o1, o2, o3, o4) = (ab.cross(ac), ab.cross(ad), cd.cross(ca), cd.cross(cb));
+            if ![o1, o2, o3, o4].iter().all(|v| v.is_finite()) {
+                return false;
+            }
+            if (opposite(o1, o2) && opposite(o3, o4))
+                || (o1 == 0.0 && on_segment(a, b, c))
+                || (o2 == 0.0 && on_segment(a, b, d))
+                || (o3 == 0.0 && on_segment(c, d, a))
+                || (o4 == 0.0 && on_segment(c, d, b))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Screen-only AREA rubber-band shading. This is not a HATCH and never enters the drawing.
 fn area_preview_fill(command: Option<&str>, ents: &[cadcraft_doc::Entity], xf: &Xf) -> Option<egui::Mesh> {
     if command != Some("area") {
@@ -274,10 +323,12 @@ fn area_preview_fill(command: Option<&str>, ents: &[cadcraft_doc::Entity], xf: &
         return None;
     }
     let boundary: Vec<Vec2> = poly.vertices.iter().map(|v| v.p).collect();
-    if boundary.iter().any(|p| !p.is_finite()) {
+    // A self-crossing polygon may shade multiple lobes even when AREA's shoelace
+    // measurement is zero. Keep its outline, but do not show a misleading fill.
+    if !area_preview_boundary_is_simple(&boundary) {
         return None;
     }
-    // Use the existing even-odd renderer for concave polygons (not a triangle fan).
+    // Use the existing even-odd renderer for simple concave polygons (not a triangle fan).
     let triangles = cadcraft_render::triangulate_evenodd(&[boundary]);
     if triangles.len() > 24_000 || triangles.iter().any(|p| !p.is_finite()) {
         return None;
@@ -2789,6 +2840,7 @@ pub(crate) mod tests {
         assert_eq!(alpha(true), 128);
     }
 
+    /// A regular AREA rectangle shades only the transient mesh, not the saved drawing.
     #[test]
     fn area_preview_fills_rectangle_without_changing_drawing() {
         let mut s = cadcraft_engine::Session::new();
@@ -2809,6 +2861,7 @@ pub(crate) mod tests {
         assert_eq!(s.doc().unwrap().model.len(), initial);
     }
 
+    /// A simple concave boundary shades its notch correctly without filling its bounding box.
     #[test]
     fn area_preview_concave_polygon_respects_notch() {
         let mut s = cadcraft_engine::Session::new();
@@ -2831,6 +2884,7 @@ pub(crate) mod tests {
         assert_eq!(s.active_command_id(), None);
     }
 
+    /// Collinear AREA points create no triangles, even though the outline remains.
     #[test]
     fn area_preview_collinear_points_have_no_fill() {
         let mut s = cadcraft_engine::Session::new();
@@ -2841,6 +2895,38 @@ pub(crate) mod tests {
         let xf = Xf { rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0)), center: Vec2::new(2.0, 0.0), scale: 10.0 };
         assert!(area_preview_fill(s.active_command_id(), &ents, &xf).is_none());
         s.cancel();
+    }
+
+    /// A self-crossing bowtie has zero signed shoelace area; its two visual lobes must not be shaded.
+    #[test]
+    fn area_preview_bowtie_does_not_show_misleading_fill() {
+        let mut s = cadcraft_engine::Session::new();
+        let initial = s.doc().unwrap().model.len();
+        s.start("area").unwrap();
+        for p in [Vec2::new(0.0, 0.0), Vec2::new(2.0, 2.0), Vec2::new(2.0, 0.0)] {
+            s.input(Input::Point(p)).unwrap();
+        }
+        let ents = s.preview(Vec2::new(0.0, 2.0));
+        let xf = Xf { rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(300.0, 300.0)), center: Vec2::new(1.0, 1.0), scale: 10.0 };
+        assert!(!ents.is_empty(), "the outline is still available");
+        assert!(area_preview_fill(s.active_command_id(), &ents, &xf).is_none());
+        assert_eq!(s.doc().unwrap().model.len(), initial);
+        s.cancel();
+        assert_eq!(s.active_command_id(), None);
+    }
+
+    /// Touching nonadjacent edges, duplicate points and invalid coordinates are not safe to shade.
+    #[test]
+    fn area_preview_rejects_touching_and_degenerate_boundaries() {
+        let v = |x, y| Vec2::new(x, y);
+        assert!(!area_preview_boundary_is_simple(&[
+            v(0.0, 0.0), v(4.0, 0.0), v(4.0, 4.0), v(2.0, 2.0), v(0.0, 4.0), v(2.0, 2.0)
+        ]));
+        assert!(!area_preview_boundary_is_simple(&[v(0.0, 0.0), v(4.0, 0.0), v(4.0, 0.0), v(0.0, 4.0)]));
+        assert!(!area_preview_boundary_is_simple(&[v(0.0, 0.0), v(f64::NAN, 2.0), v(0.0, 4.0)]));
+        assert!(area_preview_boundary_is_simple(&[
+            v(0.0, 0.0), v(6.0, 0.0), v(6.0, 2.0), v(2.0, 2.0), v(2.0, 6.0), v(0.0, 6.0)
+        ]));
     }
 
     /// Previews the session rebuilds with the current properties (the rubber band, copies of
