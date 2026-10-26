@@ -204,8 +204,9 @@ down-arrow options menu (DYNPROMPT), and DYNDIM.
 Palette tab context menus offer Dock Left and Dock Right in addition to the shared floating
 and grouping actions. Each choice moves that palette to a real side dock column through
 `ui.dock`; it does not turn the drawing into a tab group or move the palette's other tabs.
-The same menu works for floating palettes. Existing workspace persistence stores the resulting
-layout. The document view has no side-placement menu and retains its protected permissions.
+The same menu works for floating palettes. Native workspace persistence stores the resulting
+layout across restarts. The browser host does not persist workspace layouts; reloading restores
+the default arrangement. The document view has no side-placement menu and retains its protected permissions.
 This CC-018 extraction uses the upstream shared docking implementation; auto-hide and
 Tool Sets-to-ribbon placement are separate follow-ups.
 AutoCAD 2027's Properties palette menu was observed on Windows: it offers Allow Docking,
