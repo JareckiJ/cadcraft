@@ -2,7 +2,9 @@
 //! decides it for every build, screen or plot: the window a build culls against, whether an
 //! object reaches it, and which entities of a block reference reach it once the window is
 //! brought into the block's coordinates. Nested references are culled the same way at each
-//! level. An object without measurable bounds (an infinite line, a ray) always reaches.
+//! level. An object without measurable bounds (an infinite line, a ray) always reaches, and so
+//! does a POINT, or a reference to a block that draws one: a point's marker (PDMODE, PDSIZE) can
+//! be any size, and its bounds are only the point.
 //!
 //! A model-space plot with a view culls (its view grown by [`MARGIN`]); other builds cull
 //! nothing. A builder holds its window in `Builder::cull`.
@@ -34,7 +36,27 @@ pub(crate) fn reaches(b: &Bounds2, window: &Bounds2) -> bool {
 
 /// Whether the top-level object `e` can reach `window`.
 pub(crate) fn entity_reaches(d: &Drawing, e: &Entity, window: &Bounds2) -> bool {
-    reaches(&entity_bounds(d, e, 0), window)
+    reaches(&cull_bounds(d, e, 0), window)
+}
+
+/// The bounds a top-level object is culled by: its own, or none (it always reaches) for a point
+/// or a reference to a block that draws points.
+fn cull_bounds(d: &Drawing, e: &Entity, depth: usize) -> Bounds2 {
+    let draws_points = |name: &str| d.block(name).is_some_and(|blk| block_bounds(d, blk).points);
+    let points = match &e.kind {
+        EntityKind::Point(_) => true,
+        EntityKind::Insert(ins) => draws_points(&ins.block),
+        EntityKind::Dimension(dm) => dm.block.as_deref().is_some_and(draws_points),
+        EntityKind::MLeader(m) => m.block.as_ref().is_some_and(|ins| draws_points(&ins.block)),
+        _ => false,
+    };
+    if points { Bounds2::EMPTY } else { entity_bounds(d, e, depth) }
+}
+
+/// Whether `blk`, or a definition it draws through references (`nested`), has a POINT.
+fn has_points(blk: &Block, nested: &Nested) -> bool {
+    let any = |b: &Block| b.entities.iter().any(|e| matches!(e.kind, EntityKind::Point(_)));
+    any(blk) || nested.iter().any(|(_, def)| def.as_deref().is_some_and(any))
 }
 
 /// The measured entity bounds of one block definition, looked up once per block reference and
@@ -79,16 +101,18 @@ impl BlockReach {
 struct Measured {
     bounds: Arc<Vec<Bounds2>>,
     extent: Option<Bounds2>,
+    /// The block, or one drawn through it, has a POINT (see [`cull_bounds`]).
+    points: bool,
 }
 
 impl Measured {
-    fn new(bounds: Vec<Bounds2>) -> Self {
+    fn new(bounds: Vec<Bounds2>, points: bool) -> Self {
         let extent = if bounds.is_empty() || bounds.iter().any(Bounds2::is_empty) {
             None
         } else {
             Some(bounds.iter().fold(Bounds2::EMPTY, |a, b| a.union(b)))
         };
-        Measured { bounds: Arc::new(bounds), extent }
+        Measured { bounds: Arc::new(bounds), extent, points }
     }
 }
 
@@ -106,8 +130,8 @@ static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
 
 /// The drawing-wide inputs block entity bounds read besides the definitions: which layers are on
 /// and thawed (nested block contents on hidden layers take no room), and the dimension styles, text
-/// style heights and DIMSCALE that size a dimension's room for text and arrows and a tolerance
-/// frame.
+/// style heights and width factors (MTEXT bounds) and DIMSCALE that size a dimension's room for
+/// text and arrows and a tolerance frame.
 fn drawing_key(d: &Drawing) -> u64 {
     let mut h = DefaultHasher::new();
     for l in &d.layers {
@@ -117,7 +141,7 @@ fn drawing_key(d: &Drawing) -> u64 {
         (st.name.as_str(), st.scale.to_bits(), st.text_height.to_bits(), st.text_gap.to_bits(), st.text_style.as_str()).hash(&mut h);
     }
     for t in &d.text_styles {
-        (t.name.as_str(), t.height.to_bits()).hash(&mut h);
+        (t.name.as_str(), t.height.to_bits(), t.width_factor.to_bits()).hash(&mut h);
     }
     d.header.f64("DIMSCALE", 1.0).to_bits().hash(&mut h);
     h.finish()
@@ -183,8 +207,17 @@ fn block_bounds(d: &Drawing, blk: &Arc<Block>) -> Measured {
     {
         return b.clone();
     }
-    let bounds = Measured::new(blk.entities.iter().map(|e| entity_bounds(d, e, 1)).collect());
     let deps = nested(d, blk);
+    // A point, or (when this block draws points anywhere) a reference, has no bounds to cull by.
+    let points = has_points(blk, &deps);
+    let measure = |e: &Entity| match &e.kind {
+        EntityKind::Point(_) => Bounds2::EMPTY,
+        EntityKind::Insert(_) if points => Bounds2::EMPTY,
+        EntityKind::Dimension(dm) if points && dm.block.is_some() => Bounds2::EMPTY,
+        EntityKind::MLeader(m) if points && m.block.is_some() => Bounds2::EMPTY,
+        _ => entity_bounds(d, e, 1),
+    };
+    let bounds = Measured::new(blk.entities.iter().map(|e| measure(e)).collect(), points);
     if let Ok(mut cache) = CACHE.lock() {
         cache.retain(|(blk2, k, _, _)| !(*k == key && Arc::ptr_eq(blk2, blk)));
         if cache.len() >= MAX_BLOCKS {
@@ -225,6 +258,50 @@ mod tests {
             CopyReach::Some(s) => assert_eq!(s, vec![true, false]),
             _ => panic!("a copy meeting the window keeps its per-entity flags"),
         }
+    }
+
+    #[test]
+    fn points_and_blocks_drawing_points_always_reach() {
+        let mut d = Drawing::new_imperial();
+        let window = Bounds2::from_points([Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)]);
+        let point = EntityKind::Point(cadcraft_doc::Point { p: Vec3::new(10.5, 5.0, 0.0), angle: 0.0 });
+        // A point just outside the window: its marker may still reach it.
+        let e = Entity::new(Handle(1), point.clone());
+        assert!(entity_reaches(&d, &e, &window));
+        // A block drawing one, directly or through a nested reference, is never ruled out.
+        let inner = block("CullPointInner", vec![point]);
+        d.blocks.insert("CullPointInner".into(), inner.clone());
+        let EntityKind::Insert(mut ins) = insert_kind("CullPointInner") else { panic!("an insert") };
+        ins.insert = Vec3::new(100.0, 0.0, 0.0);
+        let outer = block("CullPointOuter", vec![EntityKind::Insert(ins.clone())]);
+        d.blocks.insert("CullPointOuter".into(), outer.clone());
+        assert!(entity_reaches(&d, &Entity::new(Handle(2), EntityKind::Insert(ins)), &window));
+        assert!(matches!(block_reach(&d, &outer).copy(&Mat3::translate(Vec2::new(100.0, 0.0)), &window), CopyReach::Some(_)));
+        assert!(matches!(block_reach(&d, &inner).copy(&Mat3::translate(Vec2::new(100.0, 0.0)), &window), CopyReach::Some(_)));
+    }
+
+    #[test]
+    fn a_text_style_width_factor_change_measures_blocks_again() {
+        let mut d = Drawing::new_imperial();
+        let before = drawing_key(&d);
+        if let Some(s) = d.text_styles.first_mut() {
+            s.width_factor = 2.0;
+        }
+        assert_ne!(drawing_key(&d), before, "MTEXT bounds in blocks follow the style's width factor");
+    }
+
+    fn insert_kind(name: &str) -> EntityKind {
+        EntityKind::Insert(cadcraft_doc::Insert {
+            block: name.into(),
+            insert: Vec3::ZERO,
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotation: 0.0,
+            attribs: vec![],
+            cols: 1,
+            rows: 1,
+            col_spacing: 0.0,
+            row_spacing: 0.0,
+        })
     }
 
     #[test]
