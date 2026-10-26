@@ -41,8 +41,8 @@ pub struct Prompt {
     /// prompt (a point with no base yet, e.g. the first point of a line). Elsewhere a deferred
     /// pick arrives as the plain point it was picked at.
     pub deferred: bool,
-    /// The base is a rectangle's first corner (ZOOM Window, RECTANG, ARRAYRECT's unit cell): ortho
-    /// does not bend the opposite corner, so the rectangle keeps its area.
+    /// The base is a rectangle's first corner (ZOOM Window, PLOTWINDOW, RECTANG, ARRAYRECT's unit
+    /// cell): ortho does not bend the opposite corner, so the rectangle keeps its area.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub corner: bool,
     /// The grip this prompt stretches (one hot grip at the STRETCH prompt), as (object, grip
@@ -122,7 +122,7 @@ impl Prompt {
         self
     }
     pub fn kw(mut self, k: &[&str]) -> Self {
-        self.keywords = k.iter().map(|s| s.to_string()).collect();
+        self.keywords = k.iter().map(ToString::to_string).collect();
         self
     }
     pub fn base(mut self, p: Vec2) -> Self {
@@ -141,9 +141,10 @@ impl Prompt {
     }
     /// Asks for the opposite corner of a selection window from `corner` (the `window` field):
     /// the UI draws it as a selection area, and a drag that opened it closes it where the button
-    /// comes up (PICKDRAG). It picks objects, so object snaps and Dynamic Input stay off.
+    /// comes up (PICKDRAG). It picks objects, so object snaps and Dynamic Input stay off, and the
+    /// base is a window corner ([`Prompt::corner`]), so ortho never bends it onto an axis (#1556).
     pub fn window(mut self, corner: Vec2, crossing: Option<bool>) -> Self {
-        self.base = Some(corner);
+        self = self.corner(corner);
         self.window = Some(SelectWindow { corner, crossing });
         self
     }
