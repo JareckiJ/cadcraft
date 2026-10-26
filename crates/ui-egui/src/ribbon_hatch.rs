@@ -56,8 +56,8 @@ const NONE: &[Cmd] = &[];
 const TILES: usize = 4;
 const TILE_W: f32 = 54.0;
 
-/// Whether the Hatch Editor shows: the selection is hatches only (in the drawing, not in the
-/// Block Editor). Keeps `UiState::ribbon_tab` on the tab while it appears and goes back to the
+/// Whether the Hatch Editor shows: the selection is hatches only (in the drawing or the Block
+/// Editor alike). Keeps `UiState::ribbon_tab` on the tab while it appears and goes back to the
 /// tab shown before once the hatches are deselected.
 pub fn context(app: &mut CadApp, ctx: &egui::Context) -> Option<&'static str> {
     let id = if creating(app) {
@@ -100,10 +100,6 @@ pub fn creating(app: &CadApp) -> bool {
 
 /// The selected hatches (empty when anything else is selected too).
 pub fn selected(app: &CadApp) -> Vec<Handle> {
-    let Ok(st) = app.session.state() else { return Vec::new() };
-    if st.block_edit.is_some() {
-        return Vec::new();
-    }
     let Ok(d) = app.session.doc() else { return Vec::new() };
     let sel = app.session.selection();
     let all = !sel.is_empty() && sel.iter().all(|h| matches!(d.entity(*h).map(|e| &e.kind), Some(EntityKind::Hatch(_))));

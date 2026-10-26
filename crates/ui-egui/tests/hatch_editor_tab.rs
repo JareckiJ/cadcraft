@@ -219,3 +219,36 @@ fn a_reduced_ribbon_stays_reduced_for_the_hatch_tabs() {
     assert!(h.state().ui.ribbon_minimized, "Hatch Creation");
     assert!(h.query_by_label("Close Hatch Creation").is_none());
 }
+
+#[test]
+fn the_hatch_editor_also_opens_in_the_block_editor() {
+    let (mut h, hatch, rect) = harness(false);
+    let app = h.state_mut();
+    app.run("block", json!({ "name": "Tile", "base": [0, 0], "handles": [rect.hex(), hatch.hex()] })).unwrap();
+    app.run("bedit", json!({ "name": "Tile" })).unwrap();
+    h.run_steps(3);
+    let hatch = {
+        let d = h.state().session.doc().unwrap();
+        d.model.iter().find(|e| matches!(e.kind, cadcraft_engine::doc::EntityKind::Hatch(_))).unwrap().handle
+    };
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.run_steps(3);
+    assert_eq!(h.state().ui.ribbon_tab, ribbon_hatch::TAB_ID);
+    assert!(h.query_by_label("Close Hatch Editor").is_some());
+}
+
+#[test]
+fn hatchedit_opens_the_hatch_edit_dialog_with_the_ribbon_shown() {
+    let (mut h, hatch, _) = harness(false);
+    // A hatch selected: its dialog straight away.
+    h.state_mut().session.set_selection(vec![hatch]);
+    h.state_mut().run("hatchedit", serde_json::Value::Null).unwrap();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.dialog.as_deref(), Some("hatch"));
+    assert_eq!(h.state().hatch_dlg.as_ref().map(|s| s.edit.clone()), Some(vec![hatch]));
+    // Nothing selected: a hatch is asked for first.
+    let (mut h, _, _) = harness(false);
+    h.state_mut().run("hatchedit", serde_json::Value::Null).unwrap();
+    h.run_steps(3);
+    assert!(h.state().session.running.is_some(), "a hatch is asked for");
+}

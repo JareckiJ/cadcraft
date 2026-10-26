@@ -493,13 +493,8 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             crate::aliasdlg::open(app);
             Ok(Value::Null)
         }
-        // HATCHEDIT: the selected hatches open the Hatch Editor tab; with none, pick one first.
-        "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() && app.ui.show_ribbon => {
-            if crate::ribbon_hatch::selected(app).is_empty() {
-                app.start("hatchedit.pick");
-            }
-            Ok(Value::Null)
-        }
+        // HATCHEDIT opens the Hatch Edit dialog, Ribbon or not (selecting a hatch is what shows
+        // the Hatch Editor tab); with no hatch selected, it asks for one first.
         "hatchedit" | "he" if params.is_null() && app.session.state().is_ok() => {
             crate::hatchdlg::open_edit(app);
             Ok(Value::Null)
