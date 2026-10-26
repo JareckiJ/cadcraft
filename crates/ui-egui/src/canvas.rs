@@ -1544,8 +1544,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         return;
     }
 
-    // Double-click a hatch (no command running) to edit it in the Hatch Edit dialog. The click is
-    // used up: it must not also start a grip edit on the hatch's centre grip below.
+    // Double-click a hatch (no command running): it is selected alone, so the Ribbon's Hatch
+    // Editor opens, with Quick Properties beside it; without the Ribbon, the Hatch Edit dialog. The
+    // click is used up: it must not also start a grip edit on the hatch's centre grip below.
     let mut hatch_dialog = false;
     if inside
         && dbl_primary
@@ -1554,7 +1555,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && let Some(h) = hatch_at(app, xf.to_world(hp), scale)
     {
         app.session.set_selection(vec![h]);
-        crate::hatchdlg::open_edit(app);
+        if app.ui.show_ribbon {
+            // With the Ribbon, Quick Properties opens beside the Hatch Editor tab.
+            app.force_quick_properties();
+        } else {
+            // No Ribbon (Mac layout): the Hatch Edit dialog is the only editor.
+            crate::hatchdlg::open_edit(app);
+        }
         hatch_dialog = true;
     }
 
@@ -3001,6 +3008,36 @@ mod hatch_pick_tests {
         assert_eq!(app.hatch_dlg.as_ref().map(|s| s.edit.iter().map(|h| h.hex()).collect::<Vec<_>>()), Some(vec![hx]));
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
+    }
+
+    #[test]
+    fn with_the_ribbon_double_clicking_a_hatch_opens_quick_properties() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        app.ui.show_ribbon = true;
+        app.session.execute("rectang", &json!({ "p1": [0, 0], "p2": [10, 10] })).unwrap();
+        let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
+        let _ = app.session.zoom_extents();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
+        let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
+            app.logic(&ctx);
+            let input = egui::RawInput { screen_rect: screen, events, time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| app.ui(ui));
+            out.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new(), 0.0);
+        let at = app.canvas.xf.unwrap().to_screen(Vec2::new(5.0, 5.0));
+        let button =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::default() };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)], 0.1);
+        frame(&mut app, vec![button(true), button(false)], 0.2);
+        frame(&mut app, vec![button(true), button(false)], 0.3);
+        frame(&mut app, Vec::new(), 0.4);
+        // The hatch alone selected (so the Hatch Editor tab shows) and Quick Properties forced on.
+        assert_eq!(app.session.selection().iter().map(|h| h.hex()).collect::<Vec<_>>(), vec![hx]);
+        assert!(app.qp_forced.is_some());
+        assert_eq!(app.ui.dialog, None);
+        assert!(app.session.running.is_none());
     }
 }
 

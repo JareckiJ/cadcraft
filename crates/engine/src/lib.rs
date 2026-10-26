@@ -147,6 +147,9 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// The boundary set hatches use here ([`Session::hatch_boundary_set`]); in the Block Editor,
+    /// the editor's own (the drawing's waits with it, [`blockedit::BlockEdit::host`]).
+    pub hatch_boundary: Option<BoundarySet>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -173,6 +176,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            hatch_boundary: None,
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -643,6 +647,14 @@ impl Default for MLeaderOptions {
     }
 }
 
+/// A drawing's boundary set (HATCHBOUNDARYSET) and whether pick points use it (`false`: Use
+/// Current Viewport, the set kept for later). The Block Editor has its own, which goes with it.
+#[derive(Clone, Debug)]
+pub struct BoundarySet {
+    pub handles: Vec<Handle>,
+    pub active: bool,
+}
+
 /// The editor session: open drawings, settings, the running command and the command log.
 pub struct Session {
     pub docs: Vec<DocState>,
@@ -711,6 +723,11 @@ pub struct Session {
     lisp_last: Option<std::result::Result<lisp::value::Value, String>>,
     /// What the last HATCHPICK kept (the Hatch and Gradient dialog's picks).
     pub hatch_picks: Option<cmd::hatch::HatchPicks>,
+    /// The Hatch Editor's "Store as Default Origin": a newly set origin becomes HPORIGIN.
+    pub hatch_store_origin: bool,
+    /// The last pattern and the last gradient a hatch had: what a hatch turned back to "pattern"
+    /// or "gradient" takes. See [`Session::remember_hatch`].
+    hatch_memory: cmd::hatch::TypeMemory,
 }
 
 impl Default for Session {
@@ -761,6 +778,8 @@ impl Session {
             lisp: lisp::LispState::default(),
             lisp_last: None,
             hatch_picks: None,
+            hatch_store_origin: false,
+            hatch_memory: cmd::hatch::TypeMemory::default(),
         }
     }
     /// Append a new untitled drawing (`DrawingN`, metric or imperial default view), end a running command, make it active, bump the document epoch and return its index.
@@ -817,6 +836,66 @@ impl Session {
                 Err(EngineError::Internal("open".into(), "panic".into()))
             }
         }
+    }
+
+    /// The current drawing's boundary set (HATCHBOUNDARYSET): the only objects pick points look
+    /// at; `None` uses everything visible in the current viewport ("Use Current Viewport", a set
+    /// chosen earlier then being kept, see [`Session::hatch_boundary_set_kept`]). In the Block
+    /// Editor, the set chosen there: the drawing's set waits for BCLOSE.
+    pub fn hatch_boundary_set(&self) -> Option<&[Handle]> {
+        self.state().ok()?.hatch_boundary.as_ref().filter(|b| b.active).map(|b| b.handles.as_slice())
+    }
+
+    /// The current drawing's boundary set, in use or kept aside by Use Current Viewport.
+    pub fn hatch_boundary_set_kept(&self) -> Option<&[Handle]> {
+        self.state().ok()?.hatch_boundary.as_ref().map(|b| b.handles.as_slice())
+    }
+
+    /// Make `set` the current drawing's boundary set (the Block Editor's while it is open), in
+    /// use; `None` is Use Current Viewport: the set is kept aside, not forgotten.
+    pub fn set_hatch_boundary_set(&mut self, set: Option<Vec<Handle>>) {
+        let Ok(st) = self.state_mut() else { return };
+        match set {
+            Some(handles) => st.hatch_boundary = Some(BoundarySet { handles, active: true }),
+            None => {
+                if let Some(b) = st.hatch_boundary.as_mut() {
+                    b.active = false;
+                }
+            }
+        }
+    }
+
+    /// Use the kept boundary set again; its size, or `None` when there is none.
+    pub fn use_kept_hatch_boundary_set(&mut self) -> Option<usize> {
+        let b = self.state_mut().ok()?.hatch_boundary.as_mut()?;
+        b.active = true;
+        Some(b.handles.len())
+    }
+
+    /// Remember `h`'s pattern (with its lines) when it is a pattern, or its gradient with its
+    /// settings when it is a gradient, so a hatch turned back to that type takes it again.
+    /// Solid and user-defined hatches leave both as they are.
+    pub fn remember_hatch(&mut self, h: &cadcraft_doc::Hatch) {
+        self.hatch_memory.remember(h);
+    }
+
+    /// The last pattern and gradient hatches had ([`Session::remember_hatch`]).
+    pub(crate) fn hatch_type_memory(&self) -> &cmd::hatch::TypeMemory {
+        &self.hatch_memory
+    }
+
+    pub(crate) fn set_hatch_type_memory(&mut self, memory: cmd::hatch::TypeMemory) {
+        self.hatch_memory = memory;
+    }
+
+    /// The last pattern a hatch had (name and the lines it brings), if any.
+    pub fn hatch_last_pattern(&self) -> Option<(&str, &[cadcraft_doc::library::PatternLine])> {
+        self.hatch_memory.pattern.as_ref().map(|(n, l)| (n.as_str(), l.as_slice()))
+    }
+
+    /// The last gradient a hatch had, with its colours, angle and centring, if any.
+    pub fn hatch_last_gradient(&self) -> Option<&cadcraft_doc::Gradient> {
+        self.hatch_memory.gradient.as_ref()
     }
 
     pub fn state(&self) -> Result<&DocState> {
@@ -1262,7 +1341,15 @@ impl Session {
         let base = if matches!(input, Some(Input::Point(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
         let Some(mut run) = self.running.take() else { return Ok(()) };
         let step = match input {
-            Some(Input::Cancel) => Ok(Step::Cancel),
+            // A step inside the command may take Esc and let the command go on.
+            Some(Input::Cancel) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run.machine.cancel(self))) {
+                Ok(true) => {
+                    self.echo("*Cancel*");
+                    Ok(Step::Continue)
+                }
+                Ok(false) => Ok(Step::Cancel),
+                Err(_) => Err(EngineError::Internal(run.id.clone(), "panic".into())),
+            },
             Some(i) => {
                 if let Input::Point(p) = &i {
                     self.last_point = *p;

@@ -260,6 +260,9 @@ impl DocState {
         self.tiles = Default::default();
         self.views.clear();
         self.view_history.clear();
+        // The editor's objects are numbered apart from the drawing's: it starts without a
+        // boundary set, and the drawing's waits in `host`.
+        self.hatch_boundary = None;
         self.block_edit = Some(be);
         self.revision += 1;
     }
@@ -308,6 +311,7 @@ impl DocState {
         self.tiles = host.tiles;
         self.views = host.views;
         self.view_history = host.view_history;
+        self.hatch_boundary = host.hatch_boundary;
         self.revision += 1;
         Ok(())
     }
