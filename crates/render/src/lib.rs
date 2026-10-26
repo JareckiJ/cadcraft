@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod clip;
+mod cull;
 mod dim;
 mod fill;
 mod hatch;
@@ -213,8 +214,10 @@ pub struct Options {
     /// Plot style table to draw with. When `None`, [`build`] of a layout whose page setup has
     /// "Display plot styles" on uses the layout's table; [`build_plot`] uses none.
     pub plot_style_table: Option<std::sync::Arc<cadcraft_doc::PlotStyleTable>>,
-    /// The area being looked at (world units of the space being built), for on-screen builds:
-    /// hatch patterns are only generated inside it. `None` = everywhere (plots, exports, picks).
+    /// The area being looked at (world units of the space being built): hatch patterns are only
+    /// generated inside it. A model-space [`build_plot`] also leaves out the top-level objects
+    /// and block contents whose bounds are wholly outside it (with a small margin for
+    /// lineweights); objects without measurable bounds are always built. `None` = everywhere.
     pub view: Option<Bounds2>,
     /// Draw objects with their transparency ([`DPrim::transparency`]). Off by default: the screen
     /// follows TRANSPARENCYDISPLAY, plots the page setup's "Plot transparency".
@@ -311,6 +314,9 @@ struct Builder<'a> {
     shared_budget: Option<&'a std::sync::atomic::AtomicUsize>,
     /// Transparency (percent) of the entity being drawn.
     transparency: u8,
+    /// The window this build culls against (world units of the space being built): top-level
+    /// objects and block contents wholly outside it are left out. `None` = build everything.
+    cull: Option<Bounds2>,
 }
 
 /// Upper bound on the block contents drawn per display list (each block reference, MINSERT copy
@@ -516,7 +522,9 @@ fn top_ctx<'a>(d: &'a Drawing, xf: Mat3, top: Handle, frozen: &'a [String], vp_c
 fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> DisplayList {
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, plotting).map(|t| plotstyle::Styler::new(d, t));
-    let mut b = Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let cull = cull::window(opts, space, plotting);
+    let mut b =
+        Builder { list: DisplayList::default(), opts, plotting, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0, cull };
     if let Space::Paper(name) = space {
         b.list.sheet = paper::sheet(d, name);
     }
@@ -529,6 +537,11 @@ fn build_space(d: &Drawing, space: &Space, opts: &Options, plotting: bool) -> Di
         }
         let mut viewports = 0usize;
         for e in store.iter() {
+            if let Some(w) = &b.cull
+                && !cull::entity_reaches(d, e, w)
+            {
+                continue;
+            }
             if paper && let EntityKind::Viewport(vp) = &e.kind {
                 if viewports < MAX_VIEWPORTS {
                     viewports += 1;
@@ -563,13 +576,26 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
     use rayon::prelude::*;
     let ents: Vec<&std::sync::Arc<Entity>> = store.iter().collect();
     let budget = std::sync::atomic::AtomicUsize::new(0);
-    let (opts, plotting) = (b.opts, b.plotting);
+    let (opts, plotting, window) = (b.opts, b.plotting, b.cull);
     let parts: Vec<DisplayList> = ents
         .par_chunks(PARALLEL_CHUNK)
         .map(|chunk| {
-            let mut part =
-                Builder { list: DisplayList::default(), opts, plotting, styles: None, named: None, shared_budget: Some(&budget), transparency: 0 };
+            let mut part = Builder {
+                list: DisplayList::default(),
+                opts,
+                plotting,
+                styles: None,
+                named: None,
+                shared_budget: Some(&budget),
+                transparency: 0,
+                cull: window,
+            };
             for e in chunk {
+                if let Some(w) = &window
+                    && !cull::entity_reaches(d, e, w)
+                {
+                    continue;
+                }
                 entity(&mut part, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
             }
             part.list
@@ -695,8 +721,16 @@ pub fn viewport_content(d: &Drawing, space: &Space, handle: Handle, area: Bounds
     }
     let opts = &with_point_view(d, space, opts);
     let styler = style_table(d, space, opts, false).map(|t| plotstyle::Styler::new(d, t));
-    let mut b =
-        Builder { list: DisplayList::default(), opts, plotting: false, styles: styler.as_ref(), named: None, shared_budget: None, transparency: 0 };
+    let mut b = Builder {
+        list: DisplayList::default(),
+        opts,
+        plotting: false,
+        styles: styler.as_ref(),
+        named: None,
+        shared_budget: None,
+        transparency: 0,
+        cull: None,
+    };
     contents(&mut b, d, vp, area, &Clip::Rect(area), paper::unit_mm_of(d, handle));
     b.list
 }
@@ -732,8 +766,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         if matches!(me.kind, EntityKind::Ray(_) | EntityKind::XLine(_)) {
             return true;
         }
-        let eb = cadcraft_doc::entity_bounds(d, me, 0);
-        eb.is_empty() || eb.intersects(&win)
+        cull::entity_reaches(d, me, &win)
     };
     // One expansion budget for the whole build: seed it with what the enclosing list has already
     // spent so a viewport's contents cannot start over with a fresh allowance and exceed the
@@ -747,6 +780,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
         named: None,
         shared_budget: Some(&budget),
         transparency: 0,
+        cull: b.cull,
     };
     #[cfg(not(target_arch = "wasm32"))]
     let parallel = !b.plotting && b.styles.is_none() && d.model.len() >= 2 * PARALLEL_CHUNK;
@@ -758,7 +792,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
             // As `build_parallel`: chunks built side by side, joined in drawing order.
             use rayon::prelude::*;
             let ents: Vec<&std::sync::Arc<Entity>> = d.model.iter().collect();
-            let opts = b.opts;
+            let (opts, window) = (b.opts, b.cull);
             let parts: Vec<DisplayList> = ents
                 .par_chunks(PARALLEL_CHUNK)
                 .map(|chunk| {
@@ -770,6 +804,7 @@ fn contents(b: &mut Builder, d: &Drawing, vp: &cadcraft_doc::Viewport, area: Bou
                         named: None,
                         shared_budget: Some(&budget),
                         transparency: 0,
+                        cull: window,
                     };
                     let c = ctx();
                     for me in chunk.iter().filter(|me| seen(me)) {
@@ -916,7 +951,8 @@ pub fn build_entities<'a, I: IntoIterator<Item = &'a Entity>>(d: &Drawing, ents:
     } else {
         opts
     };
-    let mut b = Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0 };
+    let mut b =
+        Builder { list: DisplayList::default(), opts, plotting: false, styles: None, named: None, shared_budget: None, transparency: 0, cull: None };
     for e in ents {
         entity(&mut b, &top_ctx(d, Mat3::IDENTITY, e.handle, &[], &[]), e);
     }
@@ -1679,6 +1715,8 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
     if let Some(blk) = ctx.d.block(&ins.block) {
         let cols = ins.cols.clamp(1, 10_000);
         let rows = ins.rows.clamp(1, 10_000);
+        // Measured once for every copy of the reference.
+        let reach = b.cull.map(|w| (w, cull::block_reach(ctx.d, blk)));
         'copies: for r in 0..rows {
             for c in 0..cols {
                 if !b.expand() {
@@ -1687,9 +1725,14 @@ fn insert(b: &mut Builder, ctx: &Ctx, e: &Entity, ins: &cadcraft_doc::Insert, rg
                 let off = Vec2::new(ins.col_spacing * f64::from(c), ins.row_spacing * f64::from(r)).rotate(ins.rotation);
                 let m = Mat3::translate(off).then_before(ins.transform(blk.base.xy()));
                 let sub = Ctx { block_pstyle: b.named, block_transparency: b.transparency, ..sub_ctx(ctx, e, m) };
-                for be in blk.entities.iter() {
+                let shown = match reach.as_ref().map(|(w, r)| r.copy(&sub.xf, w)) {
+                    Some(cull::CopyReach::Nothing) => continue,
+                    Some(cull::CopyReach::Some(s)) => Some(s),
+                    Some(cull::CopyReach::All) | None => None,
+                };
+                for (k, be) in blk.entities.iter().enumerate() {
                     // Constant/visible attribute definitions inside blocks are not drawn; attribs are.
-                    if matches!(be.kind, EntityKind::AttDef(_)) {
+                    if matches!(be.kind, EntityKind::AttDef(_)) || shown.as_ref().is_some_and(|s| s.get(k) == Some(&false)) {
                         continue;
                     }
                     if !b.expand() {
