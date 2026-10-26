@@ -160,6 +160,7 @@ impl SaveFormat {
 }
 
 impl Default for UiState {
+    /// The interface as a first start shows it: every panel and bar on, the default save format and version.
     fn default() -> Self {
         UiState {
             docking: docking::default_workspace(),

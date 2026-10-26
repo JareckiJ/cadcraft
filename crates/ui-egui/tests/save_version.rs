@@ -15,6 +15,8 @@ fn with_options(_: &Drawing, _: &str, o: &SaveAs) -> Result<Vec<u8>, String> {
     Ok(format!("{}|{}", o.version.map(|v| v.year()).unwrap_or("-"), o.binary).into_bytes())
 }
 
+/// The default save version is offered to untitled drawings by the Save As dialog, written by its
+/// Save… and by an untitled QSAVE (in the default format), and kept in the preferences.
 #[test]
 fn default_save_version_applies_to_new_drawings_and_persists() {
     set_io(IoHooks { read: |_, _| Ok(Drawing::new_metric()), write: |_, _| Ok(b"plain".to_vec()), plot: None });

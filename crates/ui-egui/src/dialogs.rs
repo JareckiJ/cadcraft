@@ -8,6 +8,8 @@ use serde_json::json;
 use crate::CadApp;
 use crate::theme::Tokens;
 
+/// Draw the open dialog (`app.ui.dialog`), the MTEXT editor and Quick Properties for this frame; a
+/// dialog closed by its own button is cleared.
 pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     crate::mtext_editor::show(app, ctx);
     crate::quick::quick_properties(app, ctx);

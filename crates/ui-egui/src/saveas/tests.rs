@@ -7,6 +7,7 @@ use serde_json::json;
 use super::*;
 use crate::Services;
 
+/// An app whose file picker answers `answer` and records every name it was offered.
 fn app_with_picker(answer: Option<String>) -> (CadApp, Rc<RefCell<Vec<String>>>) {
     let asked = Rc::new(RefCell::new(Vec::new()));
     let log = Rc::clone(&asked);
@@ -21,6 +22,8 @@ fn app_with_picker(answer: Option<String>) -> (CadApp, Rc<RefCell<Vec<String>>>)
     (CadApp::new(Session::new(), services), asked)
 }
 
+/// Save As opens the dialog, not the picker, on the drawing's own type and version (a template
+/// stays a template), and its choices become the `saveas` parameters.
 #[test]
 fn save_as_opens_the_dialog_with_the_drawings_own_type_and_version() {
     let (mut app, asked) = app_with_picker(Some("x.dxf".into()));
@@ -44,6 +47,8 @@ fn save_as_opens_the_dialog_with_the_drawings_own_type_and_version() {
     assert_eq!(app.saveas.as_ref().map(|s| s.file_type), Some(FileType::Dwt));
 }
 
+/// Choices that don't go together settle (binary is for DXF), images and templates carry no
+/// version, and the chosen extension is always the one written.
 #[test]
 fn choices_settle_and_become_saveas_parameters() {
     let mut st = SaveAsState { file_type: FileType::Dwg, version: SaveVersion::R2004, binary: true };
@@ -66,6 +71,8 @@ fn choices_settle_and_become_saveas_parameters() {
     assert!(SaveVersion::ALL.iter().all(|v| version_label(*v).starts_with("AutoCAD ")));
 }
 
+/// Save… offers the picker a name with the chosen extension and keeps the dialog when it is
+/// cancelled; without a picker the command line says how to save.
 #[test]
 fn save_asks_the_picker_with_the_chosen_type_and_keeps_the_dialog_when_cancelled() {
     let (mut app, asked) = app_with_picker(None);
@@ -81,6 +88,7 @@ fn save_asks_the_picker_with_the_chosen_type_and_keeps_the_dialog_when_cancelled
     assert!(app.session.log.iter().any(|l| l.contains("no file dialog")));
 }
 
+/// QSAVE of a drawing with no file skips the dialog: the close prompt's Save must finish at once.
 #[test]
 fn qsave_of_an_untitled_drawing_goes_straight_to_the_picker() {
     let (mut app, asked) = app_with_picker(None);
@@ -89,6 +97,7 @@ fn qsave_of_an_untitled_drawing_goes_straight_to_the_picker() {
     assert!(app.ui.dialog.is_none());
 }
 
+/// The dialog draws for every file type and keeps the choice across frames.
 #[test]
 fn the_dialog_renders_its_choices() {
     let (mut app, _) = app_with_picker(None);

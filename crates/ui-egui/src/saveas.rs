@@ -25,6 +25,7 @@ pub enum FileType {
 impl FileType {
     pub const ALL: [FileType; 6] = [FileType::Dxf, FileType::Dwg, FileType::Dwt, FileType::Svg, FileType::Png, FileType::Pdf];
 
+    /// The file extension, without the dot.
     pub fn ext(self) -> &'static str {
         match self {
             FileType::Dxf => "dxf",
@@ -36,6 +37,7 @@ impl FileType {
         }
     }
 
+    /// The name the dialog shows (translated; the format names stay as they are).
     pub fn label(self) -> &'static str {
         match self {
             FileType::Dxf => crate::tl!("Drawing (DXF)"),
@@ -152,6 +154,8 @@ fn note(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(RichText::new(text).color(Tokens::get().text_dim)).wrap());
 }
 
+/// The Save As window: file type, version and binary DXF, then Save… (the picker) or Cancel. The
+/// choices live in `app.saveas` until the window closes.
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     if app.saveas.is_none() {
         app.saveas = Some(SaveAsState::for_app(app));

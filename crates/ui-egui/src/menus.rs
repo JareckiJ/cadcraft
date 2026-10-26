@@ -86,6 +86,8 @@ pub fn run_ui_command(app: &mut CadApp, id: &str, params: &Value) -> Option<Resu
     crate::i18n::with_language(app.language(), || run_ui_command_inner(app, id, params))
 }
 
+/// [`run_ui_command`] in the interface language: the UI-only commands, and the file commands that
+/// ask for a file (Open, Save As and its dialog, Export…) when they come without parameters.
 fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if let Some(result) = crate::spacemouse::route(app, id, params) {
         return Some(result);

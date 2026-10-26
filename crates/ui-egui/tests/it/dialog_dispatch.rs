@@ -49,6 +49,8 @@ fn properties_menu_shows_the_palette() {
     assert!(app.ui.show_palettes);
 }
 
+/// File commands with JSON parameters never open a picker; typed or from a menu they ask, Save As
+/// with its dialog first and QSAVE of an untitled drawing with the picker straight away.
 #[test]
 fn json_file_commands_never_open_pickers() {
     let (mut app, picks) = app();
