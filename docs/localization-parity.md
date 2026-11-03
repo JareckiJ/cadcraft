@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-26 · **Change:** minor (Polish catalog added: the existing catalog union, three plural forms, menu heading; previously: the command line enables the OS IME and handles composition/commit, so single-line TEXT edits accept CJK input; previously: Brazilian Portuguese row updated and terminology reviewed; previously: Swedish catalog completed with the 95 strings added since; previously: Swedish catalog added: complete catalog, menu headings, native-speaker terminology review; previously: complete current Korean catalog with Hangul font coverage) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-11-03 · **Change:** minor (Polish catalog added: three plural forms, menu heading; previously: Bosnian added; previously minor: the command line enables the OS IME and handles composition/commit, so single-line TEXT edits accept CJK input; previously: Brazilian Portuguese row updated and terminology reviewed; previously: Swedish catalog completed with the 95 strings added since; previously: Swedish catalog added: complete catalog, menu headings, native-speaker terminology review; previously: complete current Korean catalog with Hangul font coverage) · **Target:** Autodesk AutoCAD 2027 for Mac (26.0)
 
 How far CADCraft's interface and drawing text are from AutoCAD's languages. Summarised in
 [ROADMAP.md](../ROADMAP.md#languages); work items in [gaps.md](gaps.md#localization).
@@ -31,8 +31,8 @@ shaping and right-to-left text through TrueType, vertical SHX text styles.
   English. For scale: about 1,160 unique capitalised string literals exist in `crates/engine`
   and `crates/ui-egui` (grep, 2026-10-10).
 - **Drawing text:** TrueType/OpenType/`.ttc` through `skrifa` with per-character font fallback
-  and FONTALT, so CJK characters render (#173). DXF text is written with `\U+` escapes so
-  non-ASCII survives in R2000 files (#169). Lines with right-to-left text get the Unicode
+  and FONTALT, so CJK characters render (#173). Pre-2007 DXF text is written in the file's code page,
+  with `\U+` escapes for characters outside it, so non-ASCII survives in R2000 files (#169). Lines with right-to-left text get the Unicode
   Bidirectional Algorithm and OpenType shaping with `harfrust` (Arabic, Persian and Urdu joining,
   lam-alef, ZWNJ, marks; Hebrew), in TEXT and MTEXT including wrapping (#287). Left-to-right lines
   are still placed one glyph per code point: **no shaping** for Devanagari and other Indic
@@ -46,7 +46,7 @@ shaping and right-to-left text through TrueType, vertical SHX text styles.
 
 ## Languages
 
-Order and columns from craftrules' progress-docs standard. Every UI percentage is **measured**
+Every UI percentage is **measured**
 from the catalogs (0 rows for every language without a catalog file). Hours are **estimated**:
 about 3–5 h per language for an Opus 5.5 agent to translate the ~990 catalog rows and fix layout,
 plus native review by a human; extending the catalog to the remaining English-only strings
@@ -74,10 +74,11 @@ plus native review by a human; extending the catalog to the remaining English-on
 | Italian | it | 1,227 catalog rows; reference catalog and marked UI literals covered | dialogs and tooltips yes; contextual menu headings (Visualizza / Vista, Edita / Modifica); command reference searchable in Italian | Latin: yes (bundled egui fonts; accented letters tested) | AI-assisted by Emanuele Bottelli (Claude), written from the English strings with Italian desktop-CAD vocabulary; no native proofreading pass yet | complete current catalog; English-only interface gaps remain | native review + shared English-only UI work |
 | Hungarian | hu | 1,326 catalog rows; reference catalog, marked UI literals and menu headings covered (no gaps reported) | dialogs and tooltips yes; contextual menu headings; command reference searchable in Hungarian | Latin: yes (bundled egui proportional and monospace fonts; ő ű Ő Ű and the other accented letters tested) | translated by @Skaywalker from the English strings; independent native proofreading pending | complete current catalog; English-only interface gaps remain | native proofreading + shared English-only UI work |
 | Turkish | tr | 1,330 catalog rows; reference catalog, marked UI literals and menu headings covered (no gaps reported) | dialogs and tooltips yes; contextual menu headings (Ölçülendirme / Ölçü); command reference searchable in Turkish | Latin: yes (bundled egui proportional and monospace fonts; Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü tested) | AI-assisted by @ogzhnklvz, written from the English strings with Turkish desktop-CAD vocabulary; the running app reviewed by a native speaker | complete current catalog; English-only interface gaps remain | line-by-line proofreading + shared English-only UI work |
-| Polish | pl | 1,437 catalog rows; the existing catalog union, marked UI literals and the Dimension menu heading covered | dialogs and tooltips yes; contextual menu heading (Wymiary / Wymiar); command reference searchable in Polish | Latin: yes (bundled egui proportional and monospace fonts; ą ć ę ł ń ó ś ź ż and capitals tested) | original AI-assisted translation written from the English strings with Polish desktop-CAD vocabulary; native proofreading pending | complete current catalog; English-only interface gaps remain | native proofreading + layout check of long labels |
+| Bosnian | bs | 1,442 catalog rows; reference catalog and marked UI literals covered | dialogs and tooltips yes | Latin: yes (bundled egui fonts) | AI-assisted; independent native proofreading pending | complete current catalog; English-only interface gaps remain | native proofreading + shared English-only UI work |
+| Polish | pl | 1,483 catalog rows; the existing catalog union, marked UI literals and the Draw, Modify, View and Dimension menu headings covered | dialogs and tooltips yes; contextual menu heading (Wymiary / Wymiar); command reference searchable in Polish | Latin: yes (bundled egui proportional and monospace fonts; ą ć ę ł ń ó ś ź ż and capitals tested) | original AI-assisted translation written from the English strings with Polish desktop-CAD vocabulary; native proofreading pending | complete current catalog; English-only interface gaps remain | native proofreading + layout check of long labels |
 
-Other languages shipped: Ukrainian, Brazilian Portuguese, German, Czech, Russian, French, Italian, Korean, Swedish, Hungarian, Turkish and Polish.
-Czech, Swedish, Hungarian and Brazilian Portuguese cover the reference catalog and every marked UI literal; engine diagnostics and uncatalogued text
+Other languages shipped: Ukrainian, Brazilian Portuguese, German, Czech, Russian, French, Italian, Korean, Swedish, Hungarian, Turkish, Bosnian and Polish.
+Czech, Swedish, Hungarian, Brazilian Portuguese and Bosnian (1,442 rows, AI-assisted, not yet native-reviewed) cover the reference catalog and every marked UI literal; engine diagnostics and uncatalogued text
 remain English. AutoCAD for Mac ships 7
 non-English languages (zh-Hans, es, fr, ja, de, ko, it); of those, CADCraft now ships German and Korean,
 and additionally Ukrainian, which AutoCAD for Mac doesn't ship.
@@ -90,7 +91,8 @@ each language, which needs humans. Translations parallelise fully once the catal
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-26 | minor | Polish added: 1,437 rows (the existing catalog union), CLDR `one\|few\|many` plurals, Dimension menu heading, prompt keywords kept in English; locale/preferences/plural/live-switch/dialog/font tests; native proofreading pending |
+| 2026-11-03 | minor | Polish added (merged from the JareckiJ fork): 1,483 rows (the existing catalog union incl. Find/Replace, backup-save and helix strings), CLDR `one\|few\|many` plurals, Dimension menu heading, prompt keywords kept in English; locale/preferences/plural/live-switch/dialog/font tests; native proofreading pending |
+| 2026-10-30 | minor | Bosnian (`bs`, Latin, Ijekavian) added: 1,442 rows, one/few/other plurals, `bs-*` locales; AI-assisted, native proofreading pending |
 | 2026-10-22 | minor | Command line IME: enabled while a prompt collects text, composition shown but not saved, commit inserted once; single-line TEXT edits accept CJK input (#1761) |
 | 2026-10-19 | minor | Brazilian Portuguese: row brought up to date (it still read 0%); native-speaker terminology pass on 69 rows (Bind as Integrar, prompt keywords and SPDX kept in English, Thaw Layer, Snap type, Revolve fixed; snap, viewport, grip, offset, layer on/off and multiline wording made consistent with Brazilian usage) |
 | 2026-10-15 | minor | Greek (`el`) catalog: 1,330 rows, context/plural/locale/font tests; review pending |

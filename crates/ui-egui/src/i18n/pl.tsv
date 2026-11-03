@@ -1437,6 +1437,52 @@
 	−Bin	−Bin
 	−LOC	−LOC
 	⌘↩ to finish	⌘↩, aby zakończyć
+	Backup copies are off, so the current file will be replaced.	Kopie zapasowe są wyłączone, więc bieżący plik zostanie zastąpiony.
+	Backup copy	Kopia zapasowa
+	Block Description...	Opis bloku...
+	Change	Zmień
+	Change Properties	Zmień właściwości
+	Create backup copy with each save	Twórz kopię zapasową przy każdym zapisie
+	DXF 2010 and earlier keep them. Use Save As to keep them in the drawing.	DXF 2010 i starsze je zachowują. Użyj polecenia Zapisz jako, aby zachować je w rysunku.
+	DXF keeps them. Use Save As to keep them in the drawing.	DXF je zachowuje. Użyj polecenia Zapisz jako, aby zachować je w rysunku.
+	Enter angle of xline (0)	Podaj kąt linii konstrukcyjnej (0)
+	Enter delta length	Podaj przyrost długości
+	Find All	Znajdź wszystko
+	Find what:	Znajdź:
+	Match case	Uwzględniaj wielkość liter
+	Multiple Insert	Wstawianie wielokrotne
+	Named Viewports...	Nazwane rzutnie...
+	Nothing found	Nic nie znaleziono
+	Oops	Przywróć usunięte obiekty
+	Replace	Zamień
+	Replace All	Zamień wszystko
+	Replace with:	Zamień na:
+	Replacement text	Tekst zastępczy
+	Results	Wyniki
+	Save Anyway	Zapisz mimo to
+	Save Layout as Template	Zapisz arkusz jako szablon
+	Save cancelled: {path} was not changed.	Zapis anulowany: plik {path} nie został zmieniony.
+	Save changes to block "{name}"?	Zapisać zmiany w bloku „{name}”?
+	Saving {name} will remove content	Zapisanie {name} usunie część zawartości
+	Searches the current space.	Przeszukuje bieżącą przestrzeń.
+	Select an object to change	Wybierz obiekt do zmiany
+	Select an object to measure	Wybierz obiekt do zmierzenia
+	Select nested objects to copy	Wybierz zagnieżdżone obiekty do skopiowania
+	Select polyline	Wybierz polilinię
+	Specify base radius	Określ promień podstawy
+	Specify helix height	Określ wysokość helisy
+	Specify top radius	Określ promień górny
+	Specify total length	Określ długość całkowitą
+	Text to find	Szukany tekst
+	The current file doesn't look whole, so {name} stays as it is and the current file will be replaced.	Bieżący plik wygląda na niekompletny, więc {name} pozostaje bez zmian, a bieżący plik zostanie zastąpiony.
+	The current file is kept as {name} until the next save.	Bieżący plik zostaje zachowany jako {name} do następnego zapisu.
+	This format can't keep these objects yet: {objects}.	Ten format nie potrafi jeszcze zachować tych obiektów: {objects}.
+	Units	Jednostki
+	Whole words	Całe wyrazy
+	{count} more types	Pozostałe typy: {count}
+menu	Draw	Rysuj
+menu	Modify	Zmiana
+menu	View	Widok
 @plural	{n} commit	{n} commit|{n} commity|{n} commitów
 @plural	{n} contributor	{n} współtwórca|{n} współtwórcy|{n} współtwórców
 menu	Dimension	Wymiary

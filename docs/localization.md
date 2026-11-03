@@ -46,8 +46,8 @@ The translations are original, AI-assisted Korean CAD terminology (for example, 
 치수, 모깎기, 모따기, 간격띄우기 and 객체 스냅). Independent native proofreading and
 platform-specific layout/IME validation remain follow-up work.
 
-Brazilian Portuguese has 1,231 catalog rows and also covers the reference catalog and every marked UI
-literal: commands, menus, tool groups and tooltips, object snaps, drafting prompts, dialogs and
+Brazilian Portuguese has 1,447 catalog rows and also covers the reference catalog, every marked UI
+literal and the strings the sibling catalogs translate: commands, menus, tool groups and tooltips, object snaps, drafting prompts, dialogs and
 Preferences; its gaps are now zero. Its plural rule is `one|other` (0 and 1 are `one`), as CLDR defines
 for `pt`, and the catalog's accented letters (`Á Â Í Ó Ú à á â ã ç é ê í ó ô õ ú`) render in the
 bundled fonts. The original catalog was contributed by @WladmirJunior; the remaining rows were completed
@@ -77,8 +77,8 @@ egui fonts cover `Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü`.
 
 ## Polish (`pl`) interface
 
-Polish has **1,437 rows**: 1,434 ordinary labels, one contextual menu heading (**Wymiary** for
-the Dimension menu, **Wymiar** for the object) and two count templates. It covers the union of the
+Polish has **1,483 rows**: 1,477 ordinary labels, four contextual menu headings (**Rysuj**,
+**Zmiana**, **Widok**, and **Wymiary** for the Dimension menu, **Wymiar** for the object) and two count templates. It covers the union of the
 existing catalogs, including Options, prompts, dialogs and tooltips. Polish integer plurals
 follow CLDR `pl` with three forms, `one|few|many`: 1; 2–4, 22–24, 32–34 … (but not 12–14);
 everything else, including 0, 5–21 and 25–31 (*1 commit*, *2 commity*, *5 commitów*, *22 commity*).
