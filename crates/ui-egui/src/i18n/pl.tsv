@@ -444,8 +444,8 @@
 	Extend	Wydłuż
 	Extension	Przedłużenie
 	Extents	Zakres
-	External Reference	Odniesienie zewnętrzne
-	External References	Odniesienia zewnętrzne
+	External Reference	Odnośnik zewnętrzny
+	External References	Odnośniki zewnętrzne
 	Extrude	Wyciągnij
 	Feet	Stopy
 	File	Plik
@@ -754,7 +754,7 @@
 	No alias file loaded. REINIT replaces these aliases with a file's.	Nie wczytano pliku aliasów. REINIT zastępuje te aliasy aliasami z pliku.
 	No blocks defined in this drawing.	W tym rysunku nie zdefiniowano żadnych bloków.
 	No contributor data was built into this copy.	Ta kopia nie zawiera danych o współtwórcach.
-	No external references are attached.	Nie dołączono żadnych odniesień zewnętrznych.
+	No external references are attached.	Nie dołączono żadnych odnośników zewnętrznych.
 	No model credits were built into this copy.	Ta kopia nie zawiera informacji o modelach.
 	No objects selected and no command running:	Brak zaznaczonych obiektów i aktywnego polecenia:
 	No plot style tables.	Brak tabel stylów wydruku.
