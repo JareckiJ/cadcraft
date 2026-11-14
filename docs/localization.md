@@ -77,7 +77,7 @@ egui fonts cover `Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü`.
 
 ## Polish (`pl`) interface
 
-Polish has **1,483 rows**: 1,477 ordinary labels, four contextual menu headings (**Rysuj**,
+Polish has **1,526 rows**: 1,520 ordinary labels, four contextual menu headings (**Rysuj**,
 **Zmiana**, **Widok**, and **Wymiary** for the Dimension menu, **Wymiar** for the object) and two count templates. It covers the union of the
 existing catalogs, including Options, prompts, dialogs and tooltips. Polish integer plurals
 follow CLDR `pl` with three forms, `one|few|many`: 1; 2–4, 22–24, 32–34 … (but not 12–14);
