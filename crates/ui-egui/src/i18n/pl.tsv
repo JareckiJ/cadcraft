@@ -183,7 +183,7 @@
 	Click to set new origin	Kliknij, aby ustawić nowy początek
 	Clip	Przytnij obwiednią
 	Clip Viewport	Przytnij rzutnię
-	Clip Xref	Przytnij odniesienie zewnętrzne
+	Clip Xref	Przytnij odnośnik zewnętrzny (Xref)
 	Clipboard	Schowek
 	Close	Zamknij
 	Close All	Zamknij wszystko
@@ -797,7 +797,7 @@
 	Open (⌘O)	Otwórz (⌘O)
 	Open Recent	Otwórz ostatnie
 	Open Sample Drawing	Otwórz przykładowy rysunek
-	Open Xref	Otwórz odniesienie zewnętrzne
+	Open Xref	Otwórz odnośnik zewnętrzny (Xref)
 	Open a drawing first.	Najpierw otwórz rysunek.
 	Open and Save	Otwieranie i zapis
 	Open in Block Editor	Otwórz w edytorze bloków
@@ -1440,10 +1440,10 @@
 	X	X
 	X offset (mm)	Przesunięcie X (mm)
 	Xline	Linia konstrukcyjna
-	Xref	Odniesienie zewnętrzne
-	Xref Clip Frame	Ramka przycięcia odniesienia zewnętrznego
-	Xref and Block In-place Editing	Edycja odniesień zewnętrznych i bloków w miejscu
-	Xrefs	Odniesienia zewnętrzne
+	Xref	Odnośnik zewnętrzny (Xref)
+	Xref Clip Frame	Ramka przycięcia odnośnika zewnętrznego (Xref)
+	Xref and Block In-place Editing	Edycja odnośników zewnętrznych (Xref) i bloków w miejscu
+	Xrefs	Odnośniki zewnętrzne (Xref)
 	Y	Y
 	Y offset (mm)	Przesunięcie Y (mm)
 	Yards	Jardy
