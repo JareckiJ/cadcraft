@@ -57,9 +57,14 @@ impl Session {
             crate::keyboard::latin_keys(name).filter(|_| !self.names_a_command(name)).map(|latin| self.greek_command_name(name).unwrap_or(latin));
         let name = latin.as_deref().unwrap_or(name);
         let lower = name.trim_start_matches(['_', '.', '-']).to_ascii_lowercase();
+        // A leading `_` asks for the English name whatever the interface language (`_O` is OFFSET
+        // in Polish too), as scripts and LISP routines write them.
+        let resolve: fn(&str) -> String =
+            if name.trim_start_matches(['.', '-']).starts_with('_') { cmd::resolve_english } else { cmd::resolve_alias };
         // A command-line form with an id of its own (-ATTEDIT) is not the command it prefixes.
-        let dashed = cmd::resolve_alias(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
-        let id = if find_command(&dashed).is_some() { dashed } else { cmd::resolve_alias(&lower) };
+        let dashed = resolve(&name.trim_start_matches(['_', '.']).to_ascii_lowercase());
+        let dashed = if find_command(&dashed).is_some() { dashed } else { localized_dashed(name, resolve) };
+        let id = if find_command(&dashed).is_some() { dashed } else { resolve(&lower) };
         let Some(spec) = find_command(&id) else {
             // A command defined in LISP: (defun c:NAME …).
             if !transparent && let Some(f) = self.lisp_command(&lower) {
@@ -605,4 +610,15 @@ impl Session {
         let extra = d.extra.iter().map(|k| Entity { handle: Handle(0), common: common.clone(), kind: k.clone() }).collect();
         Some((d, extra))
     }
+}
+
+/// The dialog-free form of a localized name typed with a leading `-` (-KRESKUJ is -HATCH), when the
+/// command has one.
+fn localized_dashed(name: &str, resolve: fn(&str) -> String) -> String {
+    let Some(rest) = name.trim_start_matches(['_', '.']).strip_prefix('-') else {
+        return String::new();
+    };
+    let id = resolve(rest);
+    let dashed = format!("-{id}");
+    if find_command(&dashed).is_some() { dashed } else { String::new() }
 }

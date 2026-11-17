@@ -1026,6 +1026,8 @@ impl CadApp {
         // it onto the root node at the end of the pass.
         if self.shown_language != Some(language) {
             ctx.set_language(Some(language.to_string()));
+            // The command line takes the interface language's command names too (OKRĄG in Polish).
+            cadcraft_engine::cmd::localized::set_language(language);
             self.shown_language = Some(language);
         }
         // Resolved every frame, so a System choice follows the OS appearance live (winit and the
