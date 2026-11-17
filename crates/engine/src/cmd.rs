@@ -58,6 +58,7 @@ mod view;
 
 pub mod curves;
 pub mod helpers;
+pub mod localized;
 pub mod machines;
 pub mod options;
 
@@ -233,13 +234,28 @@ pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
 
 /// Resolve a typed name or alias (AutoCAD-style short names such as `L`, `C`, `PL`) to an id.
 /// Command names win; the user's aliases (ALIASEDIT, REINIT) come before the built-in ones.
+/// While the interface language has command names of its own ([`localized`]), they come after the
+/// user's aliases and before the built-in English aliases: in Polish `O` is OKRĄG (CIRCLE), and
+/// `_O` ([`resolve_english`]) is still OFFSET.
 pub fn resolve_alias(name: &str) -> String {
+    resolve(name, true)
+}
+
+/// [`resolve_alias`] with the English names only, for a name typed with a leading `_`.
+pub fn resolve_english(name: &str) -> String {
+    resolve(name, false)
+}
+
+fn resolve(name: &str, localized_names: bool) -> String {
     let l = name.to_ascii_lowercase();
     if find_command(&l).is_some() {
         return l;
     }
     if let Some(id) = file::user_alias(&l) {
         return id;
+    }
+    if localized_names && let Some(id) = localized::resolve(name) {
+        return id.to_string();
     }
     command_specs().iter().find(|c| c.aliases.iter().any(|a| a.eq_ignore_ascii_case(&l))).map(|c| c.id.to_string()).unwrap_or(l)
 }

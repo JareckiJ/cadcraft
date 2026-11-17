@@ -148,9 +148,28 @@ fn suggestions(prefix: &str, is_own_command: &dyn Fn(&str) -> bool) -> Vec<Sugge
     if let Some(spec) = cadcraft_engine::cmd::find_command(&resolved)
         && !spec.id.contains('.')
     {
-        let display =
-            if spec.id == p { spec.id.to_ascii_uppercase() } else { format!("{} ({})", p.to_ascii_uppercase(), spec.id.to_ascii_uppercase()) };
+        let display = if spec.id == p { spec.id.to_ascii_uppercase() } else { format!("{} ({})", p.to_uppercase(), spec.id.to_ascii_uppercase()) };
         out.push(Suggestion { id: spec.id.to_ascii_uppercase(), display, label: spec.label });
+        seen_ids.insert(spec.id);
+    }
+
+    // 1b. Command names in the interface language (OKR → OKRĄG (CIRCLE)), typed with or without
+    // Polish letters.
+    let folded = cadcraft_engine::cmd::localized::fold(&p);
+    let mut local: Vec<(cadcraft_engine::cmd::localized::LocalName, &'static cadcraft_engine::CommandSpec)> =
+        cadcraft_engine::cmd::localized::names(cadcraft_engine::cmd::localized::language())
+            .into_iter()
+            .filter(|n| cadcraft_engine::cmd::localized::fold(n.name).starts_with(&folded))
+            .filter_map(|n| cadcraft_engine::cmd::find_command(n.id).map(|spec| (n, spec)))
+            .filter(|(_, spec)| !seen_ids.contains(spec.id))
+            .collect();
+    local.sort_by_key(|(n, _)| (n.name.chars().count(), n.name));
+    for (n, spec) in local {
+        out.push(Suggestion {
+            id: spec.id.to_ascii_uppercase(),
+            display: format!("{} ({})", n.name, spec.id.to_ascii_uppercase()),
+            label: spec.label,
+        });
         seen_ids.insert(spec.id);
     }
 
@@ -963,6 +982,21 @@ mod delete_key_tests {
 #[cfg(test)]
 mod autocomplete_tests {
     use super::*;
+
+    #[test]
+    fn polish_command_names_complete_while_the_interface_is_polish() {
+        cadcraft_engine::cmd::localized::set_language("pl");
+        let okr = suggestions("okr", &|_| false);
+        assert_eq!(okr.first().map(|s| s.display.as_str()), Some("OKRĄG (CIRCLE)"));
+        let exact = suggestions("o", &|_| false);
+        assert_eq!(exact.first().map(|s| s.display.as_str()), Some("O (CIRCLE)"));
+        let prost = suggestions("PROST", &|_| false);
+        let shown: Vec<&str> = prost.iter().map(|s| s.display.as_str()).collect();
+        assert!(shown.contains(&"PROSTA (XLINE)") && shown.contains(&"PROSTOKĄT (RECTANG)"), "{shown:?}");
+        cadcraft_engine::cmd::localized::set_language("en");
+        assert_eq!(suggestions("o", &|_| false).first().map(|s| s.id.as_str()), Some("OFFSET"));
+        assert!(suggestions("okr", &|_| false).iter().all(|s| !s.display.contains("OKRĄG")));
+    }
 
     #[test]
     fn exact_alias_is_first_suggestion_with_alias_display() {

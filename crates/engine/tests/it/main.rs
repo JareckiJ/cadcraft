@@ -92,6 +92,7 @@ mod leader_command;
 mod lisp_corpus;
 mod lisp_findfile;
 mod lisp_undo_in_routine;
+mod localized_commands;
 mod malformed_handles;
 mod matchprop;
 mod measure_distance_snapping;
