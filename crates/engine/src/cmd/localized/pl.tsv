@@ -1,0 +1,36 @@
+# CADCraft Polish command names, typed at the command line while the interface is Polish.
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# UTF-8: command id<TAB>Polish name<TAB>Polish shortcut (may be empty).
+# The name also matches without Polish letters (OKRAG for OKRĄG); a leading _ always means the English name.
+line	LINIA	L
+xline	PROSTA	PR
+ray	PÓŁPROSTA	PÓŁ
+pline	POLILINIA	PL
+3dpoly	POLILINIA3D	
+polygon	WIELOBOK	WIE
+rectang	PROSTOKĄT	PRO
+arc	ŁUK	Ł
+circle	OKRĄG	O
+donut	PIERŚCIEŃ	PIE
+spline	SPLAJN	SPL
+ellipse	ELIPSA	EL
+helix	SPIRALA	
+mline	MULTILINIA	ML
+solid	WYPEŁNIENIE2D	
+point	PUNKT	PU
+divide	PODZIEL	POD
+measure	ZMIERZ	ZMI
+hatch	KRESKUJ	KR
+gradient	GRADIENT	GRA
+boundary	OBWIEDNIA	OBW
+region	REGION	REG
+wipeout	WYCINEK	WYC
+revcloud	CHMURKAWERS	
+table	TABELA	TAB
+text	TEKST	TE
+mtext	WTEKST	WT
+block	BLOK	B
+base	PUNKTBAZOWY	
+attdef	ATRYBUT	ATR
+centerline	OŚ	
+centermark	ZNACZNIKŚRODKA	

@@ -144,6 +144,17 @@ then shows **ქართული**. A build without that face keeps the saved 
 in English, names the language **Georgian** in the picker, and the language command reports that a
 Georgian font is needed.
 
+## Command names in Polish
+
+While the interface is Polish, the command line also takes Polish command names and their
+shortcuts for the drawing commands: `LINIA` (LINE), `OKRĄG` or `O` (CIRCLE), `ŁUK` or `Ł` (ARC),
+`PROSTOKĄT` (RECTANG), `KRESKUJ` (HATCH), `WTEKST` (MTEXT) and so on. Names of three letters or more
+also match without Polish letters (`OKRAG`), and AutoComplete lists them as `OKRĄG (CIRCLE)`.
+They come after the user's own aliases and before the built-in English aliases, so in Polish `O`
+is CIRCLE; a leading `_` always asks for the English name (`_O` is OFFSET), which keeps scripts and
+LISP routines portable. English command names keep working in every language. The names live in
+`crates/engine/src/cmd/localized/pl.tsv` (`id`, name, optional shortcut).
+
 ## Adding translations
 
 The implementation follows the display-time catalog pattern used by
