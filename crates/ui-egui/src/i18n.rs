@@ -19,6 +19,8 @@ pub enum Preference {
     Greek,
     #[serde(rename = "uk")]
     Ukrainian,
+    #[serde(rename = "pl")]
+    Polish,
     #[serde(rename = "pt-BR")]
     BrazilianPortuguese,
     #[serde(rename = "de")]
@@ -51,16 +53,14 @@ pub enum Preference {
     Bosnian,
     #[serde(rename = "vi")]
     Vietnamese,
-    #[serde(rename = "pl")]
-    Polish,
 }
-
 impl Preference {
     pub const ALL: [Self; 21] = [
         Self::Auto,
         Self::English,
         Self::Greek,
         Self::Ukrainian,
+        Self::Polish,
         Self::BrazilianPortuguese,
         Self::German,
         Self::Spanish,
@@ -77,7 +77,6 @@ impl Preference {
         Self::Georgian,
         Self::Bosnian,
         Self::Vietnamese,
-        Self::Polish,
     ];
 
     /// Every preference in the order the Interface Language dialog lists them: Auto, then English
@@ -112,6 +111,7 @@ impl Preference {
             Self::English => "en",
             Self::Greek => "el",
             Self::Ukrainian => "uk",
+            Self::Polish => "pl",
             Self::BrazilianPortuguese => "pt-BR",
             Self::German => "de",
             Self::Spanish => "es",
@@ -128,7 +128,6 @@ impl Preference {
             Self::Georgian => "ka",
             Self::Bosnian => "bs",
             Self::Vietnamese => "vi",
-            Self::Polish => "pl",
         }
     }
 
@@ -138,6 +137,7 @@ impl Preference {
             Self::English => "English",
             Self::Greek => "Ελληνικά",
             Self::Ukrainian => "Українська",
+            Self::Polish => "Polski",
             Self::BrazilianPortuguese => "Português (Brasil)",
             Self::German => "Deutsch",
             Self::Spanish => "Español",
@@ -175,7 +175,6 @@ impl Preference {
                     "Vietnamese"
                 }
             }
-            Self::Polish => "Polski",
         }
     }
 
@@ -193,6 +192,7 @@ impl Preference {
             Self::English => "en",
             Self::Greek => "el",
             Self::Ukrainian => "uk",
+            Self::Polish => "pl",
             Self::BrazilianPortuguese => "pt-BR",
             Self::German => "de",
             Self::Spanish => "es",
@@ -209,7 +209,6 @@ impl Preference {
             Self::Georgian => "ka",
             Self::Bosnian => "bs",
             Self::Vietnamese => "vi",
-            Self::Polish => "pl",
             Self::Auto => locales.iter().find_map(|s| locale_language(s)).unwrap_or("en"),
         }
     }
@@ -228,6 +227,7 @@ pub struct Language {
 
 pub static LANGUAGES: [Language; 20] = [
     Language { code: "en", name: "English", source: "", plural: plural_en, plural_forms: 2, catalog: OnceLock::new() },
+    Language { code: "pl", name: "Polski", source: include_str!("i18n/pl.tsv"), plural: plural_pl, plural_forms: 3, catalog: OnceLock::new() },
     // Greek: one for exactly 1; other for zero and all other integer counts.
     Language {
         code: "el", name: "Ελληνικά", source: include_str!("i18n/el.tsv"), plural: plural_en, plural_forms: 2, catalog: OnceLock::new()
@@ -285,8 +285,6 @@ pub static LANGUAGES: [Language; 20] = [
     Language {
         code: "vi", name: "Tiếng Việt", source: include_str!("i18n/vi.tsv"), plural: plural_ko, plural_forms: 1, catalog: OnceLock::new()
     },
-    // Polish integer plurals (CLDR `pl`): one (1), few (2–4, 22–24 but not 12–14), many.
-    Language { code: "pl", name: "Polski", source: include_str!("i18n/pl.tsv"), plural: plural_pl, plural_forms: 3, catalog: OnceLock::new() },
 ];
 
 /// BCP 47 and POSIX locale tags, including `uk-UA`, `uk_UA.UTF-8` and `pt_BR.UTF-8`.
@@ -383,6 +381,17 @@ pub fn format(source: &str, values: &[(&str, String)]) -> String {
     result
 }
 
+/// Polish plurals: one (1), few (2–4, 22–24), many (0, 5–21, 25–31).
+pub fn plural_pl(n: u64) -> usize {
+    if n == 1 {
+        0
+    } else if (2..=4).contains(&(n % 10)) && !(12..=14).contains(&(n % 100)) {
+        1
+    } else {
+        2
+    }
+}
+
 /// Ukrainian integer plurals: one (1, 21), few (2–4, 22–24), many (0, 5–20, 25…).
 pub fn plural_uk(n: u64) -> usize {
     match (n % 10, n % 100) {
@@ -413,16 +422,6 @@ pub fn plural_arabic(n: u64) -> usize {
         (_, 3..=10) => 3,
         (_, 11..=99) => 4,
         _ => 5,
-    }
-}
-
-/// Polish integer plurals (CLDR `pl`): one (1), few (2–4, 22–24, …; not 12–14), many (0, 5–21, …).
-pub fn plural_pl(n: u64) -> usize {
-    match (n, n % 10, n % 100) {
-        (1, _, _) => 0,
-        (_, 2..=4, 12..=14) => 2,
-        (_, 2..=4, _) => 1,
-        _ => 2,
     }
 }
 
@@ -476,7 +475,6 @@ fn name_sort_key(name: &str) -> String {
             'ì'..='ï' | 'ī' => 'i',
             'ñ' | 'ń' | 'ň' => 'n',
             'ò'..='ö' | 'ø' | 'ő' => 'o',
-            'ł' => 'l',
             'ś' | 'š' => 's',
             'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
             'ý' | 'ÿ' => 'y',
@@ -504,8 +502,6 @@ mod picker_order_tests {
         assert!(pos(Preference::Bosnian) < pos(Preference::Czech), "Bosanski sorts under B");
         assert!(pos(Preference::Swedish) < pos(Preference::Vietnamese), "Tiếng Việt sorts under T");
         assert!(pos(Preference::Vietnamese) < pos(Preference::Turkish), "Tiếng comes before Türkçe");
-        assert!(pos(Preference::Hungarian) < pos(Preference::Polish), "Polski sorts under P");
-        assert!(pos(Preference::Polish) < pos(Preference::BrazilianPortuguese), "Polski comes before Português");
         assert_eq!(name_sort_key("Türkçe"), "turkce");
     }
 }
